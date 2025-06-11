@@ -1,0 +1,2 @@
+id,key,value,description,created_at,updated_at
+ab92c4bc-e592-40a7-8543-039616a5f05f,image_generation_default_count,"{""count"": 4}",The default number of images to generate in a single run.,2025-06-08 13:59:59.585816+00,2025-06-08 13:59:59.585816+00

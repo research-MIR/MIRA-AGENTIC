@@ -1,0 +1,7 @@
+id,model_id_string,provider,model_type,is_default,cost_per_call,notes,created_at,updated_at,default_loras,supports_img2img
+0ad55921-db86-4a11-ba22-880866f8d2bb,gemini-2.5-pro-preview-06-05,Google,text,true,,Default model for planning and text-based tools.,2025-06-08 13:59:59.585816+00,2025-06-08 13:59:59.585816+00,,false
+194f0dee-9882-44bd-9b78-599548396c89,gpt-image-1,OpenAI,image,false,,Advanced text-to-image model with multi-image prompting capabilities.,2025-06-10 07:45:08.625303+00,2025-06-10 07:45:08.625303+00,,true
+59e4ca47-2c6f-492d-b411-90993f8be8bf,gemini-2.5-flash-preview-05-20,Google,vision,false,,Used for the self-analysis step after image generation.,2025-06-08 13:59:59.585816+00,2025-06-08 13:59:59.585816+00,,false
+818607e8-a91f-4a2d-80fe-9ff0003cddd0,FLUX-1.1-Ultra-Redux,Fal.ai,image,false,,,2025-06-11 07:40:10.778534+00,2025-06-11 07:40:10.778534+00,,true
+8d03399a-a038-4bf1-bc1a-cc574bd0a678,imagen-4.0-ultra-generate-exp-05-20,Google,image,false,,Default model for high-quality image generation.,2025-06-08 13:59:59.585816+00,2025-06-08 13:59:59.585816+00,,false
+91a899be-d81a-4d23-9317-a42b338089ae,fal-ai/flux-lora,fal-ai,image,true,,Next-gen text-to-image model from Fal AI.,2025-06-09 11:20:09.544418+00,2025-06-09 11:20:09.544418+00,"[{""path"": ""https://huggingface.co/Danrisi/SamsungCam_UltraReal_v2/resolve/main/Samsung_UltraRealv2.safetensors"", ""scale"": 0.8}]",false
