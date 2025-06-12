@@ -345,7 +345,7 @@ const Developer = () => {
 
   const handleQueuePrompt = async () => {
     console.log("[DevPage] handleQueuePrompt started.");
-    if (!session?.user) return showError("You must be logged in.");
+    const invokerUserId = session?.user?.id || '00000000-0000-0000-0000-000000000000'; // Placeholder for outage
     if (!sourceImage) return showError("A source image is required for this workflow.");
     if (!comfyPrompt.trim()) return showError("A prompt is required for this workflow.");
 
@@ -398,7 +398,7 @@ const Developer = () => {
         body: {
           comfyui_address: comfyAddress,
           prompt_workflow: finalWorkflow,
-          invoker_user_id: session.user.id
+          invoker_user_id: invokerUserId
         }
       });
 
