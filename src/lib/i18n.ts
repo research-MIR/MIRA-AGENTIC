@@ -96,6 +96,7 @@ export const translations = {
     workflowAPIData: "Dati API Workflow (JSON)",
     queuePrompt: "Accoda Prompt",
     response: "Risposta",
+    uploadWorkflow: "Carica Workflow",
   },
   en: {
     // General
@@ -116,7 +117,7 @@ export const translations = {
     chooseYourModel: "1. Choose Your AI Model",
     modelSelectorDescription: "Each model has a unique style. Pick the one that best fits your vision.",
     designerMode: "Designer Mode",
-    designerModeDescription: "The agent generates, critiques, and improves the image. Slower, but more refined.",
+    designerModeDescription: "Enable this to have the agent generate, critique, and improve the image. It's slower, but the results are more refined.",
     pipelineMode: "Pipeline Mode",
     twoStagePipeline: "Two-Stage Pipeline",
     twoStagePipelineDescription: "Controls the two-stage image generation process.",
@@ -124,7 +125,7 @@ export const translations = {
     pipelineOn: "On",
     pipelineOff: "Off",
     talkToAgent: "4. Talk to the Agent",
-    talkToAgentDescription: "Give instructions here. Be descriptive!",
+    talkToAgentDescription: "Give your instructions here. Be descriptive!",
     uploadReference: "5. Upload a Reference",
     uploadReferenceDescription: "Click to upload a reference image for style, composition, or subject.",
     startNewChat: "6. Start a New Chat",
@@ -194,5 +195,6 @@ export const translations = {
     workflowAPIData: "Workflow API Data (JSON)",
     queuePrompt: "Queue Prompt",
     response: "Response",
+    uploadWorkflow: "Upload Workflow",
   },
 };

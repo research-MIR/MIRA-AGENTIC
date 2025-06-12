@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { useLanguage } from "@/context/LanguageContext";
-import { Loader2 } from "lucide-react";
+import { Loader2, Upload } from "lucide-react";
 
 const Developer = () => {
   const { supabase } = useSession();
@@ -15,6 +15,7 @@ const Developer = () => {
   const [isDevAuthenticated, setIsDevAuthenticated] = useState(false);
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ComfyUI State
   const [comfyAddress, setComfyAddress] = useState("http://127.0.0.1:8188");
@@ -23,7 +24,9 @@ const Developer = () => {
   const [isQueueing, setIsQueueing] = useState(false);
 
   useEffect(() => {
-    if (sessionStorage.getItem('dev_authenticated') === 'true') {
+    const devAuthStatus = sessionStorage.getItem('dev_authenticated') === 'true';
+    console.log(`[DeveloperPage] Initializing. Dev authenticated: ${devAuthStatus}`);
+    if (devAuthStatus) {
       setIsDevAuthenticated(true);
     }
   }, []);
@@ -31,6 +34,7 @@ const Developer = () => {
   const handlePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
+    console.log("[DeveloperPage] Attempting to verify developer password.");
     const toastId = showLoading("Verifying password...");
     try {
       const { data, error } = await supabase.functions.invoke('MIRA-AGENT-verify-dev-pass', {
@@ -40,13 +44,16 @@ const Developer = () => {
       if (error) throw error;
 
       if (data.success) {
+        console.log("[DeveloperPage] Password verification successful.");
         sessionStorage.setItem('dev_authenticated', 'true');
         setIsDevAuthenticated(true);
         showSuccess("Access granted.");
       } else {
+        console.warn("[DeveloperPage] Password verification failed.");
         showError("Incorrect password.");
       }
     } catch (err: any) {
+      console.error("[DeveloperPage] Error during password verification:", err);
       showError(err.message);
     } finally {
       dismissToast(toastId);
@@ -54,11 +61,36 @@ const Developer = () => {
     }
   };
 
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file && file.type === "application/json") {
+      console.log(`[DeveloperPage] Reading workflow from file: ${file.name}`);
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const text = e.target?.result;
+        if (typeof text === 'string') {
+          setWorkflowJson(text);
+          showSuccess("Workflow JSON loaded from file.");
+        }
+      };
+      reader.onerror = (e) => {
+        console.error("[DeveloperPage] Error reading file:", e);
+        showError("Failed to read the JSON file.");
+      }
+      reader.readAsText(file);
+    } else {
+      showError("Please upload a valid JSON file.");
+    }
+  };
+
   const handleQueuePrompt = async () => {
+    console.log("[DeveloperPage] handleQueuePrompt triggered.");
     let parsedWorkflow;
     try {
       parsedWorkflow = JSON.parse(workflowJson);
+      console.log("[DeveloperPage] Workflow JSON parsed successfully.");
     } catch (e) {
+      console.error("[DeveloperPage] Invalid Workflow API JSON:", e);
       showError("Invalid Workflow API JSON.");
       return;
     }
@@ -66,6 +98,7 @@ const Developer = () => {
     setIsQueueing(true);
     setComfyResponse("");
     const toastId = showLoading("Sending prompt to ComfyUI...");
+    console.log(`[DeveloperPage] Sending request to ComfyUI proxy at address: ${comfyAddress}`);
     try {
       const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-comfyui', {
         body: {
@@ -75,10 +108,13 @@ const Developer = () => {
       });
 
       if (error) throw error;
+      
+      console.log("[DeveloperPage] Received successful response from ComfyUI proxy:", data);
       setComfyResponse(JSON.stringify(data, null, 2));
       showSuccess("ComfyUI job queued successfully.");
 
     } catch (err: any) {
+      console.error("[DeveloperPage] Error queueing prompt:", err);
       setComfyResponse(`Error: ${err.message}`);
       showError(`Failed to queue prompt: ${err.message}`);
     } finally {
@@ -137,12 +173,25 @@ const Developer = () => {
             />
           </div>
           <div>
-            <Label htmlFor="workflow-json">{t.workflowAPIData}</Label>
+            <div className="flex justify-between items-center mb-2">
+              <Label htmlFor="workflow-json">{t.workflowAPIData}</Label>
+              <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
+                <Upload className="mr-2 h-4 w-4" />
+                {t.uploadWorkflow}
+              </Button>
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileUpload}
+                className="hidden"
+                accept=".json"
+              />
+            </div>
             <Textarea
               id="workflow-json"
               value={workflowJson}
               onChange={(e) => setWorkflowJson(e.target.value)}
-              placeholder='Paste your ComfyUI "API format" JSON here...'
+              placeholder='Paste your ComfyUI "API format" JSON here or upload a file...'
               rows={15}
               className="font-mono text-sm"
             />
