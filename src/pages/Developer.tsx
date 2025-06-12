@@ -6,7 +6,78 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { useLanguage } from "@/context/LanguageContext";
-import { Loader2 } from "lucide-react";
+import { Loader2, Save } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+
+const ComfyUIEndpointManager = () => {
+  const { supabase } = useSession();
+  const queryClient = useQueryClient();
+  const [endpoint, setEndpoint] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+
+  const fetchEndpoint = async () => {
+    const { data, error } = await supabase
+      .from('mira-agent-config')
+      .select('value')
+      .eq('key', 'comfyui_endpoint_address')
+      .single();
+    if (error) throw new Error(error.message);
+    return (data.value as string).replace(/"/g, '');
+  };
+
+  const { data: currentEndpoint, isLoading } = useQuery({
+    queryKey: ['comfyui_endpoint'],
+    queryFn: fetchEndpoint,
+  });
+
+  useEffect(() => {
+    if (currentEndpoint) {
+      setEndpoint(currentEndpoint);
+    }
+  }, [currentEndpoint]);
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    const toastId = showLoading("Saving endpoint...");
+    try {
+      const { error } = await supabase
+        .from('mira-agent-config')
+        .update({ value: `"${endpoint}"` })
+        .eq('key', 'comfyui_endpoint_address');
+      if (error) throw error;
+      
+      await queryClient.invalidateQueries({ queryKey: ['comfyui_endpoint'] });
+      showSuccess("Endpoint updated successfully!");
+    } catch (err: any) {
+      showError(`Failed to save: ${err.message}`);
+    } finally {
+      dismissToast(toastId);
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>ComfyUI Endpoint Configuration</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div>
+          <Label htmlFor="comfy-endpoint">Endpoint URL</Label>
+          {isLoading ? (
+             <Input disabled placeholder="Loading..." />
+          ) : (
+            <Input id="comfy-endpoint" value={endpoint} onChange={(e) => setEndpoint(e.target.value)} placeholder="https://your-ngrok-or-public-url.io" />
+          )}
+        </div>
+        <Button onClick={handleSave} disabled={isSaving || isLoading}>
+          {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+          Save
+        </Button>
+      </CardContent>
+    </Card>
+  );
+};
 
 const Developer = () => {
   const { supabase } = useSession();
@@ -71,14 +142,7 @@ const Developer = () => {
         <p className="text-muted-foreground">{t.developerToolsDescription}</p>
       </header>
       <div className="space-y-4">
-        <Card>
-            <CardHeader>
-                <CardTitle>More tools coming soon</CardTitle>
-            </CardHeader>
-            <CardContent>
-                <p>This area is reserved for future developer-specific tools and diagnostics.</p>
-            </CardContent>
-        </Card>
+        <ComfyUIEndpointManager />
       </div>
     </div>
   );
