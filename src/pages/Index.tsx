@@ -143,7 +143,6 @@ const Index = () => {
   const [pipelineMode, setPipelineMode] = useState<'auto' | 'on' | 'off'>('auto');
   const [ratioMode, setRatioMode] = useState<'auto' | string>('auto');
   const [numImagesMode, setNumImagesMode] = useState<'auto' | number>('auto');
-  const channelRef = useRef<RealtimeChannel | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   const scrollToBottom = () => {
@@ -153,19 +152,6 @@ const Index = () => {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
-
-  const resetChatState = useCallback(() => {
-    setMessages([{ from: "bot", text: "Ciao! Come posso aiutarti oggi?" }]);
-    setChatTitle(t.newChat);
-    setInput("");
-    setUploadedFiles([]);
-    setIsJobRunning(false);
-    setIsSending(false);
-    if (channelRef.current) {
-      channelRef.current.unsubscribe();
-      channelRef.current = null;
-    }
-  }, [t.newChat]);
 
   const processJobData = useCallback((jobData: any) => {
     if (!jobData) return;
@@ -187,20 +173,6 @@ const Index = () => {
     setMessages(conversationMessages);
   }, []);
 
-  const subscribeToJob = useCallback((jobIdToWatch: string) => {
-    if (channelRef.current) {
-        if (channelRef.current.topic === `realtime:public:mira-agent-jobs:id=eq.${jobIdToWatch}`) {
-            return; // Already subscribed to this channel
-        }
-        channelRef.current.unsubscribe();
-    }
-    const channel = supabase.channel(`job_${jobIdToWatch}`);
-    channel.on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'mira-agent-jobs', filter: `id=eq.${jobIdToWatch}` }, (payload) => {
-      processJobData(payload.new);
-    }).subscribe();
-    channelRef.current = channel;
-  }, [supabase, processJobData]);
-
   const fetchChatJob = async (jobId: string | undefined) => {
     if (!jobId || !session?.user) return null;
     const { data, error } = await supabase.from("mira-agent-jobs").select("*").eq("id", jobId).eq("user_id", session.user.id).single();
@@ -219,11 +191,35 @@ const Index = () => {
   useEffect(() => {
     if (jobId && jobData) {
       processJobData(jobData);
-      subscribeToJob(jobId);
     } else if (!jobId) {
-      resetChatState();
+      setMessages([{ from: "bot", text: "Ciao! Come posso aiutarti oggi?" }]);
+      setChatTitle(t.newChat);
+      setInput("");
+      setUploadedFiles([]);
+      setIsJobRunning(false);
+      setIsSending(false);
     }
-  }, [jobId, jobData, processJobData, subscribeToJob, resetChatState]);
+  }, [jobId, jobData, processJobData, t.newChat]);
+
+  useEffect(() => {
+    if (!jobId) return;
+
+    const channel = supabase
+      .channel(`job-updates-${jobId}`)
+      .on('postgres_changes', { 
+          event: 'UPDATE', 
+          schema: 'public', 
+          table: 'mira-agent-jobs', 
+          filter: `id=eq.${jobId}` 
+      }, (payload) => {
+          processJobData(payload.new);
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [jobId, supabase, processJobData]);
 
   useEffect(() => {
     if (error) {
@@ -260,9 +256,7 @@ const Index = () => {
   }, [session, supabase]);
 
   const handleSendMessage = useCallback(async () => {
-    console.log("[SendMessage] Function triggered. Current state:", { isJobRunning, isSending, input: input.trim(), fileCount: uploadedFiles.length });
     if ((!input.trim() && uploadedFiles.length === 0) || isJobRunning || isSending) {
-      console.warn("[SendMessage] Guard clause triggered. Aborting send.");
       return;
     }
     let currentInput = input;
@@ -277,20 +271,14 @@ const Index = () => {
         const payload = { jobId, prompt: currentInput, storagePaths: filesToProcess.map(f => f.path), userId: session?.user.id, isDesignerMode, pipelineMode, selectedModelId, language, ratioMode, numImagesMode };
         if (!payload.userId) throw new Error("User session not found.");
         
-        console.log("[SendMessage] Preparing to invoke Supabase function. Payload:", payload);
-
         if (jobId) {
-            console.log(`[SendMessage] Continuing job ${jobId}...`);
             await supabase.functions.invoke("MIRA-AGENT-continue-job", { body: payload });
         } else {
-            console.log("[SendMessage] Starting new job...");
             const { data, error } = await supabase.functions.invoke("MIRA-AGENT-master-worker", { body: payload });
             if (error) throw error;
-            console.log("[SendMessage] New job started successfully. Response:", data);
             navigate(`/chat/${data.reply.jobId}`);
         }
     } catch (error: any) {
-      console.error("[SendMessage] CATCH BLOCK: An error occurred during function invocation.", error);
       showError("Error communicating with Mira: " + error.message);
     } finally {
       setIsSending(false);
