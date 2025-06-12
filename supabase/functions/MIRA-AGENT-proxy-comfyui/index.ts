@@ -24,7 +24,6 @@ serve(async (req) => {
 
     const sanitizedAddress = comfyui_address.replace(/\/+$/, "");
     
-    // **THE FIX:** Correctly wrap the workflow in the expected payload structure.
     const payload = { 
       prompt: prompt_workflow 
     };
@@ -36,8 +35,18 @@ serve(async (req) => {
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`ComfyUI server responded with status ${response.status}: ${errorText}`);
+      const errorJson = await response.json();
+      let readableError = `ComfyUI server responded with status ${response.status}.`;
+      if (errorJson.node_errors) {
+        readableError += " Validation errors: ";
+        for (const node in errorJson.node_errors) {
+          const errorDetails = errorJson.node_errors[node].errors[0];
+          readableError += `[Node ${node} (${errorDetails.type})]: ${errorDetails.details}. `;
+        }
+      } else {
+        readableError += ` Details: ${JSON.stringify(errorJson)}`;
+      }
+      throw new Error(readableError);
     }
 
     const data = await response.json();

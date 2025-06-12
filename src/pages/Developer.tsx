@@ -17,16 +17,17 @@ interface ComfyJob {
   error_message?: string;
 }
 
-// The user's workflow is now stored as a template.
+// Updated workflow template based on user's error logs.
+// NOTE: The user must ensure a checkpoint model is available on their server.
 const workflowTemplate = `
 {
   "307": { "inputs": { "String": "HERE THE PROMPT" }, "class_type": "String", "_meta": { "title": "Prompt" } },
   "389": { "inputs": { "filename_prefix": "Output", "images": ["407", 0] }, "class_type": "SaveImage", "_meta": { "title": "Save Image" } },
-  "403": { "inputs": { "control_net_name": "control_v11f1e_sd15_tile.pth", "image": ["404", 0] }, "class_type": "ControlNetLoader", "_meta": { "title": "ControlNetLoader" } },
-  "404": { "inputs": { "image": "1749730534217_0.png", "upload": "image" }, "class_type": "LoadImage", "_meta": { "title": "Load Image" } },
+  "403": { "inputs": { "control_net_name": "fluxcontrolnetupscale.safetensors", "image": ["404", 0] }, "class_type": "ControlNetLoader", "_meta": { "title": "ControlNetLoader" } },
+  "404": { "inputs": { "image": "placeholder.png", "upload": "image" }, "class_type": "LoadImage", "_meta": { "title": "Load Image" } },
   "405": { "inputs": { "ckpt_name": "sd_xl_base_1.0.safetensors" }, "class_type": "CheckpointLoaderSimple", "_meta": { "title": "Load Checkpoint" } },
   "406": { "inputs": { "strength": 0.6, "control_net": ["403", 0], "positive": ["408", 0], "negative": ["408", 1] }, "class_type": "ControlNetApplyAdvanced", "_meta": { "title": "Apply ControlNet" } },
-  "407": { "inputs": { "model": ["405", 0], "tile_width": 1024, "tile_height": 1024, "mask_blur": 8, "tile_padding": 32, "seam_fix_mode": "NONE", "seam_fix_denoise": 1, "seam_fix_width": 64, "seam_fix_mask_blur": 8, "seam_fix_padding": 16, "force_uniform_tiles": true, "tiled_decode": false, "positive": ["406", 0], "negative": ["406", 1], "sampler": ["409", 0], "sigmas": ["410", 0] }, "class_type": "UltimateSDUpscaleCustomSample", "_meta": { "title": "Ultimate SD Upscale (Custom Sampler)" } },
+  "407": { "inputs": { "model": ["405", 0], "tile_width": 1024, "tile_height": 1024, "mask_blur": 8, "tile_padding": 32, "seam_fix_mode": "None", "seam_fix_denoise": 1, "seam_fix_width": 64, "seam_fix_mask_blur": 8, "seam_fix_padding": 16, "force_uniform_tiles": true, "tiled_decode": false, "positive": ["406", 0], "negative": ["406", 1], "sampler": ["409", 0], "sigmas": ["410", 0] }, "class_type": "UltimateSDUpscaleCustomSample", "_meta": { "title": "Ultimate SD Upscale (Custom Sampler)" } },
   "408": { "inputs": { "text": ["307", 0], "clip": ["405", 1] }, "class_type": "CLIPTextEncode", "_meta": { "title": "CLIP Text Encode" } },
   "409": { "inputs": { "sampler_name": "dpmpp_2m_sde_gpu", "scheduler": "karras" }, "class_type": "KSamplerSelect", "_meta": { "title": "KSamplerSelect" } },
   "410": { "inputs": { "steps": 20, "denoise": 0.2, "model": ["405", 0] }, "class_type": "BasicScheduler", "_meta": { "title": "BasicScheduler" } }
