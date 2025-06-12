@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, ReactNode, useCallback, useEffect } from 'react';
-import { TourProvider as ReactourProvider, useTour, StepType } from '@reactour/tour';
+import { TourProvider as ReactourProvider, useTour, StepType, StylesObj } from '@reactour/tour';
 import { useLanguage } from './LanguageContext';
 import { useSession } from '@/components/Auth/SessionContextProvider';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -113,9 +113,33 @@ export const OnboardingTourProvider = ({ children }: { children: ReactNode }) =>
     { selector: '#chat-nav-link', content: "Tour complete! You're ready to create. Click here to go back to the chat." },
   ];
 
+  const tourStyles: StylesObj = {
+    popover: (base) => ({
+      ...base,
+      backgroundColor: 'hsl(var(--popover))',
+      color: 'hsl(var(--popover-foreground))',
+      borderRadius: 'var(--radius)',
+      border: '1px solid hsl(var(--border))',
+    }),
+    badge: (base) => ({
+      ...base,
+      backgroundColor: 'hsl(var(--primary))',
+      color: 'hsl(var(--primary-foreground))',
+    }),
+    dot: (base, { current }) => ({
+      ...base,
+      backgroundColor: current ? 'hsl(var(--primary))' : 'hsl(var(--muted))',
+    }),
+    close: (base) => ({
+      ...base,
+      color: 'hsl(var(--muted-foreground))',
+    }),
+  };
+
   return (
     <ReactourProvider 
       steps={steps} 
+      styles={tourStyles}
       defaultOpen={false}
       afterOpen={() => document.body.style.overflow = 'hidden'}
       beforeClose={() => {
