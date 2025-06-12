@@ -7,9 +7,35 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
+const workflowTemplate = `
+{
+  "9": { "inputs": { "clip_name1": "clip_l.safetensors", "clip_name2": "t5xxl_fp16.safetensors", "type": "flux", "device": "default" }, "class_type": "DualCLIPLoader" },
+  "10": { "inputs": { "vae_name": "ae.safetensors" }, "class_type": "VAELoader" },
+  "20": { "inputs": { "dishonesty_factor": -0.01, "start_percent": 0.66, "end_percent": 0.95, "sampler": ["21", 0] }, "class_type": "LyingSigmaSampler" },
+  "21": { "inputs": { "sampler_name": "dpmpp_2m" }, "class_type": "KSamplerSelect" },
+  "249": { "inputs": { "lora_name": "IDunnohowtonameLora.safetensors", "strength_model": 0.8, "model": ["304", 0] }, "class_type": "LoraLoaderModelOnly" },
+  "304": { "inputs": { "unet_name": "realDream_flux1V1.safetensors", "weight_dtype": "default" }, "class_type": "UNETLoader" },
+  "307": { "inputs": { "String": "HERE THE PROMPT" }, "class_type": "String" },
+  "349": { "inputs": { "clip_l": ["307", 0], "t5xxl": ["307", 0], "guidance": 3.1, "clip": ["9", 0] }, "class_type": "CLIPTextEncodeFlux" },
+  "361": { "inputs": { "clip_l": "over exposed,ugly, depth of field ", "t5xxl": "over exposed,ugly, depth of field", "guidance": 3.1, "clip": ["9", 0] }, "class_type": "CLIPTextEncodeFlux" },
+  "363": { "inputs": { "lora_name": "Samsung_UltraReal.safetensors", "strength_model": 0.68, "model": ["249", 0] }, "class_type": "LoraLoaderModelOnly" },
+  "389": { "inputs": { "filename_prefix": "Output", "images": ["407", 0] }, "class_type": "SaveImage" },
+  "402": { "inputs": { "control_net_name": "fluxcontrolnetupscale.safetensors" }, "class_type": "ControlNetLoader" },
+  "403": { "inputs": { "strength": 1, "start_percent": 0, "end_percent": 1, "positive": ["349", 0], "negative": ["361", 0], "control_net": ["402", 0], "image": ["404", 0], "vae": ["10", 0] }, "class_type": "ControlNetApplyAdvanced" },
+  "404": { "inputs": { "image": "placeholder.png" }, "class_type": "LoadImage" },
+  "407": { "inputs": { "upscale_by": 1.4, "seed": 576355546919873, "steps": 20, "cfg": 1, "sampler_name": "euler", "scheduler": "normal", "denoise": 0.25, "mode_type": "Linear", "tile_width": 1024, "tile_height": 1024, "mask_blur": 8, "tile_padding": 32, "seam_fix_mode": "None", "seam_fix_denoise": 1, "seam_fix_width": 64, "seam_fix_mask_blur": 8, "seam_fix_padding": 16, "force_uniform_tiles": true, "tiled_decode": false, "image": ["404", 0], "model": ["363", 0], "positive": ["403", 0], "negative": ["403", 1], "vae": ["10", 0], "upscale_model": ["408", 0], "custom_sampler": ["20", 0], "custom_sigmas": ["409", 0] }, "class_type": "UltimateSDUpscaleCustomSample" },
+  "408": { "inputs": { "model_name": "4x-UltraSharp.pth" }, "class_type": "UpscaleModelLoader" },
+  "409": { "inputs": { "scheduler": "normal", "steps": 20, "denoise": 0.25, "model": ["363", 0] }, "class_type": "BasicScheduler" }
+}
+`;
+
 serve(async (req) => {
   const requestId = req.headers.get("x-request-id") || `queue-proxy-${Date.now()}`;
   console.log(`[QueueProxy][${requestId}] Function invoked.`);
+
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { headers: corsHeaders });
+  }
 
   const supabase = createClient(
     Deno.env.get('SUPABASE_URL')!,
@@ -17,17 +43,23 @@ serve(async (req) => {
   );
 
   try {
-    const { comfyui_address, prompt_workflow, invoker_user_id } = await req.json();
-    if (!comfyui_address || !prompt_workflow || !invoker_user_id) {
-      throw new Error("Missing 'comfyui_address', 'prompt_workflow', or 'invoker_user_id'.");
+    const { comfyui_address, prompt_text, image_filename, invoker_user_id } = await req.json();
+    if (!comfyui_address || !prompt_text || !image_filename || !invoker_user_id) {
+      throw new Error("Missing required parameters: comfyui_address, prompt_text, image_filename, or invoker_user_id.");
     }
     console.log(`[QueueProxy][${requestId}] Parsed request body.`);
+
+    // Build the workflow on the server
+    let finalWorkflow = JSON.parse(workflowTemplate);
+    if (finalWorkflow['404']) finalWorkflow['404'].inputs.image = image_filename;
+    if (finalWorkflow['307']) finalWorkflow['307'].inputs.String = prompt_text;
+    console.log(`[QueueProxy][${requestId}] Workflow populated successfully.`);
 
     const sanitizedAddress = comfyui_address.replace(/\/+$/, "");
     const queueUrl = `${sanitizedAddress}/prompt`;
     
     const payload = { 
-      prompt: prompt_workflow 
+      prompt: finalWorkflow 
     };
     console.log(`[QueueProxy][${requestId}] Sending prompt to: ${queueUrl}`);
 
@@ -39,19 +71,9 @@ serve(async (req) => {
 
     console.log(`[QueueProxy][${requestId}] Received response from ComfyUI with status: ${response.status}`);
     if (!response.ok) {
-      const errorJson = await response.json();
-      let readableError = `ComfyUI server responded with status ${response.status}.`;
-      if (errorJson.node_errors) {
-        readableError += " Validation errors: ";
-        for (const node in errorJson.node_errors) {
-          const errorDetails = errorJson.node_errors[node].errors[0];
-          readableError += `[Node ${node} (${errorDetails.type})]: ${errorDetails.details}. `;
-        }
-      } else {
-        readableError += ` Details: ${JSON.stringify(errorJson)}`;
-      }
-      console.error(`[QueueProxy][${requestId}] ComfyUI prompt error:`, readableError);
-      throw new Error(readableError);
+      const errorText = await response.text();
+      console.error(`[QueueProxy][${requestId}] ComfyUI prompt error:`, errorText);
+      throw new Error(`ComfyUI server responded with status ${response.status}: ${errorText}`);
     }
 
     const data = await response.json();
@@ -74,7 +96,6 @@ serve(async (req) => {
     if (insertError) throw insertError;
     console.log(`[QueueProxy][${requestId}] Created DB job with ID: ${newJob.id}`);
 
-    // Asynchronously trigger the poller to start watching the job
     console.log(`[QueueProxy][${requestId}] Invoking poller for job ${newJob.id}...`);
     supabase.functions.invoke('MIRA-AGENT-poller-comfyui', { body: { job_id: newJob.id } }).catch(console.error);
 
