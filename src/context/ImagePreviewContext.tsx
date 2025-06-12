@@ -1,8 +1,13 @@
 import { createContext, useContext, useState, ReactNode } from 'react';
 
-interface PreviewData {
+export interface PreviewImage {
   url: string;
   jobId?: string;
+}
+
+interface PreviewData {
+  images: PreviewImage[];
+  currentIndex: number;
 }
 
 interface ImagePreviewContextType {

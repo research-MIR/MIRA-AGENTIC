@@ -21,6 +21,11 @@ export const ImageGenerationResponse = ({ data, jobId }: Props) => {
     return null; // Don't render anything if there are no images
   }
 
+  const handleImageClick = (index: number) => {
+    const imageList = data.images.map(img => ({ url: img.publicUrl, jobId }));
+    showImage({ images: imageList, currentIndex: index });
+  };
+
   return (
     <Card className="max-w-2xl w-full bg-secondary/50">
       <CardHeader className="p-4">
@@ -39,7 +44,7 @@ export const ImageGenerationResponse = ({ data, jobId }: Props) => {
       <CardContent className="p-4 pt-0">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {data.images.map((image, index) => (
-            <button onClick={() => showImage({ url: image.publicUrl, jobId })} key={index} className="block w-full h-full">
+            <button onClick={() => handleImageClick(index)} key={index} className="block w-full h-full">
               <img
                 src={image.publicUrl}
                 alt={`Generated image ${index + 1}`}

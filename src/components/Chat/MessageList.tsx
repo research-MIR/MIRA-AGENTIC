@@ -58,7 +58,14 @@ export const MessageList = ({ messages, jobId }: MessageListProps) => {
                   {message.imageUrls && message.imageUrls.length > 0 && (
                     <div className="grid grid-cols-2 gap-2 mb-2">
                       {message.imageUrls.map((url, i) => (
-                        <button key={i} onClick={() => showImage({ url, jobId })} className="block w-full h-full">
+                        <button 
+                          key={i} 
+                          onClick={() => showImage({ 
+                            images: message.imageUrls!.map(u => ({ url: u, jobId })),
+                            currentIndex: i
+                          })} 
+                          className="block w-full h-full"
+                        >
                             <img src={url} alt={`User upload ${i+1}`} className="rounded-md max-w-full" />
                         </button>
                       ))}

@@ -227,7 +227,7 @@ const Refine = () => {
         return <div className="flex items-center justify-center h-full"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> In elaborazione...</div>;
       case 'complete':
         return activeJob.final_result?.publicUrl ? (
-          <button onClick={() => showImage({ url: activeJob.final_result!.publicUrl })} className="block w-full h-full">
+          <button onClick={() => showImage({ images: [{ url: activeJob.final_result!.publicUrl }], currentIndex: 0 })} className="block w-full h-full">
             <img src={activeJob.final_result.publicUrl} alt="Refined by ComfyUI" className="rounded-lg aspect-square object-contain w-full hover:opacity-80 transition-opacity" />
           </button>
         ) : <p>Job completato, ma nessun URL immagine trovato.</p>;
@@ -327,7 +327,7 @@ const Refine = () => {
                   <div>
                       <h3 className="font-semibold mb-2 text-center">{t.originalImage}</h3>
                       {sourceImageUrl ? (
-                          <button onClick={() => showImage({ url: sourceImageUrl })} className="block w-full h-full">
+                          <button onClick={() => showImage({ images: [{ url: sourceImageUrl }], currentIndex: 0 })} className="block w-full h-full">
                               <img src={sourceImageUrl} alt="Original" className="rounded-lg aspect-square object-contain w-full hover:opacity-80 transition-opacity" />
                           </button>
                       ) : (
