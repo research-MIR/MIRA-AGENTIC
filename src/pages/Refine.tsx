@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -7,10 +7,11 @@ import { Input } from "@/components/ui/input";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { Skeleton } from "@/components/ui/skeleton";
-import { UploadCloud, Wand2 } from "lucide-react";
+import { UploadCloud, Wand2, Loader2 } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useLanguage } from "@/context/LanguageContext";
+import { RealtimeChannel } from "@supabase/supabase-js";
 
 const sanitizeFilename = (filename: string): string => {
   return filename
@@ -19,24 +20,40 @@ const sanitizeFilename = (filename: string): string => {
     .replace(/\.{2,}/g, '.');
 };
 
+interface ComfyJob {
+  id: string;
+  status: 'queued' | 'processing' | 'complete' | 'failed';
+  final_result?: { publicUrl: string };
+  error_message?: string;
+}
+
 const Refine = () => {
   const { supabase, session } = useSession();
   const { t } = useLanguage();
   const [prompt, setPrompt] = useState("");
   const [sourceImageFile, setSourceImageFile] = useState<File | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [result, setResult] = useState<{ original: string; refined: string } | null>(null);
+  const [activeJob, setActiveJob] = useState<ComfyJob | null>(null);
+  const channelRef = useRef<RealtimeChannel | null>(null);
 
   const sourceImageUrl = useMemo(() => {
     if (sourceImageFile) return URL.createObjectURL(sourceImageFile);
     return null;
   }, [sourceImageFile]);
 
+  useEffect(() => {
+    return () => {
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+      }
+    };
+  }, [supabase]);
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       setSourceImageFile(file);
-      setResult(null);
+      setActiveJob(null);
     }
   };
 
@@ -46,50 +63,90 @@ const Refine = () => {
     if (!session?.user) return showError("Devi essere loggato per usare questa funzione.");
 
     setIsLoading(true);
-    setResult(null);
-    let toastId = showLoading("Caricamento dell'immagine e preparazione dell'ambiente...");
+    setActiveJob({ id: '', status: 'queued' });
+    let toastId = showLoading("Caricamento dell'immagine sorgente...");
 
     try {
-      const sanitized = sanitizeFilename(sourceImageFile.name);
-      const filePath = `${session.user.id}/refine-uploads/${Date.now()}-${sanitized}`;
+      const uploadFormData = new FormData();
+      uploadFormData.append('image', sourceImageFile);
       
-      const { error: uploadError } = await supabase.storage
-        .from('mira-agent-user-uploads')
-        .upload(filePath, sourceImageFile);
+      const { data: uploadResult, error: uploadError } = await supabase.functions.invoke('MIRA-AGENT-proxy-comfyui-upload', {
+          body: uploadFormData
+      });
 
-      if (uploadError) throw new Error(`Errore nel caricamento dell'immagine: ${uploadError.message}`);
+      if (uploadError) throw new Error(`Caricamento immagine fallito: ${uploadError.message}`);
+      const uploadedFilename = uploadResult.name;
+      if (!uploadedFilename) throw new Error("ComfyUI non ha restituito un nome file per l'immagine caricata.");
       
-      const { data: { publicUrl } } = supabase.storage.from('mira-agent-user-uploads').getPublicUrl(filePath);
-
-      if (!publicUrl) throw new Error("Impossibile ottenere l'URL pubblico per l'immagine caricata.");
-
       dismissToast(toastId);
-      toastId = showLoading("L'AI sta affinando la tua immagine...");
+      toastId = showLoading("Invio del prompt a ComfyUI...");
 
-      const { data: refineResult, error: refineError } = await supabase.functions.invoke('MIRA-AGENT-tool-fal-image-to-image', {
+      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-comfyui', {
         body: {
-          image_urls: [publicUrl],
-          prompt: prompt,
+          prompt_text: prompt,
+          image_filename: uploadedFilename,
           invoker_user_id: session.user.id
         }
       });
 
-      if (refineError) throw new Error(`Errore durante l'affinamento: ${refineError.message}`);
-      if (!refineResult?.images?.[0]?.publicUrl) throw new Error("Il servizio di affinamento non ha restituito un'immagine valida.");
+      if (error) throw error;
+      
+      const { jobId } = data;
+      if (!jobId) throw new Error("Non è stato ricevuto un ID job dal server.");
+      
+      dismissToast(toastId);
+      showSuccess("Job ComfyUI accodato. In attesa del risultato...");
+      setActiveJob({ id: jobId, status: 'queued' });
 
-      setResult({
-        original: publicUrl,
-        refined: refineResult.images[0].publicUrl
-      });
+      if (channelRef.current) supabase.removeChannel(channelRef.current);
 
-      showSuccess("Immagine affinata con successo!");
+      channelRef.current = supabase.channel(`comfyui-job-${jobId}`)
+        .on<ComfyJob>(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'mira-agent-comfyui-jobs', filter: `id=eq.${jobId}` },
+          (payload) => {
+            setActiveJob(payload.new as ComfyJob);
+            if (payload.new.status === 'complete' || payload.new.status === 'failed') {
+              supabase.removeChannel(channelRef.current!);
+              channelRef.current = null;
+            }
+          }
+        )
+        .subscribe((status, err) => {
+          if (status === 'SUBSCRIBED') {
+            console.log(`[RefinePage] Successfully subscribed to realtime updates for job ${jobId}!`);
+          }
+          if (status === 'CHANNEL_ERROR') {
+            showError(`Realtime connection failed: ${err?.message}`);
+          }
+        });
 
     } catch (err: any) {
-      showError(err.message);
+      setActiveJob(null);
+      showError(`Errore: ${err.message}`);
       console.error("[Refine] Error:", err);
+      dismissToast(toastId);
     } finally {
       setIsLoading(false);
-      dismissToast(toastId);
+    }
+  };
+
+  const renderJobStatus = () => {
+    if (!activeJob) return null;
+
+    switch (activeJob.status) {
+      case 'queued':
+        return <div className="flex items-center justify-center h-full"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> In coda...</div>;
+      case 'processing':
+        return <div className="flex items-center justify-center h-full"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> In elaborazione...</div>;
+      case 'complete':
+        return activeJob.final_result?.publicUrl ? (
+          <img src={activeJob.final_result.publicUrl} alt="Refined by ComfyUI" className="rounded-lg aspect-square object-contain w-full" />
+        ) : <p>Job completato, ma nessun URL immagine trovato.</p>;
+      case 'failed':
+        return <p className="text-destructive">Job fallito: {activeJob.error_message}</p>;
+      default:
+        return null;
     }
   };
 
@@ -129,29 +186,25 @@ const Refine = () => {
         <div className="lg:col-span-2">
           <Card className="min-h-[60vh]">
             <CardHeader><CardTitle>{t.results}</CardTitle></CardHeader>
-            <CardContent>
-              {isLoading ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <Skeleton className="aspect-square w-full" />
-                  <Skeleton className="aspect-square w-full" />
-                </div>
-              ) : result ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
+            <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
                     <h3 className="font-semibold mb-2 text-center">{t.originalImage}</h3>
-                    <img src={result.original} alt="Original" className="rounded-lg aspect-square object-contain w-full" />
-                  </div>
-                  <div>
+                    {sourceImageUrl ? (
+                        <img src={sourceImageUrl} alt="Original" className="rounded-lg aspect-square object-contain w-full" />
+                    ) : (
+                        <div className="aspect-square bg-muted rounded-lg flex flex-col items-center justify-center text-muted-foreground">
+                            <UploadCloud className="h-12 w-12 mb-4" />
+                            <p>{t.uploadAnImageToStart}</p>
+                        </div>
+                    )}
+                </div>
+                 <div>
                     <h3 className="font-semibold mb-2 text-center">{t.refinedImage}</h3>
-                    <img src={result.refined} alt="Refined" className="rounded-lg aspect-square object-contain w-full" />
-                  </div>
+                    <div className="aspect-square bg-muted rounded-lg flex items-center justify-center">
+                        {isLoading && !activeJob ? <Skeleton className="h-full w-full" /> : renderJobStatus()}
+                        {!isLoading && !activeJob && <p className="text-muted-foreground text-center p-4">Il risultato apparirà qui.</p>}
+                    </div>
                 </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center text-center text-muted-foreground h-64">
-                  <UploadCloud className="h-12 w-12 mb-4" />
-                  <p>{t.uploadAnImageToStart}</p>
-                </div>
-              )}
             </CardContent>
           </Card>
         </div>
