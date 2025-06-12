@@ -16,8 +16,12 @@ serve(async (req) => {
       throw new Error("Missing 'comfyui_address' or 'prompt_workflow' in request body.");
     }
 
-    // Sanitize the address to remove any trailing slashes
     const sanitizedAddress = comfyui_address.replace(/\/+$/, "");
+
+    // Correctly wrap the workflow in the expected payload structure
+    const payload = {
+      prompt: prompt_workflow
+    };
 
     console.log(`[ComfyUI Proxy] Forwarding request to: ${sanitizedAddress}/prompt`);
 
@@ -27,7 +31,7 @@ serve(async (req) => {
         'Content-Type': 'application/json',
         'ngrok-skip-browser-warning': 'true'
       },
-      body: JSON.stringify(prompt_workflow),
+      body: JSON.stringify(payload), // Send the correctly structured payload
     });
 
     if (!response.ok) {
