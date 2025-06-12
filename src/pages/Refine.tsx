@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { Skeleton } from "@/components/ui/skeleton";
-import { UploadCloud, Wand2, Loader2, GitCompareArrows } from "lucide-react";
+import { UploadCloud, Wand2, Loader2, GitCompareArrows, Info } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useLanguage } from "@/context/LanguageContext";
@@ -40,23 +40,24 @@ const Refine = () => {
   const [isCompareModalOpen, setIsCompareModalOpen] = useState(false);
   const [comparisonImages, setComparisonImages] = useState<{ before: string; after: string } | null>(null);
 
-  const { data: activeComfyJobs } = useQuery({
+  const { data: activeComfyJobs, isLoading: isLoadingJobs } = useQuery({
     queryKey: ['activeComfyJobs', session?.user?.id],
     queryFn: async () => {
       if (!session?.user) return [];
       const { data, error } = await supabase
         .from('mira-agent-comfyui-jobs')
-        .select('id')
+        .select('*')
         .eq('user_id', session.user.id)
-        .in('status', ['queued', 'processing']);
+        .in('status', ['queued', 'processing'])
+        .order('created_at', { ascending: false });
       if (error) {
         console.error("Error fetching active jobs:", error);
         return [];
       }
-      return data;
+      return data as ComfyJob[];
     },
     enabled: !!session?.user,
-    refetchInterval: 5000,
+    refetchInterval: 30000, // Poll every 30 seconds as a fallback
   });
 
   const isThisPageJobRunning = useMemo(() => {
@@ -73,6 +74,48 @@ const Refine = () => {
     if (sourceImageFile) return URL.createObjectURL(sourceImageFile);
     return null;
   }, [sourceImageFile]);
+
+  const subscribeToJobUpdates = useCallback((jobId: string) => {
+    if (channelRef.current) {
+      supabase.removeChannel(channelRef.current);
+    }
+    
+    channelRef.current = supabase.channel(`comfyui-job-${jobId}`)
+      .on<ComfyJob>(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'mira-agent-comfyui-jobs', filter: `id=eq.${jobId}` },
+        async (payload) => {
+          const newJob = payload.new as ComfyJob;
+          setActiveJob(newJob);
+          if (newJob.status === 'complete' && newJob.final_result) {
+            showSuccess("Refinement complete!");
+            if (sourceImageUrl) {
+              setComparisonImages({ before: sourceImageUrl, after: newJob.final_result.publicUrl });
+            }
+            queryClient.invalidateQueries({ queryKey: ['generatedImages'] });
+            supabase.removeChannel(channelRef.current!);
+            channelRef.current = null;
+          } else if (newJob.status === 'failed') {
+            showError(`Job failed: ${newJob.error_message}`);
+            supabase.removeChannel(channelRef.current!);
+            channelRef.current = null;
+          }
+        }
+      )
+      .subscribe((status, err) => {
+        if (status === 'SUBSCRIBED') console.log(`[RefinePage] Subscribed to job ${jobId}`);
+        if (status === 'CHANNEL_ERROR') showError(`Realtime connection failed: ${err?.message}`);
+      });
+  }, [supabase, sourceImageUrl, queryClient]);
+
+  useEffect(() => {
+    if (activeComfyJobs && activeComfyJobs.length > 0 && !activeJob) {
+      const jobToTrack = activeComfyJobs[0];
+      console.log(`[RefinePage] Found active job ${jobToTrack.id}, resuming tracking.`);
+      setActiveJob(jobToTrack);
+      subscribeToJobUpdates(jobToTrack.id);
+    }
+  }, [activeComfyJobs, activeJob, subscribeToJobUpdates]);
 
   useEffect(() => {
     return () => {
@@ -134,7 +177,8 @@ const Refine = () => {
           prompt_text: prompt,
           image_filename: uploadedFilename,
           invoker_user_id: session.user.id,
-          upscale_factor: upscaleFactor
+          upscale_factor: upscaleFactor,
+          original_prompt_for_gallery: `Refined: ${prompt.slice(0, 40)}...`
         }
       });
 
@@ -146,46 +190,7 @@ const Refine = () => {
       dismissToast(toastId);
       showSuccess("Job ComfyUI accodato. In attesa del risultato...");
       setActiveJob({ id: jobId, status: 'queued' });
-
-      if (channelRef.current) supabase.removeChannel(channelRef.current);
-
-      channelRef.current = supabase.channel(`comfyui-job-${jobId}`)
-        .on<ComfyJob>(
-          'postgres_changes',
-          { event: 'UPDATE', schema: 'public', table: 'mira-agent-comfyui-jobs', filter: `id=eq.${jobId}` },
-          async (payload) => {
-            const newJob = payload.new as ComfyJob;
-            setActiveJob(newJob);
-            if (newJob.status === 'complete' && newJob.final_result) {
-              if (sourceImageUrl) {
-                setComparisonImages({ before: sourceImageUrl, after: newJob.final_result.publicUrl });
-              }
-              const jobPayload = {
-                  user_id: session.user.id,
-                  original_prompt: `Refined: ${prompt.slice(0, 40)}...`,
-                  status: 'complete',
-                  final_result: { isImageGeneration: true, images: [newJob.final_result] },
-                  context: { source: 'refiner' }
-              };
-              const { error: insertError } = await supabase.from('mira-agent-jobs').insert(jobPayload);
-              if (insertError) showError(`Immagine affinata, ma non salvata in galleria: ${insertError.message}`);
-              
-              supabase.removeChannel(channelRef.current!);
-              channelRef.current = null;
-            } else if (newJob.status === 'failed') {
-              supabase.removeChannel(channelRef.current!);
-              channelRef.current = null;
-            }
-          }
-        )
-        .subscribe((status, err) => {
-          if (status === 'SUBSCRIBED') {
-            console.log(`[RefinePage] Successfully subscribed to realtime updates for job ${jobId}!`);
-          }
-          if (status === 'CHANNEL_ERROR') {
-            showError(`Realtime connection failed: ${err?.message}`);
-          }
-        });
+      subscribeToJobUpdates(jobId);
 
     } catch (err: any) {
       setActiveJob(null);
@@ -330,6 +335,11 @@ const Refine = () => {
                           <button onClick={() => showImage({ images: [{ url: sourceImageUrl }], currentIndex: 0 })} className="block w-full h-full">
                               <img src={sourceImageUrl} alt="Original" className="rounded-lg aspect-square object-contain w-full hover:opacity-80 transition-opacity" />
                           </button>
+                      ) : isThisPageJobRunning ? (
+                          <div className="aspect-square bg-muted rounded-lg flex flex-col items-center justify-center text-muted-foreground text-center p-4">
+                            <Info className="h-12 w-12 mb-4" />
+                            <p>Job in corso... L'immagine originale non è disponibile per le sessioni riprese.</p>
+                          </div>
                       ) : (
                           <div className="aspect-square bg-muted rounded-lg flex flex-col items-center justify-center text-muted-foreground">
                               <UploadCloud className="h-12 w-12 mb-4" />
