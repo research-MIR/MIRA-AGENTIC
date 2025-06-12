@@ -23,7 +23,11 @@ serve(async (req) => {
     }
 
     const sanitizedAddress = comfyui_address.replace(/\/+$/, "");
-    const payload = { prompt: prompt_workflow };
+    
+    // **THE FIX:** Correctly wrap the workflow in the expected payload structure.
+    const payload = { 
+      prompt: prompt_workflow 
+    };
 
     const response = await fetch(`${sanitizedAddress}/prompt`, {
       method: 'POST',
