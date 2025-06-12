@@ -5,7 +5,7 @@ import { useSession } from "./Auth/SessionContextProvider";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Skeleton } from "./ui/skeleton";
-import { useOnboardingTour } from "@/context/OnboardingTourContext";
+import { useOnboardingTour } from "../context/OnboardingTourContext";
 import { useLanguage } from "@/context/LanguageContext";
 
 interface JobHistory {
@@ -50,19 +50,19 @@ export const Sidebar = () => {
         <h1 className="text-2xl font-bold">MIRA</h1>
       </div>
       <nav className="p-4 space-y-2">
-        <NavLink to="/chat" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
+        <NavLink id="chat-nav-link" to="/chat" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
           <MessageSquare size={20} />
           {t.agentChat}
         </NavLink>
-        <NavLink to="/generator" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
+        <NavLink id="generator-nav-link" to="/generator" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
           <Image size={20} />
           {t.generator}
         </NavLink>
-        <NavLink to="/virtual-try-on" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
+        <NavLink id="virtual-try-on-nav-link" to="/virtual-try-on" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
           <Shirt size={20} />
           {t.virtualTryOn}
         </NavLink>
-        <NavLink to="/gallery" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
+        <NavLink id="gallery-nav-link" to="/gallery" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
           <GalleryHorizontal size={20} />
           {t.gallery}
         </NavLink>

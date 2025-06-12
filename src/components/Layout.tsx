@@ -1,6 +1,5 @@
 import { Outlet } from "react-router-dom";
 import Sidebar from "./Sidebar";
-import { OnboardingTour } from "./OnboardingTour";
 
 const Layout = () => {
   return (
@@ -9,7 +8,6 @@ const Layout = () => {
       <main className="flex-1 flex flex-col overflow-hidden">
         <Outlet />
       </main>
-      <OnboardingTour />
     </div>
   );
 };
