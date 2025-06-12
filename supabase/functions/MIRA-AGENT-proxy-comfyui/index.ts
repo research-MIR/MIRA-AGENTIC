@@ -310,22 +310,40 @@ serve(async (req) => {
     
     const { invoker_user_id, upscale_factor, original_prompt_for_gallery } = body;
     let finalWorkflow;
+    let imageFilename = body.image_filename;
+
+    // If image_filename is a URL, we need to download it and upload to ComfyUI first
+    if (imageFilename && (imageFilename.startsWith('http://') || imageFilename.startsWith('https://'))) {
+        console.log(`[QueueProxy][${requestId}] Image filename is a URL. Proxying upload...`);
+        const thisUrl = new URL(req.url);
+        const uploadProxyUrl = `${thisUrl.protocol}//${thisUrl.host}/MIRA-AGENT-proxy-comfyui-upload`;
+        
+        const uploadResponse = await fetch(uploadProxyUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': req.headers.get('Authorization')! },
+            body: JSON.stringify({ image_url: imageFilename })
+        });
+
+        if (!uploadResponse.ok) {
+            const errorText = await uploadResponse.text();
+            throw new Error(`Failed to proxy image upload: ${errorText}`);
+        }
+        const uploadData = await uploadResponse.json();
+        imageFilename = uploadData.name;
+        console.log(`[QueueProxy][${requestId}] Successfully proxied upload. New filename: ${imageFilename}`);
+    }
 
     if (body.prompt_workflow) {
-        console.log(`[QueueProxy][${requestId}] Handling legacy 'prompt_workflow' format.`);
         finalWorkflow = body.prompt_workflow;
-    } else if (body.prompt_text && body.image_filename) {
-        console.log(`[QueueProxy][${requestId}] Handling new 'prompt_text' and 'image_filename' format.`);
+    } else if (body.prompt_text && imageFilename) {
         finalWorkflow = JSON.parse(workflowTemplate);
-        if (finalWorkflow['404']) finalWorkflow['404'].inputs.image = body.image_filename;
+        if (finalWorkflow['404']) finalWorkflow['404'].inputs.image = imageFilename;
         if (finalWorkflow['307']) finalWorkflow['307'].inputs.String = body.prompt_text;
         if (finalWorkflow['407']) {
             const randomSeed = Math.floor(Math.random() * 1000000000000000);
             finalWorkflow['407'].inputs.seed = randomSeed;
-            console.log(`[QueueProxy][${requestId}] Injected random seed: ${randomSeed}`);
             if (upscale_factor) {
                 finalWorkflow['407'].inputs.upscale_by = upscale_factor;
-                console.log(`[QueueProxy][${requestId}] Injected upscale_by: ${upscale_factor}`);
             }
         }
     } else {
@@ -334,8 +352,6 @@ serve(async (req) => {
 
     if (!invoker_user_id) throw new Error("Missing required parameter: invoker_user_id");
     
-    console.log(`[QueueProxy][${requestId}] All parameters validated.`);
-
     const sanitizedAddress = COMFYUI_ENDPOINT_URL.replace(/\/+$/, "");
     const queueUrl = `${sanitizedAddress}/prompt`;
     
@@ -350,10 +366,8 @@ serve(async (req) => {
       body: JSON.stringify(payload),
     });
 
-    console.log(`[QueueProxy][${requestId}] Received response from ComfyUI with status: ${response.status}`);
     if (!response.ok) {
       const errorText = await response.text();
-      console.error(`[QueueProxy][${requestId}] ComfyUI prompt error:`, errorText);
       throw new Error(`ComfyUI server responded with status ${response.status}: ${errorText}`);
     }
 
@@ -361,7 +375,6 @@ serve(async (req) => {
     if (!data.prompt_id) {
         throw new Error("ComfyUI did not return a prompt_id.");
     }
-    console.log(`[QueueProxy][${requestId}] ComfyUI returned prompt_id: ${data.prompt_id}`);
 
     const { data: newJob, error: insertError } = await supabase
         .from('mira-agent-comfyui-jobs')
@@ -379,9 +392,7 @@ serve(async (req) => {
         .single();
 
     if (insertError) throw insertError;
-    console.log(`[QueueProxy][${requestId}] Created DB job with ID: ${newJob.id}`);
 
-    console.log(`[QueueProxy][${requestId}] Invoking poller for job ${newJob.id}...`);
     supabase.functions.invoke('MIRA-AGENT-poller-comfyui', { body: { job_id: newJob.id } }).catch(console.error);
 
     return new Response(JSON.stringify({ success: true, jobId: newJob.id }), {

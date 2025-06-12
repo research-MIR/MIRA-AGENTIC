@@ -1,0 +1,99 @@
+import { useEffect, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSession } from './Auth/SessionContextProvider';
+import { Button } from './ui/button';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
+import { Loader2 } from 'lucide-react';
+import { RealtimeChannel } from '@supabase/supabase-js';
+import { showSuccess, showError } from '@/utils/toast';
+import { downloadImage } from '@/lib/utils';
+
+interface ComfyJob {
+  id: string;
+  status: 'queued' | 'processing' | 'complete' | 'failed';
+  final_result?: { publicUrl: string };
+  error_message?: string;
+}
+
+export const ActiveJobsTracker = () => {
+  const { supabase, session } = useSession();
+  const queryClient = useQueryClient();
+  const [trackedJobs, setTrackedJobs] = useState<ComfyJob[]>([]);
+
+  const { data: activeJobs, isLoading } = useQuery<ComfyJob[]>({
+    queryKey: ['activeComfyJobs'],
+    queryFn: async () => {
+      if (!session?.user) return [];
+      const { data, error } = await supabase
+        .from('mira-agent-comfyui-jobs')
+        .select('*')
+        .eq('user_id', session.user.id)
+        .in('status', ['queued', 'processing']);
+      if (error) {
+        console.error("Error fetching active jobs:", error);
+        return [];
+      }
+      return data;
+    },
+    enabled: !!session?.user,
+    refetchInterval: 60000, // Poll every minute as a fallback
+  });
+
+  useEffect(() => {
+    if (activeJobs) {
+      setTrackedJobs(activeJobs);
+    }
+  }, [activeJobs]);
+
+  useEffect(() => {
+    if (!trackedJobs.length) return;
+
+    const channels: RealtimeChannel[] = [];
+    trackedJobs.forEach(job => {
+      const channel = supabase.channel(`comfyui-job-tracker-${job.id}`)
+        .on<ComfyJob>(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'mira-agent-comfyui-jobs', filter: `id=eq.${job.id}` },
+          (payload) => {
+            const updatedJob = payload.new;
+            if (updatedJob.status === 'complete' || updatedJob.status === 'failed') {
+              if (updatedJob.status === 'complete' && updatedJob.final_result?.publicUrl) {
+                showSuccess(`Upscale complete! Downloading now...`);
+                downloadImage(updatedJob.final_result.publicUrl, `upscaled-${job.id.substring(0, 8)}.png`);
+              } else if (updatedJob.status === 'failed') {
+                showError(`Upscale failed: ${updatedJob.error_message || 'Unknown error'}`);
+              }
+              queryClient.invalidateQueries({ queryKey: ['activeComfyJobs'] });
+              queryClient.invalidateQueries({ queryKey: ['generatedImages'] });
+            }
+          }
+        )
+        .subscribe();
+      channels.push(channel);
+    });
+
+    return () => {
+      channels.forEach(channel => supabase.removeChannel(channel));
+    };
+  }, [trackedJobs, supabase, queryClient]);
+
+  if (isLoading || !trackedJobs || trackedJobs.length === 0) {
+    return null;
+  }
+
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button variant="ghost" className="w-full justify-start gap-2 text-primary">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <span>{trackedJobs.length} job(s) in progress</span>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>
+          <p>Your upscaled images will be downloaded automatically when ready.</p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+};

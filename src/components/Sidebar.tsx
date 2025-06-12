@@ -7,6 +7,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Skeleton } from "./ui/skeleton";
 import { useLanguage } from "@/context/LanguageContext";
 import { useOnboardingTour } from "@/context/OnboardingTourContext";
+import { ActiveJobsTracker } from "./ActiveJobsTracker";
 
 interface JobHistory {
   id: string;
@@ -95,6 +96,7 @@ export const Sidebar = () => {
         )}
       </div>
       <div className="p-4 border-t space-y-2">
+        <ActiveJobsTracker />
         <Button variant="ghost" className="w-full justify-start gap-2" onClick={handleRestartTour}>
           <HelpCircle size={20} />
           {t.restartOnboarding}

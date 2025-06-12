@@ -55,23 +55,13 @@ export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => 
     if (!session?.user) return showError("You must be logged in to upscale images.");
     
     setIsUpscaling(true);
-    const toastId = showLoading(`Uploading image for x${factor} upscale...`);
+    const toastId = showLoading(`Starting x${factor} upscale job...`);
     
     try {
-      const { data: uploadResult, error: uploadError } = await supabase.functions.invoke('MIRA-AGENT-proxy-comfyui-upload', {
-        body: { image_url: currentImage.url }
-      });
-      if (uploadError) throw new Error(`Image upload failed: ${uploadError.message}`);
-      const uploadedFilename = uploadResult.name;
-      if (!uploadedFilename) throw new Error("ComfyUI did not return a filename for the uploaded image.");
-
-      dismissToast(toastId);
-      showSuccess("Image uploaded. Queueing upscale job...");
-
       const { error: queueError } = await supabase.functions.invoke('MIRA-AGENT-proxy-comfyui', {
         body: {
           prompt_text: "masterpiece, best quality, high resolution, photorealistic, sharp focus",
-          image_filename: uploadedFilename,
+          image_filename: currentImage.url, // The proxy can now handle URLs
           invoker_user_id: session.user.id,
           upscale_factor: factor,
           original_prompt_for_gallery: `Upscaled from job ${currentImage.jobId}`
@@ -80,13 +70,14 @@ export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => 
 
       if (queueError) throw queueError;
 
-      showSuccess("Upscale job queued! It will appear in your gallery shortly.");
+      dismissToast(toastId);
+      showSuccess("Upscale job started! You'll be notified when it's ready.");
       queryClient.invalidateQueries({ queryKey: ['activeComfyJobs'] });
       onClose();
 
     } catch (err: any) {
-      showError(`Upscale failed: ${err.message}`);
       dismissToast(toastId);
+      showError(`Upscale failed: ${err.message}`);
     } finally {
       setIsUpscaling(false);
     }
