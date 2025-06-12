@@ -18,7 +18,7 @@ const Developer = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ComfyUI State
-  const [comfyAddress, setComfyAddress] = useState("http://127.0.0.1:8188");
+  const [comfyAddress, setComfyAddress] = useState("https://your-ngrok-or-public-url.io");
   const [workflowJson, setWorkflowJson] = useState("");
   const [comfyResponse, setComfyResponse] = useState("");
   const [isQueueing, setIsQueueing] = useState(false);
@@ -171,6 +171,9 @@ const Developer = () => {
               value={comfyAddress}
               onChange={(e) => setComfyAddress(e.target.value)}
             />
+             <p className="text-xs text-muted-foreground mt-1">
+              {t.comfyUIAddressDescription}
+            </p>
           </div>
           <div>
             <div className="flex justify-between items-center mb-2">
