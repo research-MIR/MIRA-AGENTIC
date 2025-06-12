@@ -14,7 +14,7 @@ import Layout from "./components/Layout";
 import ProtectedRoute from "./components/Auth/ProtectedRoute";
 import { ImagePreviewProvider } from "./context/ImagePreviewContext";
 import { ImagePreviewModal } from "./components/ImagePreviewModal";
-import { LanguageProvider, useLanguage } from "./context/LanguageContext";
+import { useLanguage } from "./context/LanguageContext";
 import VirtualTryOn from "./pages/VirtualTryOn";
 import { OnboardingTourProvider, useOnboardingTour } from "./context/OnboardingTourContext";
 import { TourProvider as ReactourProvider, StepType } from '@reactour/tour';
@@ -102,19 +102,17 @@ const AppContent = () => {
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
-    <LanguageProvider>
-      <ImagePreviewProvider modal={(data, onClose) => <ImagePreviewModal data={data} onClose={onClose} />}>
-        <TooltipProvider>
-          <Toaster />
-          <Sonner position="top-right" />
-          <BrowserRouter>
-            <OnboardingTourProvider>
-              <AppContent />
-            </OnboardingTourProvider>
-          </BrowserRouter>
-        </TooltipProvider>
-      </ImagePreviewProvider>
-    </LanguageProvider>
+    <ImagePreviewProvider modal={(data, onClose) => <ImagePreviewModal data={data} onClose={onClose} />}>
+      <TooltipProvider>
+        <Toaster />
+        <Sonner position="top-right" />
+        <BrowserRouter>
+          <OnboardingTourProvider>
+            <AppContent />
+          </OnboardingTourProvider>
+        </BrowserRouter>
+      </TooltipProvider>
+    </ImagePreviewProvider>
   </QueryClientProvider>
 );
 
