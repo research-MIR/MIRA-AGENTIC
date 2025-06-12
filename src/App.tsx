@@ -3,7 +3,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import Gallery from "./pages/Gallery";
@@ -22,9 +22,10 @@ import { useSession } from "./components/Auth/SessionContextProvider";
 const queryClient = new QueryClient();
 
 const AppContent = () => {
-  const { isTourOpen, closeTour, startTour } = useOnboardingTour();
+  const { isTourOpen, isTourPending, openTour, closeTour, startTour } = useOnboardingTour();
   const { t } = useLanguage();
   const { session, supabase } = useSession();
+  const location = useLocation();
 
   useEffect(() => {
     if (session?.user) {
@@ -35,6 +36,12 @@ const AppContent = () => {
       });
     }
   }, [session, supabase, startTour]);
+
+  useEffect(() => {
+    if (isTourPending && location.pathname.startsWith('/chat')) {
+      openTour();
+    }
+  }, [isTourPending, location.pathname, openTour]);
 
   const steps: StepType[] = [
     { selector: '#model-selector', content: t.onboardingModelDescription },
@@ -73,22 +80,20 @@ const AppContent = () => {
         }),
       }}
     >
-      <BrowserRouter>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route element={<ProtectedRoute />}>
-            <Route element={<Layout />}>
-              <Route path="/" element={<Navigate to="/chat" replace />} />
-              <Route path="/chat" element={<Index />} />
-              <Route path="/chat/:jobId" element={<Index />} />
-              <Route path="/gallery" element={<Gallery />} />
-              <Route path="/generator" element={<Generator />} />
-              <Route path="/virtual-try-on" element={<VirtualTryOn />} />
-            </Route>
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route element={<ProtectedRoute />}>
+          <Route element={<Layout />}>
+            <Route path="/" element={<Navigate to="/chat" replace />} />
+            <Route path="/chat" element={<Index />} />
+            <Route path="/chat/:jobId" element={<Index />} />
+            <Route path="/gallery" element={<Gallery />} />
+            <Route path="/generator" element={<Generator />} />
+            <Route path="/virtual-try-on" element={<VirtualTryOn />} />
           </Route>
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </BrowserRouter>
+        </Route>
+        <Route path="*" element={<NotFound />} />
+      </Routes>
     </ReactourProvider>
   );
 };
@@ -100,9 +105,11 @@ const App = () => (
         <TooltipProvider>
           <Toaster />
           <Sonner position="top-right" />
-          <OnboardingTourProvider>
-            <AppContent />
-          </OnboardingTourProvider>
+          <BrowserRouter>
+            <OnboardingTourProvider>
+              <AppContent />
+            </OnboardingTourProvider>
+          </BrowserRouter>
         </TooltipProvider>
       </ImagePreviewProvider>
     </LanguageProvider>

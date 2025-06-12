@@ -2,7 +2,9 @@ import { createContext, useContext, useState, ReactNode, useCallback } from 'rea
 
 interface OnboardingTourContextType {
   isTourOpen: boolean;
+  isTourPending: boolean;
   startTour: () => void;
+  openTour: () => void;
   closeTour: () => void;
 }
 
@@ -18,16 +20,23 @@ export const useOnboardingTour = () => {
 
 export const OnboardingTourProvider = ({ children }: { children: ReactNode }) => {
   const [isTourOpen, setIsTourOpen] = useState(false);
+  const [isTourPending, setIsTourPending] = useState(false);
 
   const startTour = useCallback(() => {
+    setIsTourPending(true);
+  }, []);
+
+  const openTour = useCallback(() => {
     setIsTourOpen(true);
+    setIsTourPending(false);
   }, []);
 
   const closeTour = useCallback(() => {
     setIsTourOpen(false);
+    setIsTourPending(false);
   }, []);
 
-  const value = { isTourOpen, startTour, closeTour };
+  const value = { isTourOpen, isTourPending, startTour, openTour, closeTour };
 
   return (
     <OnboardingTourContext.Provider value={value}>

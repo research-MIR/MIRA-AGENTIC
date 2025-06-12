@@ -44,6 +44,11 @@ export const Sidebar = () => {
     navigate("/login");
   };
 
+  const handleRestartTour = () => {
+    navigate('/chat');
+    startTour();
+  };
+
   return (
     <aside className="w-64 bg-background border-r flex flex-col">
       <div className="p-4 border-b">
@@ -82,7 +87,7 @@ export const Sidebar = () => {
         )}
       </div>
       <div className="p-4 border-t space-y-2">
-        <Button variant="ghost" className="w-full justify-start gap-2" onClick={startTour}>
+        <Button variant="ghost" className="w-full justify-start gap-2" onClick={handleRestartTour}>
           <HelpCircle size={20} />
           {t.restartOnboarding}
         </Button>
