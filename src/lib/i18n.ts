@@ -5,6 +5,7 @@ export const translations = {
     generator: "Generatore",
     gallery: "Galleria",
     virtualTryOn: "Camerino Virtuale",
+    refineAndUpscale: "Rifinisci e Migliora",
     comingSoon: "Prossimamente...",
     newChat: "Nuova Chat",
     deleteChat: "Elimina Chat",
@@ -98,6 +99,15 @@ export const translations = {
     queuePrompt: "Accoda Prompt",
     response: "Risposta",
     uploadWorkflow: "Carica Workflow",
+    // Refine Page
+    refinePageDescription: "Carica un'immagine e descrivi come vuoi trasformarla.",
+    sourceImage: "Immagine Sorgente",
+    refinementPrompt: "Prompt di Affinamento",
+    refinementPromptPlaceholder: "Esempio: rendi lo stile più cinematografico, cambia i colori in toni autunnali...",
+    refineButton: "Rifinisci Immagine",
+    originalImage: "Immagine Originale",
+    refinedImage: "Immagine Rifinita",
+    uploadAnImageToStart: "Carica un'immagine per iniziare.",
   },
   en: {
     // General
@@ -105,6 +115,7 @@ export const translations = {
     generator: "Generator",
     gallery: "Gallery",
     virtualTryOn: "Virtual Try-On",
+    refineAndUpscale: "Refine & Upscale",
     comingSoon: "Coming Soon...",
     newChat: "New Chat",
     deleteChat: "Delete Chat",
@@ -198,5 +209,14 @@ export const translations = {
     queuePrompt: "Queue Prompt",
     response: "Response",
     uploadWorkflow: "Upload Workflow",
+    // Refine Page
+    refinePageDescription: "Upload an image and describe how you want to transform it.",
+    sourceImage: "Source Image",
+    refinementPrompt: "Refinement Prompt",
+    refinementPromptPlaceholder: "Example: make the style more cinematic, change the colors to autumn tones...",
+    refineButton: "Refine Image",
+    originalImage: "Original Image",
+    refinedImage: "Refined Image",
+    uploadAnImageToStart: "Upload an image to get started.",
   },
 };

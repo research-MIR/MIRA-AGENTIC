@@ -16,6 +16,7 @@ import { ImagePreviewProvider } from "./context/ImagePreviewContext";
 import { ImagePreviewModal } from "./components/ImagePreviewModal";
 import { useLanguage } from "./context/LanguageContext";
 import VirtualTryOn from "./pages/VirtualTryOn";
+import Refine from "./pages/Refine";
 import { OnboardingTourProvider, useOnboardingTour } from "./context/OnboardingTourContext";
 import { TourProvider as ReactourProvider, StepType } from '@reactour/tour';
 import { useSession } from "./components/Auth/SessionContextProvider";
@@ -90,6 +91,7 @@ const AppContent = () => {
             <Route path="/chat/:jobId" element={<Index />} />
             <Route path="/gallery" element={<Gallery />} />
             <Route path="/generator" element={<Generator />} />
+            <Route path="/refine" element={<Refine />} />
             <Route path="/developer" element={<Developer />} />
             <Route path="/virtual-try-on" element={<VirtualTryOn />} />
           </Route>
