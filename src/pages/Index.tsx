@@ -13,7 +13,7 @@ import { MessageList, Message } from "@/components/Chat/MessageList";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { PlusCircle, Trash2, RefreshCw } from "lucide-react";
+import { PlusCircle, Trash2 } from "lucide-react";
 
 interface UploadedFile {
   name: string;
@@ -313,43 +313,6 @@ const Index = () => {
     }
   }, [jobId, supabase, navigate, queryClient, t]);
 
-  const handleRefresh = useCallback(async () => {
-    if (!jobId) return;
-    const toastId = showLoading("Refreshing chat and logging data...");
-    try {
-        console.log(`--- REFRESHING JOB ${jobId} ---`);
-        
-        const { data: rawJobData, error } = await supabase
-            .from("mira-agent-jobs")
-            .select("*")
-            .eq("id", jobId)
-            .single();
-
-        if (error) throw error;
-
-        console.log("--- RAW JOB DATA FROM DB ---");
-        console.log(JSON.stringify(rawJobData, null, 2));
-
-        const parsedMessages = parseHistoryToMessages(rawJobData.context?.history);
-        
-        if (rawJobData.status === 'processing') {
-            parsedMessages.push({ from: 'bot', jobInProgress: { jobId: rawJobData.id, message: 'This job is in progress...' } });
-        }
-
-        console.log("--- PARSED MESSAGES ARRAY ---");
-        console.log(parsedMessages);
-
-        await queryClient.invalidateQueries({ queryKey: ['chatJob', jobId] });
-        showSuccess("Chat refreshed and data logged to console.");
-
-    } catch (err: any) {
-        console.error("--- REFRESH FAILED ---", err);
-        showError(`Failed to refresh chat: ${err.message}`);
-    } finally {
-        dismissToast(toastId);
-    }
-  }, [jobId, supabase, queryClient]);
-
   return (
     <div className="flex flex-col h-full relative" onDragEnter={() => setIsDragging(true)}>
       {isDragging && <FileDropzone onDrop={(files) => handleFileUpload(files)} onDragStateChange={setIsDragging} />}
@@ -364,9 +327,6 @@ const Index = () => {
           <ThemeToggle />
           {jobId && (
             <>
-              <Button variant="outline" size="icon" title="Refresh Chat" onClick={handleRefresh}>
-                <RefreshCw className="h-4 w-4" />
-              </Button>
               <AlertDialog>
                 <AlertDialogTrigger asChild><Button variant="destructive" size="icon" title={t.deleteChat}><Trash2 className="h-4 w-4" /></Button></AlertDialogTrigger>
                 <AlertDialogContent>
