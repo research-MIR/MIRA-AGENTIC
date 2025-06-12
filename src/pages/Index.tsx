@@ -169,6 +169,8 @@ const Index = () => {
         conversationMessages.push({ from: 'bot', jobInProgress: { jobId: jobData.id, message: 'This job is in progress...' } });
     } else if (jobData.status === 'failed') {
         conversationMessages.push({ from: 'bot', text: `I'm sorry, an error occurred: ${jobData.error_message}` });
+    } else if (jobData.status === 'complete' && jobData.final_result?.text) {
+        conversationMessages.push({ from: 'bot', text: jobData.final_result.text });
     }
     setMessages(conversationMessages);
   }, []);
@@ -211,15 +213,15 @@ const Index = () => {
           schema: 'public', 
           table: 'mira-agent-jobs', 
           filter: `id=eq.${jobId}` 
-      }, (payload) => {
-          processJobData(payload.new);
+      }, () => {
+          queryClient.invalidateQueries({ queryKey: ['chatJob', jobId] });
       })
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [jobId, supabase, processJobData]);
+  }, [jobId, supabase, queryClient]);
 
   useEffect(() => {
     if (error) {
