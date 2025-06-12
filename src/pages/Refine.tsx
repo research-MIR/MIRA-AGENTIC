@@ -195,8 +195,8 @@ const Refine = () => {
               <Textarea id="prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t.refinementPromptPlaceholder} rows={6} />
             </CardContent>
           </Card>
-          <Button onClick={handleRefine} disabled={isLoading || !sourceImageFile} className="w-full">
-            {isLoading ? <Wand2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+          <Button onClick={handleRefine} disabled={isLoading || !sourceImageFile || (activeJob && (activeJob.status === 'queued' || activeJob.status === 'processing'))} className="w-full">
+            {(isLoading || (activeJob && (activeJob.status === 'queued' || activeJob.status === 'processing'))) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
             {t.refineButton}
           </Button>
         </div>

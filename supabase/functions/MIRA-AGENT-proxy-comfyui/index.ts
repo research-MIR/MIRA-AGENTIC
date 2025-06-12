@@ -319,6 +319,11 @@ serve(async (req) => {
         finalWorkflow = JSON.parse(workflowTemplate);
         if (finalWorkflow['404']) finalWorkflow['404'].inputs.image = body.image_filename;
         if (finalWorkflow['307']) finalWorkflow['307'].inputs.String = body.prompt_text;
+        if (finalWorkflow['407']) {
+            const randomSeed = Math.floor(Math.random() * 1000000000000000);
+            finalWorkflow['407'].inputs.seed = randomSeed;
+            console.log(`[QueueProxy][${requestId}] Injected random seed: ${randomSeed}`);
+        }
     } else {
         throw new Error("Request body must contain either 'prompt_workflow' or both 'prompt_text' and 'image_filename'.");
     }
