@@ -48,6 +48,28 @@ async function findOutputImage(historyOutputs: any, promptWorkflow: any): Promis
     return bestOutput.image;
 }
 
+async function createGalleryEntry(supabase: any, job: any, finalResult: any) {
+    if (!job.metadata?.invoker_user_id || !job.metadata?.original_prompt_for_gallery) {
+        console.log(`[Poller][${job.id}] Skipping gallery entry creation: missing metadata.`);
+        return;
+    }
+
+    const jobPayload = {
+        user_id: job.metadata.invoker_user_id,
+        original_prompt: job.metadata.original_prompt_for_gallery,
+        status: 'complete',
+        final_result: { isImageGeneration: true, images: [finalResult] },
+        context: { source: 'refiner' }
+    };
+
+    const { error: insertError } = await supabase.from('mira-agent-jobs').insert(jobPayload);
+    if (insertError) {
+        console.error(`[Poller][${job.id}] Failed to create gallery entry:`, insertError);
+    } else {
+        console.log(`[Poller][${job.id}] Successfully created gallery entry.`);
+    }
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
 
@@ -92,7 +114,6 @@ serve(async (req) => {
     }
     console.log(`[Poller][${job_id}] History found. Searching for output image...`);
 
-    // The 'prompt' property in the history contains the original workflow object.
     const outputImage = await findOutputImage(promptHistory.outputs, promptHistory.prompt);
 
     if (outputImage) {
@@ -111,12 +132,15 @@ serve(async (req) => {
         const { data: { publicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
         console.log(`[Poller][${job_id}] Upload complete. Public URL: ${publicUrl}`);
 
+        const finalResult = { publicUrl, storagePath: filePath };
         await supabase.from('mira-agent-comfyui-jobs').update({
             status: 'complete',
-            final_result: { publicUrl, storagePath: filePath }
+            final_result: finalResult
         }).eq('id', job_id);
-
         console.log(`[Poller][${job_id}] Job status updated to 'complete' in DB.`);
+
+        await createGalleryEntry(supabase, job, finalResult);
+
         return new Response(JSON.stringify({ success: true, status: 'complete', publicUrl }), { headers: corsHeaders });
     } else {
         if (attempt > MAX_POLLING_ATTEMPTS) throw new Error("Polling timed out waiting for image output.");

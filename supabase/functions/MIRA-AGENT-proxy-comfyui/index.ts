@@ -308,7 +308,7 @@ serve(async (req) => {
     const body = await req.json();
     console.log(`[QueueProxy][${requestId}] Received request body:`, JSON.stringify(body));
     
-    const { invoker_user_id, upscale_factor } = body;
+    const { invoker_user_id, upscale_factor, original_prompt_for_gallery } = body;
     let finalWorkflow;
 
     if (body.prompt_workflow) {
@@ -369,7 +369,11 @@ serve(async (req) => {
             user_id: invoker_user_id,
             comfyui_address: sanitizedAddress,
             comfyui_prompt_id: data.prompt_id,
-            status: 'queued'
+            status: 'queued',
+            metadata: {
+                original_prompt_for_gallery: original_prompt_for_gallery || `Refined: ${body.prompt_text?.slice(0, 40) || 'image'}...`,
+                invoker_user_id: invoker_user_id
+            }
         })
         .select('id')
         .single();

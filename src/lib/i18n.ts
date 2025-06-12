@@ -71,7 +71,7 @@ export const translations = {
     viewChat: "Vedi Chat",
     // Image Preview Modal
     download: "Scarica",
-    upscaleAndDownload: "Migliora e Scarica",
+    upscaleAndDownload: "Migliora e Salva in Galleria",
     // Toasts
     chatDeleted: "Chat eliminata con successo.",
     errorDeletingChat: "Errore durante l'eliminazione della chat.",
@@ -182,7 +182,7 @@ export const translations = {
     viewChat: "View Chat",
     // Image Preview Modal
     download: "Download",
-    upscaleAndDownload: "Upscale & Download",
+    upscaleAndDownload: "Upscale & Save to Gallery",
     // Toasts
     chatDeleted: "Chat deleted successfully.",
     errorDeletingChat: "Error deleting chat.",

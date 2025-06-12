@@ -21,21 +21,34 @@ serve(async (req) => {
   }
 
   try {
-    const formData = await req.formData();
-    const image = formData.get('image');
-    console.log(`[UploadProxy][${requestId}] FormData parsed.`);
-
-    if (!image || !(image instanceof File)) {
-      throw new Error("Missing 'image' in form data.");
-    }
-
     const sanitizedAddress = COMFYUI_ENDPOINT_URL.replace(/\/+$/, "");
     const uploadUrl = `${sanitizedAddress}/upload/image`;
-    console.log(`[UploadProxy][${requestId}] Uploading to: ${uploadUrl}`);
-
     const uploadFormData = new FormData();
-    uploadFormData.append('image', image, image.name);
+
+    const contentType = req.headers.get('content-type');
+    if (contentType && contentType.includes('multipart/form-data')) {
+        console.log(`[UploadProxy][${requestId}] Handling FormData upload.`);
+        const formData = await req.formData();
+        const image = formData.get('image');
+        if (!image || !(image instanceof File)) {
+            throw new Error("Missing 'image' in form data.");
+        }
+        uploadFormData.append('image', image, image.name);
+    } else {
+        console.log(`[UploadProxy][${requestId}] Handling JSON body with image_url.`);
+        const { image_url } = await req.json();
+        if (!image_url) throw new Error("Request must be FormData or JSON with 'image_url'.");
+
+        console.log(`[UploadProxy][${requestId}] Fetching image from URL: ${image_url}`);
+        const imageResponse = await fetch(image_url);
+        if (!imageResponse.ok) throw new Error(`Failed to download image from URL: ${imageResponse.statusText}`);
+        const imageBlob = await imageResponse.blob();
+        const filename = image_url.split('/').pop() || 'image.png';
+        uploadFormData.append('image', imageBlob, filename);
+    }
+
     uploadFormData.append('overwrite', 'true');
+    console.log(`[UploadProxy][${requestId}] Uploading to: ${uploadUrl}`);
 
     const response = await fetch(uploadUrl, {
       method: 'POST',
