@@ -13,13 +13,7 @@ import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useLanguage } from "@/context/LanguageContext";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { useImagePreview } from "@/context/ImagePreviewContext";
-
-const sanitizeFilename = (filename: string): string => {
-  return filename
-    .replace(/[^a-zA-Z0-9_.-]/g, '_')
-    .replace(/_{2,}/g, '_')
-    .replace(/\.{2,}/g, '.');
-};
+import { Slider } from "@/components/ui/slider";
 
 interface ComfyJob {
   id: string;
@@ -37,6 +31,8 @@ const Refine = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [activeJob, setActiveJob] = useState<ComfyJob | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
+  const [upscaleFactor, setUpscaleFactor] = useState(1.4);
+  const [originalDimensions, setOriginalDimensions] = useState<{ width: number; height: number } | null>(null);
 
   const sourceImageUrl = useMemo(() => {
     if (sourceImageFile) return URL.createObjectURL(sourceImageFile);
@@ -56,6 +52,19 @@ const Refine = () => {
     if (file) {
       setSourceImageFile(file);
       setActiveJob(null);
+
+      const reader = new FileReader();
+      reader.onload = (event) => {
+          const img = new Image();
+          img.onload = () => {
+              setOriginalDimensions({ width: img.width, height: img.height });
+          };
+          img.src = event.target?.result as string;
+      };
+      reader.readAsDataURL(file);
+    } else {
+        setOriginalDimensions(null);
+        setSourceImageFile(null);
     }
   };
 
@@ -87,7 +96,8 @@ const Refine = () => {
         body: {
           prompt_text: prompt,
           image_filename: uploadedFilename,
-          invoker_user_id: session.user.id
+          invoker_user_id: session.user.id,
+          upscale_factor: upscaleFactor
         }
       });
 
@@ -192,7 +202,29 @@ const Refine = () => {
           <Card>
             <CardHeader><CardTitle>{t.refinementPrompt}</CardTitle></CardHeader>
             <CardContent>
-              <Textarea id="prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t.refinementPromptPlaceholder} rows={6} />
+              <Textarea id="prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t.refinementPromptPlaceholder} rows={4} />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader><CardTitle>Upscale Settings</CardTitle></CardHeader>
+            <CardContent>
+                <div className="space-y-2">
+                    <Label>Upscale Factor: {upscaleFactor.toFixed(1)}x</Label>
+                    <Slider
+                        value={[upscaleFactor]}
+                        onValueChange={(value) => setUpscaleFactor(value[0])}
+                        min={1}
+                        max={4}
+                        step={0.1}
+                        disabled={!sourceImageFile}
+                    />
+                    {originalDimensions && (
+                        <p className="text-sm text-muted-foreground text-center">
+                            {originalDimensions.width}x{originalDimensions.height} → 
+                            {' '}{Math.round(originalDimensions.width * upscaleFactor)}x{Math.round(originalDimensions.height * upscaleFactor)}
+                        </p>
+                    )}
+                </div>
             </CardContent>
           </Card>
           <Button onClick={handleRefine} disabled={isLoading || !sourceImageFile || (activeJob && (activeJob.status === 'queued' || activeJob.status === 'processing'))} className="w-full">

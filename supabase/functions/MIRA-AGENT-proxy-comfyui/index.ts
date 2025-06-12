@@ -308,7 +308,7 @@ serve(async (req) => {
     const body = await req.json();
     console.log(`[QueueProxy][${requestId}] Received request body:`, JSON.stringify(body));
     
-    const { invoker_user_id } = body;
+    const { invoker_user_id, upscale_factor } = body;
     let finalWorkflow;
 
     if (body.prompt_workflow) {
@@ -323,6 +323,10 @@ serve(async (req) => {
             const randomSeed = Math.floor(Math.random() * 1000000000000000);
             finalWorkflow['407'].inputs.seed = randomSeed;
             console.log(`[QueueProxy][${requestId}] Injected random seed: ${randomSeed}`);
+            if (upscale_factor) {
+                finalWorkflow['407'].inputs.upscale_by = upscale_factor;
+                console.log(`[QueueProxy][${requestId}] Injected upscale_by: ${upscale_factor}`);
+            }
         }
     } else {
         throw new Error("Request body must contain either 'prompt_workflow' or both 'prompt_text' and 'image_filename'.");
