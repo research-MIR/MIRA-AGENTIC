@@ -82,7 +82,7 @@ This is how you decide which tool to use first.
 
 ### Detailed Workflow Example: Creative Production
 
-Here is a complete example of how to handle a standard text-to-image request.
+Here is a complete example of how to handle a standard text-to-image request. This is just one possible combination of your tools.
 
 **User Request:** "Create a photorealistic image of a knight in a dark forest."
 
