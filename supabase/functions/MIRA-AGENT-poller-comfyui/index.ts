@@ -16,8 +16,14 @@ const MAX_POLLING_ATTEMPTS = 100; // 5 minutes total
 async function findOutputImage(history: any): Promise<any | null> {
     for (const nodeId in history) {
         const node = history[nodeId];
+        // Check for the standard SaveImage node output format, which is the most reliable
+        if (node.class_type === "SaveImage" && node.outputs && Array.isArray(node.outputs.images) && node.outputs.images.length > 0) {
+            console.log(`[Poller] Found output image in SaveImage node ${nodeId}`);
+            return node.outputs.images[0];
+        }
+        // Fallback for other potential output nodes
         if (node.outputs && Array.isArray(node.outputs.images) && node.outputs.images.length > 0) {
-            console.log(`[Poller] Found output image in node ${nodeId} of type ${node.class_type}`);
+            console.log(`[Poller] Found fallback output image in node ${nodeId} of type ${node.class_type}`);
             return node.outputs.images[0];
         }
     }
