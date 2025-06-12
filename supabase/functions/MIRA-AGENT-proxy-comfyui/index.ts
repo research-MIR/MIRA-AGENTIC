@@ -46,20 +46,25 @@ serve(async (req) => {
     const body = await req.json();
     console.log(`[QueueProxy][${requestId}] Received request body:`, JSON.stringify(body));
     
-    const { comfyui_address, prompt_text, image_filename, invoker_user_id } = body;
+    const { comfyui_address, invoker_user_id } = body;
+    let finalWorkflow;
+
+    if (body.prompt_workflow) {
+        console.log(`[QueueProxy][${requestId}] Handling legacy 'prompt_workflow' format.`);
+        finalWorkflow = body.prompt_workflow;
+    } else if (body.prompt_text && body.image_filename) {
+        console.log(`[QueueProxy][${requestId}] Handling new 'prompt_text' and 'image_filename' format.`);
+        finalWorkflow = JSON.parse(workflowTemplate);
+        if (finalWorkflow['404']) finalWorkflow['404'].inputs.image = body.image_filename;
+        if (finalWorkflow['307']) finalWorkflow['307'].inputs.String = body.prompt_text;
+    } else {
+        throw new Error("Request body must contain either 'prompt_workflow' or both 'prompt_text' and 'image_filename'.");
+    }
 
     if (!comfyui_address) throw new Error("Missing required parameter: comfyui_address");
-    if (!prompt_text) throw new Error("Missing required parameter: prompt_text");
-    if (!image_filename) throw new Error("Missing required parameter: image_filename");
     if (!invoker_user_id) throw new Error("Missing required parameter: invoker_user_id");
     
     console.log(`[QueueProxy][${requestId}] All parameters validated.`);
-
-    // Build the workflow on the server
-    let finalWorkflow = JSON.parse(workflowTemplate);
-    if (finalWorkflow['404']) finalWorkflow['404'].inputs.image = image_filename;
-    if (finalWorkflow['307']) finalWorkflow['307'].inputs.String = prompt_text;
-    console.log(`[QueueProxy][${requestId}] Workflow populated successfully.`);
 
     const sanitizedAddress = comfyui_address.replace(/\/+$/, "");
     const queueUrl = `${sanitizedAddress}/prompt`;
