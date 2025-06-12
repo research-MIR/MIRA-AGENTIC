@@ -5,7 +5,7 @@ import { useSession } from "./Auth/SessionContextProvider";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Skeleton } from "./ui/skeleton";
-import { useOnboardingTour } from "../context/OnboardingTourContext";
+import { useOnboardingTour } from "@/context/OnboardingTourContext";
 import { useLanguage } from "@/context/LanguageContext";
 
 interface JobHistory {
