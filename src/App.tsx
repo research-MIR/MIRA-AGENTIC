@@ -1,9 +1,5 @@
 import { useEffect } from "react";
-import { Toaster } from "@/components/ui/toaster";
-import { Toaster as Sonner } from "@/components/ui/sonner";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import Gallery from "./pages/Gallery";
@@ -12,18 +8,14 @@ import Developer from "./pages/Developer";
 import Login from "./pages/Login";
 import Layout from "./components/Layout";
 import ProtectedRoute from "./components/Auth/ProtectedRoute";
-import { ImagePreviewProvider } from "./context/ImagePreviewContext";
-import { ImagePreviewModal } from "./components/ImagePreviewModal";
 import { useLanguage } from "./context/LanguageContext";
 import VirtualTryOn from "./pages/VirtualTryOn";
 import Refine from "./pages/Refine";
-import { OnboardingTourProvider, useOnboardingTour } from "./context/OnboardingTourContext";
+import { useOnboardingTour } from "./context/OnboardingTourContext";
 import { TourProvider as ReactourProvider, StepType } from '@reactour/tour';
 import { useSession } from "./components/Auth/SessionContextProvider";
 
-const queryClient = new QueryClient();
-
-const AppContent = () => {
+const App = () => {
   const { isTourOpen, isTourPending, openTour, closeTour, startTour } = useOnboardingTour();
   const { t } = useLanguage();
   const { session, supabase } = useSession();
@@ -101,21 +93,5 @@ const AppContent = () => {
     </ReactourProvider>
   );
 };
-
-const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <ImagePreviewProvider modal={(data, onClose) => <ImagePreviewModal data={data} onClose={onClose} />}>
-      <TooltipProvider>
-        <Toaster />
-        <Sonner position="top-right" />
-        <BrowserRouter>
-          <OnboardingTourProvider>
-            <AppContent />
-          </OnboardingTourProvider>
-        </BrowserRouter>
-      </TooltipProvider>
-    </ImagePreviewProvider>
-  </QueryClientProvider>
-);
 
 export default App;
