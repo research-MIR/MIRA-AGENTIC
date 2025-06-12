@@ -4,7 +4,7 @@ export const translations = {
     agentChat: "Chat Agente",
     generator: "Generatore",
     gallery: "Galleria",
-    virtualTryOn: "Prova Virtuale",
+    virtualTryOn: "Camerino Virtuale",
     comingSoon: "Prossimamente...",
     newChat: "Nuova Chat",
     deleteChat: "Elimina Chat",
