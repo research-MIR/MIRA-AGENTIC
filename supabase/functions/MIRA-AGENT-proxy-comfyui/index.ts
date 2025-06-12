@@ -43,11 +43,17 @@ serve(async (req) => {
   );
 
   try {
-    const { comfyui_address, prompt_text, image_filename, invoker_user_id } = await req.json();
-    if (!comfyui_address || !prompt_text || !image_filename || !invoker_user_id) {
-      throw new Error("Missing required parameters: comfyui_address, prompt_text, image_filename, or invoker_user_id.");
-    }
-    console.log(`[QueueProxy][${requestId}] Parsed request body.`);
+    const body = await req.json();
+    console.log(`[QueueProxy][${requestId}] Received request body:`, JSON.stringify(body));
+    
+    const { comfyui_address, prompt_text, image_filename, invoker_user_id } = body;
+
+    if (!comfyui_address) throw new Error("Missing required parameter: comfyui_address");
+    if (!prompt_text) throw new Error("Missing required parameter: prompt_text");
+    if (!image_filename) throw new Error("Missing required parameter: image_filename");
+    if (!invoker_user_id) throw new Error("Missing required parameter: invoker_user_id");
+    
+    console.log(`[QueueProxy][${requestId}] All parameters validated.`);
 
     // Build the workflow on the server
     let finalWorkflow = JSON.parse(workflowTemplate);
