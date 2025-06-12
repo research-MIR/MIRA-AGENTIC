@@ -12,6 +12,7 @@ export const translations = {
     deleteConfirmationDescription: "Questa azione non può essere annullata. Questo eliminerà permanentemente la cronologia di questa chat.",
     cancel: "Annulla",
     delete: "Elimina",
+    developer: "Sviluppatore",
     // Index Page
     agentInteraction: "Interazione con l'Agente",
     chooseYourModel: "1. Scegli il tuo Modello AI",
@@ -85,6 +86,16 @@ export const translations = {
     onboardingUploadDescription: "Clicca per caricare un'immagine di riferimento per stile, composizione o soggetto.",
     onboardingNewChatTitle: "Inizia una Nuova Chat",
     onboardingNewChatDescription: "Clicca qui in qualsiasi momento per iniziare una nuova conversazione.",
+    // Developer Page
+    developerTools: "Strumenti Sviluppatore",
+    developerToolsDescription: "Un'area di test per le API e le funzionalità sperimentali.",
+    enterDeveloperPassword: "Inserisci la Password Sviluppatore",
+    submit: "Invia",
+    comfyUIWorkflowTester: "Tester Workflow ComfyUI",
+    comfyUIServerAddress: "Indirizzo Server ComfyUI",
+    workflowAPIData: "Dati API Workflow (JSON)",
+    queuePrompt: "Accoda Prompt",
+    response: "Risposta",
   },
   en: {
     // General
@@ -99,6 +110,7 @@ export const translations = {
     deleteConfirmationDescription: "This action cannot be undone. This will permanently delete this chat's history.",
     cancel: "Cancel",
     delete: "Delete",
+    developer: "Developer",
     // Index Page
     agentInteraction: "Agent Interaction",
     chooseYourModel: "1. Choose Your AI Model",
@@ -172,5 +184,15 @@ export const translations = {
     onboardingUploadDescription: "Click here to upload a reference image for style, composition, or subject.",
     onboardingNewChatTitle: "Start a New Chat",
     onboardingNewChatDescription: "Click here at any time to start a fresh conversation.",
+    // Developer Page
+    developerTools: "Developer Tools",
+    developerToolsDescription: "A testing ground for APIs and experimental features.",
+    enterDeveloperPassword: "Enter Developer Password",
+    submit: "Submit",
+    comfyUIWorkflowTester: "ComfyUI Workflow Tester",
+    comfyUIServerAddress: "ComfyUI Server Address",
+    workflowAPIData: "Workflow API Data (JSON)",
+    queuePrompt: "Queue Prompt",
+    response: "Response",
   },
 };

@@ -8,6 +8,7 @@ import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import Gallery from "./pages/Gallery";
 import Generator from "./pages/Generator";
+import Developer from "./pages/Developer";
 import Login from "./pages/Login";
 import Layout from "./components/Layout";
 import ProtectedRoute from "./components/Auth/ProtectedRoute";
@@ -89,6 +90,7 @@ const AppContent = () => {
             <Route path="/chat/:jobId" element={<Index />} />
             <Route path="/gallery" element={<Gallery />} />
             <Route path="/generator" element={<Generator />} />
+            <Route path="/developer" element={<Developer />} />
             <Route path="/virtual-try-on" element={<VirtualTryOn />} />
           </Route>
         </Route>
