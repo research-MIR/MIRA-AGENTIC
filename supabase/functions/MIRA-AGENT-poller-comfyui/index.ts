@@ -15,7 +15,6 @@ const MAX_POLLING_ATTEMPTS = 100; // 5 minutes total
 async function findOutputImage(history: any): Promise<any | null> {
     for (const nodeId in history) {
         const node = history[nodeId];
-        // More robust check: Look for any node that has an 'images' output array.
         if (node.outputs && Array.isArray(node.outputs.images) && node.outputs.images.length > 0) {
             console.log(`[Poller] Found output image in node ${nodeId} of type ${node.class_type}`);
             return node.outputs.images[0];
@@ -31,7 +30,7 @@ serve(async (req) => {
   if (!job_id) { throw new Error("job_id is required."); }
 
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-  console.log(`[Poller][${job_id}] Starting poll attempt #${attempt}`);
+  console.log(`[Poller][${job_id}] Invoked. Attempt #${attempt}`);
 
   try {
     const { data: job, error: fetchError } = await supabase
@@ -41,12 +40,15 @@ serve(async (req) => {
       .single();
 
     if (fetchError) throw new Error(`Failed to fetch job: ${fetchError.message}`);
+    console.log(`[Poller][${job_id}] Fetched job from DB. Status: ${job.status}`);
+
     if (job.status === 'complete' || job.status === 'failed') {
-        console.log(`[Poller][${job_id}] Job already completed or failed. Stopping poll.`);
+        console.log(`[Poller][${job_id}] Job already resolved. Stopping poll.`);
         return new Response(JSON.stringify({ success: true, message: "Job already resolved." }), { headers: corsHeaders });
     }
 
     const historyUrl = `${job.comfyui_address}/history/${job.comfyui_prompt_id}`;
+    console.log(`[Poller][${job_id}] Fetching history from: ${historyUrl}`);
     const historyResponse = await fetch(historyUrl);
     if (!historyResponse.ok) throw new Error(`Failed to fetch history from ComfyUI: ${historyResponse.statusText}`);
     
@@ -54,7 +56,7 @@ serve(async (req) => {
     const promptHistory = historyData[job.comfyui_prompt_id];
 
     if (!promptHistory) {
-        if (attempt > MAX_POLLING_ATTEMPTS) throw new Error("Polling timed out waiting for job to start.");
+        if (attempt > MAX_POLLING_ATTEMPTS) throw new Error("Polling timed out waiting for job to appear in history.");
         
         console.log(`[Poller][${job_id}] Job not yet in history. Re-scheduling poll.`);
         await supabase.from('mira-agent-comfyui-jobs').update({ status: 'queued' }).eq('id', job_id);
@@ -63,30 +65,35 @@ serve(async (req) => {
         }, POLLING_INTERVAL_MS);
         return new Response(JSON.stringify({ success: true, status: 'queued' }), { headers: corsHeaders });
     }
+    console.log(`[Poller][${job_id}] History found. Searching for output image...`);
 
     const outputImage = await findOutputImage(promptHistory.outputs);
 
     if (outputImage) {
         console.log(`[Poller][${job_id}] Image found! Filename: ${outputImage.filename}`);
         const imageUrl = `${job.comfyui_address}/view?filename=${encodeURIComponent(outputImage.filename)}&subfolder=${encodeURIComponent(outputImage.subfolder)}&type=${outputImage.type}`;
+        console.log(`[Poller][${job_id}] Downloading image from: ${imageUrl}`);
         
         const imageResponse = await fetch(imageUrl);
         if (!imageResponse.ok) throw new Error("Failed to download final image from ComfyUI.");
         const imageBuffer = await imageResponse.arrayBuffer();
+        console.log(`[Poller][${job_id}] Image downloaded successfully.`);
 
         const filePath = `${job.user_id}/${Date.now()}_comfyui_${outputImage.filename}`;
+        console.log(`[Poller][${job_id}] Uploading to Supabase Storage at: ${filePath}`);
         await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(filePath, imageBuffer, { contentType: 'image/png', upsert: true });
         const { data: { publicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
+        console.log(`[Poller][${job_id}] Upload complete. Public URL: ${publicUrl}`);
 
         await supabase.from('mira-agent-comfyui-jobs').update({
             status: 'complete',
             final_result: { publicUrl, storagePath: filePath }
         }).eq('id', job_id);
 
-        console.log(`[Poller][${job_id}] Job complete. Image uploaded to ${publicUrl}`);
+        console.log(`[Poller][${job_id}] Job status updated to 'complete' in DB.`);
         return new Response(JSON.stringify({ success: true, status: 'complete', publicUrl }), { headers: corsHeaders });
     } else {
-        if (attempt > MAX_POLLING_ATTEMPTS) throw new Error("Polling timed out waiting for image.");
+        if (attempt > MAX_POLLING_ATTEMPTS) throw new Error("Polling timed out waiting for image output.");
 
         console.log(`[Poller][${job_id}] Job running, but output not ready. Re-scheduling poll.`);
         await supabase.from('mira-agent-comfyui-jobs').update({ status: 'processing' }).eq('id', job_id);
@@ -97,7 +104,7 @@ serve(async (req) => {
     }
 
   } catch (error) {
-    console.error(`[Poller][${job_id}] Error:`, error);
+    console.error(`[Poller][${job_id}] Unhandled error:`, error);
     await supabase.from('mira-agent-comfyui-jobs').update({ status: 'failed', error_message: error.message }).eq('id', job_id);
     return new Response(JSON.stringify({ error: error.message }), { headers: corsHeaders, status: 500 });
   }

@@ -7,9 +7,8 @@ const corsHeaders = {
 };
 
 serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
-  }
+  const requestId = req.headers.get("x-request-id") || `queue-proxy-${Date.now()}`;
+  console.log(`[QueueProxy][${requestId}] Function invoked.`);
 
   const supabase = createClient(
     Deno.env.get('SUPABASE_URL')!,
@@ -21,19 +20,23 @@ serve(async (req) => {
     if (!comfyui_address || !prompt_workflow || !invoker_user_id) {
       throw new Error("Missing 'comfyui_address', 'prompt_workflow', or 'invoker_user_id'.");
     }
+    console.log(`[QueueProxy][${requestId}] Parsed request body.`);
 
     const sanitizedAddress = comfyui_address.replace(/\/+$/, "");
+    const queueUrl = `${sanitizedAddress}/prompt`;
     
     const payload = { 
       prompt: prompt_workflow 
     };
+    console.log(`[QueueProxy][${requestId}] Sending prompt to: ${queueUrl}`);
 
-    const response = await fetch(`${sanitizedAddress}/prompt`, {
+    const response = await fetch(queueUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
       body: JSON.stringify(payload),
     });
 
+    console.log(`[QueueProxy][${requestId}] Received response from ComfyUI with status: ${response.status}`);
     if (!response.ok) {
       const errorJson = await response.json();
       let readableError = `ComfyUI server responded with status ${response.status}.`;
@@ -46,6 +49,7 @@ serve(async (req) => {
       } else {
         readableError += ` Details: ${JSON.stringify(errorJson)}`;
       }
+      console.error(`[QueueProxy][${requestId}] ComfyUI prompt error:`, readableError);
       throw new Error(readableError);
     }
 
@@ -53,6 +57,7 @@ serve(async (req) => {
     if (!data.prompt_id) {
         throw new Error("ComfyUI did not return a prompt_id.");
     }
+    console.log(`[QueueProxy][${requestId}] ComfyUI returned prompt_id: ${data.prompt_id}`);
 
     const { data: newJob, error: insertError } = await supabase
         .from('mira-agent-comfyui-jobs')
@@ -66,8 +71,10 @@ serve(async (req) => {
         .single();
 
     if (insertError) throw insertError;
+    console.log(`[QueueProxy][${requestId}] Created DB job with ID: ${newJob.id}`);
 
     // Asynchronously trigger the poller to start watching the job
+    console.log(`[QueueProxy][${requestId}] Invoking poller for job ${newJob.id}...`);
     supabase.functions.invoke('MIRA-AGENT-poller-comfyui', { body: { job_id: newJob.id } }).catch(console.error);
 
     return new Response(JSON.stringify({ success: true, jobId: newJob.id }), {
@@ -76,7 +83,7 @@ serve(async (req) => {
     });
 
   } catch (error) {
-    console.error("[ComfyUI Proxy Error]:", error);
+    console.error(`[QueueProxy][${requestId}] Unhandled error:`, error);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,

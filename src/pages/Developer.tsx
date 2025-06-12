@@ -54,6 +54,7 @@ const Developer = () => {
 
     return () => {
       if (channelRef.current) {
+        console.log("[DevPage] Cleaning up Realtime channel.");
         supabase.removeChannel(channelRef.current);
       }
     };
@@ -82,15 +83,16 @@ const Developer = () => {
   };
 
   const handleQueuePrompt = async () => {
+    console.log("[DevPage] handleQueuePrompt started.");
     if (!session?.user) return showError("You must be logged in.");
     if (!sourceImage) return showError("A source image is required for this workflow.");
     if (!comfyPrompt.trim()) return showError("A prompt is required for this workflow.");
 
     setActiveJob({ id: '', status: 'queued' });
     let toastId = showLoading("Uploading source image...");
+    console.log("[DevPage] Step 1: Uploading source image...");
 
     try {
-      // 1. Upload the source image via our proxy
       const uploadFormData = new FormData();
       uploadFormData.append('image', sourceImage);
       uploadFormData.append('comfyui_address', comfyAddress);
@@ -102,31 +104,31 @@ const Developer = () => {
       if (uploadError) throw new Error(`Image upload failed: ${uploadError.message}`);
       const uploadedFilename = uploadResult.name;
       if (!uploadedFilename) throw new Error("ComfyUI did not return a filename for the uploaded image.");
+      console.log(`[DevPage] Step 1 complete. Uploaded filename: ${uploadedFilename}`);
       
       dismissToast(toastId);
       toastId = showLoading("Injecting inputs into workflow...");
+      console.log("[DevPage] Step 2: Populating workflow template...");
 
-      // 2. Populate the workflow template
       let finalWorkflow = JSON.parse(workflowTemplate);
       
-      // Inject filename into LoadImage node (404)
       if (finalWorkflow['404']) {
           finalWorkflow['404'].inputs.image = uploadedFilename;
       } else {
           throw new Error("Could not find the LoadImage node (404) in the workflow template.");
       }
 
-      // Inject prompt into String node (307)
       if (finalWorkflow['307']) {
           finalWorkflow['307'].inputs.String = comfyPrompt;
       } else {
           throw new Error("Could not find the Prompt node (307) in the workflow template.");
       }
+      console.log("[DevPage] Step 2 complete. Final workflow populated.");
 
       dismissToast(toastId);
       toastId = showLoading("Sending prompt to ComfyUI...");
+      console.log("[DevPage] Step 3: Queuing prompt via proxy...");
 
-      // 3. Queue the populated workflow
       const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-comfyui', {
         body: {
           comfyui_address: comfyAddress,
@@ -139,12 +141,13 @@ const Developer = () => {
       
       const { jobId } = data;
       if (!jobId) throw new Error("Did not receive a job ID from the server.");
+      console.log(`[DevPage] Step 3 complete. Received ComfyUI job ID: ${jobId}`);
       
       dismissToast(toastId);
       showSuccess("ComfyUI job queued. Waiting for result...");
       setActiveJob({ id: jobId, status: 'queued' });
 
-      // 4. Subscribe to realtime updates for the job
+      console.log(`[DevPage] Step 4: Subscribing to Realtime updates for job ${jobId}`);
       if (channelRef.current) supabase.removeChannel(channelRef.current);
 
       channelRef.current = supabase.channel(`comfyui-job-${jobId}`)
@@ -152,18 +155,28 @@ const Developer = () => {
           'postgres_changes',
           { event: 'UPDATE', schema: 'public', table: 'mira-agent-comfyui-jobs', filter: `id=eq.${jobId}` },
           (payload) => {
+            console.log('[DevPage] Realtime update received:', payload.new);
             setActiveJob(payload.new as ComfyJob);
             if (payload.new.status === 'complete' || payload.new.status === 'failed') {
+              console.log(`[DevPage] Job ${jobId} finished. Unsubscribing from Realtime channel.`);
               supabase.removeChannel(channelRef.current!);
               channelRef.current = null;
             }
           }
         )
-        .subscribe();
+        .subscribe((status, err) => {
+            if (status === 'SUBSCRIBED') {
+                console.log(`[DevPage] Successfully subscribed to Realtime channel for job ${jobId}.`);
+            }
+            if (err) {
+                console.error(`[DevPage] Realtime subscription error for job ${jobId}:`, err);
+            }
+        });
 
     } catch (err: any) {
       setActiveJob(null);
       showError(`Failed to queue prompt: ${err.message}`);
+      console.error("[DevPage] Error in handleQueuePrompt:", err);
       dismissToast(toastId);
     }
   };
