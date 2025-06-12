@@ -56,14 +56,18 @@ const Refine = () => {
       return data;
     },
     enabled: !!session?.user,
-    refetchInterval: 5000, // Poll for active jobs every 5 seconds
+    refetchInterval: 5000,
   });
 
-  const isAnotherJobActive = useMemo(() => {
-    if (!activeComfyJobs || activeComfyJobs.length === 0) return false;
-    // If there's an active job in our list that is NOT the one this page is currently tracking, then disable.
-    return activeComfyJobs.some(job => job.id !== activeJob?.id);
-  }, [activeComfyJobs, activeJob]);
+  const isThisPageJobRunning = useMemo(() => {
+    return activeJob && (activeJob.status === 'queued' || activeJob.status === 'processing');
+  }, [activeJob]);
+
+  const isAnyJobRunning = useMemo(() => {
+    return activeComfyJobs && activeComfyJobs.length > 0;
+  }, [activeComfyJobs]);
+
+  const showCancelButton = isAnyJobRunning && !isThisPageJobRunning;
 
   const sourceImageUrl = useMemo(() => {
     if (sourceImageFile) return URL.createObjectURL(sourceImageFile);
@@ -237,10 +241,10 @@ const Refine = () => {
   const refineButton = (
     <Button 
       onClick={handleRefine} 
-      disabled={isLoading || !sourceImageFile || isAnotherJobActive || (activeJob && (activeJob.status === 'queued' || activeJob.status === 'processing'))} 
+      disabled={isLoading || !sourceImageFile || isAnyJobRunning} 
       className="w-full"
     >
-      {(isLoading || (activeJob && (activeJob.status === 'queued' || activeJob.status === 'processing'))) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+      {isThisPageJobRunning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
       {t.refineButton}
     </Button>
   );
@@ -274,10 +278,10 @@ const Refine = () => {
               </CardContent>
             </Card>
             <Card>
-              <CardHeader><CardTitle>Upscale Settings</CardTitle></CardHeader>
+              <CardHeader><CardTitle>{t.upscaleSettings}</CardTitle></CardHeader>
               <CardContent>
                   <div className="space-y-2">
-                      <Label>Upscale Factor: {upscaleFactor.toFixed(1)}x</Label>
+                      <Label>{t.upscaleFactor}: {upscaleFactor.toFixed(1)}x</Label>
                       <Slider
                           value={[upscaleFactor]}
                           onValueChange={(value) => setUpscaleFactor(value[0])}
@@ -295,7 +299,7 @@ const Refine = () => {
                   </div>
               </CardContent>
             </Card>
-            {isAnotherJobActive ? (
+            {showCancelButton ? (
               <div className="flex gap-2">
                 <TooltipProvider>
                   <Tooltip>
@@ -308,7 +312,7 @@ const Refine = () => {
                   </Tooltip>
                 </TooltipProvider>
                 <Button variant="destructive" onClick={handleCancelAndStartNew}>
-                  Cancella e Avvia
+                  {t.cancelAndStartNew}
                 </Button>
               </div>
             ) : (
@@ -345,7 +349,7 @@ const Refine = () => {
             {comparisonImages && (
               <Button onClick={() => setIsCompareModalOpen(true)} className="mt-4 w-full">
                 <GitCompareArrows className="mr-2 h-4 w-4" />
-                Compare Results
+                {t.compareResults}
               </Button>
             )}
           </div>

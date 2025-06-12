@@ -15,27 +15,10 @@ import { useOnboardingTour } from "./context/OnboardingTourContext";
 import { TourProvider as ReactourProvider, StepType } from '@reactour/tour';
 import { useSession } from "./components/Auth/SessionContextProvider";
 
-const App = () => {
-  const { isTourOpen, isTourPending, openTour, closeTour, startTour } = useOnboardingTour();
+const AppRoutes = () => {
+  const { isTourOpen, closeTour } = useOnboardingTour();
   const { t } = useLanguage();
   const { session, supabase } = useSession();
-  const location = useLocation();
-
-  useEffect(() => {
-    if (session?.user) {
-      supabase.from('profiles').select('has_completed_onboarding_tour').eq('id', session.user.id).single().then(({ data }) => {
-        if (data && !data.has_completed_onboarding_tour) {
-          startTour();
-        }
-      });
-    }
-  }, [session, supabase, startTour]);
-
-  useEffect(() => {
-    if (isTourPending && location.pathname.startsWith('/chat')) {
-      openTour();
-    }
-  }, [isTourPending, location.pathname, openTour]);
 
   const steps: StepType[] = [
     { selector: '#model-selector', content: t.onboardingModelDescription },
@@ -92,6 +75,30 @@ const App = () => {
       </Routes>
     </ReactourProvider>
   );
+};
+
+const App = () => {
+  const { isTourPending, openTour, startTour } = useOnboardingTour();
+  const { session, supabase } = useSession();
+  const location = useLocation();
+
+  useEffect(() => {
+    if (session?.user) {
+      supabase.from('profiles').select('has_completed_onboarding_tour').eq('id', session.user.id).single().then(({ data }) => {
+        if (data && !data.has_completed_onboarding_tour) {
+          startTour();
+        }
+      });
+    }
+  }, [session, supabase, startTour]);
+
+  useEffect(() => {
+    if (isTourPending && location.pathname.startsWith('/chat')) {
+      openTour();
+    }
+  }, [isTourPending, location.pathname, openTour]);
+
+  return <AppRoutes />;
 };
 
 export default App;

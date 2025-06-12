@@ -1,6 +1,7 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Slider } from "@/components/ui/slider";
 import { useState, useRef, useCallback, MouseEvent, TouchEvent } from "react";
+import { useLanguage } from "@/context/LanguageContext";
 
 interface ImageCompareModalProps {
   isOpen: boolean;
@@ -13,6 +14,7 @@ export const ImageCompareModal = ({ isOpen, onClose, beforeUrl, afterUrl }: Imag
   const [sliderPosition, setSliderPosition] = useState(50);
   const [isDragging, setIsDragging] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const { t } = useLanguage();
 
   const handleMove = useCallback((clientX: number) => {
     if (!containerRef.current) return;
@@ -58,9 +60,9 @@ export const ImageCompareModal = ({ isOpen, onClose, beforeUrl, afterUrl }: Imag
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-5xl p-4">
         <DialogHeader>
-          <DialogTitle>Compare Before & After</DialogTitle>
+          <DialogTitle>{t.compareBeforeAfter}</DialogTitle>
           <DialogDescription>
-            Drag the slider or the bar on the image to compare.
+            {t.compareDescription}
           </DialogDescription>
         </DialogHeader>
         <div

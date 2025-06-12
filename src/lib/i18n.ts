@@ -72,6 +72,8 @@ export const translations = {
     // Image Preview Modal
     download: "Scarica",
     upscaleAndDownload: "Migliora e Salva in Galleria",
+    compareBeforeAfter: "Confronta Prima e Dopo",
+    compareDescription: "Trascina lo slider o la barra sull'immagine per confrontare.",
     // Toasts
     chatDeleted: "Chat eliminata con successo.",
     errorDeletingChat: "Errore durante l'eliminazione della chat.",
@@ -109,6 +111,10 @@ export const translations = {
     originalImage: "Immagine Originale",
     refinedImage: "Immagine Rifinita",
     uploadAnImageToStart: "Carica un'immagine per iniziare.",
+    upscaleSettings: "Impostazioni Upscale",
+    upscaleFactor: "Fattore di Upscale",
+    compareResults: "Confronta Risultati",
+    cancelAndStartNew: "Cancella e Avvia",
   },
   en: {
     // General
@@ -183,6 +189,8 @@ export const translations = {
     // Image Preview Modal
     download: "Download",
     upscaleAndDownload: "Upscale & Save to Gallery",
+    compareBeforeAfter: "Compare Before & After",
+    compareDescription: "Drag the slider or the bar on the image to compare.",
     // Toasts
     chatDeleted: "Chat deleted successfully.",
     errorDeletingChat: "Error deleting chat.",
@@ -220,5 +228,9 @@ export const translations = {
     originalImage: "Original Image",
     refinedImage: "Refined Image",
     uploadAnImageToStart: "Upload an image to get started.",
+    upscaleSettings: "Upscale Settings",
+    upscaleFactor: "Upscale Factor",
+    compareResults: "Compare Results",
+    cancelAndStartNew: "Cancel and Start New",
   },
 };
