@@ -43,7 +43,6 @@ const TourController = ({ children }: { children: ReactNode }) => {
   ];
 
   const startTour = useCallback(() => {
-    setSteps?.(steps);
     if (location.pathname.startsWith('/chat')) {
       setCurrentStep(0);
       setIsOpen(true);
@@ -51,15 +50,16 @@ const TourController = ({ children }: { children: ReactNode }) => {
       navigate('/chat');
       setIsTourPending(true);
     }
-  }, [navigate, location.pathname, setSteps, setCurrentStep, setIsOpen, steps]);
+  }, [navigate, location.pathname, setCurrentStep, setIsOpen]);
 
   useEffect(() => {
     if (isTourPending && location.pathname.startsWith('/chat')) {
+        setSteps(steps);
         setCurrentStep(0);
         setIsOpen(true);
         setIsTourPending(false);
     }
-  }, [location.pathname, isTourPending, setCurrentStep, setIsOpen]);
+  }, [location.pathname, isTourPending, setCurrentStep, setIsOpen, setSteps, steps]);
 
   useEffect(() => {
     const checkTourStatus = async () => {
