@@ -11,8 +11,6 @@ interface ControlPanelProps {
   onModelChange: (modelId: string) => void;
   isDesignerMode: boolean;
   onDesignerModeChange: (value: boolean) => void;
-  useTwoStagePipeline: boolean;
-  onUseTwoStagePipelineChange: (value: boolean) => void;
   ratioMode: 'auto' | string;
   onRatioModeChange: (value: 'auto' | string) => void;
   numImagesMode: 'auto' | number;
@@ -25,8 +23,6 @@ export const ControlPanel = ({
   onModelChange,
   isDesignerMode,
   onDesignerModeChange,
-  useTwoStagePipeline,
-  onUseTwoStagePipelineChange,
   ratioMode,
   onRatioModeChange,
   numImagesMode,
@@ -44,20 +40,6 @@ export const ControlPanel = ({
         <div id="designer-mode-switch" className="flex items-center space-x-2">
           <Switch id="designer-mode" checked={isDesignerMode} onCheckedChange={onDesignerModeChange} />
           <Label htmlFor="designer-mode">{t.designerMode}</Label>
-        </div>
-        <div id="pipeline-mode-switch" className="flex items-center space-x-2">
-          <Switch id="pipeline-mode" checked={useTwoStagePipeline} onCheckedChange={onUseTwoStagePipelineChange} />
-          <Label htmlFor="pipeline-mode">{t.twoStagePipeline}</Label>
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Info className="h-4 w-4 text-muted-foreground cursor-help" />
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>{t.pipelineTip}</p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
         </div>
         <div id="ratio-mode-select" className="flex items-center gap-2">
           <Label className="text-sm font-medium">Ratio:</Label>
@@ -85,6 +67,16 @@ export const ControlPanel = ({
             </SelectContent>
           </Select>
         </div>
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Info className="h-4 w-4 text-muted-foreground cursor-help" />
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>{t.refinerSuggestion}</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
       </div>
     </div>
   );
