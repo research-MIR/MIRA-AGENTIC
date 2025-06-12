@@ -12,7 +12,6 @@ import Layout from "./components/Layout";
 import ProtectedRoute from "./components/Auth/ProtectedRoute";
 import { ImagePreviewProvider } from "./context/ImagePreviewContext";
 import { ImagePreviewModal } from "./components/ImagePreviewModal";
-import { OnboardingTourProvider } from "@/context/TourProvider";
 import { LanguageProvider } from "./context/LanguageContext";
 import VirtualTryOn from "./pages/VirtualTryOn";
 
@@ -29,11 +28,7 @@ const App = () => (
             <Routes>
               <Route path="/login" element={<Login />} />
               <Route element={<ProtectedRoute />}>
-                <Route element={
-                  <OnboardingTourProvider>
-                    <Layout />
-                  </OnboardingTourProvider>
-                }>
+                <Route element={<Layout />}>
                   <Route path="/" element={<Navigate to="/chat" replace />} />
                   <Route path="/chat" element={<Index />} />
                   <Route path="/chat/:jobId" element={<Index />} />
