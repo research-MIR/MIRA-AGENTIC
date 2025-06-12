@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -10,28 +11,24 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  const supabase = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+  );
+
   try {
-    const { comfyui_address, prompt_workflow } = await req.json();
-    if (!comfyui_address || !prompt_workflow) {
-      throw new Error("Missing 'comfyui_address' or 'prompt_workflow' in request body.");
+    const { comfyui_address, prompt_workflow, invoker_user_id } = await req.json();
+    if (!comfyui_address || !prompt_workflow || !invoker_user_id) {
+      throw new Error("Missing 'comfyui_address', 'prompt_workflow', or 'invoker_user_id'.");
     }
 
     const sanitizedAddress = comfyui_address.replace(/\/+$/, "");
-
-    // Correctly wrap the workflow in the expected payload structure
-    const payload = {
-      prompt: prompt_workflow
-    };
-
-    console.log(`[ComfyUI Proxy] Forwarding request to: ${sanitizedAddress}/prompt`);
+    const payload = { prompt: prompt_workflow };
 
     const response = await fetch(`${sanitizedAddress}/prompt`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'ngrok-skip-browser-warning': 'true'
-      },
-      body: JSON.stringify(payload), // Send the correctly structured payload
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+      body: JSON.stringify(payload),
     });
 
     if (!response.ok) {
@@ -40,8 +37,27 @@ serve(async (req) => {
     }
 
     const data = await response.json();
+    if (!data.prompt_id) {
+        throw new Error("ComfyUI did not return a prompt_id.");
+    }
 
-    return new Response(JSON.stringify(data), {
+    const { data: newJob, error: insertError } = await supabase
+        .from('mira-agent-comfyui-jobs')
+        .insert({
+            user_id: invoker_user_id,
+            comfyui_address: sanitizedAddress,
+            comfyui_prompt_id: data.prompt_id,
+            status: 'queued'
+        })
+        .select('id')
+        .single();
+
+    if (insertError) throw insertError;
+
+    // Asynchronously trigger the poller to start watching the job
+    supabase.functions.invoke('MIRA-AGENT-poller-comfyui', { body: { job_id: newJob.id } }).catch(console.error);
+
+    return new Response(JSON.stringify({ success: true, jobId: newJob.id }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });
