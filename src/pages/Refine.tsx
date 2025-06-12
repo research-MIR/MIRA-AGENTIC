@@ -15,6 +15,8 @@ import { RealtimeChannel } from "@supabase/supabase-js";
 import { useImagePreview } from "@/context/ImagePreviewContext";
 import { Slider } from "@/components/ui/slider";
 import { ImageCompareModal } from "@/components/ImageCompareModal";
+import { useQuery } from "@tanstack/react-query";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface ComfyJob {
   id: string;
@@ -36,6 +38,31 @@ const Refine = () => {
   const [originalDimensions, setOriginalDimensions] = useState<{ width: number; height: number } | null>(null);
   const [isCompareModalOpen, setIsCompareModalOpen] = useState(false);
   const [comparisonImages, setComparisonImages] = useState<{ before: string; after: string } | null>(null);
+
+  const { data: activeComfyJobs } = useQuery({
+    queryKey: ['activeComfyJobs', session?.user?.id],
+    queryFn: async () => {
+      if (!session?.user) return [];
+      const { data, error } = await supabase
+        .from('mira-agent-comfyui-jobs')
+        .select('id')
+        .eq('user_id', session.user.id)
+        .in('status', ['queued', 'processing']);
+      if (error) {
+        console.error("Error fetching active jobs:", error);
+        return [];
+      }
+      return data;
+    },
+    enabled: !!session?.user,
+    refetchInterval: 5000, // Poll for active jobs every 5 seconds
+  });
+
+  const isAnotherJobActive = useMemo(() => {
+    if (!activeComfyJobs || activeComfyJobs.length === 0) return false;
+    // If there's an active job in our list that is NOT the one this page is currently tracking, then disable.
+    return activeComfyJobs.some(job => job.id !== activeJob?.id);
+  }, [activeComfyJobs, activeJob]);
 
   const sourceImageUrl = useMemo(() => {
     if (sourceImageFile) return URL.createObjectURL(sourceImageFile);
@@ -186,6 +213,17 @@ const Refine = () => {
     }
   };
 
+  const refineButton = (
+    <Button 
+      onClick={handleRefine} 
+      disabled={isLoading || !sourceImageFile || isAnotherJobActive || (activeJob && (activeJob.status === 'queued' || activeJob.status === 'processing'))} 
+      className="w-full"
+    >
+      {(isLoading || (activeJob && (activeJob.status === 'queued' || activeJob.status === 'processing'))) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+      {t.refineButton}
+    </Button>
+  );
+
   return (
     <>
       <div className="p-4 md:p-8 h-screen overflow-y-auto">
@@ -236,10 +274,20 @@ const Refine = () => {
                   </div>
               </CardContent>
             </Card>
-            <Button onClick={handleRefine} disabled={isLoading || !sourceImageFile || (activeJob && (activeJob.status === 'queued' || activeJob.status === 'processing'))} className="w-full">
-              {(isLoading || (activeJob && (activeJob.status === 'queued' || activeJob.status === 'processing'))) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
-              {t.refineButton}
-            </Button>
+            {isAnotherJobActive ? (
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div className="w-full">{refineButton}</div>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Please wait for your other refinement job to complete.</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            ) : (
+              refineButton
+            )}
           </div>
 
           <div className="lg:col-span-2">
