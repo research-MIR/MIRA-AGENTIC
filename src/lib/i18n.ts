@@ -98,6 +98,10 @@ export const translations = {
     queuePrompt: "Accoda Prompt",
     response: "Risposta",
     uploadWorkflow: "Carica Workflow",
+    workflowInputs: "Input del Workflow",
+    promptText: "Testo del Prompt",
+    promptTextPlaceholder: "Il prompt da iniettare nel tuo workflow...",
+    sourceImage: "Immagine Sorgente (per Img2Img/Upscale)",
   },
   en: {
     // General
@@ -198,5 +202,9 @@ export const translations = {
     queuePrompt: "Queue Prompt",
     response: "Response",
     uploadWorkflow: "Upload Workflow",
+    workflowInputs: "Workflow Inputs",
+    promptText: "Prompt Text",
+    promptTextPlaceholder: "The prompt to inject into your workflow...",
+    sourceImage: "Source Image (for Img2Img/Upscale)",
   },
 };
