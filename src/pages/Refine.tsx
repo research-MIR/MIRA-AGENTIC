@@ -7,13 +7,14 @@ import { Input } from "@/components/ui/input";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { Skeleton } from "@/components/ui/skeleton";
-import { UploadCloud, Wand2, Loader2 } from "lucide-react";
+import { UploadCloud, Wand2, Loader2, GitCompareArrows } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useLanguage } from "@/context/LanguageContext";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { useImagePreview } from "@/context/ImagePreviewContext";
 import { Slider } from "@/components/ui/slider";
+import { ImageCompareModal } from "@/components/ImageCompareModal";
 
 interface ComfyJob {
   id: string;
@@ -33,6 +34,8 @@ const Refine = () => {
   const channelRef = useRef<RealtimeChannel | null>(null);
   const [upscaleFactor, setUpscaleFactor] = useState(1.4);
   const [originalDimensions, setOriginalDimensions] = useState<{ width: number; height: number } | null>(null);
+  const [isCompareModalOpen, setIsCompareModalOpen] = useState(false);
+  const [comparisonImages, setComparisonImages] = useState<{ before: string; after: string } | null>(null);
 
   const sourceImageUrl = useMemo(() => {
     if (sourceImageFile) return URL.createObjectURL(sourceImageFile);
@@ -52,6 +55,7 @@ const Refine = () => {
     if (file) {
       setSourceImageFile(file);
       setActiveJob(null);
+      setComparisonImages(null);
 
       const reader = new FileReader();
       reader.onload = (event) => {
@@ -75,6 +79,7 @@ const Refine = () => {
 
     setIsLoading(true);
     setActiveJob({ id: '', status: 'queued' });
+    setComparisonImages(null);
     let toastId = showLoading("Caricamento dell'immagine sorgente...");
 
     try {
@@ -120,6 +125,9 @@ const Refine = () => {
             const newJob = payload.new as ComfyJob;
             setActiveJob(newJob);
             if (newJob.status === 'complete' && newJob.final_result) {
+              if (sourceImageUrl) {
+                setComparisonImages({ before: sourceImageUrl, after: newJob.final_result.publicUrl });
+              }
               const jobPayload = {
                   user_id: session.user.id,
                   original_prompt: `Refined: ${prompt.slice(0, 40)}...`,
@@ -179,89 +187,105 @@ const Refine = () => {
   };
 
   return (
-    <div className="p-4 md:p-8 h-screen overflow-y-auto">
-      <header className="pb-4 mb-8 border-b flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-bold">{t.refineAndUpscale}</h1>
-          <p className="text-muted-foreground">{t.refinePageDescription}</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <LanguageSwitcher />
-          <ThemeToggle />
-        </div>
-      </header>
+    <>
+      <div className="p-4 md:p-8 h-screen overflow-y-auto">
+        <header className="pb-4 mb-8 border-b flex justify-between items-center">
+          <div>
+            <h1 className="text-3xl font-bold">{t.refineAndUpscale}</h1>
+            <p className="text-muted-foreground">{t.refinePageDescription}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <LanguageSwitcher />
+            <ThemeToggle />
+          </div>
+        </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-1 space-y-6">
-          <Card>
-            <CardHeader><CardTitle>{t.sourceImage}</CardTitle></CardHeader>
-            <CardContent>
-              <Input id="source-image-upload" type="file" accept="image/*" onChange={handleFileChange} />
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader><CardTitle>{t.refinementPrompt}</CardTitle></CardHeader>
-            <CardContent>
-              <Textarea id="prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t.refinementPromptPlaceholder} rows={4} />
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader><CardTitle>Upscale Settings</CardTitle></CardHeader>
-            <CardContent>
-                <div className="space-y-2">
-                    <Label>Upscale Factor: {upscaleFactor.toFixed(1)}x</Label>
-                    <Slider
-                        value={[upscaleFactor]}
-                        onValueChange={(value) => setUpscaleFactor(value[0])}
-                        min={1}
-                        max={4}
-                        step={0.1}
-                        disabled={!sourceImageFile}
-                    />
-                    {originalDimensions && (
-                        <p className="text-sm text-muted-foreground text-center">
-                            {originalDimensions.width}x{originalDimensions.height} → 
-                            {' '}{Math.round(originalDimensions.width * upscaleFactor)}x{Math.round(originalDimensions.height * upscaleFactor)}
-                        </p>
-                    )}
-                </div>
-            </CardContent>
-          </Card>
-          <Button onClick={handleRefine} disabled={isLoading || !sourceImageFile || (activeJob && (activeJob.status === 'queued' || activeJob.status === 'processing'))} className="w-full">
-            {(isLoading || (activeJob && (activeJob.status === 'queued' || activeJob.status === 'processing'))) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
-            {t.refineButton}
-          </Button>
-        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <div className="lg:col-span-1 space-y-6">
+            <Card>
+              <CardHeader><CardTitle>{t.sourceImage}</CardTitle></CardHeader>
+              <CardContent>
+                <Input id="source-image-upload" type="file" accept="image/*" onChange={handleFileChange} />
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader><CardTitle>{t.refinementPrompt}</CardTitle></CardHeader>
+              <CardContent>
+                <Textarea id="prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t.refinementPromptPlaceholder} rows={4} />
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader><CardTitle>Upscale Settings</CardTitle></CardHeader>
+              <CardContent>
+                  <div className="space-y-2">
+                      <Label>Upscale Factor: {upscaleFactor.toFixed(1)}x</Label>
+                      <Slider
+                          value={[upscaleFactor]}
+                          onValueChange={(value) => setUpscaleFactor(value[0])}
+                          min={1}
+                          max={4}
+                          step={0.1}
+                          disabled={!sourceImageFile}
+                      />
+                      {originalDimensions && (
+                          <p className="text-sm text-muted-foreground text-center">
+                              {originalDimensions.width}x{originalDimensions.height} → 
+                              {' '}{Math.round(originalDimensions.width * upscaleFactor)}x{Math.round(originalDimensions.height * upscaleFactor)}
+                          </p>
+                      )}
+                  </div>
+              </CardContent>
+            </Card>
+            <Button onClick={handleRefine} disabled={isLoading || !sourceImageFile || (activeJob && (activeJob.status === 'queued' || activeJob.status === 'processing'))} className="w-full">
+              {(isLoading || (activeJob && (activeJob.status === 'queued' || activeJob.status === 'processing'))) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+              {t.refineButton}
+            </Button>
+          </div>
 
-        <div className="lg:col-span-2">
-          <Card className="min-h-[60vh]">
-            <CardHeader><CardTitle>{t.results}</CardTitle></CardHeader>
-            <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                    <h3 className="font-semibold mb-2 text-center">{t.originalImage}</h3>
-                    {sourceImageUrl ? (
-                        <button onClick={() => showImage({ url: sourceImageUrl })} className="block w-full h-full">
-                            <img src={sourceImageUrl} alt="Original" className="rounded-lg aspect-square object-contain w-full hover:opacity-80 transition-opacity" />
-                        </button>
-                    ) : (
-                        <div className="aspect-square bg-muted rounded-lg flex flex-col items-center justify-center text-muted-foreground">
-                            <UploadCloud className="h-12 w-12 mb-4" />
-                            <p>{t.uploadAnImageToStart}</p>
-                        </div>
-                    )}
-                </div>
-                 <div>
-                    <h3 className="font-semibold mb-2 text-center">{t.refinedImage}</h3>
-                    <div className="aspect-square bg-muted rounded-lg flex items-center justify-center">
-                        {isLoading && !activeJob ? <Skeleton className="h-full w-full" /> : renderJobStatus()}
-                        {!isLoading && !activeJob && <p className="text-muted-foreground text-center p-4">Il risultato apparirà qui.</p>}
-                    </div>
-                </div>
-            </CardContent>
-          </Card>
+          <div className="lg:col-span-2">
+            <Card className="min-h-[60vh]">
+              <CardHeader><CardTitle>{t.results}</CardTitle></CardHeader>
+              <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                      <h3 className="font-semibold mb-2 text-center">{t.originalImage}</h3>
+                      {sourceImageUrl ? (
+                          <button onClick={() => showImage({ url: sourceImageUrl })} className="block w-full h-full">
+                              <img src={sourceImageUrl} alt="Original" className="rounded-lg aspect-square object-contain w-full hover:opacity-80 transition-opacity" />
+                          </button>
+                      ) : (
+                          <div className="aspect-square bg-muted rounded-lg flex flex-col items-center justify-center text-muted-foreground">
+                              <UploadCloud className="h-12 w-12 mb-4" />
+                              <p>{t.uploadAnImageToStart}</p>
+                          </div>
+                      )}
+                  </div>
+                  <div>
+                      <h3 className="font-semibold mb-2 text-center">{t.refinedImage}</h3>
+                      <div className="aspect-square bg-muted rounded-lg flex items-center justify-center">
+                          {isLoading && !activeJob ? <Skeleton className="h-full w-full" /> : renderJobStatus()}
+                          {!isLoading && !activeJob && <p className="text-muted-foreground text-center p-4">Il risultato apparirà qui.</p>}
+                      </div>
+                  </div>
+              </CardContent>
+            </Card>
+            {comparisonImages && (
+              <Button onClick={() => setIsCompareModalOpen(true)} className="mt-4 w-full">
+                <GitCompareArrows className="mr-2 h-4 w-4" />
+                Compare Results
+              </Button>
+            )}
+          </div>
         </div>
       </div>
-    </div>
+      {comparisonImages && (
+        <ImageCompareModal
+          isOpen={isCompareModalOpen}
+          onClose={() => setIsCompareModalOpen(false)}
+          beforeUrl={comparisonImages.before}
+          afterUrl={comparisonImages.after}
+        />
+      )}
+    </>
   );
 };
 
