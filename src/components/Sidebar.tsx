@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Skeleton } from "./ui/skeleton";
 import { useLanguage } from "@/context/LanguageContext";
+import { useOnboardingTour } from "@/context/OnboardingTourContext";
 
 interface JobHistory {
   id: string;
@@ -16,6 +17,7 @@ export const Sidebar = () => {
   const { session, supabase } = useSession();
   const navigate = useNavigate();
   const { t } = useLanguage();
+  const { startTour } = useOnboardingTour();
 
   const fetchJobHistory = async () => {
     if (!session?.user) return [];
@@ -80,7 +82,7 @@ export const Sidebar = () => {
         )}
       </div>
       <div className="p-4 border-t space-y-2">
-        <Button variant="ghost" className="w-full justify-start gap-2" disabled>
+        <Button variant="ghost" className="w-full justify-start gap-2" onClick={startTour}>
           <HelpCircle size={20} />
           {t.restartOnboarding}
         </Button>
