@@ -26,7 +26,7 @@ interface Job {
     images: ImageResult[];
   };
   context: {
-    source: 'direct_generator' | 'agent';
+    source: 'direct_generator' | 'agent' | 'refiner';
     history?: any[];
   };
 }
@@ -78,18 +78,19 @@ const Gallery = () => {
     enabled: !!session?.user,
   });
 
-  const { agentJobs, directJobs } = useMemo(() => {
+  const { agentJobs, directJobs, refinedJobs } = useMemo(() => {
     if (!jobs) {
-      return { agentJobs: [], directJobs: [] };
+      return { agentJobs: [], directJobs: [], refinedJobs: [] };
     }
     
     const direct = jobs.filter(job => job.context?.source === 'direct_generator');
     const agent = jobs.filter(job => job.context?.source === 'agent');
+    const refined = jobs.filter(job => job.context?.source === 'refiner');
 
-    return { agentJobs: agent, directJobs: direct };
+    return { agentJobs: agent, directJobs: direct, refinedJobs: refined };
   }, [jobs]);
 
-  const renderImageList = (jobList: Job[] | undefined) => {
+  const renderImageList = (jobList: Job[] | undefined, isRefined: boolean = false) => {
     if (!jobList || jobList.length === 0) {
       return (
         <div className="text-center text-muted-foreground col-span-full mt-8">
@@ -106,11 +107,13 @@ const Gallery = () => {
             className="w-full h-full object-cover rounded-lg cursor-pointer"
             onClick={() => showImage({ url: image.publicUrl, jobId: job.id })}
           />
-          <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-            <Button variant="secondary" onClick={() => navigate(`/chat/${job.id}`)}>
-              <View className="mr-2 h-4 w-4" /> {t.viewChat}
-            </Button>
-          </div>
+          {!isRefined && (
+            <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+              <Button variant="secondary" onClick={() => navigate(`/chat/${job.id}`)}>
+                <View className="mr-2 h-4 w-4" /> {t.viewChat}
+              </Button>
+            </div>
+          )}
         </div>
       ))
     );
@@ -137,6 +140,7 @@ const Gallery = () => {
                 <TabsTrigger value="all">{t.galleryTabsAll}</TabsTrigger>
                 <TabsTrigger value="agent">{t.galleryTabsAgent}</TabsTrigger>
                 <TabsTrigger value="direct">{t.galleryTabsDirect}</TabsTrigger>
+                <TabsTrigger value="refined">{t.galleryTabsRefined}</TabsTrigger>
               </TabsList>
               <TabsContent value="all">
                 <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mt-4">
@@ -170,6 +174,15 @@ const Gallery = () => {
                     [...Array(6)].map((_, i) => <Skeleton key={i} className="aspect-square w-full" />)
                   ) : (
                     renderImageList(directJobs)
+                  )}
+                </div>
+              </TabsContent>
+              <TabsContent value="refined">
+                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mt-4">
+                  {isLoading ? (
+                    [...Array(6)].map((_, i) => <Skeleton key={i} className="aspect-square w-full" />)
+                  ) : (
+                    renderImageList(refinedJobs, true)
                   )}
                 </div>
               </TabsContent>

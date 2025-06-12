@@ -12,6 +12,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useLanguage } from "@/context/LanguageContext";
 import { RealtimeChannel } from "@supabase/supabase-js";
+import { useImagePreview } from "@/context/ImagePreviewContext";
 
 const sanitizeFilename = (filename: string): string => {
   return filename
@@ -23,13 +24,14 @@ const sanitizeFilename = (filename: string): string => {
 interface ComfyJob {
   id: string;
   status: 'queued' | 'processing' | 'complete' | 'failed';
-  final_result?: { publicUrl: string };
+  final_result?: { publicUrl: string, storagePath: string };
   error_message?: string;
 }
 
 const Refine = () => {
   const { supabase, session } = useSession();
   const { t } = useLanguage();
+  const { showImage } = useImagePreview();
   const [prompt, setPrompt] = useState("");
   const [sourceImageFile, setSourceImageFile] = useState<File | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -104,9 +106,23 @@ const Refine = () => {
         .on<ComfyJob>(
           'postgres_changes',
           { event: 'UPDATE', schema: 'public', table: 'mira-agent-comfyui-jobs', filter: `id=eq.${jobId}` },
-          (payload) => {
-            setActiveJob(payload.new as ComfyJob);
-            if (payload.new.status === 'complete' || payload.new.status === 'failed') {
+          async (payload) => {
+            const newJob = payload.new as ComfyJob;
+            setActiveJob(newJob);
+            if (newJob.status === 'complete' && newJob.final_result) {
+              const jobPayload = {
+                  user_id: session.user.id,
+                  original_prompt: `Refined: ${prompt.slice(0, 40)}...`,
+                  status: 'complete',
+                  final_result: { isImageGeneration: true, images: [newJob.final_result] },
+                  context: { source: 'refiner' }
+              };
+              const { error: insertError } = await supabase.from('mira-agent-jobs').insert(jobPayload);
+              if (insertError) showError(`Immagine affinata, ma non salvata in galleria: ${insertError.message}`);
+              
+              supabase.removeChannel(channelRef.current!);
+              channelRef.current = null;
+            } else if (newJob.status === 'failed') {
               supabase.removeChannel(channelRef.current!);
               channelRef.current = null;
             }
@@ -141,7 +157,9 @@ const Refine = () => {
         return <div className="flex items-center justify-center h-full"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> In elaborazione...</div>;
       case 'complete':
         return activeJob.final_result?.publicUrl ? (
-          <img src={activeJob.final_result.publicUrl} alt="Refined by ComfyUI" className="rounded-lg aspect-square object-contain w-full" />
+          <button onClick={() => showImage({ url: activeJob.final_result!.publicUrl })} className="block w-full h-full">
+            <img src={activeJob.final_result.publicUrl} alt="Refined by ComfyUI" className="rounded-lg aspect-square object-contain w-full hover:opacity-80 transition-opacity" />
+          </button>
         ) : <p>Job completato, ma nessun URL immagine trovato.</p>;
       case 'failed':
         return <p className="text-destructive">Job fallito: {activeJob.error_message}</p>;
@@ -190,7 +208,9 @@ const Refine = () => {
                 <div>
                     <h3 className="font-semibold mb-2 text-center">{t.originalImage}</h3>
                     {sourceImageUrl ? (
-                        <img src={sourceImageUrl} alt="Original" className="rounded-lg aspect-square object-contain w-full" />
+                        <button onClick={() => showImage({ url: sourceImageUrl })} className="block w-full h-full">
+                            <img src={sourceImageUrl} alt="Original" className="rounded-lg aspect-square object-contain w-full hover:opacity-80 transition-opacity" />
+                        </button>
                     ) : (
                         <div className="aspect-square bg-muted rounded-lg flex flex-col items-center justify-center text-muted-foreground">
                             <UploadCloud className="h-12 w-12 mb-4" />
