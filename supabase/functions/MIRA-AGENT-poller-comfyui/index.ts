@@ -13,21 +13,37 @@ const GENERATED_IMAGES_BUCKET = 'mira-generations';
 const POLLING_INTERVAL_MS = 3000; // 3 seconds
 const MAX_POLLING_ATTEMPTS = 100; // 5 minutes total
 
-async function findOutputImage(history: any): Promise<any | null> {
-    for (const nodeId in history) {
-        const node = history[nodeId];
-        // Check for the standard SaveImage node output format, which is the most reliable
-        if (node.class_type === "SaveImage" && node.outputs && Array.isArray(node.outputs.images) && node.outputs.images.length > 0) {
-            console.log(`[Poller] Found output image in SaveImage node ${nodeId}`);
-            return node.outputs.images[0];
-        }
-        // Fallback for other potential output nodes
+async function findOutputImage(historyOutputs: any): Promise<any | null> {
+    const outputNodes: any[] = [];
+    if (!historyOutputs) return null;
+
+    for (const nodeId in historyOutputs) {
+        const node = historyOutputs[nodeId];
         if (node.outputs && Array.isArray(node.outputs.images) && node.outputs.images.length > 0) {
-            console.log(`[Poller] Found fallback output image in node ${nodeId} of type ${node.class_type}`);
-            return node.outputs.images[0];
+            // Prioritize SaveImage (1), then PreviewImage (2), then anything else (3).
+            let priority = 3;
+            if (node.class_type === "SaveImage") priority = 1;
+            if (node.class_type === "PreviewImage") priority = 2;
+            
+            outputNodes.push({
+                nodeId: nodeId,
+                class_type: node.class_type,
+                image: node.outputs.images[0],
+                priority: priority
+            });
         }
     }
-    return null;
+
+    if (outputNodes.length === 0) {
+        return null;
+    }
+
+    // Sort by priority (lower is better)
+    outputNodes.sort((a, b) => a.priority - b.priority);
+    
+    const bestOutput = outputNodes[0];
+    console.log(`[Poller] Found best available output image in node ${bestOutput.nodeId} of type ${bestOutput.class_type}`);
+    return bestOutput.image;
 }
 
 serve(async (req) => {
@@ -102,7 +118,9 @@ serve(async (req) => {
     } else {
         if (attempt > MAX_POLLING_ATTEMPTS) throw new Error("Polling timed out waiting for image output.");
 
-        console.log(`[Poller][${job_id}] Job running, but output not ready. Re-scheduling poll.`);
+        console.log(`[Poller][${job_id}] Job running, but a final output node (SaveImage/PreviewImage) was not found in the history outputs.`);
+        console.log(`[Poller][${job_id}] For debugging, here are the current outputs from all nodes:`, JSON.stringify(promptHistory.outputs, null, 2));
+        
         await supabase.from('mira-agent-comfyui-jobs').update({ status: 'processing' }).eq('id', job_id);
         setTimeout(() => {
             supabase.functions.invoke('MIRA-AGENT-poller-comfyui', { body: { job_id, attempt: attempt + 1 } }).catch(console.error);
