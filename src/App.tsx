@@ -12,7 +12,7 @@ import Layout from "./components/Layout";
 import ProtectedRoute from "./components/Auth/ProtectedRoute";
 import { ImagePreviewProvider } from "./context/ImagePreviewContext";
 import { ImagePreviewModal } from "./components/ImagePreviewModal";
-import { OnboardingTourProvider } from "./context/OnboardingTourContext";
+import { OnboardingTourProvider } from "@/context/TourProvider";
 import { LanguageProvider } from "./context/LanguageContext";
 import VirtualTryOn from "./pages/VirtualTryOn";
 
