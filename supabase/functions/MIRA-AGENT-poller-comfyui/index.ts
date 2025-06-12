@@ -13,22 +13,26 @@ const GENERATED_IMAGES_BUCKET = 'mira-generations';
 const POLLING_INTERVAL_MS = 3000; // 3 seconds
 const MAX_POLLING_ATTEMPTS = 100; // 5 minutes total
 
-async function findOutputImage(historyOutputs: any): Promise<any | null> {
+async function findOutputImage(historyOutputs: any, promptHistory: any): Promise<any | null> {
     const outputNodes: any[] = [];
     if (!historyOutputs) return null;
 
     for (const nodeId in historyOutputs) {
-        const node = historyOutputs[nodeId];
-        if (node.outputs && Array.isArray(node.outputs.images) && node.outputs.images.length > 0) {
-            // Prioritize SaveImage (1), then PreviewImage (2), then anything else (3).
+        const outputData = historyOutputs[nodeId];
+        // The history payload has the outputs directly on the node object.
+        if (outputData.images && Array.isArray(outputData.images) && outputData.images.length > 0) {
+            // To get the class_type, we need to look at the original prompt workflow structure.
+            const nodeInfo = promptHistory.prompt.find((node: any) => node[0] == nodeId);
+            const class_type = nodeInfo ? nodeInfo[1].class_type : "Unknown";
+
             let priority = 3;
-            if (node.class_type === "SaveImage") priority = 1;
-            if (node.class_type === "PreviewImage") priority = 2;
+            if (class_type === "SaveImage") priority = 1;
+            if (class_type === "PreviewImage") priority = 2;
             
             outputNodes.push({
                 nodeId: nodeId,
-                class_type: node.class_type,
-                image: node.outputs.images[0],
+                class_type: class_type,
+                image: outputData.images[0],
                 priority: priority
             });
         }
@@ -38,7 +42,6 @@ async function findOutputImage(historyOutputs: any): Promise<any | null> {
         return null;
     }
 
-    // Sort by priority (lower is better)
     outputNodes.sort((a, b) => a.priority - b.priority);
     
     const bestOutput = outputNodes[0];
@@ -90,7 +93,7 @@ serve(async (req) => {
     }
     console.log(`[Poller][${job_id}] History found. Searching for output image...`);
 
-    const outputImage = await findOutputImage(promptHistory.outputs);
+    const outputImage = await findOutputImage(promptHistory.outputs, promptHistory);
 
     if (outputImage) {
         console.log(`[Poller][${job_id}] Image found! Filename: ${outputImage.filename}`);
