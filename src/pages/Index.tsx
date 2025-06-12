@@ -70,17 +70,9 @@ const parseHistoryToMessages = (history: any[]): Message[] => {
             }
         } else if (turn.role === 'model') {
             const textPart = turn.parts.find((p: any) => p.text);
-            const functionCallPart = turn.parts.find((p: any) => p.functionCall);
-
             if (textPart && textPart.text) {
                 flushCreativeProcessBuffer();
                 messages.push({ from: 'bot', text: textPart.text });
-            } else if (functionCallPart && functionCallPart.functionCall.name === 'finish_task') {
-                flushCreativeProcessBuffer();
-                const summary = functionCallPart.functionCall.args.summary;
-                if (summary) {
-                    messages.push({ from: 'bot', text: summary });
-                }
             }
         } else if (turn.role === 'function') {
             const response = turn.parts[0]?.functionResponse?.response;
