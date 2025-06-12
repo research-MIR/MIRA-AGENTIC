@@ -7,6 +7,9 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+
 const workflowTemplate = `
 {
   "9": {
@@ -293,16 +296,24 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  const supabase = createClient(
-    Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-  );
+  const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
 
   try {
+    const { data: config, error: configError } = await supabase
+      .from('mira-agent-config')
+      .select('value')
+      .eq('key', 'comfyui_endpoint_address')
+      .single();
+
+    if (configError || !config?.value) {
+      throw new Error("ComfyUI endpoint address is not configured in mira-agent-config table.");
+    }
+    const comfyui_address = (config.value as string).replace(/"/g, '');
+
     const body = await req.json();
     console.log(`[QueueProxy][${requestId}] Received request body:`, JSON.stringify(body));
     
-    const { comfyui_address, invoker_user_id } = body;
+    const { invoker_user_id } = body;
     let finalWorkflow;
 
     if (body.prompt_workflow) {
@@ -317,7 +328,6 @@ serve(async (req) => {
         throw new Error("Request body must contain either 'prompt_workflow' or both 'prompt_text' and 'image_filename'.");
     }
 
-    if (!comfyui_address) throw new Error("Missing required parameter: comfyui_address");
     if (!invoker_user_id) throw new Error("Missing required parameter: invoker_user_id");
     
     console.log(`[QueueProxy][${requestId}] All parameters validated.`);

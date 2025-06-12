@@ -1,10 +1,14 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
+
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 
 serve(async (req) => {
   const requestId = req.headers.get("x-request-id") || `upload-proxy-${Date.now()}`;
@@ -14,19 +18,28 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
+
   try {
+    const { data: config, error: configError } = await supabase
+      .from('mira-agent-config')
+      .select('value')
+      .eq('key', 'comfyui_endpoint_address')
+      .single();
+
+    if (configError || !config?.value) {
+      throw new Error("ComfyUI endpoint address is not configured in mira-agent-config table.");
+    }
+    const comfyui_address = (config.value as string).replace(/"/g, '');
+
     const formData = await req.formData();
     const image = formData.get('image');
-    const comfyui_address = formData.get('comfyui_address');
     console.log(`[UploadProxy][${requestId}] FormData parsed.`);
 
     if (!image || !(image instanceof File)) {
       throw new Error("Missing 'image' in form data.");
     }
-    if (!comfyui_address || typeof comfyui_address !== 'string') {
-      throw new Error("Missing 'comfyui_address' in form data.");
-    }
-
+    
     const sanitizedAddress = comfyui_address.replace(/\/+$/, "");
     const uploadUrl = `${sanitizedAddress}/upload/image`;
     console.log(`[UploadProxy][${requestId}] Uploading to: ${uploadUrl}`);

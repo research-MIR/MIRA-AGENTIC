@@ -20,7 +20,6 @@ async function findOutputImage(historyOutputs: any, promptWorkflow: any): Promis
     for (const nodeId in historyOutputs) {
         const outputData = historyOutputs[nodeId];
         if (outputData.images && Array.isArray(outputData.images) && outputData.images.length > 0) {
-            // To get the class_type, we look up the node in the original workflow object.
             const nodeInfo = promptWorkflow[nodeId];
             const class_type = nodeInfo ? nodeInfo.class_type : "Unknown";
 
@@ -92,7 +91,6 @@ serve(async (req) => {
     }
     console.log(`[Poller][${job_id}] History found. Searching for output image...`);
 
-    // The 'prompt' property in the history contains the original workflow object.
     const outputImage = await findOutputImage(promptHistory.outputs, promptHistory.prompt);
 
     if (outputImage) {
@@ -115,8 +113,26 @@ serve(async (req) => {
             status: 'complete',
             final_result: { publicUrl, storagePath: filePath }
         }).eq('id', job_id);
+        console.log(`[Poller][${job_id}] ComfyUI job status updated to 'complete' in DB.`);
 
-        console.log(`[Poller][${job_id}] Job status updated to 'complete' in DB.`);
+        // Mirror the result to the main mira-agent-jobs table for gallery integration
+        const finalImageResult = {
+            isImageGeneration: true,
+            images: [{ publicUrl, storagePath: filePath }]
+        };
+        const { error: mirrorError } = await supabase.from('mira-agent-jobs').insert({
+            user_id: job.user_id,
+            original_prompt: `Refined Image`,
+            status: 'complete',
+            final_result: finalImageResult,
+            context: { source: 'comfyui_refiner' }
+        });
+        if (mirrorError) {
+            console.error(`[Poller][${job_id}] Failed to mirror result to main jobs table:`, mirrorError);
+        } else {
+            console.log(`[Poller][${job_id}] Successfully mirrored result to main jobs table for gallery integration.`);
+        }
+
         return new Response(JSON.stringify({ success: true, status: 'complete', publicUrl }), { headers: corsHeaders });
     } else {
         if (attempt > MAX_POLLING_ATTEMPTS) throw new Error("Polling timed out waiting for image output.");
