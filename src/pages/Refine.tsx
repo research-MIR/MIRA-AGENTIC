@@ -15,7 +15,7 @@ import { RealtimeChannel } from "@supabase/supabase-js";
 import { useImagePreview } from "@/context/ImagePreviewContext";
 import { Slider } from "@/components/ui/slider";
 import { ImageCompareModal } from "@/components/ImageCompareModal";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface ComfyJob {
@@ -29,6 +29,7 @@ const Refine = () => {
   const { supabase, session } = useSession();
   const { t } = useLanguage();
   const { showImage } = useImagePreview();
+  const queryClient = useQueryClient();
   const [prompt, setPrompt] = useState("");
   const [sourceImageFile, setSourceImageFile] = useState<File | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -192,6 +193,26 @@ const Refine = () => {
     }
   };
 
+  const handleCancelAndStartNew = async () => {
+    if (!session?.user) return;
+    const toastId = showLoading("Cancellazione del job attivo...");
+    try {
+      const { error: cancelError } = await supabase.rpc('cancel_active_comfyui_jobs', { p_user_id: session.user.id });
+      if (cancelError) throw new Error(`Impossibile cancellare i job attivi: ${cancelError.message}`);
+      
+      await queryClient.invalidateQueries({ queryKey: ['activeComfyJobs', session.user.id] });
+      
+      dismissToast(toastId);
+      showSuccess("Job attivo cancellato. Avvio del nuovo affinamento...");
+
+      await handleRefine();
+
+    } catch (err: any) {
+      dismissToast(toastId);
+      showError(err.message);
+    }
+  };
+
   const renderJobStatus = () => {
     if (!activeJob) return null;
 
@@ -275,16 +296,21 @@ const Refine = () => {
               </CardContent>
             </Card>
             {isAnotherJobActive ? (
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <div className="w-full">{refineButton}</div>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>Please wait for your other refinement job to complete.</p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
+              <div className="flex gap-2">
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div className="w-full">{refineButton}</div>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Attendi il completamento dell'altro tuo lavoro di affinamento.</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+                <Button variant="destructive" onClick={handleCancelAndStartNew}>
+                  Cancella e Avvia
+                </Button>
+              </div>
             ) : (
               refineButton
             )}
