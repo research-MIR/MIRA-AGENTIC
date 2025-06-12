@@ -18,43 +18,24 @@ export const useOnboardingTour = () => {
   return context;
 };
 
-const TourController = ({ children }: { children: ReactNode }) => {
-  const { setIsOpen, setSteps, setCurrentStep, currentStep, isOpen } = useTour();
-  const { t } = useLanguage();
+const TourLogicController = ({ children }: { children: ReactNode }) => {
+  const { setIsOpen, setCurrentStep, currentStep, isOpen } = useTour();
   const { supabase, session } = useSession();
   const navigate = useNavigate();
   const location = useLocation();
   const [hasCompletedTour, setHasCompletedTour] = useState<boolean | null>(null);
   const [isTourPending, setIsTourPending] = useState(false);
 
-  const steps: StepType[] = [
-    { selector: '#model-selector', content: t.onboardingModelDescription },
-    { selector: '#designer-mode-switch', content: t.onboardingDesignerDescription },
-    { selector: '#pipeline-mode-select', content: t.onboardingPipelineDescription },
-    { selector: '#prompt-input-area', content: t.onboardingPromptDescription },
-    { selector: '#file-upload-button', content: t.onboardingUploadDescription },
-    { selector: '#new-chat-button', content: t.onboardingNewChatDescription },
-    { selector: '#generator-nav-link', content: "Let's check out the direct generator. Click here to continue." },
-    { selector: '#generator-prompt-card', content: "In the direct generator, the Prompt is what you want to see, and the Negative Prompt is what you want to avoid." },
-    { selector: '#generator-settings-card', content: "Here you have direct control over the model, aspect ratio, and other technical details." },
-    { selector: '#gallery-nav-link', content: "All your creations are saved in the Gallery. Click here to continue." },
-    { selector: '#gallery-tabs', content: "You can view all your images or filter them by how they were created." },
-    { selector: '#chat-nav-link', content: "Tour complete! You're ready to create. Click here to go back to the chat." },
-  ];
-
   const startTour = useCallback(() => {
-    console.log('[Tour] startTour called. Navigating to /chat and setting pending flag.');
     navigate('/chat');
     setIsTourPending(true);
   }, [navigate]);
 
   useEffect(() => {
-    console.log('[Tour] Pending check effect ran. isTourPending:', isTourPending, 'Path:', location.pathname);
     if (isTourPending && location.pathname === '/chat') {
-        console.log('[Tour] Conditions met, opening tour after navigation.');
-        setCurrentStep(0);
-        setIsOpen(true);
-        setIsTourPending(false);
+      setCurrentStep(0);
+      setIsOpen(true);
+      setIsTourPending(false);
     }
   }, [location.pathname, isTourPending, setCurrentStep, setIsOpen]);
 
@@ -82,18 +63,14 @@ const TourController = ({ children }: { children: ReactNode }) => {
   }, [session, supabase, startTour]);
 
   useEffect(() => {
-    console.log('[Tour] Navigation effect ran. isOpen:', isOpen, 'currentStep:', currentStep);
     if (!isOpen) return;
-
     const stepActions: Record<number, () => void> = {
       6: () => navigate('/generator'),
       9: () => navigate('/gallery'),
       11: () => navigate('/chat'),
     };
-
     const action = stepActions[currentStep];
     if (action) {
-      console.log(`[Tour] Step ${currentStep} has a navigation action. Executing...`);
       action();
     }
   }, [currentStep, isOpen, navigate]);
@@ -105,24 +82,50 @@ const TourController = ({ children }: { children: ReactNode }) => {
     else setHasCompletedTour(true);
   };
 
+  useEffect(() => {
+    if (!isOpen) {
+        markTourAsComplete();
+    }
+  }, [isOpen]);
+
   return (
     <OnboardingTourContext.Provider value={{ startTour }}>
-      <ReactourProvider 
-        steps={steps} 
-        defaultOpen={false}
-        afterOpen={() => document.body.style.overflow = 'hidden'}
-        beforeClose={() => {
-          document.body.style.overflow = 'auto';
-          markTourAsComplete();
-        }}
-        disableInteraction={true}
-      >
-        {children}
-      </ReactourProvider>
+      {children}
     </OnboardingTourContext.Provider>
   );
 };
 
 export const OnboardingTourProvider = ({ children }: { children: ReactNode }) => {
-  return <TourController>{children}</TourController>;
+  const { t } = useLanguage();
+
+  const steps: StepType[] = [
+    { selector: '#model-selector', content: t.onboardingModelDescription },
+    { selector: '#designer-mode-switch', content: t.onboardingDesignerDescription },
+    { selector: '#pipeline-mode-select', content: t.onboardingPipelineDescription },
+    { selector: '#prompt-input-area', content: t.onboardingPromptDescription },
+    { selector: '#file-upload-button', content: t.onboardingUploadDescription },
+    { selector: '#new-chat-button', content: t.onboardingNewChatDescription },
+    { selector: '#generator-nav-link', content: "Let's check out the direct generator. Click here to continue." },
+    { selector: '#generator-prompt-card', content: "In the direct generator, the Prompt is what you want to see, and the Negative Prompt is what you want to avoid." },
+    { selector: '#generator-settings-card', content: "Here you have direct control over the model, aspect ratio, and other technical details." },
+    { selector: '#gallery-nav-link', content: "All your creations are saved in the Gallery. Click here to continue." },
+    { selector: '#gallery-tabs', content: "You can view all your images or filter them by how they were created." },
+    { selector: '#chat-nav-link', content: "Tour complete! You're ready to create. Click here to go back to the chat." },
+  ];
+
+  return (
+    <ReactourProvider 
+      steps={steps} 
+      defaultOpen={false}
+      afterOpen={() => document.body.style.overflow = 'hidden'}
+      beforeClose={() => {
+        document.body.style.overflow = 'auto';
+      }}
+      disableInteraction={true}
+    >
+      <TourLogicController>
+        {children}
+      </TourLogicController>
+    </ReactourProvider>
+  );
 };
