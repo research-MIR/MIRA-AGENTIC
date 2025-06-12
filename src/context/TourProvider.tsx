@@ -43,21 +43,14 @@ const TourController = ({ children }: { children: ReactNode }) => {
   ];
 
   const startTour = useCallback(() => {
-    console.log('[Tour] startTour called. Current path:', location.pathname);
-    if (location.pathname.startsWith('/chat')) {
-      console.log('[Tour] Already on chat page, opening tour directly.');
-      setCurrentStep(0);
-      setIsOpen(true);
-    } else {
-      console.log('[Tour] Not on chat page, navigating and setting pending flag.');
-      navigate('/chat');
-      setIsTourPending(true);
-    }
-  }, [navigate, location.pathname, setCurrentStep, setIsOpen]);
+    console.log('[Tour] startTour called. Navigating to /chat and setting pending flag.');
+    navigate('/chat');
+    setIsTourPending(true);
+  }, [navigate]);
 
   useEffect(() => {
     console.log('[Tour] Pending check effect ran. isTourPending:', isTourPending, 'Path:', location.pathname);
-    if (isTourPending && location.pathname.startsWith('/chat')) {
+    if (isTourPending && location.pathname === '/chat') {
         console.log('[Tour] Conditions met, opening tour after navigation.');
         setSteps(steps);
         setCurrentStep(0);
