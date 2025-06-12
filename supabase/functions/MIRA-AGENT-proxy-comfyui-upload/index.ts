@@ -6,6 +6,8 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
+const COMFYUI_ENDPOINT_URL = Deno.env.get('COMFYUI_ENDPOINT_URL');
+
 serve(async (req) => {
   const requestId = req.headers.get("x-request-id") || `upload-proxy-${Date.now()}`;
   console.log(`[UploadProxy][${requestId}] Function invoked.`);
@@ -14,20 +16,20 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  if (!COMFYUI_ENDPOINT_URL) {
+    return new Response(JSON.stringify({ error: "Server configuration error: COMFYUI_ENDPOINT_URL secret is not set." }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500 });
+  }
+
   try {
     const formData = await req.formData();
     const image = formData.get('image');
-    const comfyui_address = formData.get('comfyui_address');
     console.log(`[UploadProxy][${requestId}] FormData parsed.`);
 
     if (!image || !(image instanceof File)) {
       throw new Error("Missing 'image' in form data.");
     }
-    if (!comfyui_address || typeof comfyui_address !== 'string') {
-      throw new Error("Missing 'comfyui_address' in form data.");
-    }
 
-    const sanitizedAddress = comfyui_address.replace(/\/+$/, "");
+    const sanitizedAddress = COMFYUI_ENDPOINT_URL.replace(/\/+$/, "");
     const uploadUrl = `${sanitizedAddress}/upload/image`;
     console.log(`[UploadProxy][${requestId}] Uploading to: ${uploadUrl}`);
 

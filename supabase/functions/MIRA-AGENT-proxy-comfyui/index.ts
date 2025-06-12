@@ -7,6 +7,8 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
+const COMFYUI_ENDPOINT_URL = Deno.env.get('COMFYUI_ENDPOINT_URL');
+
 const workflowTemplate = `
 {
   "9": {
@@ -293,6 +295,10 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  if (!COMFYUI_ENDPOINT_URL) {
+    return new Response(JSON.stringify({ error: "Server configuration error: COMFYUI_ENDPOINT_URL secret is not set." }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500 });
+  }
+
   const supabase = createClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -302,7 +308,7 @@ serve(async (req) => {
     const body = await req.json();
     console.log(`[QueueProxy][${requestId}] Received request body:`, JSON.stringify(body));
     
-    const { comfyui_address, invoker_user_id } = body;
+    const { invoker_user_id } = body;
     let finalWorkflow;
 
     if (body.prompt_workflow) {
@@ -317,12 +323,11 @@ serve(async (req) => {
         throw new Error("Request body must contain either 'prompt_workflow' or both 'prompt_text' and 'image_filename'.");
     }
 
-    if (!comfyui_address) throw new Error("Missing required parameter: comfyui_address");
     if (!invoker_user_id) throw new Error("Missing required parameter: invoker_user_id");
     
     console.log(`[QueueProxy][${requestId}] All parameters validated.`);
 
-    const sanitizedAddress = comfyui_address.replace(/\/+$/, "");
+    const sanitizedAddress = COMFYUI_ENDPOINT_URL.replace(/\/+$/, "");
     const queueUrl = `${sanitizedAddress}/prompt`;
     
     const payload = { 

@@ -304,7 +304,6 @@ const Developer = () => {
   const channelRef = useRef<RealtimeChannel | null>(null);
 
   // ComfyUI State
-  const [comfyAddress, setComfyAddress] = useState("https://your-ngrok-or-public-url.io");
   const [activeJob, setActiveJob] = useState<ComfyJob | null>(null);
   const [comfyPrompt, setComfyPrompt] = useState("");
   const [sourceImage, setSourceImage] = useState<File | null>(null);
@@ -357,7 +356,6 @@ const Developer = () => {
     try {
       const uploadFormData = new FormData();
       uploadFormData.append('image', sourceImage);
-      uploadFormData.append('comfyui_address', comfyAddress);
       
       const { data: uploadResult, error: uploadError } = await supabase.functions.invoke('MIRA-AGENT-proxy-comfyui-upload', {
           body: uploadFormData
@@ -374,14 +372,12 @@ const Developer = () => {
 
       let finalWorkflow = JSON.parse(workflowTemplate);
       
-      // Inject filename into LoadImage node (404)
       if (finalWorkflow['404']) {
           finalWorkflow['404'].inputs.image = uploadedFilename;
       } else {
           throw new Error("Could not find the LoadImage node (404) in the workflow template.");
       }
 
-      // Inject prompt into String node (307)
       if (finalWorkflow['307']) {
           finalWorkflow['307'].inputs.String = comfyPrompt;
       } else {
@@ -397,7 +393,6 @@ const Developer = () => {
 
       const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-comfyui', {
         body: {
-          comfyui_address: comfyAddress,
           prompt_workflow: finalWorkflow,
           invoker_user_id: invokerUserId
         }
@@ -513,11 +508,7 @@ const Developer = () => {
           <Card>
             <CardHeader><CardTitle>{t.comfyUIWorkflowTester}</CardTitle></CardHeader>
             <CardContent className="space-y-4">
-              <div>
-                <Label htmlFor="comfy-address">{t.comfyUIServerAddress}</Label>
-                <Input id="comfy-address" value={comfyAddress} onChange={(e) => setComfyAddress(e.target.value)} />
-                <p className="text-xs text-muted-foreground mt-1">{t.comfyUIAddressDescription}</p>
-              </div>
+              <p className="text-sm text-muted-foreground">The ComfyUI server address is now configured securely on the backend.</p>
               <Button onClick={handleQueuePrompt} disabled={!!activeJob && activeJob.status !== 'complete' && activeJob.status !== 'failed'}>
                 {(activeJob && (activeJob.status === 'queued' || activeJob.status === 'processing')) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 {t.queuePrompt}
