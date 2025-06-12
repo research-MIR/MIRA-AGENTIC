@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { useLanguage } from "@/context/LanguageContext";
-import { Loader2, Upload, Image as ImageIcon } from "lucide-react";
+import { Loader2, Upload } from "lucide-react";
 import { RealtimeChannel } from "@supabase/supabase-js";
 
 interface ComfyJob {
@@ -30,6 +30,8 @@ const Developer = () => {
   const [comfyAddress, setComfyAddress] = useState("https://your-ngrok-or-public-url.io");
   const [workflowJson, setWorkflowJson] = useState("");
   const [activeJob, setActiveJob] = useState<ComfyJob | null>(null);
+  const [comfyPrompt, setComfyPrompt] = useState("");
+  const [sourceImage, setSourceImage] = useState<File | null>(null);
 
   useEffect(() => {
     const devAuthStatus = sessionStorage.getItem('dev_authenticated') === 'true';
@@ -64,7 +66,7 @@ const Developer = () => {
     }
   };
 
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleWorkflowFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file && file.type === "application/json") {
       const reader = new FileReader();
@@ -86,51 +88,58 @@ const Developer = () => {
       return showError("Invalid Workflow API JSON.");
     }
 
-    setActiveJob({ id: '', status: 'queued' });
-    const toastId = showLoading("Sending prompt to ComfyUI...");
+    // This is a placeholder for the more complex logic to come.
+    // For now, it will still fail if the workflow requires inputs.
+    showError("Logic not yet implemented. This will be wired up in the next step.");
+    console.log({ comfyPrompt, sourceImage, parsedWorkflow });
+    return;
+
+
+    // setActiveJob({ id: '', status: 'queued' });
+    // const toastId = showLoading("Sending prompt to ComfyUI...");
     
-    try {
-      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-comfyui', {
-        body: {
-          comfyui_address: comfyAddress,
-          prompt_workflow: parsedWorkflow,
-          invoker_user_id: session.user.id
-        }
-      });
+    // try {
+    //   const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-comfyui', {
+    //     body: {
+    //       comfyui_address: comfyAddress,
+    //       prompt_workflow: parsedWorkflow,
+    //       invoker_user_id: session.user.id
+    //     }
+    //   });
 
-      if (error) throw error;
+    //   if (error) throw error;
       
-      const { jobId } = data;
-      if (!jobId) throw new Error("Did not receive a job ID from the server.");
+    //   const { jobId } = data;
+    //   if (!jobId) throw new Error("Did not receive a job ID from the server.");
       
-      dismissToast(toastId);
-      showSuccess("ComfyUI job queued. Waiting for result...");
-      setActiveJob({ id: jobId, status: 'queued' });
+    //   dismissToast(toastId);
+    //   showSuccess("ComfyUI job queued. Waiting for result...");
+    //   setActiveJob({ id: jobId, status: 'queued' });
 
-      if (channelRef.current) {
-        supabase.removeChannel(channelRef.current);
-      }
+    //   if (channelRef.current) {
+    //     supabase.removeChannel(channelRef.current);
+    //   }
 
-      channelRef.current = supabase.channel(`comfyui-job-${jobId}`)
-        .on<ComfyJob>(
-          'postgres_changes',
-          { event: 'UPDATE', schema: 'public', table: 'mira-agent-comfyui-jobs', filter: `id=eq.${jobId}` },
-          (payload) => {
-            console.log('Realtime update received:', payload.new);
-            setActiveJob(payload.new as ComfyJob);
-            if (payload.new.status === 'complete' || payload.new.status === 'failed') {
-              supabase.removeChannel(channelRef.current!);
-              channelRef.current = null;
-            }
-          }
-        )
-        .subscribe();
+    //   channelRef.current = supabase.channel(`comfyui-job-${jobId}`)
+    //     .on<ComfyJob>(
+    //       'postgres_changes',
+    //       { event: 'UPDATE', schema: 'public', table: 'mira-agent-comfyui-jobs', filter: `id=eq.${jobId}` },
+    //       (payload) => {
+    //         console.log('Realtime update received:', payload.new);
+    //         setActiveJob(payload.new as ComfyJob);
+    //         if (payload.new.status === 'complete' || payload.new.status === 'failed') {
+    //           supabase.removeChannel(channelRef.current!);
+    //           channelRef.current = null;
+    //         }
+    //       }
+    //     )
+    //     .subscribe();
 
-    } catch (err: any) {
-      setActiveJob(null);
-      showError(`Failed to queue prompt: ${err.message}`);
-      dismissToast(toastId);
-    }
+    // } catch (err: any) {
+    //   setActiveJob(null);
+    //   showError(`Failed to queue prompt: ${err.message}`);
+    //   dismissToast(toastId);
+    // }
   };
 
   const renderJobStatus = () => {
@@ -183,6 +192,20 @@ const Developer = () => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         <div className="space-y-4">
           <Card>
+            <CardHeader><CardTitle>Workflow Inputs</CardTitle></CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <Label htmlFor="comfy-prompt">Prompt Text</Label>
+                <Textarea id="comfy-prompt" value={comfyPrompt} onChange={(e) => setComfyPrompt(e.target.value)} placeholder="The prompt to inject into your workflow..." />
+              </div>
+              <div>
+                <Label htmlFor="source-image">Source Image (for Img2Img/Upscale)</Label>
+                <Input id="source-image" type="file" onChange={(e) => setSourceImage(e.target.files?.[0] || null)} accept="image/*" />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
             <CardHeader><CardTitle>{t.comfyUIWorkflowTester}</CardTitle></CardHeader>
             <CardContent className="space-y-4">
               <div>
@@ -196,7 +219,7 @@ const Developer = () => {
                   <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
                     <Upload className="mr-2 h-4 w-4" /> {t.uploadWorkflow}
                   </Button>
-                  <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept=".json" />
+                  <input type="file" ref={fileInputRef} onChange={handleWorkflowFileUpload} className="hidden" accept=".json" />
                 </div>
                 <Textarea id="workflow-json" value={workflowJson} onChange={(e) => setWorkflowJson(e.target.value)} placeholder='Paste your ComfyUI "API format" JSON here...' rows={15} className="font-mono text-sm" />
               </div>
