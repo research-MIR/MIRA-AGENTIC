@@ -3,14 +3,16 @@ import { ModelSelector } from "@/components/ModelSelector";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useLanguage } from "@/context/LanguageContext";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Info } from "lucide-react";
 
 interface ControlPanelProps {
   selectedModelId: string | null;
   onModelChange: (modelId: string) => void;
   isDesignerMode: boolean;
   onDesignerModeChange: (value: boolean) => void;
-  pipelineMode: 'auto' | 'on' | 'off';
-  onPipelineModeChange: (value: 'auto' | 'on' | 'off') => void;
+  useTwoStagePipeline: boolean;
+  onUseTwoStagePipelineChange: (value: boolean) => void;
   ratioMode: 'auto' | string;
   onRatioModeChange: (value: 'auto' | string) => void;
   numImagesMode: 'auto' | number;
@@ -23,8 +25,8 @@ export const ControlPanel = ({
   onModelChange,
   isDesignerMode,
   onDesignerModeChange,
-  pipelineMode,
-  onPipelineModeChange,
+  useTwoStagePipeline,
+  onUseTwoStagePipelineChange,
   ratioMode,
   onRatioModeChange,
   numImagesMode,
@@ -43,16 +45,19 @@ export const ControlPanel = ({
           <Switch id="designer-mode" checked={isDesignerMode} onCheckedChange={onDesignerModeChange} />
           <Label htmlFor="designer-mode">{t.designerMode}</Label>
         </div>
-        <div id="pipeline-mode-select" className="flex items-center gap-2">
-          <Label className="text-sm font-medium">Pipeline:</Label>
-          <Select value={pipelineMode} onValueChange={(v) => onPipelineModeChange(v as any)}>
-            <SelectTrigger className="w-[100px]"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="auto">Auto</SelectItem>
-              <SelectItem value="on">On</SelectItem>
-              <SelectItem value="off">Off</SelectItem>
-            </SelectContent>
-          </Select>
+        <div id="pipeline-mode-switch" className="flex items-center space-x-2">
+          <Switch id="pipeline-mode" checked={useTwoStagePipeline} onCheckedChange={onUseTwoStagePipelineChange} />
+          <Label htmlFor="pipeline-mode">{t.twoStagePipeline}</Label>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Info className="h-4 w-4 text-muted-foreground cursor-help" />
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{t.pipelineTip}</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         </div>
         <div id="ratio-mode-select" className="flex items-center gap-2">
           <Label className="text-sm font-medium">Ratio:</Label>

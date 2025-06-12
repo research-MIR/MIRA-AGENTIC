@@ -132,7 +132,7 @@ const Index = () => {
   const [isDragging, setIsDragging] = useState(false);
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [isDesignerMode, setIsDesignerMode] = useState(false);
-  const [pipelineMode, setPipelineMode] = useState<'auto' | 'on' | 'off'>('auto');
+  const [useTwoStagePipeline, setUseTwoStagePipeline] = useState(false);
   const [ratioMode, setRatioMode] = useState<'auto' | string>('auto');
   const [numImagesMode, setNumImagesMode] = useState<'auto' | number>('auto');
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -150,7 +150,7 @@ const Index = () => {
     setIsJobRunning(jobData.status === 'processing');
     setChatTitle(jobData.original_prompt || "Untitled Chat");
     if (jobData.context?.isDesignerMode !== undefined) setIsDesignerMode(jobData.context.isDesignerMode);
-    if (jobData.context?.pipelineMode) setPipelineMode(jobData.context.pipelineMode);
+    if (jobData.context?.pipelineMode) setUseTwoStagePipeline(jobData.context.pipelineMode === 'on');
     if (jobData.context?.selectedModelId) setSelectedModelId(jobData.context.selectedModelId);
     if (jobData.context?.ratioMode) setRatioMode(jobData.context.ratioMode);
     if (jobData.context?.numImagesMode) setNumImagesMode(jobData.context.numImagesMode);
@@ -262,7 +262,18 @@ const Index = () => {
     setIsSending(true);
 
     try {
-        const payload = { jobId, prompt: currentInput, storagePaths: filesToProcess.map(f => f.path), userId: session?.user.id, isDesignerMode, pipelineMode, selectedModelId, language, ratioMode, numImagesMode };
+        const payload = { 
+            jobId, 
+            prompt: currentInput, 
+            storagePaths: filesToProcess.map(f => f.path), 
+            userId: session?.user.id, 
+            isDesignerMode, 
+            pipelineMode: useTwoStagePipeline ? 'on' : 'off', 
+            selectedModelId, 
+            language, 
+            ratioMode, 
+            numImagesMode 
+        };
         if (!payload.userId) throw new Error("User session not found.");
         
         if (jobId) {
@@ -277,7 +288,7 @@ const Index = () => {
     } finally {
       setIsSending(false);
     }
-  }, [input, uploadedFiles, isJobRunning, isSending, jobId, session, isDesignerMode, pipelineMode, selectedModelId, language, ratioMode, numImagesMode, supabase, navigate]);
+  }, [input, uploadedFiles, isJobRunning, isSending, jobId, session, isDesignerMode, useTwoStagePipeline, selectedModelId, language, ratioMode, numImagesMode, supabase, navigate]);
 
   const handleDeleteChat = useCallback(async () => {
     if (!jobId) return;
@@ -335,8 +346,8 @@ const Index = () => {
           onModelChange={setSelectedModelId}
           isDesignerMode={isDesignerMode}
           onDesignerModeChange={setIsDesignerMode}
-          pipelineMode={pipelineMode}
-          onPipelineModeChange={setPipelineMode}
+          useTwoStagePipeline={useTwoStagePipeline}
+          onUseTwoStagePipelineChange={setUseTwoStagePipeline}
           ratioMode={ratioMode}
           onRatioModeChange={setRatioMode}
           numImagesMode={numImagesMode}
