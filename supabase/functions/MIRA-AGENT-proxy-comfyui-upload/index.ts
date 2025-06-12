@@ -6,9 +6,8 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const COMFYUI_ENDPOINT_URL = Deno.env.get('COMFYUI_ENDPOINT_URL');
-
 serve(async (req) => {
+  const COMFYUI_ENDPOINT_URL = Deno.env.get('COMFYUI_ENDPOINT_URL');
   const requestId = req.headers.get("x-request-id") || `upload-proxy-${Date.now()}`;
   console.log(`[UploadProxy][${requestId}] Function invoked.`);
 
@@ -17,6 +16,7 @@ serve(async (req) => {
   }
 
   if (!COMFYUI_ENDPOINT_URL) {
+    console.error(`[UploadProxy][${requestId}] CRITICAL: COMFYUI_ENDPOINT_URL secret is not set.`);
     return new Response(JSON.stringify({ error: "Server configuration error: COMFYUI_ENDPOINT_URL secret is not set." }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500 });
   }
 

@@ -7,8 +7,6 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const COMFYUI_ENDPOINT_URL = Deno.env.get('COMFYUI_ENDPOINT_URL');
-
 const workflowTemplate = `
 {
   "9": {
@@ -288,6 +286,7 @@ const workflowTemplate = `
 `;
 
 serve(async (req) => {
+  const COMFYUI_ENDPOINT_URL = Deno.env.get('COMFYUI_ENDPOINT_URL');
   const requestId = req.headers.get("x-request-id") || `queue-proxy-${Date.now()}`;
   console.log(`[QueueProxy][${requestId}] Function invoked.`);
 
@@ -296,6 +295,7 @@ serve(async (req) => {
   }
 
   if (!COMFYUI_ENDPOINT_URL) {
+    console.error(`[QueueProxy][${requestId}] CRITICAL: COMFYUI_ENDPOINT_URL secret is not set.`);
     return new Response(JSON.stringify({ error: "Server configuration error: COMFYUI_ENDPOINT_URL secret is not set." }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500 });
   }
 
