@@ -72,7 +72,7 @@ export const ModelSelector = ({ selectedModelId, onModelChange, disabled = false
               <TooltipTrigger asChild>
                 <SelectItem value={model.model_id_string}>
                   <div className="flex justify-between w-full items-center">
-                    <span>{model.model_id_string} ({model.provider})</span>
+                    <span>{model.model_id_string}</span>
                     {model.supports_img2img && <Badge variant="secondary">Ref</Badge>}
                   </div>
                 </SelectItem>

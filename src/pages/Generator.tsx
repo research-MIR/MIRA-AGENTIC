@@ -8,12 +8,11 @@ import { ModelSelector } from "@/components/ModelSelector";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { showError, showLoading, dismissToast } from "@/utils/toast";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Sparkles, Wand2, X } from "lucide-react";
+import { Sparkles, Wand2, Info } from "lucide-react";
 import { useImagePreview } from "@/context/ImagePreviewContext";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
-import { cn } from "@/lib/utils";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useLanguage } from "@/context/LanguageContext";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 
@@ -63,7 +62,7 @@ const Generator = () => {
     try {
       if (useTwoStage) {
         dismissToast(toastId);
-        toastId = showLoading("Stage 1: Generating base image with Google...");
+        toastId = showLoading("Stage 1: Generating base image...");
         
         if (!selectedModelId) throw new Error("Please select a model for the first stage.");
         
@@ -76,24 +75,24 @@ const Generator = () => {
                 size: aspectRatio
             } 
         });
-        if (stage1Error || !stage1Result.images || stage1Result.images.length === 0) throw new Error(`Stage 1 (Google) failed: ${stage1Error?.message || 'No image returned'}`);
+        if (stage1Error || !stage1Result.images || stage1Result.images.length === 0) throw new Error(`Stage 1 failed: ${stage1Error?.message || 'No image returned'}`);
         
         const stage1Images = stage1Result.images;
         setIntermediateResult(stage1Images[0]);
 
         dismissToast(toastId);
-        toastId = showLoading("Stage 2: Refining image with Fal.ai...");
+        toastId = showLoading("Stage 2: Refining image...");
         const { data: falResult, error: falError } = await supabase.functions.invoke('MIRA-AGENT-tool-fal-image-to-image', {
           body: { image_urls: [stage1Images[0].publicUrl], prompt: prompt, invoker_user_id: session.user.id }
         });
-        if (falError) throw new Error(`Stage 2 (Fal.ai) failed: ${falError.message}`);
+        if (falError) throw new Error(`Stage 2 failed: ${falError.message}`);
         finalImages = falResult.images;
         setResults(finalImages);
 
       } else {
         // Single Stage Pipeline
         dismissToast(toastId);
-        toastId = showLoading(`Generating with Google...`);
+        toastId = showLoading(`Generating images...`);
         if (!selectedModelId) throw new Error("Please select a model.");
         
         const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-generate-image-google', { 
@@ -172,13 +171,13 @@ const Generator = () => {
               <CardTitle>{t.configureSettings}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-               <div className="flex items-center justify-between rounded-lg border p-3 shadow-sm">
-                <div className="space-y-0.5">
-                  <Label htmlFor="two-stage-mode">{t.twoStageRefinement}</Label>
-                  <p className="text-[0.8rem] text-muted-foreground">{t.twoStageRefinementDescription}</p>
-                </div>
-                <Switch id="two-stage-mode" checked={useTwoStage} onCheckedChange={setUseTwoStage} />
-              </div>
+               <Alert>
+                  <Info className="h-4 w-4" />
+                  <AlertTitle>Pro Tip!</AlertTitle>
+                  <AlertDescription>
+                    {t.refinerSuggestion}
+                  </AlertDescription>
+                </Alert>
               <div>
                 <Label>{t.model}</Label>
                 <ModelSelector selectedModelId={selectedModelId} onModelChange={setSelectedModelId} />
