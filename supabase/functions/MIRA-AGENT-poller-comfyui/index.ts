@@ -15,7 +15,9 @@ const MAX_POLLING_ATTEMPTS = 100; // 5 minutes total
 async function findOutputImage(history: any): Promise<any | null> {
     for (const nodeId in history) {
         const node = history[nodeId];
-        if (node.class_type === "SaveImage" && node.outputs.images) {
+        // More robust check: Look for any node that has an 'images' output array.
+        if (node.outputs && Array.isArray(node.outputs.images) && node.outputs.images.length > 0) {
+            console.log(`[Poller] Found output image in node ${nodeId} of type ${node.class_type}`);
             return node.outputs.images[0];
         }
     }
