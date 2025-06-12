@@ -25,6 +25,12 @@ interface ModelSelectorProps {
   disabled?: boolean;
 }
 
+const modelAliases: { [key: string]: string } = {
+  'imagen-4': 'Photoreal Model',
+  'fal-ai/flux-pro/v1.1-ultra': 'Creative Model',
+  'fal-ai/flux-pro/v1.1-ultra/redux': 'Creative Model (Refined)',
+};
+
 export const ModelSelector = ({ selectedModelId, onModelChange, disabled = false }: ModelSelectorProps) => {
   const [models, setModels] = useState<Model[]>([]);
   const [defaultModelId, setDefaultModelId] = useState<string | null>(null);
@@ -72,7 +78,7 @@ export const ModelSelector = ({ selectedModelId, onModelChange, disabled = false
               <TooltipTrigger asChild>
                 <SelectItem value={model.model_id_string}>
                   <div className="flex justify-between w-full items-center">
-                    <span>{model.model_id_string}</span>
+                    <span>{modelAliases[model.model_id_string] || model.model_id_string}</span>
                     {model.supports_img2img && <Badge variant="secondary">Ref</Badge>}
                   </div>
                 </SelectItem>
