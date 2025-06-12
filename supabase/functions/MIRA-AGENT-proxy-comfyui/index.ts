@@ -311,6 +311,7 @@ serve(async (req) => {
     const { invoker_user_id, upscale_factor, original_prompt_for_gallery } = body;
     let finalWorkflow;
     let imageFilename = body.image_filename;
+    const sourceImageUrl = body.image_filename; // Keep original URL for metadata
 
     // If image_filename is a URL, we need to download it and upload to ComfyUI first
     if (imageFilename && (imageFilename.startsWith('http://') || imageFilename.startsWith('https://'))) {
@@ -384,7 +385,8 @@ serve(async (req) => {
             status: 'queued',
             metadata: {
                 original_prompt_for_gallery: original_prompt_for_gallery || `Refined: ${body.prompt_text?.slice(0, 40) || 'image'}...`,
-                invoker_user_id: invoker_user_id
+                invoker_user_id: invoker_user_id,
+                source_image_url: sourceImageUrl
             }
         })
         .select('id')

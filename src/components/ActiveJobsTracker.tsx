@@ -7,18 +7,22 @@ import { Loader2 } from 'lucide-react';
 import { RealtimeChannel } from '@supabase/supabase-js';
 import { showSuccess, showError } from '@/utils/toast';
 import { downloadImage } from '@/lib/utils';
+import { ActiveJobsModal } from './ActiveJobsModal';
 
 interface ComfyJob {
   id: string;
   status: 'queued' | 'processing' | 'complete' | 'failed';
   final_result?: { publicUrl: string };
   error_message?: string;
+  metadata?: {
+    source_image_url?: string;
+  };
 }
 
 export const ActiveJobsTracker = () => {
   const { supabase, session } = useSession();
   const queryClient = useQueryClient();
-  const [trackedJobs, setTrackedJobs] = useState<ComfyJob[]>([]);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   const { data: activeJobs, isLoading } = useQuery<ComfyJob[]>({
     queryKey: ['activeComfyJobs'],
@@ -40,16 +44,10 @@ export const ActiveJobsTracker = () => {
   });
 
   useEffect(() => {
-    if (activeJobs) {
-      setTrackedJobs(activeJobs);
-    }
-  }, [activeJobs]);
-
-  useEffect(() => {
-    if (!trackedJobs.length) return;
+    if (!activeJobs || activeJobs.length === 0) return;
 
     const channels: RealtimeChannel[] = [];
-    trackedJobs.forEach(job => {
+    activeJobs.forEach(job => {
       const channel = supabase.channel(`comfyui-job-tracker-${job.id}`)
         .on<ComfyJob>(
           'postgres_changes',
@@ -75,25 +73,28 @@ export const ActiveJobsTracker = () => {
     return () => {
       channels.forEach(channel => supabase.removeChannel(channel));
     };
-  }, [trackedJobs, supabase, queryClient]);
+  }, [activeJobs, supabase, queryClient]);
 
-  if (isLoading || !trackedJobs || trackedJobs.length === 0) {
+  if (isLoading || !activeJobs || activeJobs.length === 0) {
     return null;
   }
 
   return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button variant="ghost" className="w-full justify-start gap-2 text-primary">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            <span>{trackedJobs.length} job(s) in progress</span>
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>
-          <p>Your upscaled images will be downloaded automatically when ready.</p>
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <>
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" className="w-full justify-start gap-2 text-primary" onClick={() => setIsModalOpen(true)}>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span>{activeJobs.length} job(s) in progress</span>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p>Click to view details. Your upscaled images will be downloaded automatically when ready.</p>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+      <ActiveJobsModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} jobs={activeJobs} />
+    </>
   );
 };
