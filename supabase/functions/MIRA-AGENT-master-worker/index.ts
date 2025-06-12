@@ -30,8 +30,9 @@ const getDynamicSystemPrompt = (jobContext: any): string => {
 
 **Core Planning Logic:**
 1.  **Analyze Intent:**
+    -   If the user asks to analyze a brand or generate content inspired by a brand, especially if they provide a URL, your first step MUST be to call \`dispatch_to_brand_analyzer\`.
     -   If the user provides an image, you MUST assume it is for style, composition, or subject reference. Your ONLY valid first step is to call \`dispatch_to_artisan_engine\`.
-    -   If the request is text-only, proceed to the Text-to-Image Workflow.
+    -   If the request is text-only and not about a brand, proceed to the Text-to-Image Workflow.
     -   If the request is conversational or ambiguous, use \`finish_task\` to ask for clarification.
 
 2.  **Text-to-Image Workflow:**
@@ -77,6 +78,7 @@ You MUST NOT answer the user directly. Your only output is a tool call.`;
 
 async function getDynamicMasterTools(jobContext: any, supabase: SupabaseClient): Promise<FunctionDeclaration[]> {
     const baseTools: FunctionDeclaration[] = [
+      { name: "dispatch_to_brand_analyzer", description: "Analyzes a brand's online presence (website, social media) to understand its visual identity. Use this when the user asks to analyze a brand or generate content inspired by a brand, especially if they provide a URL.", parameters: { type: Type.OBJECT, properties: { brand_name: { type: Type.STRING, description: "The name of the brand to analyze." } }, required: ["brand_name"] } },
       { name: "dispatch_to_artisan_engine", description: "Generates or refines a detailed image prompt. This is the correct first step if the user provides a reference image.", parameters: { type: Type.OBJECT, properties: { user_request_summary: { type: Type.STRING, description: "A brief summary of the user's request for the Artisan Engine, noting that a reference image was provided for style/composition." } }, required: ["user_request_summary"] } },
       { name: "fal_image_to_image", description: "Refines a batch of images using a secondary AI model.", parameters: { type: Type.OBJECT, properties: { image_urls: { type: Type.ARRAY, items: { type: Type.STRING }, description: "An array of public URLs of the images to be refined." }, prompt: { type: Type.STRING, description: "The detailed prompt from the ArtisanEngine to guide the refinement." } }, required: ["image_urls", "prompt"] } },
       { name: "critique_images", description: "Invokes the Art Director agent to critique generated images.", parameters: { type: Type.OBJECT, properties: { reason_for_critique: { type: Type.STRING, description: "A brief summary of why the critique is necessary." } }, required: ["reason_for_critique"] } },
@@ -313,7 +315,18 @@ serve(async (req) => {
     let toolResponseData;
     const historyParts: Part[] = [];
 
-    if (call.name === 'generate_image') {
+    if (call.name === 'dispatch_to_brand_analyzer') {
+        console.log(`[MasterWorker][${currentJobId}] Dispatching to brand analyzer...`);
+        await supabase.from('mira-agent-jobs').update({ 
+            context: { ...job.context, brand_name: call.args.brand_name } 
+        }).eq('id', currentJobId);
+
+        const { error } = await supabase.functions.invoke('MIRA-AGENT-executor-brand-analyzer', { body: { job_id: currentJobId } });
+        if (error) throw error;
+
+        return new Response(JSON.stringify({ success: true, message: "Brand analysis initiated." }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+
+    } else if (call.name === 'generate_image') {
         console.log(`[MasterWorker][${currentJobId}] Dispatching to text-to-image generator...`);
         const finalModelId = job.context?.selectedModelId;
         if (!finalModelId) throw new Error("Cannot generate image without a selected model in the job context.");

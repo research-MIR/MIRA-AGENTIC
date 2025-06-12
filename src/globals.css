@@ -115,7 +115,7 @@
     @apply mb-1;
   }
   .markdown-content a {
-    @apply text-blue-500 underline hover:text-blue-600;
+    @apply text-blue-500 underline hover:text-blue-600 break-words;
   }
   .markdown-content code {
     @apply px-1 py-0.5 bg-muted rounded-sm font-mono text-sm;
