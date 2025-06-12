@@ -52,12 +52,11 @@ const TourController = ({ children }: { children: ReactNode }) => {
     console.log('[Tour] Pending check effect ran. isTourPending:', isTourPending, 'Path:', location.pathname);
     if (isTourPending && location.pathname === '/chat') {
         console.log('[Tour] Conditions met, opening tour after navigation.');
-        setSteps(steps);
         setCurrentStep(0);
         setIsOpen(true);
         setIsTourPending(false);
     }
-  }, [location.pathname, isTourPending, setCurrentStep, setIsOpen, setSteps, steps]);
+  }, [location.pathname, isTourPending, setCurrentStep, setIsOpen]);
 
   useEffect(() => {
     const checkTourStatus = async () => {
