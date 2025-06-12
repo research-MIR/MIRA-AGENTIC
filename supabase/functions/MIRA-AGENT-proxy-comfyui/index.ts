@@ -315,8 +315,7 @@ serve(async (req) => {
     // If image_filename is a URL, we need to download it and upload to ComfyUI first
     if (imageFilename && (imageFilename.startsWith('http://') || imageFilename.startsWith('https://'))) {
         console.log(`[QueueProxy][${requestId}] Image filename is a URL. Proxying upload...`);
-        const thisUrl = new URL(req.url);
-        const uploadProxyUrl = `${thisUrl.protocol}//${thisUrl.host}/MIRA-AGENT-proxy-comfyui-upload`;
+        const uploadProxyUrl = `https://ukxguvvbgjvukrsdnxmy.supabase.co/functions/v1/MIRA-AGENT-proxy-comfyui-upload`;
         
         const uploadResponse = await fetch(uploadProxyUrl, {
             method: 'POST',
