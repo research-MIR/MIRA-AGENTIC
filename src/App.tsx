@@ -19,7 +19,6 @@ import VirtualTryOn from "./pages/VirtualTryOn";
 import { OnboardingTourProvider, useOnboardingTour } from "./context/OnboardingTourContext";
 import { TourProvider as ReactourProvider, StepType } from '@reactour/tour';
 import { useSession } from "./components/Auth/SessionContextProvider";
-import Refiner from "./pages/Refiner";
 
 const queryClient = new QueryClient();
 
@@ -91,7 +90,6 @@ const AppContent = () => {
             <Route path="/chat/:jobId" element={<Index />} />
             <Route path="/gallery" element={<Gallery />} />
             <Route path="/generator" element={<Generator />} />
-            <Route path="/refiner" element={<Refiner />} />
             <Route path="/developer" element={<Developer />} />
             <Route path="/virtual-try-on" element={<VirtualTryOn />} />
           </Route>
