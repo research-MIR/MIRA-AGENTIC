@@ -233,7 +233,7 @@ const Generator = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                         <h3 className="font-semibold mb-2 text-center">{t.stage1BaseImage}</h3>
-                        <button onClick={() => showImage({ url: intermediateResult.publicUrl })} className="block w-full h-full">
+                        <button onClick={() => showImage({ images: [{ url: intermediateResult.publicUrl }], currentIndex: 0 })} className="block w-full h-full">
                             <img
                                 src={intermediateResult.publicUrl}
                                 alt="Intermediate stage 1 result"
@@ -243,7 +243,7 @@ const Generator = () => {
                     </div>
                     <div>
                         <h3 className="font-semibold mb-2 text-center">{t.stage2RefinedImage}</h3>
-                        <button onClick={() => showImage({ url: results[0].publicUrl })} className="block w-full h-full">
+                        <button onClick={() => showImage({ images: results.map(img => ({ url: img.publicUrl })), currentIndex: 0 })} className="block w-full h-full">
                             <img
                                 src={results[0].publicUrl}
                                 alt="Final refined stage 2 result"
@@ -255,7 +255,14 @@ const Generator = () => {
               ) : results.length > 0 ? (
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   {results.map((image, index) => (
-                    <button onClick={() => showImage({ url: image.publicUrl })} key={index} className="block w-full h-full">
+                    <button 
+                      onClick={() => showImage({ 
+                        images: results.map(img => ({ url: img.publicUrl })), 
+                        currentIndex: index 
+                      })} 
+                      key={index} 
+                      className="block w-full h-full"
+                    >
                       <img
                         src={image.publicUrl}
                         alt={`Generated image ${index + 1}`}
