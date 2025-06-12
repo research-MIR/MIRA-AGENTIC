@@ -1,0 +1,419 @@
+import { useState, useEffect, useRef, useCallback } from "react";
+import { Button } from "@/components/ui/button";
+import { useSession } from "@/components/Auth/SessionContextProvider";
+import { showError, showSuccess, showLoading, dismissToast } from "@/utils/toast";
+import { FileDropzone } from "@/components/FileDropzone";
+import { RealtimeChannel } from "@supabase/supabase-js";
+import { useParams, useNavigate } from "react-router-dom";
+import { useLanguage } from "@/context/LanguageContext";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ControlPanel } from "@/components/Chat/ControlPanel";
+import { PromptInput } from "@/components/Chat/PromptInput";
+import { MessageList, Message } from "@/components/Chat/MessageList";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { ThemeToggle } from "@/components/ThemeToggle";
+import { PlusCircle, Trash2, RefreshCw } from "lucide-react";
+
+interface UploadedFile {
+  name: string;
+  path: string;
+  previewUrl: string;
+  isImage: boolean;
+}
+
+const sanitizeFilename = (filename: string): string => {
+  return filename
+    .replace(/[^a-zA-Z0-9_.-]/g, '_')
+    .replace(/_{2,}/g, '_')
+    .replace(/\.{2,}/g, '.');
+};
+
+const parseHistoryToMessages = (history: any[]): Message[] => {
+    const messages: Message[] = [];
+    if (!history) return messages;
+
+    let creativeProcessBuffer: any[] = [];
+
+    const flushCreativeProcessBuffer = () => {
+        if (creativeProcessBuffer.length > 0) {
+            const lastIterationWithRefinement = [...creativeProcessBuffer].reverse().find(it => it.refined_generation_result);
+            const finalGeneration = lastIterationWithRefinement 
+                ? lastIterationWithRefinement.refined_generation_result 
+                : [...creativeProcessBuffer].reverse().find(it => it.initial_generation_result)?.initial_generation_result;
+            
+            messages.push({
+                from: 'bot',
+                creativeProcessResponse: {
+                    isCreativeProcess: true,
+                    iterations: [...creativeProcessBuffer],
+                    final_generation_result: finalGeneration,
+                }
+            });
+            creativeProcessBuffer = [];
+        }
+    };
+
+    for (const turn of history) {
+        if (turn.role === 'user') {
+            flushCreativeProcessBuffer();
+            const userMessage: Message = { from: 'user', imageUrls: [] };
+            const textPart = turn.parts.find((p: any) => p.text);
+            const imageParts = turn.parts.filter((p: any) => p.inlineData);
+
+            if (textPart) userMessage.text = textPart.text;
+            if (imageParts.length > 0) {
+                userMessage.imageUrls = imageParts.map((p: any) => `data:${p.inlineData.mimeType};base64,${p.inlineData.data}`);
+            }
+            if (userMessage.text || (userMessage.imageUrls && userMessage.imageUrls.length > 0)) {
+                messages.push(userMessage);
+            }
+        } else if (turn.role === 'model') {
+            const textPart = turn.parts.find((p: any) => p.text);
+            const functionCallPart = turn.parts.find((p: any) => p.functionCall);
+
+            if (textPart && textPart.text) {
+                flushCreativeProcessBuffer();
+                messages.push({ from: 'bot', text: textPart.text });
+            } else if (functionCallPart && functionCallPart.functionCall.name === 'finish_task') {
+                flushCreativeProcessBuffer();
+                const summary = functionCallPart.functionCall.args.summary;
+                if (summary) {
+                    messages.push({ from: 'bot', text: summary });
+                }
+            }
+        } else if (turn.role === 'function') {
+            const response = turn.parts[0]?.functionResponse?.response;
+            const name = turn.parts[0]?.functionResponse?.name;
+
+            if (response) {
+                if (name === 'dispatch_to_artisan_engine') {
+                    if (creativeProcessBuffer.length > 0) flushCreativeProcessBuffer();
+                    creativeProcessBuffer.push({ artisan_result: response });
+                } else if (['generate_image', 'generate_image_with_reference'].includes(name)) {
+                    if (creativeProcessBuffer.length === 0) {
+                        creativeProcessBuffer.push({});
+                    }
+                    const lastIteration = creativeProcessBuffer[creativeProcessBuffer.length - 1];
+                    if (lastIteration) {
+                       lastIteration.initial_generation_result = { toolName: name, response: response };
+                    }
+                } else if (name === 'fal_image_to_image') {
+                    if (creativeProcessBuffer.length > 0) {
+                       const lastIteration = creativeProcessBuffer[creativeProcessBuffer.length - 1];
+                       lastIteration.refined_generation_result = { toolName: name, response: response };
+                    }
+                } else if (name === 'critique_images') {
+                    if (creativeProcessBuffer.length > 0) {
+                        const lastIteration = creativeProcessBuffer[creativeProcessBuffer.length - 1];
+                        lastIteration.critique_result = response;
+                        if (response.is_good_enough === false) {
+                            flushCreativeProcessBuffer();
+                        }
+                    }
+                } else if (response.isBrandAnalysis) {
+                    flushCreativeProcessBuffer();
+                    messages.push({ from: 'bot', brandAnalysisResponse: response });
+                }
+            }
+        }
+    }
+    
+    flushCreativeProcessBuffer();
+    
+    return messages;
+};
+
+const Index = () => {
+  const { supabase, session } = useSession();
+  const { jobId } = useParams();
+  const navigate = useNavigate();
+  const { language, t } = useLanguage();
+  const queryClient = useQueryClient();
+  
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [chatTitle, setChatTitle] = useState<string>(t.newChat);
+  const [input, setInput] = useState("");
+  const [isJobRunning, setIsJobRunning] = useState(false);
+  const [isSending, setIsSending] = useState(false);
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+  const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
+  const [isDesignerMode, setIsDesignerMode] = useState(false);
+  const [pipelineMode, setPipelineMode] = useState<'auto' | 'on' | 'off'>('auto');
+  const [ratioMode, setRatioMode] = useState<'auto' | string>('auto');
+  const [numImagesMode, setNumImagesMode] = useState<'auto' | number>('auto');
+  const channelRef = useRef<RealtimeChannel | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  const resetChatState = useCallback(() => {
+    setMessages([{ from: "bot", text: "Ciao! Come posso aiutarti oggi?" }]);
+    setChatTitle(t.newChat);
+    setInput("");
+    setUploadedFiles([]);
+    setIsJobRunning(false);
+    setIsSending(false);
+    if (channelRef.current) {
+      channelRef.current.unsubscribe();
+      channelRef.current = null;
+    }
+  }, [t.newChat]);
+
+  const processJobData = useCallback((jobData: any) => {
+    if (!jobData) return;
+    setIsJobRunning(jobData.status === 'processing');
+    setChatTitle(jobData.original_prompt || "Untitled Chat");
+    if (jobData.context?.isDesignerMode !== undefined) setIsDesignerMode(jobData.context.isDesignerMode);
+    if (jobData.context?.pipelineMode) setPipelineMode(jobData.context.pipelineMode);
+    if (jobData.context?.selectedModelId) setSelectedModelId(jobData.context.selectedModelId);
+    if (jobData.context?.ratioMode) setRatioMode(jobData.context.ratioMode);
+    if (jobData.context?.numImagesMode) setNumImagesMode(jobData.context.numImagesMode);
+
+    let conversationMessages = parseHistoryToMessages(jobData.context?.history);
+    
+    if (jobData.status === 'processing') {
+        conversationMessages.push({ from: 'bot', jobInProgress: { jobId: jobData.id, message: 'This job is in progress...' } });
+    } else if (jobData.status === 'failed') {
+        conversationMessages.push({ from: 'bot', text: `I'm sorry, an error occurred: ${jobData.error_message}` });
+    }
+    setMessages(conversationMessages);
+  }, []);
+
+  const subscribeToJob = useCallback((jobIdToWatch: string) => {
+    if (channelRef.current) {
+        if (channelRef.current.topic === `realtime:public:mira-agent-jobs:id=eq.${jobIdToWatch}`) {
+            return; // Already subscribed to this channel
+        }
+        channelRef.current.unsubscribe();
+    }
+    const channel = supabase.channel(`job_${jobIdToWatch}`);
+    channel.on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'mira-agent-jobs', filter: `id=eq.${jobIdToWatch}` }, (payload) => {
+      processJobData(payload.new);
+    }).subscribe();
+    channelRef.current = channel;
+  }, [supabase, processJobData]);
+
+  const fetchChatJob = async (jobId: string | undefined) => {
+    if (!jobId || !session?.user) return null;
+    const { data, error } = await supabase.from("mira-agent-jobs").select("*").eq("id", jobId).eq("user_id", session.user.id).single();
+    if (error) throw new Error("Could not load chat history.");
+    return data;
+  };
+
+  const { data: jobData, error } = useQuery({
+    queryKey: ['chatJob', jobId],
+    queryFn: () => fetchChatJob(jobId),
+    enabled: !!jobId,
+    refetchOnWindowFocus: false,
+    retry: 1,
+  });
+
+  useEffect(() => {
+    if (jobId && jobData) {
+      processJobData(jobData);
+      subscribeToJob(jobId);
+    } else if (!jobId) {
+      resetChatState();
+    }
+  }, [jobId, jobData, processJobData, subscribeToJob, resetChatState]);
+
+  useEffect(() => {
+    if (error) {
+      showError(error.message);
+      navigate("/chat");
+    }
+  }, [error, navigate]);
+
+  const handleFileUpload = useCallback(async (files: FileList | null): Promise<UploadedFile[]> => {
+    if (!files || files.length === 0) return [];
+    const toastId = showLoading(`Uploading ${files.length} file(s)...`);
+    try {
+      const uploadPromises = Array.from(files).map(file => {
+        const fileExt = file.name.split('.').pop()?.toLowerCase();
+        const sanitized = sanitizeFilename(file.name);
+        const filePath = `${session?.user.id}/${Date.now()}-${sanitized}`;
+        return supabase.storage.from('mira-agent-user-uploads').upload(filePath, file).then(({ error }) => {
+          if (error) throw error;
+          const isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(fileExt || '');
+          const previewUrl = isImage ? URL.createObjectURL(file) : '';
+          return { name: file.name, path: filePath, previewUrl, isImage };
+        });
+      });
+      const newFiles = await Promise.all(uploadPromises);
+      setUploadedFiles(prev => [...prev, ...newFiles]);
+      dismissToast(toastId);
+      showSuccess(`${files.length} file(s) uploaded successfully!`);
+      return newFiles;
+    } catch (error: any) {
+      dismissToast(toastId);
+      showError("Upload failed: " + error.message);
+      return [];
+    }
+  }, [session, supabase]);
+
+  const handleSendMessage = useCallback(async () => {
+    console.log("[SendMessage] Function triggered. Current state:", { isJobRunning, isSending, input: input.trim(), fileCount: uploadedFiles.length });
+    if ((!input.trim() && uploadedFiles.length === 0) || isJobRunning || isSending) {
+      console.warn("[SendMessage] Guard clause triggered. Aborting send.");
+      return;
+    }
+    let currentInput = input;
+    if (!currentInput.trim() && uploadedFiles.length > 0) currentInput = "Please analyze the attached file(s).";
+    
+    const filesToProcess = [...uploadedFiles];
+    setInput("");
+    setUploadedFiles([]);
+    setIsSending(true);
+
+    try {
+        const payload = { jobId, prompt: currentInput, storagePaths: filesToProcess.map(f => f.path), userId: session?.user.id, isDesignerMode, pipelineMode, selectedModelId, language, ratioMode, numImagesMode };
+        if (!payload.userId) throw new Error("User session not found.");
+        
+        console.log("[SendMessage] Preparing to invoke Supabase function. Payload:", payload);
+
+        if (jobId) {
+            console.log(`[SendMessage] Continuing job ${jobId}...`);
+            await supabase.functions.invoke("MIRA-AGENT-continue-job", { body: payload });
+        } else {
+            console.log("[SendMessage] Starting new job...");
+            const { data, error } = await supabase.functions.invoke("MIRA-AGENT-master-worker", { body: payload });
+            if (error) throw error;
+            console.log("[SendMessage] New job started successfully. Response:", data);
+            navigate(`/chat/${data.reply.jobId}`);
+        }
+    } catch (error: any) {
+      console.error("[SendMessage] CATCH BLOCK: An error occurred during function invocation.", error);
+      showError("Error communicating with Mira: " + error.message);
+    } finally {
+      setIsSending(false);
+    }
+  }, [input, uploadedFiles, isJobRunning, isSending, jobId, session, isDesignerMode, pipelineMode, selectedModelId, language, ratioMode, numImagesMode, supabase, navigate]);
+
+  const handleDeleteChat = useCallback(async () => {
+    if (!jobId) return;
+    const toastId = showLoading("Deleting chat...");
+    try {
+      const { error } = await supabase.rpc('delete_mira_agent_job', { p_job_id: jobId });
+      if (error) throw error;
+      dismissToast(toastId);
+      showSuccess(t.chatDeleted);
+      await queryClient.invalidateQueries({ queryKey: ["jobHistory"] });
+      navigate("/chat");
+    } catch (error: any) {
+      dismissToast(toastId);
+      showError(`${t.errorDeletingChat}: ${error.message}`);
+    }
+  }, [jobId, supabase, navigate, queryClient, t]);
+
+  const handleRefresh = useCallback(async () => {
+    if (!jobId) return;
+    const toastId = showLoading("Refreshing chat and logging data...");
+    try {
+        console.log(`--- REFRESHING JOB ${jobId} ---`);
+        
+        const { data: rawJobData, error } = await supabase
+            .from("mira-agent-jobs")
+            .select("*")
+            .eq("id", jobId)
+            .single();
+
+        if (error) throw error;
+
+        console.log("--- RAW JOB DATA FROM DB ---");
+        console.log(JSON.stringify(rawJobData, null, 2));
+
+        const parsedMessages = parseHistoryToMessages(rawJobData.context?.history);
+        
+        if (rawJobData.status === 'processing') {
+            parsedMessages.push({ from: 'bot', jobInProgress: { jobId: rawJobData.id, message: 'This job is in progress...' } });
+        }
+
+        console.log("--- PARSED MESSAGES ARRAY ---");
+        console.log(parsedMessages);
+
+        await queryClient.invalidateQueries({ queryKey: ['chatJob', jobId] });
+        showSuccess("Chat refreshed and data logged to console.");
+
+    } catch (err: any) {
+        console.error("--- REFRESH FAILED ---", err);
+        showError(`Failed to refresh chat: ${err.message}`);
+    } finally {
+        dismissToast(toastId);
+    }
+  }, [jobId, supabase, queryClient]);
+
+  return (
+    <div className="flex flex-col h-full relative" onDragEnter={() => setIsDragging(true)}>
+      {isDragging && <FileDropzone onDrop={(files) => handleFileUpload(files)} onDragStateChange={setIsDragging} />}
+      
+      <header className="border-b p-4 md:p-6 flex justify-between items-center shrink-0">
+        <div>
+          <h1 className="text-2xl font-bold truncate">{jobId ? chatTitle : t.newChat}</h1>
+          <p className="text-muted-foreground">{t.agentInteraction}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <LanguageSwitcher />
+          <ThemeToggle />
+          {jobId && (
+            <>
+              <Button variant="outline" size="icon" title="Refresh Chat" onClick={handleRefresh}>
+                <RefreshCw className="h-4 w-4" />
+              </Button>
+              <AlertDialog>
+                <AlertDialogTrigger asChild><Button variant="destructive" size="icon" title={t.deleteChat}><Trash2 className="h-4 w-4" /></Button></AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader><AlertDialogTitle>{t.deleteConfirmationTitle}</AlertDialogTitle><AlertDialogDescription>{t.deleteConfirmationDescription}</AlertDialogDescription></AlertDialogHeader>
+                  <AlertDialogFooter><AlertDialogCancel>{t.cancel}</AlertDialogCancel><AlertDialogAction onClick={handleDeleteChat}>{t.delete}</AlertDialogAction></AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </>
+          )}
+          <Button id="new-chat-button" variant="outline" onClick={() => navigate("/chat")}><PlusCircle className="mr-2 h-4 w-4" />{t.newChat}</Button>
+        </div>
+      </header>
+
+      <div className="flex-1 overflow-y-auto">
+        <div className="p-4 md:p-6 space-y-4">
+            <MessageList messages={messages} jobId={jobId} />
+            <div ref={messagesEndRef} />
+        </div>
+      </div>
+
+      <div className="border-t shrink-0 sticky bottom-0 bg-background">
+        <ControlPanel
+          selectedModelId={selectedModelId}
+          onModelChange={setSelectedModelId}
+          isDesignerMode={isDesignerMode}
+          onDesignerModeChange={setIsDesignerMode}
+          pipelineMode={pipelineMode}
+          onPipelineModeChange={setPipelineMode}
+          ratioMode={ratioMode}
+          onRatioModeChange={setRatioMode}
+          numImagesMode={numImagesMode}
+          onNumImagesModeChange={setNumImagesMode}
+          isJobActive={!!jobId}
+        />
+        <PromptInput
+          input={input}
+          onInputChange={setInput}
+          onFileUpload={handleFileUpload}
+          uploadedFiles={uploadedFiles}
+          onRemoveFile={(path) => setUploadedFiles(files => files.filter(f => f.path !== path))}
+          isJobRunning={isJobRunning}
+          isSending={isSending}
+          onSendMessage={handleSendMessage}
+        />
+      </div>
+    </div>
+  );
+};
+
+export default Index;
