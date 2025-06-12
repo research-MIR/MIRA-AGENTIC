@@ -25,6 +25,7 @@ const TourController = ({ children }: { children: ReactNode }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const [hasCompletedTour, setHasCompletedTour] = useState<boolean | null>(null);
+  const [isTourPending, setIsTourPending] = useState(false);
 
   const steps: StepType[] = [
     { selector: '#model-selector', content: t.onboardingModelDescription },
@@ -40,6 +41,20 @@ const TourController = ({ children }: { children: ReactNode }) => {
     { selector: '#gallery-tabs', content: "You can view all your images or filter them by how they were created." },
     { selector: '#chat-nav-link', content: "Tour complete! You're ready to create. Click here to go back to the chat." },
   ];
+
+  const startTour = useCallback(() => {
+    navigate('/chat');
+    setIsTourPending(true);
+  }, [navigate]);
+
+  useEffect(() => {
+    if (isTourPending && location.pathname.startsWith('/chat')) {
+        setSteps?.(steps);
+        setCurrentStep(0);
+        setIsOpen(true);
+        setIsTourPending(false);
+    }
+  }, [location.pathname, isTourPending, setSteps, setCurrentStep, setIsOpen, steps]);
 
   useEffect(() => {
     const checkTourStatus = async () => {
@@ -62,7 +77,7 @@ const TourController = ({ children }: { children: ReactNode }) => {
       }
     };
     checkTourStatus();
-  }, [session, supabase]);
+  }, [session, supabase, startTour]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -78,12 +93,6 @@ const TourController = ({ children }: { children: ReactNode }) => {
       action();
     }
   }, [currentStep, isOpen, navigate]);
-
-  const startTour = useCallback(() => {
-    setSteps?.(steps);
-    setCurrentStep(0);
-    setIsOpen(true);
-  }, [setSteps, setIsOpen, setCurrentStep, steps]);
 
   const markTourAsComplete = async () => {
     if (hasCompletedTour) return;
