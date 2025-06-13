@@ -30,10 +30,10 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
 
   try {
-    const { jobId, prompt, storagePaths, isDesignerMode, pipelineMode, ratioMode, numImagesMode } = await req.json();
+    const { jobId, prompt, storagePaths, isDesignerMode, pipelineMode, ratioMode, numImagesMode, isSilent } = await req.json();
     if (!jobId) { throw new Error("jobId is required to continue a job."); }
 
-    console.log(`[ContinueJob][${jobId}] Received request.`);
+    console.log(`[ContinueJob][${jobId}] Received request. isSilent: ${isSilent}`);
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
     const { data: job, error: fetchError } = await supabase.from('mira-agent-jobs').select('*').eq('id', jobId).single();
@@ -73,12 +73,6 @@ serve(async (req) => {
         }
     }
 
-    if (userParts.length > 0) {
-        history.push({ role: 'user', parts: userParts });
-    } else {
-        console.warn(`[ContinueJob][${jobId}] No new prompt or files provided. Re-triggering without new user input.`);
-    }
-
     const newContext = { 
         ...job.context, 
         history, 
@@ -87,6 +81,17 @@ serve(async (req) => {
         ratioMode,
         numImagesMode
     };
+
+    if (userParts.length > 0) {
+        if (isSilent) {
+            console.log(`[ContinueJob][${jobId}] Handling silent choice. Storing in pending_user_choice.`);
+            newContext.pending_user_choice = prompt;
+        } else {
+            history.push({ role: 'user', parts: userParts });
+        }
+    } else {
+        console.warn(`[ContinueJob][${jobId}] No new prompt or files provided. Re-triggering without new user input.`);
+    }
 
     console.log(`[ContinueJob][${jobId}] Updating job history and settings. Setting status to 'processing'.`);
     await supabase.from('mira-agent-jobs').update({ 

@@ -290,6 +290,17 @@ serve(async (req) => {
     let history: Content[] = job.context?.history || [];
     let iterationNumber = job.context?.iteration_number || 1;
     
+    // Check for and inject a pending user choice into the history for the planner
+    if (job.context?.pending_user_choice) {
+        console.log(`[MasterWorker][${currentJobId}] Found pending user choice. Injecting into history for planner.`);
+        history.push({ role: 'user', parts: [{ text: job.context.pending_user_choice }] });
+        // Clear it from the context immediately after processing it
+        const { error: updateError } = await supabase.from('mira-agent-jobs').update({
+            context: { ...job.context, pending_user_choice: undefined }
+        }).eq('id', currentJobId);
+        if (updateError) console.error(`[MasterWorker][${currentJobId}] Failed to clear pending_user_choice:`, updateError);
+    }
+
     console.log(`[MasterWorker][${currentJobId}] History has ${history.length} turns. Iteration: ${iterationNumber}. Preparing to send to Gemini planner.`);
     console.log(`[MasterWorker][${currentJobId}] Full history being sent to planner:`, JSON.stringify(history, null, 2));
     

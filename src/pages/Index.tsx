@@ -155,7 +155,7 @@ const Index = () => {
     scrollToBottom();
   }, [messages]);
 
-  const handleSendMessage = useCallback(async (messageText?: string) => {
+  const handleSendMessage = useCallback(async (messageText?: string, isSilent = false) => {
     const textToSend = messageText || input;
     if ((!textToSend.trim() && uploadedFiles.length === 0) || isJobRunning || isSending) {
       return;
@@ -176,7 +176,8 @@ const Index = () => {
             selectedModelId, 
             language, 
             ratioMode, 
-            numImagesMode 
+            numImagesMode,
+            isSilent
         };
         if (!payload.userId) throw new Error("User session not found.");
         
@@ -193,23 +194,6 @@ const Index = () => {
       setIsSending(false);
     }
   }, [input, uploadedFiles, isJobRunning, isSending, jobId, session, isDesignerMode, selectedModelId, language, ratioMode, numImagesMode, supabase, navigate]);
-
-  const handleImageChoice = useCallback(async (choiceText: string) => {
-    if (!jobId || isJobRunning || isSending) return;
-    
-    // Don't add the choice to the visible message list.
-    // Just send it to the backend to continue the job.
-    setIsSending(true);
-    try {
-        const payload = { jobId, prompt: choiceText, userId: session?.user.id };
-        if (!payload.userId) throw new Error("User session not found.");
-        await supabase.functions.invoke("MIRA-AGENT-continue-job", { body: payload });
-    } catch (error: any) {
-        showError("Error communicating with Mira: " + error.message);
-    } finally {
-        setIsSending(false);
-    }
-  }, [jobId, isJobRunning, isSending, session, supabase]);
 
   const processJobData = useCallback((jobData: any) => {
     if (!jobData) return;
@@ -386,7 +370,7 @@ const Index = () => {
 
       <div className="flex-1 overflow-y-auto">
         <div className="p-4 md:p-6 space-y-4">
-            <MessageList messages={messages} jobId={jobId} onRefinementComplete={handleRefinementComplete} onSendMessage={handleImageChoice} />
+            <MessageList messages={messages} jobId={jobId} onRefinementComplete={handleRefinementComplete} onSendMessage={(text) => handleSendMessage(text, true)} />
             <div ref={messagesEndRef} />
         </div>
       </div>
