@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -89,6 +90,11 @@ serve(async (req) => {
             });
             if (!imageResponse.ok) throw new Error(`Failed to download image from URL: ${imageResponse.statusText}`);
             imageFile = await imageResponse.blob();
+        } else if (body.base64_image_data) {
+            console.log(`[QueueProxy][${requestId}] Handling JSON body with base64_image_data.`);
+            const imageBuffer = decodeBase64(body.base64_image_data);
+            imageFile = new Blob([imageBuffer], { type: body.mime_type || 'image/png' });
+            sourceImageUrl = `agent_history_image.png`;
         }
     }
     

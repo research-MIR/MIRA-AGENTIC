@@ -34,13 +34,14 @@ serve(async (req) => {
         throw new Error("Could not find an image in the history to refine.");
     }
 
-    const { data: base64Data } = lastImagePart.inlineData;
+    const { data: base64Data, mimeType } = lastImagePart.inlineData;
 
     console.log(`[RefinementExecutor][${job_id}] Found image data. Calling ComfyUI proxy directly.`);
 
     const { error: toolError } = await supabase.functions.invoke('MIRA-AGENT-proxy-comfyui', {
         body: {
             base64_image_data: base64Data,
+            mime_type: mimeType,
             prompt_text: prompt,
             upscale_factor: upscale_factor,
             main_agent_job_id: job_id,
