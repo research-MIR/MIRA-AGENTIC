@@ -289,7 +289,8 @@ serve(async (req) => {
     let history: Content[] = job.context?.history || [];
     let iterationNumber = job.context?.iteration_number || 1;
     
-    console.log(`[MasterWorker][${currentJobId}] History has ${history.length} turns. Iteration: ${iterationNumber}. Preparing to send to Gemini planner.`);
+    console.log(`[MasterWorker][${currentJobId}] History has ${history.length} turns. Iteration: ${iterationNumber}.`);
+    console.log(`[MasterWorker][${currentJobId}] History being sent to planner:`, JSON.stringify(history, null, 2));
     
     const dynamicTools = await getDynamicMasterTools(job.context, supabase);
     const systemPrompt = getDynamicSystemPrompt(job.context);
