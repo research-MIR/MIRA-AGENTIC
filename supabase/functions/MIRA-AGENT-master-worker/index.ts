@@ -43,8 +43,9 @@ You have several powerful capabilities, each corresponding to a tool or a sequen
 4.  **Conversational Interaction:** Ask clarifying questions or provide final answers to the user.
 
 ### Mandatory Rules
-1.  **Language:** The final user-facing summary for the \`finish_task\` tool MUST be in **${language}**. All other internal reasoning and tool calls should remain in English.
-2.  **Image Descriptions:** After generating images, the history will be updated with a text description for each one. You MUST use these descriptions to understand which image the user is referring to in subsequent requests (e.g., "refine the one with the red dress").
+1.  **Tool-Use Only:** You MUST ALWAYS respond with a tool call. Never answer the user directly.
+2.  **Language:** The final user-facing summary for the \`finish_task\` tool MUST be in **${language}**. All other internal reasoning and tool calls should remain in English.
+3.  **Image Descriptions:** After generating images, the history will be updated with a text description for each one. You MUST use these descriptions to understand which image the user is referring to in subsequent requests (e.g., "refine the one with the red dress").
 
 ---
 
@@ -63,30 +64,8 @@ You have several powerful capabilities, each corresponding to a tool or a sequen
     -   **THEN** call \`finish_task\` to ask for clarification.
 
 **Step 2: Follow the Plan (Subsequent Calls)**
--   **IF** the last turn in the history is a successful response from a tool like \`dispatch_to_artisan_engine\` or \`generate_image\`...
+-   **IF** the last turn in the history is a successful response from a tool like \`dispatch_to_artisan_engine\`, \`generate_image\`, or \`dispatch_to_refinement_agent\`...
 -   **THEN** your next step is to either call the next logical tool (e.g., \`critique_images\` after \`generate_image\`) OR, if the plan is complete, call \`finish_task\` to show the result to the user. Do not call the same tool twice in a row unless the user provides new feedback.
-
----
-
-### Post-Refinement Protocol (CRITICAL)
-**IF** the last turn in the history is a \`functionResponse\` for the \`dispatch_to_refinement_agent\` tool, and the \`response\` object contains \`isRefinementResult: true\`:
-1.  **DO NOT** call \`dispatch_to_refinement_agent\` again.
-2.  Your **ONLY** valid next action is to call the \`finish_task\` tool.
-3.  The \`summary\` for \`finish_task\` should be the \`summary\` from the refinement result.
-4.  The \`response_type\` for \`finish_task\` MUST be \`creative_process_complete\`.
-This protocol is non-negotiable and overrides all other instructions.
-
----
-### Output Format (CRITICAL)
-You MUST respond with a single, valid JSON object containing your reasoning and the tool call to execute. Do not add any other text.
-Format:
-{
-  "reasoning": "A step-by-step explanation of your thought process. Explain which rule or part of the history led you to choose this specific tool and its arguments.",
-  "tool_call": {
-    "name": "tool_name",
-    "args": { "arg1": "value1" }
-  }
-}
 
 ---
 ### User Preferences
@@ -99,9 +78,9 @@ async function getDynamicMasterTools(jobContext: any, supabase: SupabaseClient):
     const baseTools: FunctionDeclaration[] = [
       { name: "dispatch_to_brand_analyzer", description: "Analyzes a brand's online presence (website, social media) to understand its visual identity. Use this when the user asks to analyze a brand or generate content inspired by a brand, especially if they provide a URL.", parameters: { type: Type.OBJECT, properties: { brand_name: { type: Type.STRING, description: "The name of the brand to analyze." } }, required: ["brand_name"] } },
       { name: "dispatch_to_artisan_engine", description: "Generates or refines a detailed image prompt. This is the correct first step if the user provides a reference image.", parameters: { type: Type.OBJECT, properties: { user_request_summary: { type: Type.STRING, description: "A brief summary of the user's request for the Artisan Engine, noting that a reference image was provided for style/composition." } }, required: ["user_request_summary"] } },
-      { name: "dispatch_to_refinement_agent", description: "When the user asks to refine, improve, or upscale the most recent image in the conversation, call this tool. DO NOT call this tool if the previous turn was already a response from this tool.", parameters: { type: Type.OBJECT, properties: { prompt: { type: Type.STRING, description: "The user's instructions for refinement." }, upscale_factor: { type: Type.NUMBER, description: "The upscale factor to use. 1.2 for 'refine', 1.4 for 'improve', 2.0 for 'upscale'." } }, required: ["prompt", "upscale_factor"] } },
+      { name: "dispatch_to_refinement_agent", description: "When the user asks to refine, improve, or upscale the most recent image in the conversation, call this tool.", parameters: { type: Type.OBJECT, properties: { prompt: { type: Type.STRING, description: "The user's instructions for refinement." }, upscale_factor: { type: Type.NUMBER, description: "The upscale factor to use. 1.2 for 'refine', 1.4 for 'improve', 2.0 for 'upscale'." } }, required: ["prompt", "upscale_factor"] } },
       { name: "critique_images", description: "Invokes the Art Director agent to critique generated images.", parameters: { type: Type.OBJECT, properties: { reason_for_critique: { type: Type.STRING, description: "A brief summary of why the critique is necessary." } }, required: ["reason_for_critique"] } },
-      { name: "finish_task", description: "Call this to respond to the user. CRITICAL: This is the ONLY valid tool to call after a refinement job (dispatch_to_refinement_agent) has successfully completed.", parameters: { type: Type.OBJECT, properties: { response_type: { type: Type.STRING, enum: ["clarification_question", "creative_process_complete", "text"], description: "The type of response to send." }, summary: { type: Type.STRING, description: "The message to send to the user." }, follow_up_message: { type: Type.STRING, description: "A helpful follow-up message." } }, required: ["response_type", "summary"] } },
+      { name: "finish_task", description: "Call this to respond to the user.", parameters: { type: Type.OBJECT, properties: { response_type: { type: Type.STRING, enum: ["clarification_question", "creative_process_complete", "text"], description: "The type of response to send." }, summary: { type: Type.STRING, description: "The message to send to the user." }, follow_up_message: { type: Type.STRING, description: "A helpful follow-up message." } }, required: ["response_type", "summary"] } },
     ];
 
     const { data: models, error: modelsError } = await supabase
@@ -300,7 +279,7 @@ serve(async (req) => {
     let history: Content[] = job.context?.history || [];
     let iterationNumber = job.context?.iteration_number || 1;
     
-    console.log(`[MasterWorker][${currentJobId}] History has ${history.length} turns. Iteration: ${iterationNumber}.`);
+    console.log(`[MasterWorker][${currentJobId}] History has ${history.length} turns. Iteration: ${iterationNumber}. Preparing to send to Gemini planner.`);
     
     const dynamicTools = await getDynamicMasterTools(job.context, supabase);
     const systemPrompt = getDynamicSystemPrompt(job.context);
@@ -312,9 +291,6 @@ serve(async (req) => {
         result = await ai.models.generateContent({
           model: MODEL_NAME,
           contents: history,
-          generationConfig: {
-            responseMimeType: "application/json",
-          },
           config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] }, tools: [{ functionDeclarations: dynamicTools }] }
         });
         break;
@@ -327,25 +303,10 @@ serve(async (req) => {
 
     if (!result) throw new Error("AI planner failed to respond after all retries.");
 
-    const responseText = result.text;
-    if (!responseText) throw new Error("AI planner returned an empty response.");
+    const functionCalls = result.functionCalls;
+    if (!functionCalls || functionCalls.length === 0) throw new Error("Orchestrator did not return a tool call.");
 
-    let parsedResponse;
-    try {
-        parsedResponse = JSON.parse(responseText);
-    } catch (e) {
-        console.error(`[MasterWorker][${currentJobId}] Failed to parse planner's JSON response. Raw text: ${responseText}`);
-        throw new Error(`Failed to parse planner's JSON response.`);
-    }
-
-    const { reasoning, tool_call } = parsedResponse;
-    if (!reasoning || !tool_call) {
-        throw new Error(`Planner's response is missing 'reasoning' or 'tool_call'. Response: ${responseText}`);
-    }
-
-    console.log(`[MasterWorker][${currentJobId}] Planner Reasoning: ${reasoning}`);
-    const call = tool_call;
-    
+    const call = functionCalls[0];
     console.log(`[MasterWorker][${currentJobId}] Gemini decided to call tool: ${call.name} with args:`, call.args);
     history.push({ role: 'model', parts: [{ functionCall: call }] });
     
@@ -433,19 +394,7 @@ serve(async (req) => {
         let finalStatus = 'complete';
 
         console.log(`[MasterWorker][${currentJobId}] Finish task called with type: ${response_type}.`);
-        
-        const lastFunctionResponse = [...history].reverse().find(turn => turn.role === 'function')?.parts[0]?.functionResponse;
-
-        if (lastFunctionResponse?.name === 'dispatch_to_refinement_agent' && lastFunctionResponse?.response?.isRefinementResult) {
-            finalResult = {
-                isCreativeProcess: true,
-                iterations: [],
-                final_generation_result: {
-                    toolName: 'dispatch_to_refinement_agent',
-                    response: lastFunctionResponse.response
-                }
-            };
-        } else if (response_type === 'creative_process_complete') {
+        if (response_type === 'creative_process_complete') {
             finalResult = { isCreativeProcess: true };
         } else {
             finalResult = { text: summary };
