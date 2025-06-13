@@ -162,6 +162,16 @@ const Index = () => {
     }
     
     const filesToProcess = [...uploadedFiles];
+
+    if (!isSilent) {
+      const optimisticMessage: Message = {
+        from: 'user',
+        text: textToSend,
+        imageUrls: filesToProcess.map(f => f.previewUrl)
+      };
+      setMessages(prev => [...prev, optimisticMessage]);
+    }
+
     setInput("");
     setUploadedFiles([]);
     setIsSending(true);
