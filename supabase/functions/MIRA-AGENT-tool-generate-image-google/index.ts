@@ -143,7 +143,8 @@ serve(async (req)=>{
             sampleCount: 1, 
             aspectRatio: aspectRatioString, 
             negativePrompt: negative_prompt, 
-            seed: seed ? Number(seed) + i : undefined 
+            seed: seed ? Number(seed) + i : undefined,
+            addWatermark: false // Fix: Disable watermark to allow seed usage
         }
       };
       return (async () => {

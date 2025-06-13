@@ -40,10 +40,20 @@ serve(async (req) => {
         if (!image_url) throw new Error("Request must be FormData or JSON with 'image_url'.");
 
         console.log(`[UploadProxy][${requestId}] Fetching image from URL: ${image_url}`);
-        const imageResponse = await fetch(image_url);
-        if (!imageResponse.ok) throw new Error(`Failed to download image from URL: ${imageResponse.statusText}`);
+        // Fix: Pass Authorization headers to reliably fetch from Supabase Storage
+        const imageResponse = await fetch(image_url, {
+            headers: {
+                'Authorization': req.headers.get('Authorization')!,
+                'apikey': Deno.env.get('SUPABASE_ANON_KEY')!
+            }
+        });
+        if (!imageResponse.ok) {
+            const errorText = await imageResponse.text();
+            console.error(`[UploadProxy][${requestId}] Failed to download image. Status: ${imageResponse.status}. Body: ${errorText}`);
+            throw new Error(`Failed to download image from URL: ${imageResponse.statusText}`);
+        }
         const imageBlob = await imageResponse.blob();
-        const filename = image_url.split('/').pop() || 'image.png';
+        const filename = image_url.split('/').pop()?.split('?')[0] || 'image.png';
         uploadFormData.append('image', imageBlob, filename);
     }
 
