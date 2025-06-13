@@ -80,12 +80,22 @@ const parseHistoryToMessages = (history: any[]): Message[] => {
             const name = turn.parts[0]?.functionResponse?.name;
 
             if (response) {
+                if (name === 'dispatch_to_refinement_agent' && response.isImageGeneration) {
+                    flushCreativeProcessBuffer();
+                    messages.push({ from: 'bot', imageGenerationResponse: response });
+                    continue;
+                }
+
                 if (name === 'dispatch_to_artisan_engine') {
                     if (creativeProcessBuffer.length > 0) flushCreativeProcessBuffer();
                     creativeProcessBuffer.push({ artisan_result: response });
                 } else if (['generate_image', 'generate_image_with_reference'].includes(name)) {
                     if (creativeProcessBuffer.length === 0) {
-                        creativeProcessBuffer.push({});
+                        if (response.isImageGeneration) {
+                            flushCreativeProcessBuffer();
+                            messages.push({ from: 'bot', imageGenerationResponse: response });
+                            continue;
+                        }
                     }
                     const lastIteration = creativeProcessBuffer[creativeProcessBuffer.length - 1];
                     if (lastIteration) {
