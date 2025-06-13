@@ -53,7 +53,7 @@ export const ActiveJobsTracker = () => {
           'postgres_changes',
           { event: 'UPDATE', schema: 'public', table: 'mira-agent-comfyui-jobs', filter: `id=eq.${job.id}` },
           (payload) => {
-            const updatedJob = payload.new;
+            const updatedJob = payload.new as ComfyJob;
             if (updatedJob.status === 'complete' || updatedJob.status === 'failed') {
               if (updatedJob.status === 'complete' && updatedJob.final_result?.publicUrl) {
                 showSuccess(`Upscale complete! Downloading now...`);
@@ -61,7 +61,13 @@ export const ActiveJobsTracker = () => {
               } else if (updatedJob.status === 'failed') {
                 showError(`Upscale failed: ${updatedJob.error_message || 'Unknown error'}`);
               }
-              queryClient.invalidateQueries({ queryKey: ['activeComfyJobs'] });
+              
+              // Optimistically update the UI by removing the completed job from the cache
+              queryClient.setQueryData(['activeComfyJobs'], (oldData: ComfyJob[] | undefined) => {
+                return oldData ? oldData.filter(j => j.id !== updatedJob.id) : [];
+              });
+
+              // Invalidate gallery query to show the new image
               queryClient.invalidateQueries({ queryKey: ['generatedImages'] });
             }
           }
