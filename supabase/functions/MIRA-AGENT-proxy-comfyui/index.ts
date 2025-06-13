@@ -152,7 +152,7 @@ const workflowTemplate = `
         0
       ],
       "seed": 701371193782021,
-      "steps": 20,
+      "steps": 28,
       "cfg": 1,
       "sampler_name": "euler",
       "scheduler": "normal",
