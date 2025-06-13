@@ -155,31 +155,18 @@ const Refine = () => {
     setIsLoading(true);
     setActiveJob({ id: '', status: 'queued' });
     setComparisonImages(null);
-    let toastId = showLoading("Caricamento dell'immagine sorgente...");
+    let toastId = showLoading("Invio del job di affinamento...");
 
     try {
-      const uploadFormData = new FormData();
-      uploadFormData.append('image', sourceImageFile);
-      
-      const { data: uploadResult, error: uploadError } = await supabase.functions.invoke('MIRA-AGENT-proxy-comfyui-upload', {
-          body: uploadFormData
-      });
-
-      if (uploadError) throw new Error(`Caricamento immagine fallito: ${uploadError.message}`);
-      const uploadedFilename = uploadResult.name;
-      if (!uploadedFilename) throw new Error("ComfyUI non ha restituito un nome file per l'immagine caricata.");
-      
-      dismissToast(toastId);
-      toastId = showLoading("Invio del prompt a ComfyUI...");
+      const formData = new FormData();
+      formData.append('image', sourceImageFile);
+      formData.append('prompt_text', prompt);
+      formData.append('invoker_user_id', session.user.id);
+      formData.append('upscale_factor', String(upscaleFactor));
+      formData.append('original_prompt_for_gallery', `Refined: ${prompt.slice(0, 40)}...`);
 
       const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-comfyui', {
-        body: {
-          prompt_text: prompt,
-          image_filename: uploadedFilename,
-          invoker_user_id: session.user.id,
-          upscale_factor: upscaleFactor,
-          original_prompt_for_gallery: `Refined: ${prompt.slice(0, 40)}...`
-        }
+        body: formData
       });
 
       if (error) throw error;
