@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { GoogleAuth } from "npm:google-auth-library";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { decode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
+import { GoogleGenAI } from 'https://esm.sh/@google/genai@0.15.0';
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -11,10 +12,48 @@ const corsHeaders = {
 
 const GOOGLE_VERTEX_AI_SA_KEY_JSON = Deno.env.get('GOOGLE_VERTEX_AI_SA_KEY_JSON');
 const GOOGLE_PROJECT_ID = Deno.env.get('GOOGLE_PROJECT_ID');
+const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const GOOGLE_LOCATION = 'us-central1';
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 1500;
+
+const visionSystemPrompt = "You are an expert image analyst. Your sole task is to describe the provided image in a single, concise sentence. Focus on the main subject, their pose, and key attributes. Do not mention colors or background unless they are critical for identification. Example: 'A woman standing with her hands on her hips, wearing a red dress.'";
+
+async function describeImage(base64Data: string, mimeType: string): Promise<string> {
+    if (!GEMINI_API_KEY) {
+        console.warn("[ImageDescriber] Missing GEMINI_API_KEY, skipping description.");
+        return "No description available.";
+    }
+    try {
+        const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+        const result = await ai.models.generateContent({
+            model: "gemini-1.5-flash-latest",
+            contents: [{
+                role: 'user',
+                parts: [{
+                    inlineData: {
+                        mimeType: mimeType,
+                        data: base64Data
+                    }
+                }, {
+                    text: "Describe this image based on the system instructions."
+                }]
+            }],
+            config: {
+                systemInstruction: {
+                    role: "system",
+                    parts: [{ text: visionSystemPrompt }]
+                }
+            }
+        });
+        return result.text.trim();
+    } catch (error) {
+        console.error("[ImageDescriber] Error generating description:", error.message);
+        return "Description generation failed.";
+    }
+}
+
 
 function mapSizeToGoogleAspectRatio(size?: string): string {
     if (!size) return "1:1";
@@ -144,7 +183,12 @@ serve(async (req)=>{
       const filePath = `${invoker_user_id}/${Date.now()}_${index}.png`;
       await supabaseAdmin.storage.from(GENERATED_IMAGES_BUCKET).upload(filePath, imageBuffer, { contentType: 'image/png', upsert: true });
       const { data: { publicUrl } } = supabaseAdmin.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
-      return { storagePath: filePath, publicUrl };
+      
+      // Self-analysis step
+      const description = await describeImage(prediction.bytesBase64Encoded, 'image/png');
+      console.log(`[ImageGenerator-Google][${requestId}] Generated description for image ${index + 1}: "${description}"`);
+
+      return { storagePath: filePath, publicUrl, description };
     });
 
     const processedImages = await Promise.all(uploadPromises);

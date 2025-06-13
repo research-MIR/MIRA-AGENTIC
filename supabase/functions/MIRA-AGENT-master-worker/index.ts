@@ -45,6 +45,7 @@ You have several powerful capabilities, each corresponding to a tool or a sequen
 ### Mandatory Rules
 1.  **Tool-Use Only:** You MUST ALWAYS respond with a tool call. Never answer the user directly.
 2.  **Language:** The final user-facing summary for the \`finish_task\` tool MUST be in **${language}**. All other internal reasoning and tool calls should remain in English.
+3.  **Image Descriptions:** After generating images, the history will be updated with a text description for each one. You MUST use these descriptions to understand which image the user is referring to in subsequent requests (e.g., "refine the one with the red dress").
 
 ---
 
@@ -54,7 +55,7 @@ This is how you decide which tool to use first.
 
 **Step 1: Analyze User Intent**
 -   **IF** the user asks to "refine", "improve", or "upscale" an image...
-    -   **THEN** your first and only step is to call \`propose_refinement_options\`.
+    -   **THEN** your first and only step is to call \`propose_refinement_options\`. You should pass the user's specific request (e.g., "the one with the red dress") to the tool.
 -   **IF** the user asks to analyze a brand, or generate content inspired by a brand (e.g., "create an ad for Nike"), especially if they provide a URL...
     -   **THEN** your first and only step is to call \`dispatch_to_brand_analyzer\`.
 -   **ELSE IF** the user provides an image for a creative task (e.g., "make this more cinematic," "use this style")...
@@ -75,7 +76,7 @@ async function getDynamicMasterTools(jobContext: any, supabase: SupabaseClient):
     const baseTools: FunctionDeclaration[] = [
       { name: "dispatch_to_brand_analyzer", description: "Analyzes a brand's online presence (website, social media) to understand its visual identity. Use this when the user asks to analyze a brand or generate content inspired by a brand, especially if they provide a URL.", parameters: { type: Type.OBJECT, properties: { brand_name: { type: Type.STRING, description: "The name of the brand to analyze." } }, required: ["brand_name"] } },
       { name: "dispatch_to_artisan_engine", description: "Generates or refines a detailed image prompt. This is the correct first step if the user provides a reference image.", parameters: { type: Type.OBJECT, properties: { user_request_summary: { type: Type.STRING, description: "A brief summary of the user's request for the Artisan Engine, noting that a reference image was provided for style/composition." } }, required: ["user_request_summary"] } },
-      { name: "propose_refinement_options", description: "When the user asks to refine, improve, or upscale an image, call this tool to find all generated images in the conversation and present them as options.", parameters: { type: Type.OBJECT, properties: {}, required: [] } },
+      { name: "propose_refinement_options", description: "When the user asks to refine, improve, or upscale an image, call this tool. If the user specifies which image they want (e.g., 'the one with the red dress'), pass their query.", parameters: { type: Type.OBJECT, properties: { user_query_for_image: { type: Type.STRING, description: "The user's specific description of the image they want to refine." } }, required: [] } },
       { name: "critique_images", description: "Invokes the Art Director agent to critique generated images.", parameters: { type: Type.OBJECT, properties: { reason_for_critique: { type: Type.STRING, description: "A brief summary of why the critique is necessary." } }, required: ["reason_for_critique"] } },
       { name: "finish_task", description: "Call this to respond to the user.", parameters: { type: Type.OBJECT, properties: { response_type: { type: Type.STRING, enum: ["clarification_question", "creative_process_complete", "text"], description: "The type of response to send." }, summary: { type: Type.STRING, description: "The message to send to the user." }, follow_up_message: { type: Type.STRING, description: "A helpful follow-up message." } }, required: ["response_type", "summary"] } },
     ];
@@ -358,23 +359,22 @@ serve(async (req) => {
         historyParts.push({ functionResponse: { name: call.name, response: toolResponseData } });
 
     } else if (call.name === 'propose_refinement_options') {
-        console.log(`[MasterWorker][${currentJobId}] Handling refinement proposal...`);
-        const generatedImages = history
-            .filter(turn => turn.role === 'function' && (turn.parts[0]?.functionResponse?.name === 'generate_image' || turn.parts[0]?.functionResponse?.name === 'fal_image_to_image'))
-            .flatMap(turn => turn.parts[0]?.functionResponse?.response?.images || [])
-            .map((img: any) => ({ url: img.publicUrl, jobId: currentJobId }));
+        console.log(`[MasterWorker][${currentJobId}] Dispatching to refinement tool...`);
+        const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-propose-refinement', {
+            body: {
+                history: history,
+                user_query_for_image: call.args.user_query_for_image,
+                job_id: currentJobId
+            }
+        });
+        if (error) throw error;
+        toolResponseData = data;
 
-        if (generatedImages.length === 0) {
-            toolResponseData = { text: "I couldn't find any images in our conversation to refine. Please generate an image first." };
-            historyParts.push({ functionResponse: { name: 'finish_task', response: toolResponseData } });
-        } else {
-            const finalResult = {
-                isRefinementProposal: true,
-                summary: "Of course! Which of these images would you like to refine?",
-                options: generatedImages,
-            };
-            await supabase.from('mira-agent-jobs').update({ status: 'awaiting_feedback', final_result: finalResult, context: { ...job.context, history } }).eq('id', currentJobId);
+        if (toolResponseData.isRefinementProposal) {
+            await supabase.from('mira-agent-jobs').update({ status: 'awaiting_feedback', final_result: toolResponseData, context: { ...job.context, history } }).eq('id', currentJobId);
             return new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        } else {
+            historyParts.push({ functionResponse: { name: call.name, response: toolResponseData } });
         }
     } else if (call.name === 'dispatch_to_artisan_engine' || call.name === 'critique_images') {
         const toolName = call.name === 'dispatch_to_artisan_engine' ? 'MIRA-AGENT-tool-generate-image-prompt' : 'MIRA-AGENT-tool-critique-images';
