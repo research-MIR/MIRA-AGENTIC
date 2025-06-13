@@ -77,7 +77,8 @@ async function wakeUpMainAgent(supabase: any, comfyJob: any, finalResult: any) {
                 functionResponse: {
                     name: 'dispatch_to_refinement_agent',
                     response: {
-                        isImageGeneration: true,
+                        isRefinementResult: true,
+                        summary: "The image refinement process is complete.",
                         images: [finalResult]
                     }
                 }

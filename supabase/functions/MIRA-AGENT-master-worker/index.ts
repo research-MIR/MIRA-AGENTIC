@@ -64,8 +64,18 @@ You have several powerful capabilities, each corresponding to a tool or a sequen
     -   **THEN** call \`finish_task\` to ask for clarification.
 
 **Step 2: Follow the Plan (Subsequent Calls)**
--   **IF** the last turn in the history is a successful response from a tool like \`dispatch_to_artisan_engine\`, \`generate_image\`, or \`dispatch_to_refinement_agent\`...
+-   **IF** the last turn in the history is a successful response from a tool like \`dispatch_to_artisan_engine\` or \`generate_image\`...
 -   **THEN** your next step is to either call the next logical tool (e.g., \`critique_images\` after \`generate_image\`) OR, if the plan is complete, call \`finish_task\` to show the result to the user. Do not call the same tool twice in a row unless the user provides new feedback.
+
+---
+
+### Post-Refinement Protocol (CRITICAL)
+**IF** the last turn in the history is a \`functionResponse\` for the \`dispatch_to_refinement_agent\` tool, and the \`response\` object contains \`isRefinementResult: true\`:
+1.  **DO NOT** call \`dispatch_to_refinement_agent\` again.
+2.  Your **ONLY** valid next action is to call the \`finish_task\` tool.
+3.  The \`summary\` for \`finish_task\` should be the \`summary\` from the refinement result.
+4.  The \`response_type\` for \`finish_task\` MUST be \`creative_process_complete\`.
+This protocol is non-negotiable and overrides all other instructions.
 
 ---
 ### User Preferences
@@ -394,7 +404,19 @@ serve(async (req) => {
         let finalStatus = 'complete';
 
         console.log(`[MasterWorker][${currentJobId}] Finish task called with type: ${response_type}.`);
-        if (response_type === 'creative_process_complete') {
+        
+        const lastFunctionResponse = [...history].reverse().find(turn => turn.role === 'function')?.parts[0]?.functionResponse;
+
+        if (lastFunctionResponse?.name === 'dispatch_to_refinement_agent' && lastFunctionResponse?.response?.isRefinementResult) {
+            finalResult = {
+                isCreativeProcess: true,
+                iterations: [],
+                final_generation_result: {
+                    toolName: 'dispatch_to_refinement_agent',
+                    response: lastFunctionResponse.response
+                }
+            };
+        } else if (response_type === 'creative_process_complete') {
             finalResult = { isCreativeProcess: true };
         } else {
             finalResult = { text: summary };
