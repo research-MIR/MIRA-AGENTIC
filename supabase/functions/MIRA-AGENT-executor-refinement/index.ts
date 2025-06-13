@@ -26,16 +26,34 @@ serve(async (req) => {
 
     const history = job.context?.history || [];
     
-    // Find the most recent generated image URL from the history
-    const lastImageGenerationTurn = [...history].reverse().find(turn => 
-        turn.role === 'function' && 
-        turn.parts[0]?.functionResponse?.response?.isImageGeneration &&
-        turn.parts[0]?.functionResponse?.response?.images?.length > 0
-    );
+    let imageUrlToRefine: string | null = null;
+    let imageBase64Data: string | null = null;
+    let imageMimeType: string | null = 'image/png';
+    let imageDataSource: 'generated' | 'uploaded' | null = null;
 
-    const imageUrlToRefine = lastImageGenerationTurn?.parts[0]?.functionResponse?.response?.images[0]?.publicUrl;
+    // Search history in reverse to find the absolute last image, regardless of source
+    for (const turn of [...history].reverse()) {
+        if (turn.role === 'function' && turn.parts[0]?.functionResponse?.response?.isImageGeneration && turn.parts[0]?.functionResponse?.response?.images?.length > 0) {
+            imageUrlToRefine = turn.parts[0].functionResponse.response.images[0].publicUrl;
+            imageDataSource = 'generated';
+            break; // Found the most recent generated image, stop searching
+        }
+        if (turn.role === 'user') {
+            const imagePart = turn.parts.find((p: any) => p.inlineData);
+            if (imagePart) {
+                imageBase64Data = imagePart.inlineData.data;
+                imageMimeType = imagePart.inlineData.mimeType;
+                imageDataSource = 'uploaded';
+                break; // Found the most recent user-uploaded image, stop searching
+            }
+        }
+    }
 
-    if (imageUrlToRefine) {
+    if (!imageDataSource) {
+        throw new Error("Could not find any image in the conversation history to refine.");
+    }
+
+    if (imageDataSource === 'generated' && imageUrlToRefine) {
         console.log(`[RefinementExecutor][${job_id}] Found generated image URL: ${imageUrlToRefine}. Calling ComfyUI proxy with URL.`);
         
         const { error: toolError } = await supabase.functions.invoke('MIRA-AGENT-proxy-comfyui', {
@@ -48,24 +66,13 @@ serve(async (req) => {
             }
         });
         if (toolError) throw toolError;
-    } else {
-        // If no generated image, look for a user-uploaded one as a fallback
-        const lastImagePart = [...history].reverse()
-            .flatMap(turn => turn.parts)
-            .find(part => part.inlineData);
-        
-        if (!lastImagePart || !lastImagePart.inlineData) {
-            throw new Error("Could not find an image in the history to refine.");
-        }
-        
-        const { data: base64Data, mimeType } = lastImagePart.inlineData;
-
+    } else if (imageDataSource === 'uploaded' && imageBase64Data) {
         console.log(`[RefinementExecutor][${job_id}] Found user-uploaded image data. Calling ComfyUI proxy directly with base64.`);
 
         const { error: toolError } = await supabase.functions.invoke('MIRA-AGENT-proxy-comfyui', {
             body: {
-                base64_image_data: base64Data,
-                mime_type: mimeType,
+                base64_image_data: imageBase64Data,
+                mime_type: imageMimeType,
                 prompt_text: prompt,
                 upscale_factor: upscale_factor,
                 main_agent_job_id: job_id,
@@ -73,6 +80,8 @@ serve(async (req) => {
             }
         });
         if (toolError) throw toolError;
+    } else {
+        throw new Error("Image data source was identified but the corresponding data was missing.");
     }
 
     console.log(`[RefinementExecutor][${job_id}] Pausing main job and awaiting refinement result.`);
