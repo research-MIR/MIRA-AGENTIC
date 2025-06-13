@@ -8,14 +8,25 @@ import Developer from "./pages/Developer";
 import Login from "./pages/Login";
 import Layout from "./components/Layout";
 import ProtectedRoute from "./components/Auth/ProtectedRoute";
-import { useLanguage } from "./context/LanguageContext";
 import VirtualTryOn from "./pages/VirtualTryOn";
 import Refine from "./pages/Refine";
-import { useOnboardingTour } from "./context/OnboardingTourContext";
-import { TourProvider as ReactourProvider, StepType } from '@reactour/tour';
-import { useSession } from "./components/Auth/SessionContextProvider";
 
-const App = () => {
+// Imports moved from main.tsx
+import { SessionContextProvider, useSession } from "./components/Auth/SessionContextProvider.tsx";
+import { ThemeProvider } from "./components/ThemeProvider.tsx";
+import { LanguageProvider, useLanguage } from "./context/LanguageContext.tsx";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { ImagePreviewProvider } from "./context/ImagePreviewContext.tsx";
+import { ImagePreviewModal } from "./components/ImagePreviewModal.tsx";
+import { TooltipProvider } from "./components/ui/tooltip.tsx";
+import { Toaster } from "./components/ui/toaster.tsx";
+import { Toaster as Sonner } from "./components/ui/sonner.tsx";
+import { OnboardingTourProvider, useOnboardingTour } from "./context/OnboardingTourContext.tsx";
+import { TourProvider as ReactourProvider, StepType } from '@reactour/tour';
+
+const queryClient = new QueryClient();
+
+const AppRoutes = () => {
   const { isTourOpen, closeTour, isTourPending, openTour, startTour } = useOnboardingTour();
   const { t } = useLanguage();
   const { session, supabase } = useSession();
@@ -91,6 +102,28 @@ const App = () => {
         <Route path="*" element={<NotFound />} />
       </Routes>
     </ReactourProvider>
+  );
+};
+
+const App = () => {
+  return (
+    <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+      <SessionContextProvider>
+        <LanguageProvider>
+          <QueryClientProvider client={queryClient}>
+            <OnboardingTourProvider>
+              <ImagePreviewProvider modal={(data, onClose) => <ImagePreviewModal data={data} onClose={onClose} />}>
+                <TooltipProvider>
+                  <Toaster />
+                  <Sonner position="top-right" />
+                  <AppRoutes />
+                </TooltipProvider>
+              </ImagePreviewProvider>
+            </OnboardingTourProvider>
+          </QueryClientProvider>
+        </LanguageProvider>
+      </SessionContextProvider>
+    </ThemeProvider>
   );
 };
 
