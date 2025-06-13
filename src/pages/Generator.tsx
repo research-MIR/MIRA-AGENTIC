@@ -8,13 +8,14 @@ import { ModelSelector } from "@/components/ModelSelector";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { showError, showLoading, dismissToast } from "@/utils/toast";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Sparkles, Wand2, Info } from "lucide-react";
+import { Sparkles, Wand2, Info, UploadCloud, X } from "lucide-react";
 import { useImagePreview } from "@/context/ImagePreviewContext";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useLanguage } from "@/context/LanguageContext";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 
 interface ImageResult {
   publicUrl: string;
@@ -48,6 +49,40 @@ const Generator = () => {
   const [results, setResults] = useState<ImageResult[]>([]);
   const [intermediateResult, setIntermediateResult] = useState<ImageResult | null>(null);
   const [useTwoStage, setUseTwoStage] = useState(false);
+  
+  const [styleReferenceImageFile, setStyleReferenceImageFile] = useState<File | null>(null);
+  const [styleReferenceImageUrl, setStyleReferenceImageUrl] = useState<string | null>(null);
+  const [garmentReferenceImageFile, setGarmentReferenceImageFile] = useState<File | null>(null);
+  const [garmentReferenceImageUrl, setGarmentReferenceImageUrl] = useState<string | null>(null);
+
+  const createChangeHandler = (setFile: (file: File) => void, setUrl: (url: string) => void) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setFile(file);
+      const previewUrl = URL.createObjectURL(file);
+      setUrl(previewUrl);
+    }
+  };
+
+  const createRemoveHandler = (setFile: (file: null) => void, setUrl: (url: null) => void, url: string | null) => () => {
+    if (url) {
+      URL.revokeObjectURL(url);
+    }
+    setFile(null);
+    setUrl(null);
+  };
+
+  const handleStyleReferenceImageChange = createChangeHandler(setStyleReferenceImageFile, setStyleReferenceImageUrl);
+  const handleRemoveStyleReferenceImage = createRemoveHandler(setStyleReferenceImageFile, setStyleReferenceImageUrl, styleReferenceImageUrl);
+  const handleGarmentReferenceImageChange = createChangeHandler(setGarmentReferenceImageFile, setGarmentReferenceImageUrl);
+  const handleRemoveGarmentReferenceImage = createRemoveHandler(setGarmentReferenceImageFile, setGarmentReferenceImageUrl, garmentReferenceImageUrl);
+
+  useEffect(() => {
+    return () => {
+      if (styleReferenceImageUrl) URL.revokeObjectURL(styleReferenceImageUrl);
+      if (garmentReferenceImageUrl) URL.revokeObjectURL(garmentReferenceImageUrl);
+    };
+  }, [styleReferenceImageUrl, garmentReferenceImageUrl]);
 
   const handleGenerate = async () => {
     if (!prompt.trim()) return showError("Please enter a prompt.");
@@ -133,6 +168,33 @@ const Generator = () => {
     }
   };
 
+  const renderUploader = (label: string, imageUrl: string | null, onFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void, onRemove: () => void, inputId: string) => (
+    <div>
+      <Label>{label}</Label>
+      {imageUrl ? (
+        <div className="mt-2 relative">
+          <img src={imageUrl} alt="Reference" className="w-full h-auto rounded-md object-contain max-h-60" />
+          <Button variant="destructive" size="icon" className="absolute top-2 right-2 h-6 w-6" onClick={onRemove}>
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+      ) : (
+        <div className="mt-2 flex justify-center rounded-lg border border-dashed border-border px-6 py-10">
+          <div className="text-center">
+            <UploadCloud className="mx-auto h-12 w-12 text-muted-foreground" />
+            <div className="mt-4 flex text-sm leading-6 text-muted-foreground">
+              <Label htmlFor={inputId} className="relative cursor-pointer rounded-md bg-background font-semibold text-primary focus-within:outline-none focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 hover:text-primary/80">
+                <span>Upload a file</span>
+                <Input id={inputId} type="file" className="sr-only" onChange={onFileChange} accept="image/*" />
+              </Label>
+            </div>
+            <p className="text-xs leading-5 text-muted-foreground">PNG, JPG, etc.</p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <div className="p-4 md:p-8 h-screen overflow-y-auto">
       <header className="pb-4 mb-8 border-b flex justify-between items-center">
@@ -162,6 +224,17 @@ const Generator = () => {
                   <Label htmlFor="negative-prompt">{t.negativePrompt}</Label>
                   <Textarea id="negative-prompt" value={negativePrompt} onChange={(e) => setNegativePrompt(e.target.value)} placeholder={t.negativePromptPlaceholder} rows={3} />
                 </div>
+                <Accordion type="single" collapsible className="w-full">
+                  <AccordionItem value="item-1">
+                    <AccordionTrigger>Reference Images (Optional)</AccordionTrigger>
+                    <AccordionContent>
+                      <div className="space-y-4 pt-4">
+                        {renderUploader(t.styleReference, styleReferenceImageUrl, handleStyleReferenceImageChange, handleRemoveStyleReferenceImage, "style-reference-image-upload")}
+                        {renderUploader(t.garmentReference, garmentReferenceImageUrl, handleGarmentReferenceImageChange, handleRemoveGarmentReferenceImage, "garment-reference-image-upload")}
+                      </div>
+                    </AccordionContent>
+                  </AccordionItem>
+                </Accordion>
               </div>
             </CardContent>
           </Card>
