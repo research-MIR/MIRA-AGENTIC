@@ -34,8 +34,30 @@ const parseHistoryToMessages = (history: any[]): Message[] => {
     const messages: Message[] = [];
     if (!history) return messages;
 
+    let creativeProcessBuffer: any[] = [];
+
+    const flushCreativeProcessBuffer = () => {
+        if (creativeProcessBuffer.length > 0) {
+            const lastIterationWithRefinement = [...creativeProcessBuffer].reverse().find(it => it.refined_generation_result);
+            const finalGeneration = lastIterationWithRefinement 
+                ? lastIterationWithRefinement.refined_generation_result 
+                : [...creativeProcessBuffer].reverse().find(it => it.initial_generation_result)?.initial_generation_result;
+            
+            messages.push({
+                from: 'bot',
+                creativeProcessResponse: {
+                    isCreativeProcess: true,
+                    iterations: [...creativeProcessBuffer],
+                    final_generation_result: finalGeneration,
+                }
+            });
+            creativeProcessBuffer = [];
+        }
+    };
+
     for (const turn of history) {
         if (turn.role === 'user') {
+            flushCreativeProcessBuffer();
             const userMessage: Message = { from: 'user', imageUrls: [] };
             const textPart = turn.parts.find((p: any) => p.text);
             const imageParts = turn.parts.filter((p: any) => p.inlineData);
@@ -50,21 +72,58 @@ const parseHistoryToMessages = (history: any[]): Message[] => {
         } else if (turn.role === 'model') {
             const textPart = turn.parts.find((p: any) => p.text);
             if (textPart && textPart.text) {
+                flushCreativeProcessBuffer();
                 messages.push({ from: 'bot', text: textPart.text });
             }
         } else if (turn.role === 'function') {
             const response = turn.parts[0]?.functionResponse?.response;
+            const name = turn.parts[0]?.functionResponse?.name;
+
             if (response) {
-                if (response.isArtisanResponse) {
-                    messages.push({ from: 'bot', artisanResponse: response });
-                } else if (response.isImageGeneration) {
+                if (name === 'dispatch_to_refinement_agent' && response.isImageGeneration) {
+                    flushCreativeProcessBuffer();
                     messages.push({ from: 'bot', imageGenerationResponse: response });
+                    continue;
+                }
+
+                if (name === 'dispatch_to_artisan_engine') {
+                    if (creativeProcessBuffer.length > 0) flushCreativeProcessBuffer();
+                    creativeProcessBuffer.push({ artisan_result: response });
+                } else if (['generate_image', 'generate_image_with_reference'].includes(name)) {
+                    if (creativeProcessBuffer.length === 0) {
+                        if (response.isImageGeneration) {
+                            flushCreativeProcessBuffer();
+                            messages.push({ from: 'bot', imageGenerationResponse: response });
+                            continue;
+                        }
+                    }
+                    const lastIteration = creativeProcessBuffer[creativeProcessBuffer.length - 1];
+                    if (lastIteration) {
+                       lastIteration.initial_generation_result = { toolName: name, response: response };
+                    }
+                } else if (name === 'fal_image_to_image') {
+                    if (creativeProcessBuffer.length > 0) {
+                       const lastIteration = creativeProcessBuffer[creativeProcessBuffer.length - 1];
+                       lastIteration.refined_generation_result = { toolName: name, response: response };
+                    }
+                } else if (name === 'critique_images') {
+                    if (creativeProcessBuffer.length > 0) {
+                        const lastIteration = creativeProcessBuffer[creativeProcessBuffer.length - 1];
+                        lastIteration.critique_result = response;
+                        if (response.is_good_enough === false) {
+                            flushCreativeProcessBuffer();
+                        }
+                    }
                 } else if (response.isBrandAnalysis) {
+                    flushCreativeProcessBuffer();
                     messages.push({ from: 'bot', brandAnalysisResponse: response });
                 }
             }
         }
     }
+    
+    flushCreativeProcessBuffer();
+    
     return messages;
 };
 

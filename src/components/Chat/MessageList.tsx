@@ -7,6 +7,7 @@ import { ArtisanEngineResponse } from "@/components/ArtisanEngineResponse";
 import { BrandAnalyzerResponse } from "@/components/BrandAnalyzerResponse";
 import { JobStatusCard } from "@/components/JobStatusCard";
 import { ImageGenerationResponse } from "@/components/ImageGenerationResponse";
+import { CreativeProcessResponse } from "@/components/CreativeProcessResponse";
 import { useImagePreview } from "@/context/ImagePreviewContext";
 import { showSuccess } from "@/utils/toast";
 import { RefinementProposalCard } from "../RefinementProposalCard";
@@ -20,6 +21,7 @@ interface ImageAnalysis { image_description: string; lighting_style: string; pho
 interface BrandAnalysisData { isBrandAnalysis: boolean; brand_name: string; website_analysis?: { url: string; analysis: { dominant_colors: string[]; image_analysis: ImageAnalysis[]; synthesis: string; }; }; social_media_analysis?: { url: string; analysis: { dominant_colors: string[]; image_analysis: ImageAnalysis[]; synthesis: string; }; }; combined_synthesis: string; follow_up_message?: string; }
 interface ArtisanResponseData { isArtisanResponse: boolean; version: number; analysis: { [key: string]: string }; prompt: string; rationale: string; follow_up_message?: string; }
 interface ImageGenerationData { isImageGeneration: true; images: ImageResult[]; follow_up_message?: string; }
+interface CreativeProcessData { isCreativeProcess: true; iterations: any[]; final_generation_result: any; follow_up_message?: string; }
 interface RefinementProposalData { summary: string; options: { url: string; jobId: string; }[]; }
 interface ImageChoiceProposalData { summary: string; images: ImageResult[]; }
 
@@ -31,6 +33,7 @@ export interface Message {
     artisanResponse?: ArtisanResponseData; 
     brandAnalysisResponse?: BrandAnalysisData; 
     imageGenerationResponse?: ImageGenerationData; 
+    creativeProcessResponse?: CreativeProcessData; 
     jobInProgress?: { jobId: string; message: string; };
     refinementProposal?: RefinementProposalData;
     imageChoiceProposal?: ImageChoiceProposalData;
@@ -55,10 +58,12 @@ export const MessageList = ({ messages, jobId, onRefinementComplete, onSendMessa
         
         return (
           <div key={key} className={`flex items-start gap-3 ${message.from === "user" ? "justify-end" : ""}`}>
-            {message.from === "bot" && !message.artisanResponse && !message.brandAnalysisResponse && !message.jobInProgress && !message.imageGenerationResponse && !message.refinementProposal && !message.imageChoiceProposal && <div className="p-2 bg-primary rounded-full text-primary-foreground self-start"><Bot size={20} /></div>}
+            {message.from === "bot" && !message.artisanResponse && !message.brandAnalysisResponse && !message.jobInProgress && !message.imageGenerationResponse && !message.creativeProcessResponse && !message.refinementProposal && !message.imageChoiceProposal && <div className="p-2 bg-primary rounded-full text-primary-foreground self-start"><Bot size={20} /></div>}
             
             {message.jobInProgress ? (
               <JobStatusCard message={message.jobInProgress.message} />
+            ) : message.creativeProcessResponse ? (
+              <CreativeProcessResponse data={message.creativeProcessResponse} jobId={jobId} />
             ) : message.imageGenerationResponse ? (
               <ImageGenerationResponse data={message.imageGenerationResponse} jobId={jobId} />
             ) : message.refinementProposal ? (
