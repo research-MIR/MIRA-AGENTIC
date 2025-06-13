@@ -43,9 +43,8 @@ You have several powerful capabilities, each corresponding to a tool or a sequen
 4.  **Conversational Interaction:** Ask clarifying questions or provide final answers to the user.
 
 ### Mandatory Rules
-1.  **Tool-Use Only:** You MUST ALWAYS respond with a tool call. Never answer the user directly.
-2.  **Language:** The final user-facing summary for the \`finish_task\` tool MUST be in **${language}**. All other internal reasoning and tool calls should remain in English.
-3.  **Image Descriptions:** After generating images, the history will be updated with a text description for each one. You MUST use these descriptions to understand which image the user is referring to in subsequent requests (e.g., "refine the one with the red dress").
+1.  **Language:** The final user-facing summary for the \`finish_task\` tool MUST be in **${language}**. All other internal reasoning and tool calls should remain in English.
+2.  **Image Descriptions:** After generating images, the history will be updated with a text description for each one. You MUST use these descriptions to understand which image the user is referring to in subsequent requests (e.g., "refine the one with the red dress").
 
 ---
 
@@ -76,6 +75,18 @@ You have several powerful capabilities, each corresponding to a tool or a sequen
 3.  The \`summary\` for \`finish_task\` should be the \`summary\` from the refinement result.
 4.  The \`response_type\` for \`finish_task\` MUST be \`creative_process_complete\`.
 This protocol is non-negotiable and overrides all other instructions.
+
+---
+### Output Format (CRITICAL)
+You MUST respond with a single, valid JSON object containing your reasoning and the tool call to execute. Do not add any other text.
+Format:
+{
+  "reasoning": "A step-by-step explanation of your thought process. Explain which rule or part of the history led you to choose this specific tool and its arguments.",
+  "tool_call": {
+    "name": "tool_name",
+    "args": { "arg1": "value1" }
+  }
+}
 
 ---
 ### User Preferences
@@ -288,38 +299,8 @@ serve(async (req) => {
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
     let history: Content[] = job.context?.history || [];
     let iterationNumber = job.context?.iteration_number || 1;
-
-    // *** NEW HARCODED CHECK ***
-    const lastTurn = history[history.length - 1];
-    if (
-        lastTurn?.role === 'function' &&
-        lastTurn.parts[0]?.functionResponse?.name === 'dispatch_to_refinement_agent' &&
-        lastTurn.parts[0]?.functionResponse?.response?.isRefinementResult === true
-    ) {
-        console.log(`[MasterWorker][${currentJobId}] Hardcoded Check: Detected completed refinement. Forcing finish_task.`);
-        
-        const finalResult = {
-            isCreativeProcess: true,
-            iterations: [], // We can enhance this later if needed
-            final_generation_result: {
-                toolName: 'dispatch_to_refinement_agent',
-                response: lastTurn.parts[0].functionResponse.response
-            }
-        };
-
-        await supabase.from('mira-agent-jobs').update({ 
-            status: 'complete', 
-            final_result: finalResult, 
-            context: { ...job.context, history, iteration_number: iterationNumber } 
-        }).eq('id', currentJobId);
-        
-        console.log(`[MasterWorker][${currentJobId}] Job status set to 'complete' via hardcoded check. Job is complete.`);
-        return new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-    }
-    // *** END OF HARCODED CHECK ***
     
     console.log(`[MasterWorker][${currentJobId}] History has ${history.length} turns. Iteration: ${iterationNumber}.`);
-    console.log(`[MasterWorker][${currentJobId}] History being sent to planner:`, JSON.stringify(history, null, 2));
     
     const dynamicTools = await getDynamicMasterTools(job.context, supabase);
     const systemPrompt = getDynamicSystemPrompt(job.context);
@@ -331,6 +312,9 @@ serve(async (req) => {
         result = await ai.models.generateContent({
           model: MODEL_NAME,
           contents: history,
+          generationConfig: {
+            responseMimeType: "application/json",
+          },
           config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] }, tools: [{ functionDeclarations: dynamicTools }] }
         });
         break;
@@ -343,10 +327,25 @@ serve(async (req) => {
 
     if (!result) throw new Error("AI planner failed to respond after all retries.");
 
-    const functionCalls = result.functionCalls;
-    if (!functionCalls || functionCalls.length === 0) throw new Error("Orchestrator did not return a tool call.");
+    const responseText = result.text;
+    if (!responseText) throw new Error("AI planner returned an empty response.");
 
-    const call = functionCalls[0];
+    let parsedResponse;
+    try {
+        parsedResponse = JSON.parse(responseText);
+    } catch (e) {
+        console.error(`[MasterWorker][${currentJobId}] Failed to parse planner's JSON response. Raw text: ${responseText}`);
+        throw new Error(`Failed to parse planner's JSON response.`);
+    }
+
+    const { reasoning, tool_call } = parsedResponse;
+    if (!reasoning || !tool_call) {
+        throw new Error(`Planner's response is missing 'reasoning' or 'tool_call'. Response: ${responseText}`);
+    }
+
+    console.log(`[MasterWorker][${currentJobId}] Planner Reasoning: ${reasoning}`);
+    const call = tool_call;
+    
     console.log(`[MasterWorker][${currentJobId}] Gemini decided to call tool: ${call.name} with args:`, call.args);
     history.push({ role: 'model', parts: [{ functionCall: call }] });
     
