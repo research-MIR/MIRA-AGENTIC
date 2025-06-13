@@ -75,7 +75,7 @@ async function wakeUpMainAgent(supabase: any, comfyJob: any, finalResult: any) {
             role: 'function',
             parts: [{
                 functionResponse: {
-                    name: 'refine_image_with_comfyui',
+                    name: 'dispatch_to_refinement_agent',
                     response: {
                         isImageGeneration: true,
                         images: [finalResult]
