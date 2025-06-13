@@ -308,7 +308,7 @@ serve(async (req) => {
     const body = await req.json();
     console.log(`[QueueProxy][${requestId}] Received request body:`, JSON.stringify(body));
     
-    const { invoker_user_id, upscale_factor, original_prompt_for_gallery } = body;
+    const { invoker_user_id, upscale_factor, original_prompt_for_gallery, main_agent_job_id } = body;
     let finalWorkflow;
     let imageFilename = body.image_filename;
     const sourceImageUrl = body.image_filename; // Keep original URL for metadata
@@ -383,6 +383,7 @@ serve(async (req) => {
             comfyui_address: sanitizedAddress,
             comfyui_prompt_id: data.prompt_id,
             status: 'queued',
+            main_agent_job_id: main_agent_job_id, // Store the link to the parent job
             metadata: {
                 original_prompt_for_gallery: original_prompt_for_gallery || `Refined: ${body.prompt_text?.slice(0, 40) || 'image'}...`,
                 invoker_user_id: invoker_user_id,

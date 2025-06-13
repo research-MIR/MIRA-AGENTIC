@@ -70,6 +70,55 @@ async function createGalleryEntry(supabase: any, job: any, finalResult: any) {
     }
 }
 
+async function wakeUpMainAgent(supabase: any, comfyJob: any, finalResult: any) {
+    if (!comfyJob.main_agent_job_id) return;
+    
+    console.log(`[Poller][${comfyJob.id}] This job is linked to main agent job ${comfyJob.main_agent_job_id}. Waking it up...`);
+
+    const { data: mainJob, error: fetchError } = await supabase
+        .from('mira-agent-jobs')
+        .select('context')
+        .eq('id', comfyJob.main_agent_job_id)
+        .single();
+
+    if (fetchError) {
+        console.error(`[Poller][${comfyJob.id}] Could not fetch parent agent job:`, fetchError);
+        return;
+    }
+
+    const newHistory = [
+        ...(mainJob.context?.history || []),
+        {
+            role: 'function',
+            parts: [{
+                functionResponse: {
+                    name: 'refine_image_with_comfyui',
+                    response: {
+                        isImageGeneration: true,
+                        images: [finalResult]
+                    }
+                }
+            }]
+        }
+    ];
+
+    const { error: updateError } = await supabase
+        .from('mira-agent-jobs')
+        .update({
+            status: 'processing',
+            context: { ...mainJob.context, history: newHistory }
+        })
+        .eq('id', comfyJob.main_agent_job_id);
+
+    if (updateError) {
+        console.error(`[Poller][${comfyJob.id}] Failed to update main agent job:`, updateError);
+        return;
+    }
+
+    console.log(`[Poller][${comfyJob.id}] Main agent job updated. Re-invoking master-worker...`);
+    supabase.functions.invoke('MIRA-AGENT-master-worker', { body: { job_id: comfyJob.main_agent_job_id } }).catch(console.error);
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
 
@@ -139,7 +188,11 @@ serve(async (req) => {
         }).eq('id', job_id);
         console.log(`[Poller][${job_id}] Job status updated to 'complete' in DB.`);
 
-        await createGalleryEntry(supabase, job, finalResult);
+        if (job.main_agent_job_id) {
+            await wakeUpMainAgent(supabase, job, finalResult);
+        } else {
+            await createGalleryEntry(supabase, job, finalResult);
+        }
 
         return new Response(JSON.stringify({ success: true, status: 'complete', publicUrl }), { headers: corsHeaders });
     } else {
