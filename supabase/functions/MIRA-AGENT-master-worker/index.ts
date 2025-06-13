@@ -285,29 +285,6 @@ serve(async (req) => {
     const { data: job, error: fetchError } = await supabase.from('mira-agent-jobs').select('*').eq('id', currentJobId).single();
     if (fetchError) throw fetchError;
 
-    // Hardcoded check to prevent refinement loop
-    const lastHistoryTurn = job.context?.history?.[job.context.history.length - 1];
-    if (lastHistoryTurn?.role === 'function' && lastHistoryTurn.parts[0]?.functionResponse?.name === 'dispatch_to_refinement_agent') {
-        console.log(`[MasterWorker][${currentJobId}] Detected completed refinement. Bypassing planner and finishing task directly.`);
-        
-        const finalResult = {
-            isCreativeProcess: true,
-            iterations: [], // This can be enhanced later if needed
-            final_generation_result: {
-                toolName: 'dispatch_to_refinement_agent',
-                response: lastHistoryTurn.parts[0].functionResponse.response
-            }
-        };
-
-        await supabase.from('mira-agent-jobs').update({ 
-            status: 'complete', 
-            final_result: finalResult 
-        }).eq('id', currentJobId);
-
-        console.log(`[MasterWorker][${currentJobId}] Job status set to 'complete'. Job is complete.`);
-        return new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-    }
-
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
     let history: Content[] = job.context?.history || [];
     let iterationNumber = job.context?.iteration_number || 1;

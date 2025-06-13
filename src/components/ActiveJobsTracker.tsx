@@ -6,6 +6,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/t
 import { Loader2 } from 'lucide-react';
 import { RealtimeChannel } from '@supabase/supabase-js';
 import { showSuccess, showError } from '@/utils/toast';
+import { downloadImage } from '@/lib/utils';
 import { ActiveJobsModal } from './ActiveJobsModal';
 
 interface ComfyJob {
@@ -55,7 +56,8 @@ export const ActiveJobsTracker = () => {
             const updatedJob = payload.new;
             if (updatedJob.status === 'complete' || updatedJob.status === 'failed') {
               if (updatedJob.status === 'complete' && updatedJob.final_result?.publicUrl) {
-                showSuccess(`Upscale complete! Check your gallery.`);
+                showSuccess(`Upscale complete! Downloading now...`);
+                downloadImage(updatedJob.final_result.publicUrl, `upscaled-${job.id.substring(0, 8)}.png`);
               } else if (updatedJob.status === 'failed') {
                 showError(`Upscale failed: ${updatedJob.error_message || 'Unknown error'}`);
               }
@@ -88,7 +90,7 @@ export const ActiveJobsTracker = () => {
             </Button>
           </TooltipTrigger>
           <TooltipContent>
-            <p>Click to view details. Your upscaled images will be available in the gallery when ready.</p>
+            <p>Click to view details. Your upscaled images will be downloaded automatically when ready.</p>
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>
