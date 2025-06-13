@@ -275,9 +275,8 @@ serve(async (req) => {
     const { data: job, error: fetchError } = await supabase.from('mira-agent-jobs').select('*').eq('id', currentJobId).single();
     if (fetchError) throw fetchError;
 
-    // --- BUG FIX: Add status check here ---
     if (job.status !== 'processing') {
-        console.log(`[MasterWorker][${currentJobId}] Job status is '${job.status}', not 'processing'. Worker will not proceed.`);
+        console.log(`[MasterWorker][${currentJobId}] Worker invoked for a job with status '${job.status}'. Halting execution as it's not 'processing'.`);
         return new Response(JSON.stringify({ success: true, message: `Job status is ${job.status}, worker halted.` }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
