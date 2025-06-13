@@ -13,39 +13,22 @@ const GENERATED_IMAGES_BUCKET = 'mira-generations';
 const POLLING_INTERVAL_MS = 3000; // 3 seconds
 const MAX_POLLING_ATTEMPTS = 100; // 5 minutes total
 
-async function findOutputImage(historyOutputs: any, promptWorkflow: any): Promise<any | null> {
-    const outputNodes: any[] = [];
+async function findOutputImage(historyOutputs: any): Promise<any | null> {
     if (!historyOutputs) return null;
 
+    // Iterate through all nodes in the output history
     for (const nodeId in historyOutputs) {
         const outputData = historyOutputs[nodeId];
+        // Check if the node has an 'images' array with content
         if (outputData.images && Array.isArray(outputData.images) && outputData.images.length > 0) {
-            // To get the class_type, we look up the node in the original workflow object.
-            const nodeInfo = promptWorkflow[nodeId];
-            const class_type = nodeInfo ? nodeInfo.class_type : "Unknown";
-
-            let priority = 3;
-            if (class_type === "SaveImage") priority = 1;
-            if (class_type === "PreviewImage") priority = 2;
-            
-            outputNodes.push({
-                nodeId: nodeId,
-                class_type: class_type,
-                image: outputData.images[0],
-                priority: priority
-            });
+            // Return the first image found. This is sufficient for our current workflows.
+            console.log(`[Poller] Found output image in node ${nodeId}.`);
+            return outputData.images[0];
         }
     }
 
-    if (outputNodes.length === 0) {
-        return null;
-    }
-
-    outputNodes.sort((a, b) => a.priority - b.priority);
-    
-    const bestOutput = outputNodes[0];
-    console.log(`[Poller] Found best available output image in node ${bestOutput.nodeId} of type ${bestOutput.class_type}`);
-    return bestOutput.image;
+    // Return null if no node with images was found
+    return null;
 }
 
 async function createGalleryEntry(supabase: any, job: any, finalResult: any) {
@@ -163,7 +146,7 @@ serve(async (req) => {
     }
     console.log(`[Poller][${job_id}] History found. Searching for output image...`);
 
-    const outputImage = await findOutputImage(promptHistory.outputs, promptHistory.prompt);
+    const outputImage = await findOutputImage(promptHistory.outputs);
 
     if (outputImage) {
         console.log(`[Poller][${job_id}] Image found! Filename: ${outputImage.filename}`);
