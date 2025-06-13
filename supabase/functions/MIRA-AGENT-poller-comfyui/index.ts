@@ -123,7 +123,7 @@ serve(async (req) => {
     console.log(`[Poller][${job_id}] Fetched job from DB. Status: ${job.status}`);
 
     if (job.status === 'complete' || job.status === 'failed') {
-        console.log(`[Poller][${job_id}] Job already resolved. Stopping poll.`);
+        console.log(`[Poller][${job.id}] Job already resolved. Stopping poll.`);
         return new Response(JSON.stringify({ success: true, message: "Job already resolved." }), { headers: corsHeaders });
     }
 
