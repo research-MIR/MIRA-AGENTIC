@@ -49,8 +49,6 @@ const Generator = () => {
   const [intermediateResult, setIntermediateResult] = useState<ImageResult | null>(null);
   const [useTwoStage, setUseTwoStage] = useState(false);
   
-  const [referenceImageFile, setReferenceImageFile] = useState<File | null>(null);
-  const [referenceImageUrl, setReferenceImageUrl] = useState<string | null>(null);
   const [styleReferenceImageFile, setStyleReferenceImageFile] = useState<File | null>(null);
   const [styleReferenceImageUrl, setStyleReferenceImageUrl] = useState<string | null>(null);
   const [garmentReferenceImageFile, setGarmentReferenceImageFile] = useState<File | null>(null);
@@ -73,8 +71,6 @@ const Generator = () => {
     setUrl(null);
   };
 
-  const handleReferenceImageChange = createChangeHandler(setReferenceImageFile, setReferenceImageUrl);
-  const handleRemoveReferenceImage = createRemoveHandler(setReferenceImageFile, setReferenceImageUrl, referenceImageUrl);
   const handleStyleReferenceImageChange = createChangeHandler(setStyleReferenceImageFile, setStyleReferenceImageUrl);
   const handleRemoveStyleReferenceImage = createRemoveHandler(setStyleReferenceImageFile, setStyleReferenceImageUrl, styleReferenceImageUrl);
   const handleGarmentReferenceImageChange = createChangeHandler(setGarmentReferenceImageFile, setGarmentReferenceImageUrl);
@@ -82,11 +78,10 @@ const Generator = () => {
 
   useEffect(() => {
     return () => {
-      if (referenceImageUrl) URL.revokeObjectURL(referenceImageUrl);
       if (styleReferenceImageUrl) URL.revokeObjectURL(styleReferenceImageUrl);
       if (garmentReferenceImageUrl) URL.revokeObjectURL(garmentReferenceImageUrl);
     };
-  }, [referenceImageUrl, styleReferenceImageUrl, garmentReferenceImageUrl]);
+  }, [styleReferenceImageUrl, garmentReferenceImageUrl]);
 
   const handleGenerate = async () => {
     if (!prompt.trim()) return showError("Please enter a prompt.");
@@ -228,7 +223,6 @@ const Generator = () => {
                   <Label htmlFor="negative-prompt">{t.negativePrompt}</Label>
                   <Textarea id="negative-prompt" value={negativePrompt} onChange={(e) => setNegativePrompt(e.target.value)} placeholder={t.negativePromptPlaceholder} rows={3} />
                 </div>
-                {renderUploader(t.referenceImage, referenceImageUrl, handleReferenceImageChange, handleRemoveReferenceImage, "reference-image-upload")}
                 {renderUploader(t.styleReference, styleReferenceImageUrl, handleStyleReferenceImageChange, handleRemoveStyleReferenceImage, "style-reference-image-upload")}
                 {renderUploader(t.garmentReference, garmentReferenceImageUrl, handleGarmentReferenceImageChange, handleRemoveGarmentReferenceImage, "garment-reference-image-upload")}
               </div>
