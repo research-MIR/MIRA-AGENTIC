@@ -64,7 +64,7 @@ You have several powerful capabilities, each corresponding to a tool or a sequen
     -   **THEN** call \`finish_task\` to ask for clarification.
 
 **Step 2: Follow the Plan (Subsequent Calls)**
--   **IF** the last turn in the history is a successful response from a tool like \`dispatch_to_artisan_engine\` or \`generate_image\`...
+-   **IF** the last turn in the history is a successful response from a tool like \`dispatch_to_artisan_engine\`, \`generate_image\`, or \`dispatch_to_refinement_agent\`...
 -   **THEN** your next step is to either call the next logical tool (e.g., \`critique_images\` after \`generate_image\`) OR, if the plan is complete, call \`finish_task\` to show the result to the user. Do not call the same tool twice in a row unless the user provides new feedback.
 
 ---
@@ -275,31 +275,9 @@ serve(async (req) => {
     const { data: job, error: fetchError } = await supabase.from('mira-agent-jobs').select('*').eq('id', currentJobId).single();
     if (fetchError) throw fetchError;
 
+    const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
     let history: Content[] = job.context?.history || [];
     let iterationNumber = job.context?.iteration_number || 1;
-
-    const lastTurn = history[history.length - 1];
-    if (lastTurn && lastTurn.role === 'function' && lastTurn.parts[0]?.functionResponse?.name === 'dispatch_to_refinement_agent') {
-        console.log(`[MasterWorker][${currentJobId}] Detected completed refinement job. Bypassing planner and setting to 'awaiting_feedback'.`);
-        
-        const finalResult = {
-            isCreativeProcess: true,
-            iterations: [],
-            final_generation_result: {
-                toolName: 'dispatch_to_refinement_agent',
-                response: lastTurn.parts[0].functionResponse.response
-            }
-        };
-
-        await supabase.from('mira-agent-jobs').update({ 
-            status: 'awaiting_feedback', 
-            final_result: finalResult,
-            context: { ...job.context, history } 
-        }).eq('id', currentJobId);
-
-        console.log(`[MasterWorker][${currentJobId}] Job status set to 'awaiting_feedback'. Refinement result sent to UI.`);
-        return new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-    }
     
     console.log(`[MasterWorker][${currentJobId}] History has ${history.length} turns. Iteration: ${iterationNumber}. Preparing to send to Gemini planner.`);
     
