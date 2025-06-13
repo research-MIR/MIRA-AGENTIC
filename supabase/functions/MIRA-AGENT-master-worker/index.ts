@@ -288,6 +288,35 @@ serve(async (req) => {
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
     let history: Content[] = job.context?.history || [];
     let iterationNumber = job.context?.iteration_number || 1;
+
+    // *** NEW HARCODED CHECK ***
+    const lastTurn = history[history.length - 1];
+    if (
+        lastTurn?.role === 'function' &&
+        lastTurn.parts[0]?.functionResponse?.name === 'dispatch_to_refinement_agent' &&
+        lastTurn.parts[0]?.functionResponse?.response?.isRefinementResult === true
+    ) {
+        console.log(`[MasterWorker][${currentJobId}] Hardcoded Check: Detected completed refinement. Forcing finish_task.`);
+        
+        const finalResult = {
+            isCreativeProcess: true,
+            iterations: [], // We can enhance this later if needed
+            final_generation_result: {
+                toolName: 'dispatch_to_refinement_agent',
+                response: lastTurn.parts[0].functionResponse.response
+            }
+        };
+
+        await supabase.from('mira-agent-jobs').update({ 
+            status: 'complete', 
+            final_result: finalResult, 
+            context: { ...job.context, history, iteration_number: iterationNumber } 
+        }).eq('id', currentJobId);
+        
+        console.log(`[MasterWorker][${currentJobId}] Job status set to 'complete' via hardcoded check. Job is complete.`);
+        return new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+    // *** END OF HARCODED CHECK ***
     
     console.log(`[MasterWorker][${currentJobId}] History has ${history.length} turns. Iteration: ${iterationNumber}.`);
     console.log(`[MasterWorker][${currentJobId}] History being sent to planner:`, JSON.stringify(history, null, 2));
