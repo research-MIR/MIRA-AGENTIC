@@ -270,22 +270,38 @@ const Index = () => {
   useEffect(() => {
     if (!jobId) return;
 
-    const channel = supabase
-      .channel(`job-updates-${jobId}`)
-      .on('postgres_changes', { 
-          event: 'UPDATE', 
-          schema: 'public', 
-          table: 'mira-agent-jobs', 
-          filter: `id=eq.${jobId}` 
-      }, () => {
-          queryClient.invalidateQueries({ queryKey: ['chatJob', jobId] });
-      })
-      .subscribe();
+    const channelName = `job-updates-${jobId}`;
+    const channel = supabase.channel(channelName, {
+      config: {
+        broadcast: {
+          self: true,
+        },
+      },
+    });
+
+    const subscription = channel.on('postgres_changes', { 
+        event: 'UPDATE', 
+        schema: 'public', 
+        table: 'mira-agent-jobs', 
+        filter: `id=eq.${jobId}` 
+    }, (payload) => {
+        console.log('[Realtime] Job update received:', payload.new);
+        processJobData(payload.new);
+    }).subscribe((status, err) => {
+        if (status === 'SUBSCRIBED') {
+            console.log(`[Realtime] Subscribed to ${channelName}`);
+        }
+        if (status === 'CHANNEL_ERROR') {
+            console.error('[Realtime] Channel error:', err);
+            showError(`Realtime connection failed: ${err?.message}`);
+        }
+    });
 
     return () => {
+      console.log(`[Realtime] Unsubscribing from ${channelName}`);
       supabase.removeChannel(channel);
     };
-  }, [jobId, supabase, queryClient]);
+  }, [jobId, supabase, processJobData]);
 
   useEffect(() => {
     if (error) {
