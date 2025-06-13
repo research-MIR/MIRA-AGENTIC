@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { GoogleAuth } from "npm:google-auth-library";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { decode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
+import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 import { GoogleGenAI } from 'https://esm.sh/@google/genai@0.15.0';
 
 const corsHeaders = {
@@ -179,7 +179,7 @@ serve(async (req)=>{
     console.log(`[ImageGenerator-Google][${requestId}] Successfully generated ${successfulPredictions.length} images.`);
 
     const uploadPromises = successfulPredictions.map(async (prediction, index) => {
-      const imageBuffer = decode(prediction.bytesBase64Encoded);
+      const imageBuffer = decodeBase64(prediction.bytesBase64Encoded);
       const filePath = `${invoker_user_id}/${Date.now()}_${index}.png`;
       await supabaseAdmin.storage.from(GENERATED_IMAGES_BUCKET).upload(filePath, imageBuffer, { contentType: 'image/png', upsert: true });
       const { data: { publicUrl } } = supabaseAdmin.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
