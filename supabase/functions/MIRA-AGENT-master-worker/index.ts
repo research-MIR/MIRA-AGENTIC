@@ -55,7 +55,7 @@ This is how you decide which tool to use first.
 
 **Step 1: Analyze User Intent**
 -   **IF** the user asks to "refine", "improve", or "upscale" an image...
-    -   **THEN** your first and only step is to call \`refine_image_with_comfyui\`. You must analyze the conversation history to find the URL of the image they are referring to. You must also determine the upscale factor based on their words: "refine" = 1.2, "improve" = 1.4, "upscale" = 2.0 (or the number they specify).
+    -   **THEN** your first and only step is to call \`dispatch_to_refinement_agent\`. You must determine the upscale factor based on their words: "refine" = 1.2, "improve" = 1.4, "upscale" = 2.0 (or the number they specify).
 -   **IF** the user asks to analyze a brand, or generate content inspired by a brand (e.g., "create an ad for Nike"), especially if they provide a URL...
     -   **THEN** your first and only step is to call \`dispatch_to_brand_analyzer\`.
 -   **ELSE IF** the user provides an image for a creative task (e.g., "make this more cinematic," "use this style")...
@@ -76,7 +76,7 @@ async function getDynamicMasterTools(jobContext: any, supabase: SupabaseClient):
     const baseTools: FunctionDeclaration[] = [
       { name: "dispatch_to_brand_analyzer", description: "Analyzes a brand's online presence (website, social media) to understand its visual identity. Use this when the user asks to analyze a brand or generate content inspired by a brand, especially if they provide a URL.", parameters: { type: Type.OBJECT, properties: { brand_name: { type: Type.STRING, description: "The name of the brand to analyze." } }, required: ["brand_name"] } },
       { name: "dispatch_to_artisan_engine", description: "Generates or refines a detailed image prompt. This is the correct first step if the user provides a reference image.", parameters: { type: Type.OBJECT, properties: { user_request_summary: { type: Type.STRING, description: "A brief summary of the user's request for the Artisan Engine, noting that a reference image was provided for style/composition." } }, required: ["user_request_summary"] } },
-      { name: "refine_image_with_comfyui", description: "When the user asks to refine, improve, or upscale an image, call this tool. You must find the image URL from the history and determine the upscale factor.", parameters: { type: Type.OBJECT, properties: { image_url: { type: Type.STRING, description: "The public URL of the image to be refined, found in the conversation history." }, prompt: { type: Type.STRING, description: "The user's instructions for refinement." }, upscale_factor: { type: Type.NUMBER, description: "The upscale factor to use. 1.2 for 'refine', 1.4 for 'improve', 2.0 for 'upscale'." } }, required: ["image_url", "prompt", "upscale_factor"] } },
+      { name: "dispatch_to_refinement_agent", description: "When the user asks to refine, improve, or upscale the most recent image in the conversation, call this tool.", parameters: { type: Type.OBJECT, properties: { prompt: { type: Type.STRING, description: "The user's instructions for refinement." }, upscale_factor: { type: Type.NUMBER, description: "The upscale factor to use. 1.2 for 'refine', 1.4 for 'improve', 2.0 for 'upscale'." } }, required: ["prompt", "upscale_factor"] } },
       { name: "critique_images", description: "Invokes the Art Director agent to critique generated images.", parameters: { type: Type.OBJECT, properties: { reason_for_critique: { type: Type.STRING, description: "A brief summary of why the critique is necessary." } }, required: ["reason_for_critique"] } },
       { name: "finish_task", description: "Call this to respond to the user.", parameters: { type: Type.OBJECT, properties: { response_type: { type: Type.STRING, enum: ["clarification_question", "creative_process_complete", "text"], description: "The type of response to send." }, summary: { type: Type.STRING, description: "The message to send to the user." }, follow_up_message: { type: Type.STRING, description: "A helpful follow-up message." } }, required: ["response_type", "summary"] } },
     ];
@@ -358,23 +358,20 @@ serve(async (req) => {
         toolResponseData = data;
         historyParts.push({ functionResponse: { name: call.name, response: toolResponseData } });
 
-    } else if (call.name === 'refine_image_with_comfyui') {
-        console.log(`[MasterWorker][${currentJobId}] Dispatching to ComfyUI refinement tool...`);
-        const { image_url, prompt, upscale_factor } = call.args;
-        const { error } = await supabase.functions.invoke('MIRA-AGENT-tool-refine-image-comfyui', {
+    } else if (call.name === 'dispatch_to_refinement_agent') {
+        console.log(`[MasterWorker][${currentJobId}] Dispatching to refinement agent...`);
+        const { prompt, upscale_factor } = call.args;
+        const { error } = await supabase.functions.invoke('MIRA-AGENT-executor-refinement', {
             body: {
-                image_url,
+                job_id: currentJobId,
                 prompt,
-                upscale_factor,
-                main_agent_job_id: currentJobId,
-                invoker_user_id: job.user_id
+                upscale_factor
             }
         });
         if (error) throw error;
 
-        console.log(`[MasterWorker][${currentJobId}] Pausing job and awaiting refinement result.`);
-        await supabase.from('mira-agent-jobs').update({ status: 'awaiting_refinement', context: { ...job.context, history } }).eq('id', currentJobId);
-        return new Response(JSON.stringify({ success: true, message: "Refinement job started. Main agent is now paused." }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        // The refinement executor will pause the job, so we just return here.
+        return new Response(JSON.stringify({ success: true, message: "Refinement job dispatched." }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
     } else if (call.name === 'dispatch_to_artisan_engine' || call.name === 'critique_images') {
         const toolName = call.name === 'dispatch_to_artisan_engine' ? 'MIRA-AGENT-tool-generate-image-prompt' : 'MIRA-AGENT-tool-critique-images';
