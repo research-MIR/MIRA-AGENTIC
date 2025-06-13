@@ -65,8 +65,10 @@ You have several powerful capabilities, each corresponding to a tool or a sequen
     -   **THEN** call \`finish_task\` to ask for clarification.
 
 **Step 2: Follow the Plan (Subsequent Calls)**
+-   **IF** you have just generated multiple images and the user asks to proceed (e.g., "upscale one of them", "I like the second one"), but their request is ambiguous...
+    -   **THEN** you MUST call \`present_image_choice\` to ask them to clarify which image they want to proceed with.
 -   **IF** the last turn in the history is a successful response from a tool like \`dispatch_to_artisan_engine\`, \`generate_image\`, or \`dispatch_to_refinement_agent\`...
--   **THEN** your next step is to either call the next logical tool (e.g., \`critique_images\` after \`generate_image\`) OR, if the plan is complete, call \`finish_task\` to show the result to the user. Do not call the same tool twice in a row unless the user provides new feedback.
+    -   **THEN** your next step is to either call the next logical tool (e.g., \`critique_images\` after \`generate_image\`) OR, if the plan is complete, call \`finish_task\` to show the result to the user. Do not call the same tool twice in a row unless the user provides new feedback.
 
 ---
 ### User Preferences
@@ -81,6 +83,7 @@ async function getDynamicMasterTools(jobContext: any, supabase: SupabaseClient):
       { name: "dispatch_to_artisan_engine", description: "Generates or refines a detailed image prompt. This is the correct first step if the user provides a reference image.", parameters: { type: Type.OBJECT, properties: { user_request_summary: { type: Type.STRING, description: "A brief summary of the user's request for the Artisan Engine, noting that a reference image was provided for style/composition." } }, required: ["user_request_summary"] } },
       { name: "dispatch_to_refinement_agent", description: "When the user asks to refine, improve, or upscale the most recent image in the conversation, call this tool.", parameters: { type: Type.OBJECT, properties: { prompt: { type: Type.STRING, description: "The user's instructions for refinement." }, upscale_factor: { type: Type.NUMBER, description: "The upscale factor to use. 1.2 for 'refine', 1.4 for 'upscale', 2.0 for 'improve'." } }, required: ["prompt", "upscale_factor"] } },
       { name: "critique_images", description: "Invokes the Art Director agent to critique generated images.", parameters: { type: Type.OBJECT, properties: { reason_for_critique: { type: Type.STRING, description: "A brief summary of why the critique is necessary." } }, required: ["reason_for_critique"] } },
+      { name: "present_image_choice", description: "When you have generated multiple images and need the user to choose one to proceed, call this tool. You MUST provide a summary to ask the user which one they prefer.", parameters: { type: Type.OBJECT, properties: { summary: { type: Type.STRING, description: "The question to ask the user, e.g., 'I've created a couple of options for you. Which one should we refine?'" } }, required: ["summary"] } },
       { name: "finish_task", description: "Call this to respond to the user.", parameters: { type: Type.OBJECT, properties: { response_type: { type: Type.STRING, enum: ["clarification_question", "creative_process_complete", "text"], description: "The type of response to send." }, summary: { type: Type.STRING, description: "The message to send to the user." }, follow_up_message: { type: Type.STRING, description: "A helpful follow-up message." } }, required: ["response_type", "summary"] } },
     ];
 
@@ -395,6 +398,34 @@ serve(async (req) => {
             iterationNumber++;
             console.log(`[MasterWorker][${currentJobId}] Critique rejected. Incrementing iteration to ${iterationNumber}.`);
         }
+    } else if (call.name === 'present_image_choice') {
+        console.log(`[MasterWorker][${currentJobId}] Presenting image choice to user.`);
+        
+        const lastGenerationTurn = [...history].reverse().find(turn => 
+            turn.role === 'function' && 
+            (turn.parts[0]?.functionResponse?.name === 'generate_image' || turn.parts[0]?.functionResponse?.name === 'generate_image_with_reference') &&
+            turn.parts[0]?.functionResponse?.response?.images
+        );
+
+        if (!lastGenerationTurn) {
+            throw new Error("Agent tried to present a choice, but no generated images were found in history.");
+        }
+
+        const images = lastGenerationTurn.parts[0].functionResponse.response.images;
+        const finalResult = {
+            isImageChoiceProposal: true,
+            summary: call.args.summary,
+            images: images
+        };
+
+        await supabase.from('mira-agent-jobs').update({
+            status: 'awaiting_feedback',
+            final_result: finalResult
+        }).eq('id', currentJobId);
+
+        console.log(`[MasterWorker][${currentJobId}] Job status set to 'awaiting_feedback' with an image choice proposal.`);
+        return new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+
     } else if (call.name === 'finish_task') {
         const { response_type, summary, follow_up_message } = call.args;
         let finalResult;

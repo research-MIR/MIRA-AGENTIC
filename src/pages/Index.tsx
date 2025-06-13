@@ -212,17 +212,10 @@ const Index = () => {
     } else if (jobData.status === 'failed') {
         conversationMessages.push({ from: 'bot', text: jobData.error_message });
     } else if (jobData.status === 'awaiting_feedback') {
-        const lastImageGeneration = [...conversationMessages].reverse().find(m => m.imageGenerationResponse);
-        if (jobData.final_result?.isRefinementProposal) {
+        if (jobData.final_result?.isImageChoiceProposal) {
+            conversationMessages.push({ from: 'bot', imageChoiceProposal: jobData.final_result });
+        } else if (jobData.final_result?.isRefinementProposal) {
             conversationMessages.push({ from: 'bot', refinementProposal: jobData.final_result });
-        } else if (jobData.final_result?.text && lastImageGeneration) {
-            conversationMessages.push({ 
-                from: 'bot', 
-                imageChoiceProposal: {
-                    summary: jobData.final_result.text,
-                    images: lastImageGeneration.imageGenerationResponse!.images
-                }
-            });
         } else if (jobData.final_result?.text) {
             conversationMessages.push({ from: 'bot', text: jobData.final_result.text });
         }
