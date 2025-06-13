@@ -31,30 +31,6 @@ const workflowTemplate = `
       "title": "Load VAE"
     }
   },
-  "249": {
-    "inputs": {
-      "lora_name": "IDunnohowtonameLora.safetensors",
-      "strength_model": 0.8000000000000002,
-      "model": [
-        "304",
-        0
-      ]
-    },
-    "class_type": "LoraLoaderModelOnly",
-    "_meta": {
-      "title": "LoraLoaderModelOnly"
-    }
-  },
-  "304": {
-    "inputs": {
-      "unet_name": "realDream_flux1V1.safetensors",
-      "weight_dtype": "default"
-    },
-    "class_type": "UNETLoader",
-    "_meta": {
-      "title": "Load Diffusion Model"
-    }
-  },
   "307": {
     "inputs": {
       "String": "HERE THE PROMPT"
@@ -100,20 +76,6 @@ const workflowTemplate = `
       "title": "CLIPTextEncodeFlux"
     }
   },
-  "363": {
-    "inputs": {
-      "lora_name": "Samsung_UltraReal.safetensors",
-      "strength_model": 0.6800000000000002,
-      "model": [
-        "249",
-        0
-      ]
-    },
-    "class_type": "LoraLoaderModelOnly",
-    "_meta": {
-      "title": "LoraLoaderModelOnly"
-    }
-  },
   "389": {
     "inputs": {
       "filename_prefix": "Output",
@@ -127,22 +89,13 @@ const workflowTemplate = `
       "title": "Save Image"
     }
   },
-  "402": {
-    "inputs": {
-      "control_net_name": "fluxcontrolnetupscale.safetensors"
-    },
-    "class_type": "ControlNetLoader",
-    "_meta": {
-      "title": "Load ControlNet Model"
-    }
-  },
   "404": {
     "inputs": {
-      "image": "placeholder.png"
+      "image": "1749818990465_1.png"
     },
     "class_type": "LoadImage",
     "_meta": {
-      "title": "Load Image"
+      "title": "InputImage"
     }
   },
   "407": {
@@ -151,8 +104,8 @@ const workflowTemplate = `
         "410",
         0
       ],
-      "seed": 701371193782021,
-      "steps": 28,
+      "seed": 323710341375553,
+      "steps": 20,
       "cfg": 1,
       "sampler_name": "euler",
       "scheduler": "normal",
@@ -170,11 +123,11 @@ const workflowTemplate = `
       "force_uniform_tiles": true,
       "tiled_decode": false,
       "image": [
-        "404",
+        "421",
         0
       ],
       "model": [
-        "363",
+        "419",
         0
       ],
       "positive": [
@@ -192,6 +145,14 @@ const workflowTemplate = `
       "upscale_model": [
         "408",
         0
+      ],
+      "custom_sampler": [
+        "423",
+        0
+      ],
+      "custom_sigmas": [
+        "424",
+        0
       ]
     },
     "class_type": "UltimateSDUpscaleCustomSample",
@@ -201,7 +162,7 @@ const workflowTemplate = `
   },
   "408": {
     "inputs": {
-      "model_name": "4x-UltraSharp.pth"
+      "model_name": "4x-UltraSharpV2.safetensors"
     },
     "class_type": "UpscaleModelLoader",
     "_meta": {
@@ -210,11 +171,11 @@ const workflowTemplate = `
   },
   "410": {
     "inputs": {
-      "value": 1.4
+      "value": 2.0000000000000004
     },
     "class_type": "FloatConstant",
     "_meta": {
-      "title": "Float Constant"
+      "title": "Upscale_Scale"
     }
   },
   "411": {
@@ -227,6 +188,191 @@ const workflowTemplate = `
     "class_type": "PreviewImage",
     "_meta": {
       "title": "Preview Image"
+    }
+  },
+  "412": {
+    "inputs": {
+      "double_layers": "10",
+      "single_layers": "3,4",
+      "scale": 3,
+      "start_percent": 0.010000000000000002,
+      "end_percent": 0.15000000000000002,
+      "rescaling_scale": 0,
+      "model": [
+        "413",
+        0
+      ]
+    },
+    "class_type": "SkipLayerGuidanceDiT",
+    "_meta": {
+      "title": "SkipLayerGuidanceDiT"
+    }
+  },
+  "413": {
+    "inputs": {
+      "unet_name": "flux1-dev.safetensors",
+      "weight_dtype": "fp8_e4m3fn_fast"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Load Diffusion Model"
+    }
+  },
+  "414": {
+    "inputs": {
+      "lora_name": "Samsung_UltraReal.safetensors",
+      "strength_model": 0.8000000000000002,
+      "model": [
+        "416",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "LoraLoaderModelOnly"
+    }
+  },
+  "415": {
+    "inputs": {
+      "lora_name": "IDunnohowtonameLora.safetensors",
+      "strength_model": 0.25000000000000006,
+      "model": [
+        "414",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "LoraLoaderModelOnly"
+    }
+  },
+  "416": {
+    "inputs": {
+      "lora_name": "42lux-UltimateAtHome-flux-highresfix.safetensors",
+      "strength_model": 0.7800000000000001,
+      "model": [
+        "412",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "LoraLoaderModelOnly"
+    }
+  },
+  "417": {
+    "inputs": {
+      "model": [
+        "415",
+        0
+      ]
+    },
+    "class_type": "ConfigureModifiedFlux",
+    "_meta": {
+      "title": "Configure Modified Flux"
+    }
+  },
+  "418": {
+    "inputs": {
+      "scale": 1.75,
+      "rescale": 0,
+      "model": [
+        "417",
+        0
+      ]
+    },
+    "class_type": "PAGAttention",
+    "_meta": {
+      "title": "Apply Flux PAG Attention"
+    }
+  },
+  "419": {
+    "inputs": {
+      "max_shift": 1.1500000000000001,
+      "base_shift": 0.5000000000000001,
+      "model": [
+        "418",
+        0
+      ],
+      "latent": [
+        "420",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingFluxNormalized",
+    "_meta": {
+      "title": "Model Sampling Flux Normalized"
+    }
+  },
+  "420": {
+    "inputs": {
+      "pixels": [
+        "404",
+        0
+      ],
+      "vae": [
+        "10",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE Encode"
+    }
+  },
+  "421": {
+    "inputs": {
+      "samples": [
+        "419",
+        1
+      ],
+      "vae": [
+        "10",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "422": {
+    "inputs": {
+      "sampler_name": "dpmpp_2m"
+    },
+    "class_type": "KSamplerSelect",
+    "_meta": {
+      "title": "KSamplerSelect"
+    }
+  },
+  "423": {
+    "inputs": {
+      "dishonesty_factor": -0.020000000000000004,
+      "start_percent": 0.28,
+      "end_percent": 0.9500000000000002,
+      "sampler": [
+        "422",
+        0
+      ]
+    },
+    "class_type": "LyingSigmaSampler",
+    "_meta": {
+      "title": "Lying Sigma Sampler"
+    }
+  },
+  "424": {
+    "inputs": {
+      "scheduler": "sgm_uniform",
+      "steps": 20,
+      "denoise": 0.30000000000000004,
+      "model": [
+        "419",
+        0
+      ]
+    },
+    "class_type": "BasicScheduler",
+    "_meta": {
+      "title": "BasicScheduler"
     }
   }
 }
