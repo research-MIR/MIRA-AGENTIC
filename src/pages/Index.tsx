@@ -155,6 +155,45 @@ const Index = () => {
     scrollToBottom();
   }, [messages]);
 
+  const handleSendMessage = useCallback(async (messageText?: string) => {
+    const textToSend = messageText || input;
+    if ((!textToSend.trim() && uploadedFiles.length === 0) || isJobRunning || isSending) {
+      return;
+    }
+    
+    const filesToProcess = [...uploadedFiles];
+    setInput("");
+    setUploadedFiles([]);
+    setIsSending(true);
+
+    try {
+        const payload = { 
+            jobId, 
+            prompt: textToSend, 
+            storagePaths: filesToProcess.map(f => f.path), 
+            userId: session?.user.id, 
+            isDesignerMode, 
+            selectedModelId, 
+            language, 
+            ratioMode, 
+            numImagesMode 
+        };
+        if (!payload.userId) throw new Error("User session not found.");
+        
+        if (jobId) {
+            await supabase.functions.invoke("MIRA-AGENT-continue-job", { body: payload });
+        } else {
+            const { data, error } = await supabase.functions.invoke("MIRA-AGENT-master-worker", { body: payload });
+            if (error) throw error;
+            navigate(`/chat/${data.reply.jobId}`);
+        }
+    } catch (error: any) {
+      showError("Error communicating with Mira: " + error.message);
+    } finally {
+      setIsSending(false);
+    }
+  }, [input, uploadedFiles, isJobRunning, isSending, jobId, session, isDesignerMode, selectedModelId, language, ratioMode, numImagesMode, supabase, navigate]);
+
   const processJobData = useCallback((jobData: any) => {
     if (!jobData) return;
     setIsJobRunning(jobData.status === 'processing' || jobData.status === 'awaiting_refinement');
@@ -172,8 +211,21 @@ const Index = () => {
         conversationMessages.push({ from: 'bot', jobInProgress: { jobId: jobData.id, message: 'Refining image in the background...' } });
     } else if (jobData.status === 'failed') {
         conversationMessages.push({ from: 'bot', text: jobData.error_message });
-    } else if (jobData.status === 'awaiting_feedback' && jobData.final_result?.isRefinementProposal) {
-        conversationMessages.push({ from: 'bot', refinementProposal: jobData.final_result });
+    } else if (jobData.status === 'awaiting_feedback') {
+        const lastImageGeneration = [...conversationMessages].reverse().find(m => m.imageGenerationResponse);
+        if (jobData.final_result?.isRefinementProposal) {
+            conversationMessages.push({ from: 'bot', refinementProposal: jobData.final_result });
+        } else if (jobData.final_result?.text && lastImageGeneration) {
+            conversationMessages.push({ 
+                from: 'bot', 
+                imageChoiceProposal: {
+                    summary: jobData.final_result.text,
+                    images: lastImageGeneration.imageGenerationResponse!.images
+                }
+            });
+        } else if (jobData.final_result?.text) {
+            conversationMessages.push({ from: 'bot', text: jobData.final_result.text });
+        }
     } else if (jobData.status === 'complete' && jobData.final_result?.text) {
         const lastMessage = conversationMessages[conversationMessages.length - 1];
         if (!lastMessage || lastMessage.from !== 'bot' || lastMessage.text !== jobData.final_result.text) {
@@ -265,46 +317,6 @@ const Index = () => {
     }
   }, [session, supabase]);
 
-  const handleSendMessage = useCallback(async () => {
-    if ((!input.trim() && uploadedFiles.length === 0) || isJobRunning || isSending) {
-      return;
-    }
-    let currentInput = input;
-    if (!currentInput.trim() && uploadedFiles.length > 0) currentInput = "Please analyze the attached file(s).";
-    
-    const filesToProcess = [...uploadedFiles];
-    setInput("");
-    setUploadedFiles([]);
-    setIsSending(true);
-
-    try {
-        const payload = { 
-            jobId, 
-            prompt: currentInput, 
-            storagePaths: filesToProcess.map(f => f.path), 
-            userId: session?.user.id, 
-            isDesignerMode, 
-            selectedModelId, 
-            language, 
-            ratioMode, 
-            numImagesMode 
-        };
-        if (!payload.userId) throw new Error("User session not found.");
-        
-        if (jobId) {
-            await supabase.functions.invoke("MIRA-AGENT-continue-job", { body: payload });
-        } else {
-            const { data, error } = await supabase.functions.invoke("MIRA-AGENT-master-worker", { body: payload });
-            if (error) throw error;
-            navigate(`/chat/${data.reply.jobId}`);
-        }
-    } catch (error: any) {
-      showError("Error communicating with Mira: " + error.message);
-    } finally {
-      setIsSending(false);
-    }
-  }, [input, uploadedFiles, isJobRunning, isSending, jobId, session, isDesignerMode, selectedModelId, language, ratioMode, numImagesMode, supabase, navigate]);
-
   const handleDeleteChat = useCallback(async () => {
     if (!jobId) return;
     const toastId = showLoading("Deleting chat...");
@@ -364,7 +376,7 @@ const Index = () => {
 
       <div className="flex-1 overflow-y-auto">
         <div className="p-4 md:p-6 space-y-4">
-            <MessageList messages={messages} jobId={jobId} onRefinementComplete={handleRefinementComplete} />
+            <MessageList messages={messages} jobId={jobId} onRefinementComplete={handleRefinementComplete} onSendMessage={handleSendMessage} />
             <div ref={messagesEndRef} />
         </div>
       </div>
@@ -389,7 +401,7 @@ const Index = () => {
           onRemoveFile={(path) => setUploadedFiles(files => files.filter(f => f.path !== path))}
           isJobRunning={isJobRunning}
           isSending={isSending}
-          onSendMessage={handleSendMessage}
+          onSendMessage={() => handleSendMessage()}
         />
       </div>
     </div>

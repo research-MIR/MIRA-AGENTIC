@@ -12,16 +12,18 @@ import { useImagePreview } from "@/context/ImagePreviewContext";
 import { showSuccess } from "@/utils/toast";
 import { RefinementProposalCard } from "../RefinementProposalCard";
 import { useLanguage } from "@/context/LanguageContext";
+import { ImageChoiceProposalCard } from "../ImageChoiceProposalCard";
 
 // Re-defining types here to make the component self-contained
 // In a larger app, these would be in a central types file.
-interface ImageResult { publicUrl: string; storagePath: string; }
+interface ImageResult { publicUrl: string; storagePath: string; description?: string; }
 interface ImageAnalysis { image_description: string; lighting_style: string; photography_style: string; composition_and_setup: string; }
 interface BrandAnalysisData { isBrandAnalysis: boolean; brand_name: string; website_analysis?: { url: string; analysis: { dominant_colors: string[]; image_analysis: ImageAnalysis[]; synthesis: string; }; }; social_media_analysis?: { url: string; analysis: { dominant_colors: string[]; image_analysis: ImageAnalysis[]; synthesis: string; }; }; combined_synthesis: string; follow_up_message?: string; }
 interface ArtisanResponseData { isArtisanResponse: boolean; version: number; analysis: { [key: string]: string }; prompt: string; rationale: string; follow_up_message?: string; }
 interface ImageGenerationData { isImageGeneration: true; images: ImageResult[]; follow_up_message?: string; }
 interface CreativeProcessData { isCreativeProcess: true; iterations: any[]; final_generation_result: any; follow_up_message?: string; }
 interface RefinementProposalData { summary: string; options: { url: string; jobId: string; }[]; }
+interface ImageChoiceProposalData { summary: string; images: ImageResult[]; }
 
 export interface Message { 
     from: "bot" | "user"; 
@@ -34,15 +36,17 @@ export interface Message {
     creativeProcessResponse?: CreativeProcessData; 
     jobInProgress?: { jobId: string; message: string; };
     refinementProposal?: RefinementProposalData;
+    imageChoiceProposal?: ImageChoiceProposalData;
 }
 
 interface MessageListProps {
   messages: Message[];
   jobId?: string;
   onRefinementComplete: (newImageUrl: string) => void;
+  onSendMessage: (message: string) => void;
 }
 
-export const MessageList = ({ messages, jobId, onRefinementComplete }: MessageListProps) => {
+export const MessageList = ({ messages, jobId, onRefinementComplete, onSendMessage }: MessageListProps) => {
   const { showImage } = useImagePreview();
   const { t } = useLanguage();
 
@@ -54,7 +58,7 @@ export const MessageList = ({ messages, jobId, onRefinementComplete }: MessageLi
         
         return (
           <div key={key} className={`flex items-start gap-3 ${message.from === "user" ? "justify-end" : ""}`}>
-            {message.from === "bot" && !message.artisanResponse && !message.brandAnalysisResponse && !message.jobInProgress && !message.imageGenerationResponse && !message.creativeProcessResponse && !message.refinementProposal && <div className="p-2 bg-primary rounded-full text-primary-foreground self-start"><Bot size={20} /></div>}
+            {message.from === "bot" && !message.artisanResponse && !message.brandAnalysisResponse && !message.jobInProgress && !message.imageGenerationResponse && !message.creativeProcessResponse && !message.refinementProposal && !message.imageChoiceProposal && <div className="p-2 bg-primary rounded-full text-primary-foreground self-start"><Bot size={20} /></div>}
             
             {message.jobInProgress ? (
               <JobStatusCard message={message.jobInProgress.message} />
@@ -64,6 +68,8 @@ export const MessageList = ({ messages, jobId, onRefinementComplete }: MessageLi
               <ImageGenerationResponse data={message.imageGenerationResponse} jobId={jobId} />
             ) : message.refinementProposal ? (
               <RefinementProposalCard data={message.refinementProposal} onRefinementComplete={onRefinementComplete} />
+            ) : message.imageChoiceProposal ? (
+              <ImageChoiceProposalCard data={message.imageChoiceProposal} onChoose={onSendMessage} />
             ) : message.artisanResponse ? (
               <div className="flex items-center gap-2">
                 <ArtisanEngineResponse data={message.artisanResponse} />
