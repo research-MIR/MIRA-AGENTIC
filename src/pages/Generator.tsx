@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -8,7 +8,7 @@ import { ModelSelector } from "@/components/ModelSelector";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { showError, showLoading, dismissToast } from "@/utils/toast";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Sparkles, Wand2, Info } from "lucide-react";
+import { Sparkles, Wand2, Info, UploadCloud, X } from "lucide-react";
 import { useImagePreview } from "@/context/ImagePreviewContext";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -48,6 +48,33 @@ const Generator = () => {
   const [results, setResults] = useState<ImageResult[]>([]);
   const [intermediateResult, setIntermediateResult] = useState<ImageResult | null>(null);
   const [useTwoStage, setUseTwoStage] = useState(false);
+  const [referenceImageFile, setReferenceImageFile] = useState<File | null>(null);
+  const [referenceImageUrl, setReferenceImageUrl] = useState<string | null>(null);
+
+  const handleReferenceImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+        setReferenceImageFile(file);
+        const previewUrl = URL.createObjectURL(file);
+        setReferenceImageUrl(previewUrl);
+    }
+  };
+
+  const handleRemoveReferenceImage = () => {
+      if (referenceImageUrl) {
+          URL.revokeObjectURL(referenceImageUrl);
+      }
+      setReferenceImageFile(null);
+      setReferenceImageUrl(null);
+  };
+
+  useEffect(() => {
+      return () => {
+          if (referenceImageUrl) {
+              URL.revokeObjectURL(referenceImageUrl);
+          }
+      };
+  }, [referenceImageUrl]);
 
   const handleGenerate = async () => {
     if (!prompt.trim()) return showError("Please enter a prompt.");
@@ -161,6 +188,38 @@ const Generator = () => {
                 <div>
                   <Label htmlFor="negative-prompt">{t.negativePrompt}</Label>
                   <Textarea id="negative-prompt" value={negativePrompt} onChange={(e) => setNegativePrompt(e.target.value)} placeholder={t.negativePromptPlaceholder} rows={3} />
+                </div>
+                <div>
+                    <Label>{t.referenceImage}</Label>
+                    {referenceImageUrl ? (
+                        <div className="mt-2 relative">
+                            <img src={referenceImageUrl} alt="Reference" className="w-full h-auto rounded-md object-contain max-h-60" />
+                            <Button
+                                variant="destructive"
+                                size="icon"
+                                className="absolute top-2 right-2 h-6 w-6"
+                                onClick={handleRemoveReferenceImage}
+                            >
+                                <X className="h-4 w-4" />
+                            </Button>
+                        </div>
+                    ) : (
+                        <div className="mt-2 flex justify-center rounded-lg border border-dashed border-border px-6 py-10">
+                            <div className="text-center">
+                                <UploadCloud className="mx-auto h-12 w-12 text-muted-foreground" />
+                                <div className="mt-4 flex text-sm leading-6 text-muted-foreground">
+                                    <Label
+                                        htmlFor="reference-image-upload"
+                                        className="relative cursor-pointer rounded-md bg-background font-semibold text-primary focus-within:outline-none focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 hover:text-primary/80"
+                                    >
+                                        <span>Upload a file</span>
+                                        <Input id="reference-image-upload" type="file" className="sr-only" onChange={handleReferenceImageChange} accept="image/*" />
+                                    </Label>
+                                </div>
+                                <p className="text-xs leading-5 text-muted-foreground">PNG, JPG, etc.</p>
+                            </div>
+                        </div>
+                    )}
                 </div>
               </div>
             </CardContent>
