@@ -87,7 +87,7 @@ async function wakeUpMainAgent(supabase: any, comfyJob: any, finalResult: any) {
 
     const finalResultPayload = {
         isRefinementProposal: true,
-        summary: "Here is the refined image. What would you like to do next?",
+        summary: "REFINEMENT_COMPLETE",
         options: [{ url: finalResult.publicUrl, jobId: comfyJob.main_agent_job_id }]
     };
 

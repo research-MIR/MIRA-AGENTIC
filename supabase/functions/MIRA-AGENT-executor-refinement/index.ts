@@ -51,11 +51,10 @@ serve(async (req) => {
 
     if (!imageDataSource) {
         console.log(`[RefinementExecutor][${job_id}] No image found in history. Reporting back to user.`);
-        const errorMessage = "I'm sorry, I couldn't find an image in our current conversation to refine. Please upload one or generate one first.";
         
         await supabase.from('mira-agent-jobs').update({
             status: 'complete',
-            final_result: { text: errorMessage }
+            final_result: { text: "ERROR_NO_IMAGE_TO_REFINE" }
         }).eq('id', job_id);
 
         return new Response(JSON.stringify({ success: true, message: "No image found, job completed with a message." }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });

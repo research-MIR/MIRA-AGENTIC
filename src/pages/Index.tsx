@@ -171,7 +171,7 @@ const Index = () => {
     } else if (jobData.status === 'awaiting_refinement') {
         conversationMessages.push({ from: 'bot', jobInProgress: { jobId: jobData.id, message: 'Refining image in the background...' } });
     } else if (jobData.status === 'failed') {
-        conversationMessages.push({ from: 'bot', text: `I'm sorry, an error occurred: ${jobData.error_message}` });
+        conversationMessages.push({ from: 'bot', text: jobData.error_message });
     } else if (jobData.status === 'awaiting_feedback' && jobData.final_result?.isRefinementProposal) {
         conversationMessages.push({ from: 'bot', refinementProposal: jobData.final_result });
     } else if (jobData.status === 'complete' && jobData.final_result?.text) {
@@ -321,18 +321,19 @@ const Index = () => {
     }
   }, [jobId, supabase, navigate, queryClient, t]);
 
-  const handleRefinementComplete = (newImageUrl: string) => {
-    setMessages(prev => [
-        ...prev.filter(m => !m.refinementProposal), // Remove the proposal card
-        {
-            from: 'bot',
-            imageGenerationResponse: {
-                isImageGeneration: true,
-                images: [{ publicUrl: newImageUrl, storagePath: '' }]
-            }
+  const handleRefinementComplete = useCallback((newImageUrl: string) => {
+    setMessages(prev => {
+      const newMessages = prev.filter(m => !m.refinementProposal); // Remove old proposal
+      newMessages.push({
+        from: 'bot',
+        refinementProposal: {
+          summary: "REFINEMENT_FURTHER",
+          options: [{ url: newImageUrl, jobId: jobId || '' }]
         }
-    ]);
-  };
+      });
+      return newMessages;
+    });
+  }, [jobId]);
 
   return (
     <div className="flex flex-col h-full relative" onDragEnter={() => setIsDragging(true)}>

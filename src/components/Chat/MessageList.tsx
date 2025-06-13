@@ -11,6 +11,7 @@ import { CreativeProcessResponse } from "@/components/CreativeProcessResponse";
 import { useImagePreview } from "@/context/ImagePreviewContext";
 import { showSuccess } from "@/utils/toast";
 import { RefinementProposalCard } from "../RefinementProposalCard";
+import { useLanguage } from "@/context/LanguageContext";
 
 // Re-defining types here to make the component self-contained
 // In a larger app, these would be in a central types file.
@@ -43,6 +44,7 @@ interface MessageListProps {
 
 export const MessageList = ({ messages, jobId, onRefinementComplete }: MessageListProps) => {
   const { showImage } = useImagePreview();
+  const { t } = useLanguage();
 
   return (
     <>
@@ -88,7 +90,7 @@ export const MessageList = ({ messages, jobId, onRefinementComplete }: MessageLi
                       ))}
                     </div>
                   )}
-                  {message.text && <div className="markdown-content"><ReactMarkdown remarkPlugins={[remarkGfm]}>{message.text}</ReactMarkdown></div>}
+                  {message.text && <div className="markdown-content"><ReactMarkdown remarkPlugins={[remarkGfm]}>{(t[message.text as keyof typeof t]) || message.text}</ReactMarkdown></div>}
                 </CardContent>
               </Card>
             )}

@@ -4,6 +4,7 @@ import { Wand2, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { useSession } from "./Auth/SessionContextProvider";
 import { showError, showLoading, dismissToast } from "@/utils/toast";
+import { useLanguage } from "@/context/LanguageContext";
 
 interface RefinementOption {
   url: string;
@@ -22,6 +23,7 @@ interface Props {
 
 export const RefinementProposalCard = ({ data, onRefinementComplete }: Props) => {
   const { supabase, session } = useSession();
+  const { t } = useLanguage();
   const [isLoading, setIsLoading] = useState<string | null>(null); // Store URL of loading image
 
   const handleRefineClick = async (option: RefinementOption) => {
@@ -51,10 +53,12 @@ export const RefinementProposalCard = ({ data, onRefinementComplete }: Props) =>
     }
   };
 
+  const titleText = (data.summary && t[data.summary as keyof typeof t]) || data.summary;
+
   return (
     <Card className="max-w-2xl w-full bg-secondary/50">
       <CardHeader>
-        <CardTitle className="text-base font-semibold">{data.summary}</CardTitle>
+        <CardTitle className="text-base font-semibold">{titleText}</CardTitle>
       </CardHeader>
       <CardContent>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -76,7 +80,7 @@ export const RefinementProposalCard = ({ data, onRefinementComplete }: Props) =>
                 ) : (
                   <Wand2 className="mr-2 h-4 w-4" />
                 )}
-                Refine
+                {t.refineButtonLabel}
               </Button>
             </div>
           ))}
