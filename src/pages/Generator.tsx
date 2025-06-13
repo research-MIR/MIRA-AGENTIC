@@ -48,33 +48,45 @@ const Generator = () => {
   const [results, setResults] = useState<ImageResult[]>([]);
   const [intermediateResult, setIntermediateResult] = useState<ImageResult | null>(null);
   const [useTwoStage, setUseTwoStage] = useState(false);
+  
   const [referenceImageFile, setReferenceImageFile] = useState<File | null>(null);
   const [referenceImageUrl, setReferenceImageUrl] = useState<string | null>(null);
+  const [styleReferenceImageFile, setStyleReferenceImageFile] = useState<File | null>(null);
+  const [styleReferenceImageUrl, setStyleReferenceImageUrl] = useState<string | null>(null);
+  const [garmentReferenceImageFile, setGarmentReferenceImageFile] = useState<File | null>(null);
+  const [garmentReferenceImageUrl, setGarmentReferenceImageUrl] = useState<string | null>(null);
 
-  const handleReferenceImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const createChangeHandler = (setFile: (file: File) => void, setUrl: (url: string) => void) => (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-        setReferenceImageFile(file);
-        const previewUrl = URL.createObjectURL(file);
-        setReferenceImageUrl(previewUrl);
+      setFile(file);
+      const previewUrl = URL.createObjectURL(file);
+      setUrl(previewUrl);
     }
   };
 
-  const handleRemoveReferenceImage = () => {
-      if (referenceImageUrl) {
-          URL.revokeObjectURL(referenceImageUrl);
-      }
-      setReferenceImageFile(null);
-      setReferenceImageUrl(null);
+  const createRemoveHandler = (setFile: (file: null) => void, setUrl: (url: null) => void, url: string | null) => () => {
+    if (url) {
+      URL.revokeObjectURL(url);
+    }
+    setFile(null);
+    setUrl(null);
   };
 
+  const handleReferenceImageChange = createChangeHandler(setReferenceImageFile, setReferenceImageUrl);
+  const handleRemoveReferenceImage = createRemoveHandler(setReferenceImageFile, setReferenceImageUrl, referenceImageUrl);
+  const handleStyleReferenceImageChange = createChangeHandler(setStyleReferenceImageFile, setStyleReferenceImageUrl);
+  const handleRemoveStyleReferenceImage = createRemoveHandler(setStyleReferenceImageFile, setStyleReferenceImageUrl, styleReferenceImageUrl);
+  const handleGarmentReferenceImageChange = createChangeHandler(setGarmentReferenceImageFile, setGarmentReferenceImageUrl);
+  const handleRemoveGarmentReferenceImage = createRemoveHandler(setGarmentReferenceImageFile, setGarmentReferenceImageUrl, garmentReferenceImageUrl);
+
   useEffect(() => {
-      return () => {
-          if (referenceImageUrl) {
-              URL.revokeObjectURL(referenceImageUrl);
-          }
-      };
-  }, [referenceImageUrl]);
+    return () => {
+      if (referenceImageUrl) URL.revokeObjectURL(referenceImageUrl);
+      if (styleReferenceImageUrl) URL.revokeObjectURL(styleReferenceImageUrl);
+      if (garmentReferenceImageUrl) URL.revokeObjectURL(garmentReferenceImageUrl);
+    };
+  }, [referenceImageUrl, styleReferenceImageUrl, garmentReferenceImageUrl]);
 
   const handleGenerate = async () => {
     if (!prompt.trim()) return showError("Please enter a prompt.");
@@ -160,6 +172,33 @@ const Generator = () => {
     }
   };
 
+  const renderUploader = (label: string, imageUrl: string | null, onFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void, onRemove: () => void, inputId: string) => (
+    <div>
+      <Label>{label}</Label>
+      {imageUrl ? (
+        <div className="mt-2 relative">
+          <img src={imageUrl} alt="Reference" className="w-full h-auto rounded-md object-contain max-h-60" />
+          <Button variant="destructive" size="icon" className="absolute top-2 right-2 h-6 w-6" onClick={onRemove}>
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+      ) : (
+        <div className="mt-2 flex justify-center rounded-lg border border-dashed border-border px-6 py-10">
+          <div className="text-center">
+            <UploadCloud className="mx-auto h-12 w-12 text-muted-foreground" />
+            <div className="mt-4 flex text-sm leading-6 text-muted-foreground">
+              <Label htmlFor={inputId} className="relative cursor-pointer rounded-md bg-background font-semibold text-primary focus-within:outline-none focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 hover:text-primary/80">
+                <span>Upload a file</span>
+                <Input id={inputId} type="file" className="sr-only" onChange={onFileChange} accept="image/*" />
+              </Label>
+            </div>
+            <p className="text-xs leading-5 text-muted-foreground">PNG, JPG, etc.</p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <div className="p-4 md:p-8 h-screen overflow-y-auto">
       <header className="pb-4 mb-8 border-b flex justify-between items-center">
@@ -189,38 +228,9 @@ const Generator = () => {
                   <Label htmlFor="negative-prompt">{t.negativePrompt}</Label>
                   <Textarea id="negative-prompt" value={negativePrompt} onChange={(e) => setNegativePrompt(e.target.value)} placeholder={t.negativePromptPlaceholder} rows={3} />
                 </div>
-                <div>
-                    <Label>{t.referenceImage}</Label>
-                    {referenceImageUrl ? (
-                        <div className="mt-2 relative">
-                            <img src={referenceImageUrl} alt="Reference" className="w-full h-auto rounded-md object-contain max-h-60" />
-                            <Button
-                                variant="destructive"
-                                size="icon"
-                                className="absolute top-2 right-2 h-6 w-6"
-                                onClick={handleRemoveReferenceImage}
-                            >
-                                <X className="h-4 w-4" />
-                            </Button>
-                        </div>
-                    ) : (
-                        <div className="mt-2 flex justify-center rounded-lg border border-dashed border-border px-6 py-10">
-                            <div className="text-center">
-                                <UploadCloud className="mx-auto h-12 w-12 text-muted-foreground" />
-                                <div className="mt-4 flex text-sm leading-6 text-muted-foreground">
-                                    <Label
-                                        htmlFor="reference-image-upload"
-                                        className="relative cursor-pointer rounded-md bg-background font-semibold text-primary focus-within:outline-none focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 hover:text-primary/80"
-                                    >
-                                        <span>Upload a file</span>
-                                        <Input id="reference-image-upload" type="file" className="sr-only" onChange={handleReferenceImageChange} accept="image/*" />
-                                    </Label>
-                                </div>
-                                <p className="text-xs leading-5 text-muted-foreground">PNG, JPG, etc.</p>
-                            </div>
-                        </div>
-                    )}
-                </div>
+                {renderUploader(t.referenceImage, referenceImageUrl, handleReferenceImageChange, handleRemoveReferenceImage, "reference-image-upload")}
+                {renderUploader(t.styleReference, styleReferenceImageUrl, handleStyleReferenceImageChange, handleRemoveStyleReferenceImage, "style-reference-image-upload")}
+                {renderUploader(t.garmentReference, garmentReferenceImageUrl, handleGarmentReferenceImageChange, handleRemoveGarmentReferenceImage, "garment-reference-image-upload")}
               </div>
             </CardContent>
           </Card>
