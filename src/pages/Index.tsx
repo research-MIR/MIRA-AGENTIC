@@ -14,6 +14,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { PlusCircle, Trash2 } from "lucide-react";
+import { RefinementProposalCard } from "@/components/RefinementProposalCard";
 
 interface UploadedFile {
   name: string;
@@ -159,6 +160,8 @@ const Index = () => {
         conversationMessages.push({ from: 'bot', jobInProgress: { jobId: jobData.id, message: 'This job is in progress...' } });
     } else if (jobData.status === 'failed') {
         conversationMessages.push({ from: 'bot', text: `I'm sorry, an error occurred: ${jobData.error_message}` });
+    } else if (jobData.status === 'awaiting_feedback' && jobData.final_result?.isRefinementProposal) {
+        conversationMessages.push({ from: 'bot', refinementProposal: jobData.final_result });
     } else if (jobData.status === 'complete' && jobData.final_result?.text) {
         conversationMessages.push({ from: 'bot', text: jobData.final_result.text });
     }
@@ -303,6 +306,19 @@ const Index = () => {
     }
   }, [jobId, supabase, navigate, queryClient, t]);
 
+  const handleRefinementComplete = (newImageUrl: string) => {
+    setMessages(prev => [
+        ...prev.filter(m => !m.refinementProposal), // Remove the proposal card
+        {
+            from: 'bot',
+            imageGenerationResponse: {
+                isImageGeneration: true,
+                images: [{ publicUrl: newImageUrl, storagePath: '' }]
+            }
+        }
+    ]);
+  };
+
   return (
     <div className="flex flex-col h-full relative" onDragEnter={() => setIsDragging(true)}>
       {isDragging && <FileDropzone onDrop={(files) => handleFileUpload(files)} onDragStateChange={setIsDragging} />}
@@ -332,7 +348,7 @@ const Index = () => {
 
       <div className="flex-1 overflow-y-auto">
         <div className="p-4 md:p-6 space-y-4">
-            <MessageList messages={messages} jobId={jobId} />
+            <MessageList messages={messages} jobId={jobId} onRefinementComplete={handleRefinementComplete} />
             <div ref={messagesEndRef} />
         </div>
       </div>

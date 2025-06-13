@@ -10,6 +10,7 @@ import { ImageGenerationResponse } from "@/components/ImageGenerationResponse";
 import { CreativeProcessResponse } from "@/components/CreativeProcessResponse";
 import { useImagePreview } from "@/context/ImagePreviewContext";
 import { showSuccess } from "@/utils/toast";
+import { RefinementProposalCard } from "../RefinementProposalCard";
 
 // Re-defining types here to make the component self-contained
 // In a larger app, these would be in a central types file.
@@ -19,14 +20,28 @@ interface BrandAnalysisData { isBrandAnalysis: boolean; brand_name: string; webs
 interface ArtisanResponseData { isArtisanResponse: boolean; version: number; analysis: { [key: string]: string }; prompt: string; rationale: string; follow_up_message?: string; }
 interface ImageGenerationData { isImageGeneration: true; images: ImageResult[]; follow_up_message?: string; }
 interface CreativeProcessData { isCreativeProcess: true; iterations: any[]; final_generation_result: any; follow_up_message?: string; }
-export interface Message { from: "bot" | "user"; jobId?: string; text?: string; imageUrls?: string[]; artisanResponse?: ArtisanResponseData; brandAnalysisResponse?: BrandAnalysisData; imageGenerationResponse?: ImageGenerationData; creativeProcessResponse?: CreativeProcessData; jobInProgress?: { jobId: string; message: string; }; }
+interface RefinementProposalData { summary: string; options: { url: string; jobId: string; }[]; }
+
+export interface Message { 
+    from: "bot" | "user"; 
+    jobId?: string; 
+    text?: string; 
+    imageUrls?: string[]; 
+    artisanResponse?: ArtisanResponseData; 
+    brandAnalysisResponse?: BrandAnalysisData; 
+    imageGenerationResponse?: ImageGenerationData; 
+    creativeProcessResponse?: CreativeProcessData; 
+    jobInProgress?: { jobId: string; message: string; };
+    refinementProposal?: RefinementProposalData;
+}
 
 interface MessageListProps {
   messages: Message[];
   jobId?: string;
+  onRefinementComplete: (newImageUrl: string) => void;
 }
 
-export const MessageList = ({ messages, jobId }: MessageListProps) => {
+export const MessageList = ({ messages, jobId, onRefinementComplete }: MessageListProps) => {
   const { showImage } = useImagePreview();
 
   return (
@@ -37,7 +52,7 @@ export const MessageList = ({ messages, jobId }: MessageListProps) => {
         
         return (
           <div key={key} className={`flex items-start gap-3 ${message.from === "user" ? "justify-end" : ""}`}>
-            {message.from === "bot" && !message.artisanResponse && !message.brandAnalysisResponse && !message.jobInProgress && !message.imageGenerationResponse && !message.creativeProcessResponse && <div className="p-2 bg-primary rounded-full text-primary-foreground self-start"><Bot size={20} /></div>}
+            {message.from === "bot" && !message.artisanResponse && !message.brandAnalysisResponse && !message.jobInProgress && !message.imageGenerationResponse && !message.creativeProcessResponse && !message.refinementProposal && <div className="p-2 bg-primary rounded-full text-primary-foreground self-start"><Bot size={20} /></div>}
             
             {message.jobInProgress ? (
               <JobStatusCard message={message.jobInProgress.message} />
@@ -45,6 +60,8 @@ export const MessageList = ({ messages, jobId }: MessageListProps) => {
               <CreativeProcessResponse data={message.creativeProcessResponse} jobId={jobId} />
             ) : message.imageGenerationResponse ? (
               <ImageGenerationResponse data={message.imageGenerationResponse} jobId={jobId} />
+            ) : message.refinementProposal ? (
+              <RefinementProposalCard data={message.refinementProposal} onRefinementComplete={onRefinementComplete} />
             ) : message.artisanResponse ? (
               <div className="flex items-center gap-2">
                 <ArtisanEngineResponse data={message.artisanResponse} />

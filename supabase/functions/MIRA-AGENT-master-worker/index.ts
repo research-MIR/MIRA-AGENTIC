@@ -33,29 +33,13 @@ const getDynamicSystemPrompt = (jobContext: any): string => {
         userPreferences += `\n- **Number of Images:** The user has specified they want **${jobContext.numImagesMode}** image(s). You MUST use this number in your \`generate_image\` tool call.`;
     }
 
-    const pipelineMode = jobContext?.pipelineMode || 'auto';
-    let refinementRule = '';
-
-    switch (pipelineMode) {
-        case 'on':
-            refinementRule = `You MUST now proceed to the Final Refinement Step by calling the \`fal_image_to_image\` tool. There are no exceptions.`;
-            break;
-        case 'off':
-            refinementRule = `The plan is now complete. You MUST call \`finish_task\`.`;
-            break;
-        case 'auto':
-        default:
-            refinementRule = `You MUST check the model ID used in the last \`generate_image\` call. If the model ID contains 'gpt' or 'imagen', proceed to the Final Refinement Step by calling \`fal_image_to_image\`. For all other models (like FLUX), the plan is complete and you MUST call \`finish_task\`.`;
-            break;
-    }
-
     return `You are Mira, a master AI orchestrator. Your purpose is to create and execute a multi-step plan to fulfill a user's request by calling the appropriate tools.
 
 ### Core Capabilities
 You have several powerful capabilities, each corresponding to a tool or a sequence of tools:
 1.  **Creative Production:** Generate highly detailed image prompts and then create images from them, including a self-correction loop for quality control.
 2.  **Brand Analysis:** Autonomously research a brand's online presence to understand its visual identity before creating content.
-3.  **Image Refinement:** Improve existing images using a secondary AI model.
+3.  **Interactive Refinement:** When asked to refine or upscale, you can present the user with a choice of images from the conversation.
 4.  **Conversational Interaction:** Ask clarifying questions or provide final answers to the user.
 
 ### Mandatory Rules
@@ -69,6 +53,8 @@ You have several powerful capabilities, each corresponding to a tool or a sequen
 This is how you decide which tool to use first.
 
 **Step 1: Analyze User Intent**
+-   **IF** the user asks to "refine", "improve", or "upscale" an image...
+    -   **THEN** your first and only step is to call \`propose_refinement_options\`.
 -   **IF** the user asks to analyze a brand, or generate content inspired by a brand (e.g., "create an ad for Nike"), especially if they provide a URL...
     -   **THEN** your first and only step is to call \`dispatch_to_brand_analyzer\`.
 -   **ELSE IF** the user provides an image for a creative task (e.g., "make this more cinematic," "use this style")...
@@ -77,45 +63,6 @@ This is how you decide which tool to use first.
     -   **THEN** your first step is to call \`dispatch_to_artisan_engine\` to begin the creative workflow.
 -   **ELSE** (if the request is conversational or ambiguous)...
     -   **THEN** call \`finish_task\` to ask for clarification.
-
----
-
-### Detailed Workflow Example: Creative Production
-
-Here is a complete example of how to handle a standard text-to-image request. This is just one possible combination of your tools.
-
-**User Request:** "Create a photorealistic image of a knight in a dark forest."
-
-**Your Thought Process:** "The user wants an image. I will start the creative loop."
-
-**Step 1: Generate the Prompt**
--   **Action:** Call \`dispatch_to_artisan_engine\` to generate a detailed prompt.
--   **Tool Call:** \`dispatch_to_artisan_engine(user_request_summary="The user wants a photorealistic image of a knight in a dark forest.")\`
-
-**Step 2: Generate the Image**
--   **History:** The history now contains the detailed prompt from the Artisan.
--   **Action:** Call \`generate_image\`, using the prompt from the previous step.
--   **Tool Call:** \`generate_image(prompt="Photorealistic, cinematic medium shot of a knight in intricately detailed, battle-worn steel armor...", number_of_images=2)\`
-
-**Step 3: Critique the Image**
--   **History:** The history now contains the generated images.
--   **Action:** Call \`critique_images\` to check for quality and adherence to the prompt.
--   **Tool Call:** \`critique_images(reason_for_critique="Initial generation complete. Evaluating against the Artisan's prompt.")\`
-
-**Step 4: Handle the Critique**
--   **History:** The history now contains the critique.
--   **Action:** Read the \`is_good_enough\` field from the critique response.
-    -   **IF \`false\`:** The images were rejected. Loop back to **Step 1** (\`dispatch_to_artisan_engine\`), but this time the full history (including the rejection) will be sent, allowing the Artisan to improve its prompt.
-    -   **IF \`true\`:** The images are approved. Proceed to the next step.
-
-**Step 5: Final Refinement (Pipeline Mode)**
--   **Action:** Follow the specific rule for the current pipeline mode.
--   **Refinement Rule (Mode: ${pipelineMode}):** ${refinementRule}
--   **Example Tool Call (if applicable):** \`fal_image_to_image(image_urls=["..."], prompt="...")\`
-
-**Step 6: Finish the Task**
--   **Action:** The plan is complete. Call \`finish_task\` to present the final result to the user.
--   **Tool Call:** \`finish_task(response_type="creative_process_complete", summary="Here is the final creative result based on your request.")\`
 
 ---
 ### User Preferences
@@ -128,7 +75,7 @@ async function getDynamicMasterTools(jobContext: any, supabase: SupabaseClient):
     const baseTools: FunctionDeclaration[] = [
       { name: "dispatch_to_brand_analyzer", description: "Analyzes a brand's online presence (website, social media) to understand its visual identity. Use this when the user asks to analyze a brand or generate content inspired by a brand, especially if they provide a URL.", parameters: { type: Type.OBJECT, properties: { brand_name: { type: Type.STRING, description: "The name of the brand to analyze." } }, required: ["brand_name"] } },
       { name: "dispatch_to_artisan_engine", description: "Generates or refines a detailed image prompt. This is the correct first step if the user provides a reference image.", parameters: { type: Type.OBJECT, properties: { user_request_summary: { type: Type.STRING, description: "A brief summary of the user's request for the Artisan Engine, noting that a reference image was provided for style/composition." } }, required: ["user_request_summary"] } },
-      { name: "fal_image_to_image", description: "Refines a batch of images using a secondary AI model.", parameters: { type: Type.OBJECT, properties: { image_urls: { type: Type.ARRAY, items: { type: Type.STRING }, description: "An array of public URLs of the images to be refined." }, prompt: { type: Type.STRING, description: "The detailed prompt from the ArtisanEngine to guide the refinement." } }, required: ["image_urls", "prompt"] } },
+      { name: "propose_refinement_options", description: "When the user asks to refine, improve, or upscale an image, call this tool to find all generated images in the conversation and present them as options.", parameters: { type: Type.OBJECT, properties: {}, required: [] } },
       { name: "critique_images", description: "Invokes the Art Director agent to critique generated images.", parameters: { type: Type.OBJECT, properties: { reason_for_critique: { type: Type.STRING, description: "A brief summary of why the critique is necessary." } }, required: ["reason_for_critique"] } },
       { name: "finish_task", description: "Call this to respond to the user.", parameters: { type: Type.OBJECT, properties: { response_type: { type: Type.STRING, enum: ["clarification_question", "creative_process_complete", "text"], description: "The type of response to send." }, summary: { type: Type.STRING, description: "The message to send to the user." }, follow_up_message: { type: Type.STRING, description: "A helpful follow-up message." } }, required: ["response_type", "summary"] } },
     ];
@@ -410,14 +357,25 @@ serve(async (req) => {
         toolResponseData = data;
         historyParts.push({ functionResponse: { name: call.name, response: toolResponseData } });
 
-    } else if (call.name === 'fal_image_to_image') {
-        console.log(`[MasterWorker][${currentJobId}] Dispatching to Fal.ai image-to-image tool...`);
-        const payload = { ...call.args, invoker_user_id: job.user_id };
-        const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-fal-image-to-image', { body: payload });
-        if (error) throw error;
-        toolResponseData = data;
-        historyParts.push({ functionResponse: { name: call.name, response: toolResponseData } });
+    } else if (call.name === 'propose_refinement_options') {
+        console.log(`[MasterWorker][${currentJobId}] Handling refinement proposal...`);
+        const generatedImages = history
+            .filter(turn => turn.role === 'function' && (turn.parts[0]?.functionResponse?.name === 'generate_image' || turn.parts[0]?.functionResponse?.name === 'fal_image_to_image'))
+            .flatMap(turn => turn.parts[0]?.functionResponse?.response?.images || [])
+            .map((img: any) => ({ url: img.publicUrl, jobId: currentJobId }));
 
+        if (generatedImages.length === 0) {
+            toolResponseData = { text: "I couldn't find any images in our conversation to refine. Please generate an image first." };
+            historyParts.push({ functionResponse: { name: 'finish_task', response: toolResponseData } });
+        } else {
+            const finalResult = {
+                isRefinementProposal: true,
+                summary: "Of course! Which of these images would you like to refine?",
+                options: generatedImages,
+            };
+            await supabase.from('mira-agent-jobs').update({ status: 'awaiting_feedback', final_result: finalResult, context: { ...job.context, history } }).eq('id', currentJobId);
+            return new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
     } else if (call.name === 'dispatch_to_artisan_engine' || call.name === 'critique_images') {
         const toolName = call.name === 'dispatch_to_artisan_engine' ? 'MIRA-AGENT-tool-generate-image-prompt' : 'MIRA-AGENT-tool-critique-images';
         const payload = { body: { history: history, iteration_number: iterationNumber, is_designer_mode: job.context?.isDesignerMode } };
