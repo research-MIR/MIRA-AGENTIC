@@ -157,7 +157,7 @@ const Index = () => {
 
   const processJobData = useCallback((jobData: any) => {
     if (!jobData) return;
-    setIsJobRunning(jobData.status === 'processing');
+    setIsJobRunning(jobData.status === 'processing' || jobData.status === 'awaiting_refinement');
     setChatTitle(jobData.original_prompt || "Untitled Chat");
     if (jobData.context?.isDesignerMode !== undefined) setIsDesignerMode(jobData.context.isDesignerMode);
     if (jobData.context?.selectedModelId) setSelectedModelId(jobData.context.selectedModelId);
@@ -167,13 +167,18 @@ const Index = () => {
     let conversationMessages = parseHistoryToMessages(jobData.context?.history);
     
     if (jobData.status === 'processing') {
-        conversationMessages.push({ from: 'bot', jobInProgress: { jobId: jobData.id, message: 'This job is in progress...' } });
+        conversationMessages.push({ from: 'bot', jobInProgress: { jobId: jobData.id, message: 'Thinking...' } });
+    } else if (jobData.status === 'awaiting_refinement') {
+        conversationMessages.push({ from: 'bot', jobInProgress: { jobId: jobData.id, message: 'Refining image in the background...' } });
     } else if (jobData.status === 'failed') {
         conversationMessages.push({ from: 'bot', text: `I'm sorry, an error occurred: ${jobData.error_message}` });
     } else if (jobData.status === 'awaiting_feedback' && jobData.final_result?.isRefinementProposal) {
         conversationMessages.push({ from: 'bot', refinementProposal: jobData.final_result });
     } else if (jobData.status === 'complete' && jobData.final_result?.text) {
-        conversationMessages.push({ from: 'bot', text: jobData.final_result.text });
+        const lastMessage = conversationMessages[conversationMessages.length - 1];
+        if (!lastMessage || lastMessage.from !== 'bot' || lastMessage.text !== jobData.final_result.text) {
+            conversationMessages.push({ from: 'bot', text: jobData.final_result.text });
+        }
     }
     setMessages(conversationMessages);
   }, []);
