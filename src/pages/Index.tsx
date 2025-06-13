@@ -200,14 +200,21 @@ const Index = () => {
         }
     } catch (error: any) {
       showError("Error communicating with Mira: " + error.message);
+      setIsSending(false); // Ensure sending state is reset on error
     } finally {
-      setIsSending(false);
+      // isSending is reset by the job status update, so we may not need it here
     }
   }, [input, uploadedFiles, isJobRunning, isSending, jobId, session, isDesignerMode, selectedModelId, language, ratioMode, numImagesMode, supabase, navigate]);
 
   const processJobData = useCallback((jobData: any) => {
     if (!jobData) return;
-    setIsJobRunning(jobData.status === 'processing' || jobData.status === 'awaiting_refinement');
+    
+    const newIsJobRunning = jobData.status === 'processing' || jobData.status === 'awaiting_refinement';
+    if (!newIsJobRunning) {
+        setIsSending(false); // Reset sending state when job is no longer running
+    }
+    setIsJobRunning(newIsJobRunning);
+
     setChatTitle(jobData.original_prompt || "Untitled Chat");
     if (jobData.context?.isDesignerMode !== undefined) setIsDesignerMode(jobData.context.isDesignerMode);
     if (jobData.context?.selectedModelId) setSelectedModelId(jobData.context.selectedModelId);
@@ -242,7 +249,14 @@ const Index = () => {
   const fetchChatJob = async (jobId: string | undefined) => {
     if (!jobId || !session?.user) return null;
     const { data, error } = await supabase.from("mira-agent-jobs").select("*").eq("id", jobId).eq("user_id", session.user.id).single();
-    if (error) throw new Error("Could not load chat history.");
+    if (error) {
+        // It's possible the job was deleted, navigate to new chat
+        if (error.code === 'PGRST116') {
+            navigate('/chat');
+            return null;
+        }
+        throw new Error("Could not load chat history.");
+    }
     return data;
   };
 
@@ -270,26 +284,19 @@ const Index = () => {
   useEffect(() => {
     if (!jobId) return;
 
-    const channelName = `job-updates-${jobId}`;
-    const channel = supabase.channel(channelName, {
-      config: {
-        broadcast: {
-          self: true,
-        },
-      },
-    });
-
+    const channel = supabase.channel(`job-updates-${jobId}`);
+    
     const subscription = channel.on('postgres_changes', { 
         event: 'UPDATE', 
         schema: 'public', 
         table: 'mira-agent-jobs', 
         filter: `id=eq.${jobId}` 
-    }, (payload) => {
-        console.log('[Realtime] Job update received:', payload.new);
-        processJobData(payload.new);
+    }, () => {
+        console.log('[Realtime] Job update detected, invalidating query cache.');
+        queryClient.invalidateQueries({ queryKey: ['chatJob', jobId] });
     }).subscribe((status, err) => {
         if (status === 'SUBSCRIBED') {
-            console.log(`[Realtime] Subscribed to ${channelName}`);
+            console.log(`[Realtime] Subscribed to job-updates-${jobId}`);
         }
         if (status === 'CHANNEL_ERROR') {
             console.error('[Realtime] Channel error:', err);
@@ -298,10 +305,9 @@ const Index = () => {
     });
 
     return () => {
-      console.log(`[Realtime] Unsubscribing from ${channelName}`);
       supabase.removeChannel(channel);
     };
-  }, [jobId, supabase, processJobData]);
+  }, [jobId, supabase, queryClient]);
 
   useEffect(() => {
     if (error) {
