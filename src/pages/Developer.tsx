@@ -7,8 +7,20 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { useLanguage } from "@/context/LanguageContext";
-import { Loader2 } from "lucide-react";
+import { Loader2, AlertTriangle } from "lucide-react";
 import { RealtimeChannel } from "@supabase/supabase-js";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { useQueryClient } from "@tanstack/react-query";
 
 interface ComfyJob {
   id: string;
@@ -24,6 +36,8 @@ const Developer = () => {
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const channelRef = useRef<RealtimeChannel | null>(null);
+  const queryClient = useQueryClient();
+  const [isCancelling, setIsCancelling] = useState(false);
 
   // ComfyUI State
   const [activeJob, setActiveJob] = useState<ComfyJob | null>(null);
@@ -129,6 +143,28 @@ const Developer = () => {
     }
   };
 
+  const handleCancelAllJobs = async () => {
+    if (!session?.user) return showError("You must be logged in.");
+    setIsCancelling(true);
+    const toastId = showLoading("Cancelling all active jobs...");
+    try {
+      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-cancel-all-my-jobs', {
+        body: { user_id: session.user.id }
+      });
+
+      if (error) throw error;
+
+      dismissToast(toastId);
+      showSuccess(data.message || "All active jobs have been cancelled.");
+      queryClient.invalidateQueries({ queryKey: ['activeComfyJobs'] });
+    } catch (err: any) {
+      dismissToast(toastId);
+      showError(`Failed to cancel jobs: ${err.message}`);
+    } finally {
+      setIsCancelling(false);
+    }
+  };
+
   const renderJobStatus = () => {
     if (!activeJob) return <p className="text-center text-muted-foreground">{t.resultsPlaceholder}</p>;
 
@@ -200,6 +236,42 @@ const Developer = () => {
                 {(activeJob && (activeJob.status === 'queued' || activeJob.status === 'processing')) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 {t.queuePrompt}
               </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-destructive">
+                    <AlertTriangle />
+                    Danger Zone
+                </CardTitle>
+            </CardHeader>
+            <CardContent>
+                <p className="text-sm text-muted-foreground mb-4">
+                    These actions are irreversible. Use with caution.
+                </p>
+                <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                        <Button variant="destructive" disabled={isCancelling}>
+                            {isCancelling && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            Cancel All My Active Jobs
+                        </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                        <AlertDialogHeader>
+                            <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                                This will immediately stop and fail all of your jobs that are currently queued or processing across all systems. This action cannot be undone.
+                            </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                            <AlertDialogAction onClick={handleCancelAllJobs}>
+                                Yes, cancel all jobs
+                            </AlertDialogAction>
+                        </AlertDialogFooter>
+                    </AlertDialogContent>
+                </AlertDialog>
             </CardContent>
           </Card>
         </div>
