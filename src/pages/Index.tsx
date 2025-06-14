@@ -81,8 +81,6 @@ const parseHistoryToMessages = (history: any[]): Message[] => {
                 flushCreativeProcessBuffer();
                 if (response.text) {
                     messages.push({ from: 'bot', text: response.text });
-                } else if (response.isCreativeProcess) {
-                    messages.push({ from: 'bot', creativeProcessResponse: response });
                 }
             } else if (callName === 'dispatch_to_artisan_engine') {
                 flushCreativeProcessBuffer();
