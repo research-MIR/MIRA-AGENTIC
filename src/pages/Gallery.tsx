@@ -54,8 +54,19 @@ const Gallery = () => {
     const processedJobs = data
       .map((job: any) => {
         console.log(`[Gallery] Processing job ID: ${job.id}`, job);
-        // For any job with a history, check for image generation artifacts.
-        // This covers both simple agent generations and complex creative processes.
+        
+        // First, check if the final_result already contains the images.
+        // This handles simple agent generations and direct generator jobs.
+        if (job.final_result?.isImageGeneration && Array.isArray(job.final_result.images)) {
+            console.log(`[Gallery] Found images directly in final_result for job ${job.id}.`);
+            if (!job.context.source) {
+                job.context.source = 'agent'; // Default to agent if source is missing
+            }
+            return job;
+        }
+
+        // If not found in final_result, then search the history.
+        // This handles complex creative processes where the final_result might be a text summary.
         if (job.context?.history) {
           const history = job.context.history;
           const lastImageTurn = [...history].reverse().find(turn => 
@@ -82,7 +93,6 @@ const Gallery = () => {
             console.log(`[Gallery] No image turn found in history for job ${job.id}.`);
           }
         }
-        // Jobs from direct generator or refiner should already have the correct final_result structure.
         return job;
       })
       .filter(job => {
