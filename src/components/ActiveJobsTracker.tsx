@@ -4,7 +4,6 @@ import { useSession } from './Auth/SessionContextProvider';
 import { Button } from './ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
 import { Loader2 } from 'lucide-react';
-import { RealtimeChannel } from '@supabase/supabase-js';
 import { showSuccess, showError } from '@/utils/toast';
 import { downloadImage } from '@/lib/utils';
 import { ActiveJobsModal } from './ActiveJobsModal';

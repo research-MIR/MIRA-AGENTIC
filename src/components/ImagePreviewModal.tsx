@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Download, Wand2, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
+import { Download, Wand2, Loader2 } from "lucide-react";
 import { downloadImage } from "@/lib/utils";
 import { useSession } from "./Auth/SessionContextProvider";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
@@ -55,16 +55,40 @@ export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => 
     if (!session?.user) return showError("You must be logged in to upscale images.");
     
     setIsUpscaling(true);
-    const toastId = showLoading(`Starting x${factor} upscale job...`);
+    let toastId = showLoading("Analyzing image to create prompt...");
     
     try {
+      // Step 1: Fetch the image blob and convert to base64 for auto-prompting
+      const imageResponse = await fetch(currentImage.url);
+      if (!imageResponse.ok) throw new Error("Failed to fetch image for analysis.");
+      const imageBlob = await imageResponse.blob();
+      const reader = new FileReader();
+      reader.readAsDataURL(imageBlob);
+      const base64String = await new Promise<string>((resolve, reject) => {
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
+      });
+      const base64Data = base64String.split(',')[1];
+
+      // Step 2: Get the auto-generated prompt
+      const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-auto-describe-image', {
+        body: { base64_image_data: base64Data, mime_type: imageBlob.type }
+      });
+      if (promptError) throw promptError;
+      const autoPrompt = promptData.auto_prompt;
+      if (!autoPrompt) throw new Error("Auto-prompting failed to return a prompt.");
+
+      dismissToast(toastId);
+      toastId = showLoading(`Submitting x${factor} upscale job...`);
+
+      // Step 3: Queue the job in ComfyUI using the existing proxy
       const { error: queueError } = await supabase.functions.invoke('MIRA-AGENT-proxy-comfyui', {
         body: {
-          prompt_text: "masterpiece, best quality, high resolution, photorealistic, sharp focus",
-          image_filename: currentImage.url, // The proxy can now handle URLs
+          prompt_text: autoPrompt,
+          image_url: currentImage.url, // Pass the original URL to the proxy
           invoker_user_id: session.user.id,
           upscale_factor: factor,
-          original_prompt_for_gallery: `Upscaled from job ${currentImage.jobId}`
+          original_prompt_for_gallery: `Upscaled from job ${currentImage.jobId || 'gallery'}`
         }
       });
 
