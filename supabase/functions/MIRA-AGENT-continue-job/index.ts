@@ -40,12 +40,24 @@ serve(async (req) => {
     if (fetchError) throw fetchError;
 
     const history = job.context?.history || [];
-    
-    if (job.final_result && job.final_result.text) {
-        console.log(`[ContinueJob][${jobId}] Found previous bot text response. Adding to history.`);
-        history.push({ role: 'model', parts: [{ text: job.final_result.text }] });
-    }
+    const lastResult = job.final_result;
+    const lastTurn = history.length > 0 ? history[history.length - 1] : null;
 
+    // If the job was 'complete' or 'awaiting_feedback', its last message was in final_result.
+    // We need to commit this to the history to ensure the log is complete before adding new user input.
+    if (lastResult && lastTurn && lastTurn.role === 'model' && lastTurn.parts[0]?.functionCall) {
+        history.push({
+            role: 'function',
+            parts: [{
+                functionResponse: {
+                    name: lastTurn.parts[0].functionCall.name,
+                    response: lastResult
+                }
+            }]
+        });
+        console.log(`[ContinueJob][${jobId}] Preserved previous final_result in history by completing the last model turn.`);
+    }
+    
     const userParts: Part[] = [];
 
     if (prompt) {

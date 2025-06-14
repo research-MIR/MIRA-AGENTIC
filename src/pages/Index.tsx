@@ -79,6 +79,18 @@ const parseHistoryToMessages = (history: any[], jobStatus: string): Message[] =>
             const response = turn.parts[0]?.functionResponse?.response;
             const name = turn.parts[0]?.functionResponse?.name;
 
+            if (name === 'finish_task' && response) {
+                flushCreativeProcessBuffer();
+                if (response.isCreativeProcess) {
+                    messages.push({ from: 'bot', creativeProcessResponse: response });
+                } else if (response.isImageGeneration) {
+                    messages.push({ from: 'bot', imageGenerationResponse: response });
+                } else if (response.isBrandAnalysis) {
+                    messages.push({ from: 'bot', brandAnalysisResponse: response });
+                }
+                continue;
+            }
+
             if (response) {
                 if (name === 'dispatch_to_refinement_agent' && response.isImageGeneration) {
                     flushCreativeProcessBuffer();
@@ -122,7 +134,6 @@ const parseHistoryToMessages = (history: any[], jobStatus: string): Message[] =>
         }
     }
     
-    // Always flush at the end, or if the job has failed, to show partial progress.
     if (creativeProcessBuffer.length > 0 || jobStatus === 'failed') {
         flushCreativeProcessBuffer();
     }
