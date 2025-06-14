@@ -3,10 +3,11 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+const DISPATCHER_SECRET_KEY = Deno.env.get('DISPATCHER_SECRET_KEY');
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-dispatcher-secret',
 };
 
 // A job is considered stalled if it's been polled more than 2 minutes ago
@@ -17,13 +18,21 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // Check for the custom secret header
+  const receivedSecret = req.headers.get('x-dispatcher-secret');
+  if (!DISPATCHER_SECRET_KEY || receivedSecret !== DISPATCHER_SECRET_KEY) {
+    console.error("Unauthorized watchdog access attempt.");
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      status: 401,
+    });
+  }
+
   try {
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
     
-    // Calculate the timestamp for the stalled threshold
     const threshold = new Date(Date.now() - STALLED_THRESHOLD_MINUTES * 60 * 1000).toISOString();
 
-    // Find jobs that are 'processing' or 'queued' and haven't been polled recently
     const { data: stalledJobs, error: queryError } = await supabase
       .from('mira-agent-comfyui-jobs')
       .select('id')
@@ -47,7 +56,6 @@ serve(async (req) => {
 
     const triggerPromises = stalledJobs.map(job => {
       console.log(`Re-triggering poller for stalled ComfyUI job: ${job.id}`);
-      // We don't await this, just fire and forget.
       supabase.functions.invoke('MIRA-AGENT-poller-comfyui', { body: { job_id: job.id } });
       return job.id;
     });
