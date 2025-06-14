@@ -4,7 +4,7 @@ import { useSession } from "@/components/Auth/SessionContextProvider";
 import { showError, showSuccess, showLoading, dismissToast } from "@/utils/toast";
 import { FileDropzone } from "@/components/FileDropzone";
 import { RealtimeChannel } from "@supabase/supabase-js";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useLanguage } from "@/context/LanguageContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ControlPanel } from "@/components/Chat/ControlPanel";
@@ -165,6 +165,7 @@ const Index = () => {
   const { supabase, session } = useSession();
   const { jobId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const { t, language } = useLanguage();
   const queryClient = useQueryClient();
   
@@ -250,14 +251,45 @@ const Index = () => {
         } else {
             const { data, error } = await supabase.functions.invoke("MIRA-AGENT-master-worker", { body: payload });
             if (error) throw error;
-            // After creating a new job, navigate to its unique URL.
-            navigate(`/chat/${data.reply.jobId}`);
+            const newJobId = data.reply.jobId;
+
+            // Construct an initial job object to pre-populate the cache.
+            // This prevents the UI from flashing a blank screen while the first real fetch occurs.
+            const userPartsForCache = [{ text: textToSend }];
+            // Note: We can't easily add image data here without re-reading files.
+            // The text history is the most important part to prevent the UI from feeling broken.
+            // The real image data will be filled in by the first fetch/realtime update.
+            const initialJobData = {
+                id: newJobId,
+                status: 'processing',
+                original_prompt: textToSend,
+                context: {
+                    history: [{ role: 'user', parts: userPartsForCache }],
+                    isDesignerMode,
+                    selectedModelId,
+                    language,
+                    ratioMode,
+                    numImagesMode,
+                    source: 'agent'
+                },
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+                final_result: null,
+                error_message: null,
+                user_id: session?.user.id,
+            };
+
+            // Use the query client to set the initial data for the new job's query key.
+            queryClient.setQueryData(['chatJob', newJobId], initialJobData);
+            
+            // Navigate to the new chat URL. Because the cache is pre-populated, the UI will render instantly.
+            navigate(`/chat/${newJobId}`);
         }
     } catch (error: any) {
       showError("Error communicating with Mira: " + error.message);
       setIsSending(false); // Reset sending state on error
     }
-  }, [input, uploadedFiles, isJobRunning, isSending, jobId, session, isDesignerMode, selectedModelId, language, ratioMode, numImagesMode, supabase, navigate]);
+  }, [input, uploadedFiles, isJobRunning, isSending, jobId, session, isDesignerMode, selectedModelId, language, ratioMode, numImagesMode, supabase, navigate, queryClient]);
 
   // Central function to update the entire component's state based on the job data from the database.
   const processJobData = useCallback((jobData: any) => {
@@ -330,6 +362,8 @@ const Index = () => {
     queryKey: ['chatJob', jobId],
     queryFn: () => fetchChatJob(jobId),
     enabled: !!jobId,
+    // Use initialData if passed via navigation state. This is the key to the seamless new chat experience.
+    initialData: () => location.state?.initialJobData,
     refetchOnWindowFocus: false,
     retry: 1,
   });
