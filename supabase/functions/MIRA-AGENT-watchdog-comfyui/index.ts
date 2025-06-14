@@ -15,6 +15,8 @@ serve(async (req) => {
   }
 
   try {
+    console.log("[ComfyUI Watchdog] Cron job invoked. Checking for stalled jobs...");
+
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
     
     // A job is considered stalled if it hasn't been polled in the last 55 seconds.
