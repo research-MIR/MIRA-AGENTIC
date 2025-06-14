@@ -1,11 +1,13 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { GoogleGenAI, Content, Part } from 'https://esm.sh/@google/genai@0.15.0';
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY');
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const MODEL_NAME = "gemini-2.5-pro-preview-06-05";
+const BUCKET_NAME = 'mira-agent-user-uploads';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -27,18 +29,30 @@ const synthesisSystemPrompt = `You are a master prompt crafter. Your task is to 
 Combine these elements into a final, rich, photorealistic prompt in English. Do not respond in JSON, only the final text prompt.`;
 
 async function analyzeImage(ai: GoogleGenAI, imageUrl: string, systemPrompt: string, isJsonOutput: boolean = false): Promise<any> {
-    if (!SUPABASE_ANON_KEY || !SUPABASE_SERVICE_ROLE_KEY) {
-        throw new Error("Supabase API keys are not set in environment variables.");
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+        throw new Error("Supabase URL or Service Role Key are not set in environment variables.");
     }
-    const response = await fetch(imageUrl, {
-        headers: {
-            'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-            'apikey': SUPABASE_ANON_KEY
-        }
-    });
-    if (!response.ok) throw new Error(`Failed to download image from ${imageUrl}`);
-    const mimeType = response.headers.get("content-type") || "image/png";
-    const buffer = await response.arrayBuffer();
+    
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    
+    // Extract file path from the public URL
+    const url = new URL(imageUrl);
+    const filePath = url.pathname.split(`/${BUCKET_NAME}/`)[1];
+    if (!filePath) {
+        throw new Error(`Could not parse file path from URL: ${imageUrl}`);
+    }
+
+    console.log(`[PromptHelper] Downloading file from Supabase Storage at path: ${filePath}`);
+    const { data: fileBlob, error: downloadError } = await supabase.storage
+        .from(BUCKET_NAME)
+        .download(filePath);
+
+    if (downloadError) {
+        throw new Error(`Supabase download failed: ${downloadError.message}`);
+    }
+
+    const mimeType = fileBlob.type;
+    const buffer = await fileBlob.arrayBuffer();
     const base64 = encodeBase64(buffer);
 
     const result = await ai.models.generateContent({
