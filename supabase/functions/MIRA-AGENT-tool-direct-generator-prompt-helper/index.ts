@@ -4,6 +4,7 @@ import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY');
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const MODEL_NAME = "gemini-2.5-pro-preview-06-05";
 
 const corsHeaders = {
@@ -26,12 +27,12 @@ const synthesisSystemPrompt = `You are a master prompt crafter. Your task is to 
 Combine these elements into a final, rich, photorealistic prompt in English. Do not respond in JSON, only the final text prompt.`;
 
 async function analyzeImage(ai: GoogleGenAI, imageUrl: string, systemPrompt: string, isJsonOutput: boolean = false): Promise<any> {
-    if (!SUPABASE_ANON_KEY) {
-        throw new Error("SUPABASE_ANON_KEY is not set in environment variables.");
+    if (!SUPABASE_ANON_KEY || !SUPABASE_SERVICE_ROLE_KEY) {
+        throw new Error("Supabase API keys are not set in environment variables.");
     }
     const response = await fetch(imageUrl, {
         headers: {
-            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+            'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
             'apikey': SUPABASE_ANON_KEY
         }
     });
