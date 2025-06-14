@@ -138,8 +138,10 @@ const Index = () => {
     scrollToBottom();
   }, [messages]);
 
-  const handleSendMessage = useCallback(async (messageText?: string, isSilent = false) => {
+  const handleSendMessage = useCallback(async (messageText?: string) => {
     const textToSend = messageText || input;
+    const isSilent = textToSend.startsWith("I choose image number");
+
     if ((!textToSend.trim() && uploadedFiles.length === 0) || isJobRunning || isSending) {
       return;
     }
@@ -409,7 +411,7 @@ const Index = () => {
 
       <div className="flex-1 overflow-y-auto">
         <div className="p-4 md:p-6 space-y-4">
-            <MessageList messages={messages} jobId={jobId} onRefinementComplete={handleRefinementComplete} onSendMessage={(text) => handleSendMessage(text, true)} />
+            <MessageList messages={messages} jobId={jobId} onRefinementComplete={handleRefinementComplete} onSendMessage={handleSendMessage} />
             <div ref={messagesEndRef} />
         </div>
       </div>
