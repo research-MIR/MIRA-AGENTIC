@@ -327,10 +327,16 @@ const Index = () => {
         }
     } else if (jobData.status === 'complete' && jobData.final_result) {
         const result = jobData.final_result;
-        // The main result card (e.g., CreativeProcessResponse) is rendered by parseHistoryToMessages.
-        // Here, we only need to add the final text-based messages from the agent.
+        // The `parseHistoryToMessages` function is the single source of truth
+        // for rendering complex result cards from the history.
+        // This block should ONLY handle appending the final text messages that
+        // are part of the `final_result` object itself.
         if (result.text) {
-            conversationMessages.push({ from: 'bot', text: result.text });
+            const lastMessage = conversationMessages[conversationMessages.length - 1];
+            // Avoid duplicating the message if it's already the last one
+            if (!lastMessage || lastMessage.from !== 'bot' || lastMessage.text !== result.text) {
+                conversationMessages.push({ from: 'bot', text: result.text });
+            }
         }
         if (result.follow_up_message) {
             conversationMessages.push({ from: 'bot', text: result.follow_up_message });
