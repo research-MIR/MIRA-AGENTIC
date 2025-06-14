@@ -40,10 +40,10 @@ export const useDropzone = ({ onDrop }: DropzoneOptions) => {
   return {
     isDraggingOver,
     dropzoneProps: {
-      onDragEnter,
-      onDragLeave,
-      onDragOver,
-      onDrop,
+      onDragEnter: handleDragEnter,
+      onDragLeave: handleDragLeave,
+      onDragOver: handleDragOver,
+      onDrop: handleDrop,
     },
   };
 };
