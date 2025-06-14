@@ -95,7 +95,7 @@ export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => 
       if (queueError) throw queueError;
 
       dismissToast(toastId);
-      showSuccess("Upscale job started! You'll be notified when it's ready.");
+      showSuccess("Upscale job started! You can find the result in the gallery in a couple of minutes.", { duration: 10000 });
       queryClient.invalidateQueries({ queryKey: ['activeComfyJobs'] });
       onClose();
 

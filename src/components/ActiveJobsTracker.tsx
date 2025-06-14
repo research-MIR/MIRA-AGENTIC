@@ -52,7 +52,7 @@ export const ActiveJobsTracker = () => {
           
           if (payload.eventType === 'UPDATE' && (updatedJob.status === 'complete' || updatedJob.status === 'failed')) {
             if (updatedJob.status === 'complete' && updatedJob.final_result?.publicUrl) {
-              showSuccess(`Upscale complete! Downloading now...`);
+              showSuccess(`Upscale complete! Downloading now...`, { duration: 10000 });
               downloadImage(updatedJob.final_result.publicUrl, `upscaled-${updatedJob.id.substring(0, 8)}.png`);
             } else if (updatedJob.status === 'failed') {
               showError(`Upscale failed: ${updatedJob.error_message || 'Unknown error'}`);
