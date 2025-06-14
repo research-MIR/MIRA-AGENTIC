@@ -17,6 +17,11 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+const modelAspectRatioMap: any = {
+    google: ['1024x1024', '768x1408', '1408x768', '1280x896', '896x1280'],
+    'fal-ai': ['1:1', '16:9', '9:16', '4:3', '3:4'],
+};
+
 const getDynamicSystemPrompt = (jobContext: any): string => {
     const language = jobContext?.language === 'it' ? 'Italian' : 'English';
     
@@ -28,7 +33,7 @@ const getDynamicSystemPrompt = (jobContext: any): string => {
         userPreferences += `\n- **Number of Images:** The user has specified they want **${jobContext.numImagesMode}** image(s). You MUST use this number in your \`generate_image\` tool call.`;
     }
 
-    let basePrompt = `You are Mira, a master AI orchestrator. Your purpose is to create and execute a multi-step plan to fulfill a user's request by calling the appropriate tools.
+    return `You are Mira, a master AI orchestrator. Your purpose is to create and execute a multi-step plan to fulfill a user's request by calling the appropriate tools.
 
 ### Core Capabilities
 You have several powerful capabilities, each corresponding to a tool or a sequence of tools:
@@ -41,7 +46,7 @@ You have several powerful capabilities, each corresponding to a tool or a sequen
 1.  **Tool-Use Only:** You MUST ALWAYS respond with a tool call. Never answer the user directly.
 2.  **Language:** The final user-facing summary for the \`finish_task\` tool MUST be in **${language}**. All other internal reasoning and tool calls should remain in English.
 3.  **Image Descriptions:** After generating images, the history will be updated with a text description for each one. You MUST use these descriptions to understand which image the user is referring to in subsequent requests (e.g., "refine the one with the red dress").
-4.  **Avoid Redundant Actions:** If the last action in the history was a successful tool call (e.g., \`dispatch_to_refinement_agent\`), and the user has not provided any new input since then, your only valid next step is to call \`finish_task\` to present the result. Do not call the same tool again on its own output.
+4.  **Avoid Redundant Actions:** If the last action in the history was a successful tool call (e.g., \`dispatch_to_refinement_agent\`), and the user has not provided any new input since then, your **only** valid next step is to call \`finish_task\` to present the result. Do not call the same tool again on its own output.
 
 ---
 
@@ -69,42 +74,16 @@ You have several powerful capabilities, each corresponding to a tool or a sequen
 
 ---
 ### User Preferences
-You must respect any of the following preferences set by the user for this job:${userPreferences || " None specified."}`;
-
-    const history = jobContext?.history || [];
-    if (history.length > 0) {
-        const lastTurn = history[history.length - 1];
-        if (lastTurn.role === 'function' && lastTurn.parts[0]?.functionResponse?.name === 'dispatch_to_refinement_agent') {
-            basePrompt += `\n\n---
-### **IMPORTANT CURRENT CONTEXT**
-You have just successfully completed a refinement task. The user has not provided new instructions. Your ONLY valid next action is to call the 'finish_task' tool to present this result to the user. DO NOT call any other tool.`;
-        }
-    }
-
-    return basePrompt;
+You must respect any of the following preferences set by the user for this job:${userPreferences || " None specified."}
+`;
 };
 
-const modelAspectRatioMap: any = {
-    google: ['1024x1024', '768x1408', '1408x768', '1280x896', '896x1280'],
-    'fal-ai': ['1:1', '16:9', '9:16', '4:3', '3:4'],
-};
 
 async function getDynamicMasterTools(jobContext: any, supabase: SupabaseClient): Promise<FunctionDeclaration[]> {
-    let baseTools: FunctionDeclaration[] = [
+    const baseTools: FunctionDeclaration[] = [
       { name: "dispatch_to_brand_analyzer", description: "Analyzes a brand's online presence (website, social media) to understand its visual identity. Use this when the user asks to analyze a brand or generate content inspired by a brand, especially if they provide a URL.", parameters: { type: Type.OBJECT, properties: { brand_name: { type: Type.STRING, description: "The name of the brand to analyze." } }, required: ["brand_name"] } },
       { name: "dispatch_to_artisan_engine", description: "Generates or refines a detailed image prompt. This is the correct first step if the user provides a reference image.", parameters: { type: Type.OBJECT, properties: { user_request_summary: { type: Type.STRING, description: "A brief summary of the user's request for the Artisan Engine, noting that a reference image was provided for style/composition." } }, required: ["user_request_summary"] } },
-      { 
-        name: "dispatch_to_refinement_agent", 
-        description: "When the user asks to refine, improve, or upscale an image, call this tool. This is the correct first step if the user provides an image and asks for it to be upscaled.", 
-        parameters: { 
-            type: Type.OBJECT, 
-            properties: { 
-                prompt: { type: Type.STRING, description: "The user's original text instruction for refinement, e.g., 'upscale this image'." }, 
-                upscale_factor: { type: Type.NUMBER, description: "The upscale factor to use. 1.2 for 'refine', 1.4 for 'upscale', 2.0 for 'improve'." } 
-            }, 
-            required: ["prompt", "upscale_factor"] 
-        } 
-      },
+      { name: "dispatch_to_refinement_agent", description: "When the user asks to refine, improve, or upscale the most recent image in the conversation, call this tool.", parameters: { type: Type.OBJECT, properties: { prompt: { type: Type.STRING, description: "The user's instructions for refinement." }, upscale_factor: { type: Type.NUMBER, description: "The upscale factor to use. 1.2 for 'refine', 1.4 for 'upscale', 2.0 for 'improve'." } }, required: ["prompt", "upscale_factor"] } },
       { name: "critique_images", description: "Invokes the Art Director agent to critique generated images.", parameters: { type: Type.OBJECT, properties: { reason_for_critique: { type: Type.STRING, description: "A brief summary of why the critique is necessary." } }, required: ["reason_for_critique"] } },
       { name: "present_image_choice", description: "When you have generated multiple images and need the user to choose one to proceed, call this tool. You MUST provide a summary to ask the user which one they prefer.", parameters: { type: Type.OBJECT, properties: { summary: { type: Type.STRING, description: "The question to ask the user, e.g., 'I've created a couple of options for you. Which one should we refine?'" } }, required: ["summary"] } },
       { name: "finish_task", description: "Call this to respond to the user.", parameters: { type: Type.OBJECT, properties: { response_type: { type: Type.STRING, enum: ["clarification_question", "creative_process_complete", "text"], description: "The type of response to send." }, summary: { type: Type.STRING, description: "The message to send to the user." }, follow_up_message: { type: Type.STRING, description: "A helpful follow-up message." } }, required: ["response_type", "summary"] } },
@@ -153,7 +132,7 @@ async function getDynamicMasterTools(jobContext: any, supabase: SupabaseClient):
         }
     };
     
-    let allTools = [generateImageTool, ...baseTools];
+    const allTools = [generateImageTool, ...baseTools];
 
     const hasReferenceImage = jobContext?.user_provided_assets?.some((asset: any) => asset.type === 'image');
     if (hasReferenceImage && supportsImg2Img) {
@@ -172,16 +151,6 @@ async function getDynamicMasterTools(jobContext: any, supabase: SupabaseClient):
             }
         };
         allTools.push(generateWithReferenceTool);
-    }
-
-    // Check if the last action was a successful refinement to prevent loops
-    const history = jobContext?.history || [];
-    if (history.length > 0) {
-        const lastTurn = history[history.length - 1];
-        if (lastTurn.role === 'function' && lastTurn.parts[0]?.functionResponse?.name === 'dispatch_to_refinement_agent') {
-            console.log("[MasterWorker] Last action was a refinement. Temporarily removing refinement tool to prevent loop.");
-            allTools = allTools.filter(tool => tool.name !== 'dispatch_to_refinement_agent');
-        }
     }
 
     return allTools;
@@ -416,25 +385,7 @@ serve(async (req) => {
 
     } else if (call.name === 'dispatch_to_refinement_agent') {
         console.log(`[MasterWorker][${currentJobId}] Dispatching to refinement agent...`);
-        let { prompt, upscale_factor } = call.args;
-
-        // Robustness: If the model fails to provide the prompt, find the last user message.
-        if (!prompt) {
-            const lastUserTurn = [...history].reverse().find(turn => turn.role === 'user');
-            if (lastUserTurn) {
-                const textPart = lastUserTurn.parts.find((p: any) => p.text);
-                if (textPart) {
-                    prompt = textPart.text;
-                    console.log(`[MasterWorker][${currentJobId}] Model did not provide a prompt. Extracted from history: "${prompt}"`);
-                }
-            }
-        }
-
-        if (!prompt) {
-            // If still no prompt, we can't proceed.
-            throw new Error("Could not determine the refinement prompt from the model's call or the conversation history.");
-        }
-
+        const { prompt, upscale_factor } = call.args;
         const { error } = await supabase.functions.invoke('MIRA-AGENT-executor-refinement', {
             body: {
                 job_id: currentJobId,

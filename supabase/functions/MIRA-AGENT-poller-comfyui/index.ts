@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -44,21 +44,19 @@ async function createGalleryEntry(supabase: any, job: any, finalResult: any) {
     }
 }
 
-async function wakeUpMainAgent(supabase: SupabaseClient, comfyJob: any, finalResult: any) {
+async function wakeUpMainAgent(supabase: any, comfyJob: any, finalResult: any) {
     if (!comfyJob.main_agent_job_id) return;
     
-    console.log(`[Poller][${comfyJob.id}] This job is linked to main agent job ${comfyJob.main_agent_job_id}. Waking it up.`);
+    console.log(`[Poller][${comfyJob.id}] This job is linked to main agent job ${comfyJob.main_agent_job_id}. Updating its status.`);
     const { data: mainJob, error: fetchError } = await supabase
         .from('mira-agent-jobs')
         .select('context')
         .eq('id', comfyJob.main_agent_job_id)
         .single();
-
     if (fetchError) {
         console.error(`[Poller][${comfyJob.id}] Could not fetch parent agent job:`, fetchError);
         return;
     }
-
     const newHistory = [
         ...(mainJob.context?.history || []),
         {
@@ -74,25 +72,24 @@ async function wakeUpMainAgent(supabase: SupabaseClient, comfyJob: any, finalRes
             }]
         }
     ];
-
-    // Update the main job's history and set it back to 'processing'
+    const finalResultPayload = {
+        isRefinementProposal: true,
+        summary: "REFINEMENT_COMPLETE",
+        options: [{ url: finalResult.publicUrl, jobId: comfyJob.main_agent_job_id }]
+    };
     const { error: updateError } = await supabase
         .from('mira-agent-jobs')
         .update({
-            status: 'processing', // Set back to processing
-            context: { ...mainJob.context, history: newHistory },
-            final_result: null // Clear any previous final_result
+            status: 'awaiting_feedback',
+            final_result: finalResultPayload,
+            context: { ...mainJob.context, history: newHistory }
         })
         .eq('id', comfyJob.main_agent_job_id);
-
     if (updateError) {
         console.error(`[Poller][${comfyJob.id}] Failed to update main agent job:`, updateError);
         return;
     }
-
-    console.log(`[Poller][${comfyJob.id}] Main agent job status set to 'processing'. Re-invoking master-worker.`);
-    // Re-invoke the master worker to continue the plan
-    supabase.functions.invoke('MIRA-AGENT-master-worker', { body: { job_id: comfyJob.main_agent_job_id } }).catch(console.error);
+    console.log(`[Poller][${comfyJob.id}] Main agent job updated to 'awaiting_feedback'. The job is now paused, awaiting user input.`);
 }
 
 serve(async (req) => {
