@@ -243,45 +243,26 @@ const Index = () => {
         };
         if (!payload.userId) throw new Error("User session not found.");
         
-        // If there's a jobId, we're continuing an existing chat. Otherwise, we're starting a new one.
+        // If there's a jobId, we're continuing an existing chat.
         if (jobId) {
             await supabase.functions.invoke("MIRA-AGENT-continue-job", { body: payload });
         } else {
-            const { data, error } = await supabase.functions.invoke("MIRA-AGENT-master-worker", { body: payload });
-            if (error) throw error;
-            const newJobId = data.reply.jobId;
-
-            // Construct an initial job object to pre-populate the cache.
-            // This prevents the UI from flashing a blank screen while the first real fetch occurs.
-            const userPartsForCache = [{ text: textToSend }];
-            // Note: We can't easily add image data here without re-reading files.
-            // The text history is the most important part to prevent the UI from feeling broken.
-            // The real image data will be filled in by the first fetch/realtime update.
-            const initialJobData = {
-                id: newJobId,
-                status: 'processing',
-                original_prompt: textToSend,
-                context: {
-                    history: [{ role: 'user', parts: userPartsForCache }],
-                    isDesignerMode,
-                    selectedModelId,
-                    language,
-                    ratioMode,
-                    numImagesMode,
-                    source: 'agent'
-                },
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-                final_result: null,
-                error_message: null,
-                user_id: session?.user.id,
-            };
-
-            // Use the query client to set the initial data for the new job's query key.
-            queryClient.setQueryData(['chatJob', newJobId], initialJobData);
+            // For a new chat, use the new two-step creation and start process.
+            // Step 1: Create the job.
+            const { data: createData, error: createError } = await supabase.functions.invoke("MIRA-AGENT-create-job", { body: payload });
+            if (createError) throw createError;
             
-            // Navigate to the new chat URL. Because the cache is pre-populated, the UI will render instantly.
-            navigate(`/chat/${newJobId}`);
+            const newJob = createData.newJob;
+            if (!newJob || !newJob.id) throw new Error("Failed to create a new job.");
+
+            // Pre-populate the cache with the data returned from the create function.
+            queryClient.setQueryData(['chatJob', newJob.id], newJob);
+            
+            // Navigate to the new chat URL.
+            navigate(`/chat/${newJob.id}`);
+
+            // Step 2: Immediately call continue-job to kick off the orchestrator.
+            await supabase.functions.invoke("MIRA-AGENT-continue-job", { body: { ...payload, jobId: newJob.id } });
         }
     } catch (error: any) {
       showError("Error communicating with Mira: " + error.message);
