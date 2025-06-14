@@ -127,7 +127,7 @@ const workflowTemplate = `
         0
       ],
       "model": [
-        "419",
+        "418",
         0
       ],
       "positive": [
@@ -286,24 +286,6 @@ const workflowTemplate = `
       "title": "Apply Flux PAG Attention"
     }
   },
-  "419": {
-    "inputs": {
-      "max_shift": 1.1500000000000001,
-      "base_shift": 0.5000000000000001,
-      "model": [
-        "418",
-        0
-      ],
-      "latent": [
-        "420",
-        0
-      ]
-    },
-    "class_type": "ModelSamplingFluxNormalized",
-    "_meta": {
-      "title": "Model Sampling Flux Normalized"
-    }
-  },
   "420": {
     "inputs": {
       "pixels": [
@@ -323,8 +305,8 @@ const workflowTemplate = `
   "421": {
     "inputs": {
       "samples": [
-        "419",
-        1
+        "420",
+        0
       ],
       "vae": [
         "10",
@@ -366,7 +348,7 @@ const workflowTemplate = `
       "steps": 20,
       "denoise": 0.30000000000000004,
       "model": [
-        "419",
+        "418",
         0
       ]
     },
