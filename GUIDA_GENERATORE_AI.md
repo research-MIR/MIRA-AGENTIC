@@ -50,25 +50,40 @@ Se disattivi l'AI Prompt Helper, il generatore **ignorerà completamente** le im
 
 ---
 
-### 3. Esempio Pratico: Mettiamo Tutto Insieme
+### 3. Consiglio Avanzato: Guida l'AI con Precisione
+
+Mentre l'AI è intelligente nell'interpretare le tue immagini, puoi renderla ancora più precisa dandole istruzioni dirette nel prompt di testo. Non limitarti a descrivere la scena; dì all'AI esattamente **cosa prendere** da ogni immagine di riferimento.
+
+**Esempi di istruzioni specifiche:**
+
+*   `"Usa la posa del soggetto dall'immagine di stile, ma mantieni l'outfit che ho descritto."`
+*   `"Applica la color correction e l'illuminazione dell'immagine di stile al mio soggetto."`
+*   `"Voglio solo la giacca dall'immagine di riferimento, ignora il resto dell'outfit."`
+*   `"Prendi il lampione e l'atmosfera notturna dalla foto di stile e aggiungili alla mia scena."`
+
+Essere così specifici ti dà il massimo controllo e ti permette di mescolare e abbinare elementi da più fonti per ottenere il risultato perfetto.
+
+---
+
+### 4. Esempio Pratico: Mettiamo Tutto Insieme
 
 Immagina di voler creare questa immagine:
 
 1.  **Scrivi un prompt di base:**
-    > "Una modella in un contesto urbano."
+    > "Una modella in un contesto urbano. Usa la posa dall'immagine di stile."
 
 2.  **Carica i Riferimenti Indumento:**
     *   Una foto di una giacca di pelle nera.
     *   Una foto di un paio di jeans strappati.
 
 3.  **Carica un Riferimento Stile:**
-    *   Una foto di una strada di Tokyo di notte, con vivaci luci al neon e un'atmosfera cinematografica.
+    *   Una foto di una strada di Tokyo di notte, con vivaci luci al neon e un'atmosfera cinematografica, dove una persona è appoggiata a un muro.
 
 4.  **Attiva l'AI Prompt Helper e clicca "Genera".**
 
 L'AI combinerà tutto questo e creerà un prompt finale incredibilmente dettagliato, simile a questo:
 
-> *"Un ritratto fotorealistico di una modella che indossa una giacca di pelle nera e jeans blu strappati, in piedi su una strada cittadina di notte, illuminata da vibranti luci al neon, con uno stile cinematografico e un'atmosfera suggestiva."*
+> *"Un ritratto fotorealistico di una modella appoggiata a un muro, che indossa una giacca di pelle nera e jeans blu strappati, su una strada cittadina di notte, illuminata da vibranti luci al neon, con uno stile cinematografico e un'atmosfera suggestiva."*
 
 Il risultato sarà un'immagine che cattura perfettamente la tua visione complessa, combinando elementi da tre fonti diverse in un'unica, coerente creazione.
 
