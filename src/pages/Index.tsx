@@ -30,7 +30,7 @@ const sanitizeFilename = (filename: string): string => {
     .replace(/\.{2,}/g, '.');
 };
 
-const parseHistoryToMessages = (history: any[]): Message[] => {
+const parseHistoryToMessages = (history: any[], jobStatus: string): Message[] => {
     const messages: Message[] = [];
     if (!history) return messages;
 
@@ -122,7 +122,10 @@ const parseHistoryToMessages = (history: any[]): Message[] => {
         }
     }
     
-    flushCreativeProcessBuffer();
+    // Always flush at the end, or if the job has failed, to show partial progress.
+    if (creativeProcessBuffer.length > 0 || jobStatus === 'failed') {
+        flushCreativeProcessBuffer();
+    }
     
     return messages;
 };
@@ -131,7 +134,7 @@ const Index = () => {
   const { supabase, session } = useSession();
   const { jobId } = useParams();
   const navigate = useNavigate();
-  const { language, t } = useLanguage();
+  const { t } = useLanguage();
   const queryClient = useQueryClient();
   
   const [messages, setMessages] = useState<Message[]>([]);
@@ -146,6 +149,7 @@ const Index = () => {
   const [ratioMode, setRatioMode] = useState<'auto' | string>('auto');
   const [numImagesMode, setNumImagesMode] = useState<'auto' | number>('auto');
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const channelRef = useRef<RealtimeChannel | null>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -200,9 +204,7 @@ const Index = () => {
         }
     } catch (error: any) {
       showError("Error communicating with Mira: " + error.message);
-      setIsSending(false); // Ensure sending state is reset on error
-    } finally {
-      // isSending is reset by the job status update, so we may not need it here
+      setIsSending(false); // Reset sending state on error
     }
   }, [input, uploadedFiles, isJobRunning, isSending, jobId, session, isDesignerMode, selectedModelId, language, ratioMode, numImagesMode, supabase, navigate]);
 
@@ -211,7 +213,7 @@ const Index = () => {
     
     const newIsJobRunning = jobData.status === 'processing' || jobData.status === 'awaiting_refinement';
     if (!newIsJobRunning) {
-        setIsSending(false); // Reset sending state when job is no longer running
+        setIsSending(false);
     }
     setIsJobRunning(newIsJobRunning);
 
@@ -221,7 +223,7 @@ const Index = () => {
     if (jobData.context?.ratioMode) setRatioMode(jobData.context.ratioMode);
     if (jobData.context?.numImagesMode) setNumImagesMode(jobData.context.numImagesMode);
 
-    let conversationMessages = parseHistoryToMessages(jobData.context?.history);
+    let conversationMessages = parseHistoryToMessages(jobData.context?.history, jobData.status);
     
     if (jobData.status === 'processing') {
         conversationMessages.push({ from: 'bot', jobInProgress: { jobId: jobData.id, message: 'Thinking...' } });
@@ -250,7 +252,6 @@ const Index = () => {
     if (!jobId || !session?.user) return null;
     const { data, error } = await supabase.from("mira-agent-jobs").select("*").eq("id", jobId).eq("user_id", session.user.id).single();
     if (error) {
-        // It's possible the job was deleted, navigate to new chat
         if (error.code === 'PGRST116') {
             navigate('/chat');
             return null;
@@ -282,11 +283,17 @@ const Index = () => {
   }, [jobId, jobData, processJobData, t.newChat]);
 
   useEffect(() => {
+    if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+    }
+
     if (!jobId) return;
 
-    const channel = supabase.channel(`job-updates-${jobId}`);
+    const newChannel = supabase.channel(`job-updates-${jobId}`);
+    channelRef.current = newChannel;
     
-    const subscription = channel.on('postgres_changes', { 
+    const subscription = newChannel.on('postgres_changes', { 
         event: 'UPDATE', 
         schema: 'public', 
         table: 'mira-agent-jobs', 
@@ -305,7 +312,10 @@ const Index = () => {
     });
 
     return () => {
-      supabase.removeChannel(channel);
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
     };
   }, [jobId, supabase, queryClient]);
 
