@@ -50,7 +50,9 @@ const Gallery = () => {
 
     const processedJobs = data
       .map((job: any) => {
-        if (job.final_result?.isCreativeProcess && job.context?.history) {
+        // For any job with a history, check for image generation artifacts.
+        // This covers both simple agent generations and complex creative processes.
+        if (job.context?.history) {
           const history = job.context.history;
           const lastImageTurn = [...history].reverse().find(turn => 
             turn.role === 'function' && 
@@ -61,13 +63,21 @@ const Gallery = () => {
           );
 
           if (lastImageTurn) {
-            job.final_result.isImageGeneration = true;
-            job.final_result.images = lastImageTurn.parts[0].functionResponse.response.images;
+            // Overwrite final_result to standardize it for the gallery
+            job.final_result = {
+                isImageGeneration: true,
+                images: lastImageTurn.parts[0].functionResponse.response.images
+            };
+            // Ensure agent jobs are categorized correctly if source is missing
+            if (!job.context.source) {
+                job.context.source = 'agent';
+            }
           }
         }
+        // Jobs from direct generator or refiner should already have the correct final_result structure.
         return job;
       })
-      .filter(job => job.final_result?.isImageGeneration && job.final_result.images?.length > 0);
+      .filter(job => job.final_result?.isImageGeneration && Array.isArray(job.final_result.images) && job.final_result.images.length > 0);
 
     return processedJobs;
   };
