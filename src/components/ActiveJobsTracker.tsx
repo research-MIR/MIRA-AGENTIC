@@ -25,7 +25,7 @@ export const ActiveJobsTracker = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   const { data: activeJobs, isLoading } = useQuery<ComfyJob[]>({
-    queryKey: ['activeComfyJobs'],
+    queryKey: ['activeComfyJobs', session?.user?.id],
     queryFn: async () => {
       if (!session?.user) return [];
       const { data, error } = await supabase
@@ -63,7 +63,7 @@ export const ActiveJobsTracker = () => {
               }
               
               // Optimistically update the UI by removing the completed job from the cache
-              queryClient.setQueryData(['activeComfyJobs'], (oldData: ComfyJob[] | undefined) => {
+              queryClient.setQueryData(['activeComfyJobs', session?.user?.id], (oldData: ComfyJob[] | undefined) => {
                 return oldData ? oldData.filter(j => j.id !== updatedJob.id) : [];
               });
 
@@ -79,7 +79,7 @@ export const ActiveJobsTracker = () => {
     return () => {
       channels.forEach(channel => supabase.removeChannel(channel));
     };
-  }, [activeJobs, supabase, queryClient]);
+  }, [activeJobs, supabase, queryClient, session?.user?.id]);
 
   if (isLoading || !activeJobs || activeJobs.length === 0) {
     return null;

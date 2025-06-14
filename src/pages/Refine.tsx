@@ -92,16 +92,21 @@ const Refine = () => {
         async (payload) => {
           const newJob = payload.new as ComfyJob;
           setActiveJob(newJob);
-          if (newJob.status === 'complete' && newJob.final_result) {
-            showSuccess("Refinement complete!");
-            if (sourceImageUrl) {
-              setComparisonImages({ before: sourceImageUrl, after: newJob.final_result.publicUrl });
+          if (newJob.status === 'complete' || newJob.status === 'failed') {
+            queryClient.setQueryData(['activeComfyJobs', session?.user?.id], (oldData: ComfyJob[] | undefined) => {
+                return oldData ? oldData.filter(j => j.id !== newJob.id) : [];
+            });
+
+            if (newJob.status === 'complete' && newJob.final_result) {
+              showSuccess("Refinement complete!");
+              if (sourceImageUrl) {
+                setComparisonImages({ before: sourceImageUrl, after: newJob.final_result.publicUrl });
+              }
+              queryClient.invalidateQueries({ queryKey: ['generatedImages'] });
+            } else if (newJob.status === 'failed') {
+              showError(`Job failed: ${newJob.error_message}`);
             }
-            queryClient.invalidateQueries({ queryKey: ['generatedImages'] });
-            supabase.removeChannel(channelRef.current!);
-            channelRef.current = null;
-          } else if (newJob.status === 'failed') {
-            showError(`Job failed: ${newJob.error_message}`);
+            
             supabase.removeChannel(channelRef.current!);
             channelRef.current = null;
           }
@@ -111,7 +116,7 @@ const Refine = () => {
         if (status === 'SUBSCRIBED') console.log(`[RefinePage] Subscribed to job ${jobId}`);
         if (status === 'CHANNEL_ERROR') showError(`Realtime connection failed: ${err?.message}`);
       });
-  }, [supabase, sourceImageUrl, queryClient]);
+  }, [supabase, sourceImageUrl, queryClient, session?.user?.id]);
 
   useEffect(() => {
     if (activeComfyJobs && activeComfyJobs.length > 0 && !activeJob) {
