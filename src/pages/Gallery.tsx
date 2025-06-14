@@ -16,19 +16,8 @@ import { useMemo } from "react";
 interface ImageResult {
   publicUrl: string;
   storagePath: string;
-}
-
-interface Job {
-  id: string;
-  final_result: {
-    isImageGeneration: boolean;
-    isCreativeProcess?: boolean;
-    images: ImageResult[];
-  };
-  context: {
-    source: 'direct_generator' | 'agent' | 'refiner';
-    history?: any[];
-  };
+  jobId: string;
+  source: 'direct_generator' | 'agent' | 'refiner';
 }
 
 const Gallery = () => {
@@ -37,10 +26,10 @@ const Gallery = () => {
   const navigate = useNavigate();
   const { t } = useLanguage();
 
-  const fetchGeneratedImages = async () => {
+  const fetchGeneratedImages = async (): Promise<ImageResult[]> => {
     if (!session?.user) return [];
-    console.log("[Gallery] Fetching jobs from Supabase...");
-    const { data, error } = await supabase
+    console.log("[Gallery V3] Fetching jobs from Supabase...");
+    const { data: jobs, error } = await supabase
       .from("mira-agent-jobs")
       .select("id, final_result, context")
       .eq("user_id", session.user.id)
@@ -49,76 +38,64 @@ const Gallery = () => {
 
     if (error) throw new Error(error.message);
 
-    console.log(`[Gallery] Fetched ${data.length} raw jobs from DB.`, data);
+    console.log(`[Gallery V3] Fetched ${jobs.length} raw jobs from DB.`);
+    const allImages: ImageResult[] = [];
 
-    const processedJobs = data
-      .map((job: any) => {
-        console.log(`[Gallery] Processing job ID: ${job.id}`, job);
+    for (const job of jobs) {
+        const source = job.context?.source || 'agent';
         
-        // If the job has a history, always check it for the latest image generation event.
-        // This handles complex creative processes where the final_result might be a text summary.
+        // Case 1: Images are directly in the final_result (Direct Generator, simple agent responses)
+        if (job.final_result?.isImageGeneration && Array.isArray(job.final_result.images)) {
+            console.log(`[Gallery V3][${job.id}] Found ${job.final_result.images.length} images in final_result.`);
+            for (const image of job.final_result.images) {
+                allImages.push({ ...image, jobId: job.id, source });
+            }
+        }
+
+        // Case 2: Images are buried in the history (complex agent conversations)
         if (job.context?.history) {
-          const history = job.context.history;
-          const lastImageTurn = [...history].reverse().find(turn => 
-            turn.role === 'function' && 
-            (turn.parts[0]?.functionResponse?.name === 'generate_image' || 
-             turn.parts[0]?.functionResponse?.name === 'generate_image_with_reference' ||
-             turn.parts[0]?.functionResponse?.name === 'fal_image_to_image') &&
-            turn.parts[0]?.functionResponse?.response?.images
-          );
-
-          if (lastImageTurn) {
-            console.log(`[Gallery] Found image turn in history for job ${job.id}. Overwriting final_result for display.`, lastImageTurn);
-            // Overwrite final_result to standardize it for the gallery
-            job.final_result = {
-                isImageGeneration: true,
-                images: lastImageTurn.parts[0].functionResponse.response.images
-            };
-          } else {
-            console.log(`[Gallery] No image turn found in history for job ${job.id}.`);
-          }
+            for (const turn of job.context.history) {
+                if (turn.role === 'function' && turn.parts[0]?.functionResponse?.response?.isImageGeneration) {
+                    const imagesInTurn = turn.parts[0].functionResponse.response.images;
+                    if (Array.isArray(imagesInTurn)) {
+                        console.log(`[Gallery V3][${job.id}] Found ${imagesInTurn.length} images in a history turn.`);
+                        for (const image of imagesInTurn) {
+                            // Avoid duplicates if the image is already in the list from final_result
+                            if (!allImages.some(existing => existing.publicUrl === image.publicUrl)) {
+                                allImages.push({ ...image, jobId: job.id, source });
+                            }
+                        }
+                    }
+                }
+            }
         }
-
-        // Standardize the source for categorization
-        if (!job.context.source) {
-            console.log(`[Gallery] Job ${job.id} missing source, defaulting to 'agent'.`);
-            job.context.source = 'agent';
-        }
-
-        return job;
-      })
-      .filter(job => {
-        const hasImages = job.final_result?.isImageGeneration && Array.isArray(job.final_result.images) && job.final_result.images.length > 0;
-        if (!hasImages) {
-            console.log(`[Gallery] Filtering out job ${job.id} because it has no valid images in final_result.`, job.final_result);
-        }
-        return hasImages;
-      });
+    }
     
-    console.log(`[Gallery] Finished processing. ${processedJobs.length} jobs have images to display.`, processedJobs);
-    return processedJobs;
+    // Remove duplicates - sometimes the same image can be in history and final_result
+    const uniqueImages = Array.from(new Map(allImages.map(item => [item.publicUrl, item])).values());
+
+    console.log(`[Gallery V3] Finished processing. Found a total of ${uniqueImages.length} unique images.`);
+    return uniqueImages;
   };
 
-  const { data: jobs, isLoading, error } = useQuery<Job[]>({
+  const { data: allImages, isLoading, error } = useQuery<ImageResult[]>({
     queryKey: ["generatedImages", session?.user?.id],
     queryFn: fetchGeneratedImages,
     enabled: !!session?.user,
   });
 
-  const { agentJobs, directJobs, refinedJobs } = useMemo(() => {
-    if (!jobs) {
-      return { agentJobs: [], directJobs: [], refinedJobs: [] };
+  const { agentImages, directImages, refinedImages } = useMemo(() => {
+    if (!allImages) {
+      return { agentImages: [], directImages: [], refinedImages: [] };
     }
-    
-    const direct = jobs.filter(job => job.context?.source === 'direct_generator');
-    const agent = jobs.filter(job => job.context?.source === 'agent');
-    const refined = jobs.filter(job => job.context?.source === 'refiner');
+    const agent = allImages.filter(img => img.source === 'agent');
+    const direct = allImages.filter(img => img.source === 'direct_generator');
+    const refined = allImages.filter(img => img.source === 'refiner');
+    return { agentImages: agent, directImages: direct, refinedImages: refined };
+  }, [allImages]);
 
-    return { agentJobs: agent, directJobs: direct, refinedJobs: refined };
-  }, [jobs]);
-
-  const renderImageList = (jobList: Job[] | undefined) => {
-    if (!jobList || jobList.length === 0) {
+  const renderImageList = (imageList: ImageResult[] | undefined) => {
+    if (!imageList || imageList.length === 0) {
       return (
         <div className="text-center text-muted-foreground col-span-full mt-8">
           <p>{t.noImagesYet}</p>
@@ -126,22 +103,14 @@ const Gallery = () => {
       );
     }
 
-    const allImagesInList = jobList.flatMap(job => 
-        job.final_result.images.map(image => ({
-            ...image,
-            jobId: job.id,
-            source: job.context?.source
-        }))
-    );
-
-    return allImagesInList.map((image, index) => (
+    return imageList.map((image, index) => (
         <div key={`${image.jobId}-${index}`} className="relative group aspect-square">
           <img
             src={image.publicUrl}
             alt={`Generated by job ${image.jobId}`}
             className="w-full h-full object-cover rounded-lg cursor-pointer"
             onClick={() => showImage({ 
-                images: allImagesInList.map(img => ({ url: img.publicUrl, jobId: img.jobId })),
+                images: imageList.map(img => ({ url: img.publicUrl, jobId: img.jobId })),
                 currentIndex: index 
             })}
           />
@@ -184,8 +153,8 @@ const Gallery = () => {
                 <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mt-4">
                   {isLoading ? (
                     [...Array(12)].map((_, i) => <Skeleton key={i} className="aspect-square w-full" />)
-                  ) : jobs && jobs.length > 0 ? (
-                    renderImageList(jobs)
+                  ) : allImages && allImages.length > 0 ? (
+                    renderImageList(allImages)
                   ) : (
                     <div className="col-span-full">
                       <Alert>
@@ -202,7 +171,7 @@ const Gallery = () => {
                   {isLoading ? (
                     [...Array(6)].map((_, i) => <Skeleton key={i} className="aspect-square w-full" />)
                   ) : (
-                    renderImageList(agentJobs)
+                    renderImageList(agentImages)
                   )}
                 </div>
               </TabsContent>
@@ -211,7 +180,7 @@ const Gallery = () => {
                   {isLoading ? (
                     [...Array(6)].map((_, i) => <Skeleton key={i} className="aspect-square w-full" />)
                   ) : (
-                    renderImageList(directJobs)
+                    renderImageList(directImages)
                   )}
                 </div>
               </TabsContent>
@@ -220,7 +189,7 @@ const Gallery = () => {
                   {isLoading ? (
                     [...Array(6)].map((_, i) => <Skeleton key={i} className="aspect-square w-full" />)
                   ) : (
-                    renderImageList(refinedJobs)
+                    renderImageList(refinedImages)
                   )}
                 </div>
               </TabsContent>
