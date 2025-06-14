@@ -29,12 +29,28 @@ const sanitizeFilename = (filename: string): string => {
     .replace(/\.{2,}/g, '.');
 };
 
+/**
+ * This is the core translation layer between the raw, machine-readable agent history
+ * from the database and the human-readable array of Message components displayed in the UI.
+ * It iterates through the agent's turn-by-turn history and decides which UI component
+ * should be rendered for each step.
+ *
+ * The most complex part is the `creativeProcessBuffer`. This is a temporary holding area
+ * used to group related agent actions (e.g., prompt generation, image generation, critique)
+ * into a single, cohesive UI card (`CreativeProcessResponse`). The buffer is "flushed"
+ * (i.e., its contents are processed and added to the message list) whenever an unrelated
+ * message type is encountered, or at the very end of parsing. This ensures that the
+ * multi-step creative process is displayed as a single, logical unit.
+ */
 const parseHistoryToMessages = (history: any[]): Message[] => {
     const messages: Message[] = [];
     if (!history) return messages;
 
+    // A temporary buffer to group related steps of the creative process.
     let creativeProcessBuffer: any[] = [];
 
+    // This function takes the buffered creative steps, packages them into a single
+    // `creativeProcessResponse` object, and adds it to the main messages array.
     const flushCreativeProcessBuffer = () => {
         if (creativeProcessBuffer.length > 0) {
             const lastIteration = creativeProcessBuffer[creativeProcessBuffer.length - 1];
@@ -48,6 +64,7 @@ const parseHistoryToMessages = (history: any[]): Message[] => {
                     final_generation_result: finalGeneration,
                 }
             });
+            // Clear the buffer for the next set of operations.
             creativeProcessBuffer = [];
         }
     };
@@ -55,7 +72,9 @@ const parseHistoryToMessages = (history: any[]): Message[] => {
     for (let i = 0; i < history.length; i++) {
         const turn = history[i];
 
+        // Handle simple user messages or simple text responses from the model.
         if (turn.role === 'user' || (turn.role === 'model' && turn.parts[0]?.text)) {
+            // Before processing a new user/bot message, flush any existing creative process.
             flushCreativeProcessBuffer();
             const message: Message = { from: turn.role, imageUrls: [] };
             const textPart = turn.parts.find((p: any) => p.text);
@@ -71,29 +90,38 @@ const parseHistoryToMessages = (history: any[]): Message[] => {
             continue;
         }
 
+        // Handle complex responses from the agent's tool calls.
         if (turn.role === 'function') {
             const response = turn.parts[0]?.functionResponse?.response;
             const callName = history[i - 1]?.parts[0]?.functionCall?.name;
 
             if (!response || !callName) continue;
 
+            // The 'finish_task' tool is the final step. It might contain a simple text
+            // response or signal the end of a creative process.
             if (callName === 'finish_task') {
-                flushCreativeProcessBuffer();
+                flushCreativeProcessBuffer(); // Always flush before finishing.
                 if (response.text) {
                     messages.push({ from: 'bot', text: response.text });
                 }
+                // We intentionally do NOT handle `response.isCreativeProcess` here.
+                // The `flushCreativeProcessBuffer` call above has already taken care of
+                // rendering the completed creative process from the buffer. This prevents
+                // a duplicate, malformed card from being rendered.
             } else if (callName === 'dispatch_to_artisan_engine') {
                 flushCreativeProcessBuffer();
                 creativeProcessBuffer.push({ artisan_result: response });
             } else if (callName === 'generate_image' || callName === 'generate_image_with_reference') {
                 if (creativeProcessBuffer.length > 0) {
                     const currentIteration = creativeProcessBuffer[creativeProcessBuffer.length - 1];
+                    // Differentiate between the first generation and a subsequent refinement in the same iteration.
                     if (!currentIteration.initial_generation_result) {
                         currentIteration.initial_generation_result = { toolName: callName, response };
                     } else {
                         currentIteration.refined_generation_result = { toolName: callName, response };
                     }
                 } else {
+                    // If there's no buffer, it was a standalone generation.
                     flushCreativeProcessBuffer();
                     messages.push({ from: 'bot', imageGenerationResponse: response });
                 }
@@ -102,15 +130,18 @@ const parseHistoryToMessages = (history: any[]): Message[] => {
                     creativeProcessBuffer[creativeProcessBuffer.length - 1].critique_result = response;
                 }
             } else {
+                // Handle other structured responses that are not part of the main creative loop.
                 flushCreativeProcessBuffer();
                 if (response.isImageChoiceProposal) {
                     const choiceMessage: Message = { from: 'bot', imageChoiceProposal: response };
+                    // Look ahead to see if the user's choice is the next message.
+                    // If so, we can pre-select it in the UI and skip rendering the user's choice message.
                     const nextTurn = history[i + 1];
                     if (nextTurn && nextTurn.role === 'user' && nextTurn.parts[0]?.text?.startsWith("I choose image number")) {
                         const match = nextTurn.parts[0].text.match(/I choose image number (\d+)/);
                         if (match && match[1]) {
                             choiceMessage.imageChoiceSelectedIndex = parseInt(match[1], 10) - 1;
-                            i++; 
+                            i++; // Increment the loop counter to skip the user's choice turn.
                         }
                     }
                     messages.push(choiceMessage);
@@ -123,6 +154,7 @@ const parseHistoryToMessages = (history: any[]): Message[] => {
         }
     }
     
+    // After the loop, flush any remaining items in the buffer.
     flushCreativeProcessBuffer();
     
     return messages;
@@ -136,30 +168,44 @@ const Index = () => {
   const { t, language } = useLanguage();
   const queryClient = useQueryClient();
   
+  // --- STATE MANAGEMENT ---
+  // The main array of messages to be displayed in the chat UI.
   const [messages, setMessages] = useState<Message[]>([]);
+  // The title of the current chat, displayed in the header.
   const [chatTitle, setChatTitle] = useState<string>(t.newChat);
+  // The current text in the user's input textarea.
   const [input, setInput] = useState("");
+  // True if the agent is actively working on a job (`processing` or `awaiting_refinement`). Disables most UI interactions.
   const [isJobRunning, setIsJobRunning] = useState(false);
+  // A short-lived state, true only while the API call to start/continue a job is in flight. Prevents double-sends.
   const [isSending, setIsSending] = useState(false);
+  // An array of files the user has uploaded but not yet sent with a message.
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  // True if the user is dragging a file over the window, used to show the dropzone overlay.
   const [isDragging, setIsDragging] = useState(false);
+  // State for the control panel settings.
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [isDesignerMode, setIsDesignerMode] = useState(false);
   const [ratioMode, setRatioMode] = useState<'auto' | string>('auto');
   const [numImagesMode, setNumImagesMode] = useState<'auto' | number>('auto');
+  // A ref to the end of the message list, used to auto-scroll.
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  // A ref to the Supabase Realtime channel instance, crucial for proper subscription cleanup.
   const channelRef = useRef<RealtimeChannel | null>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
+  // Auto-scroll whenever new messages are added.
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
 
+  // The main function for sending a message or continuing a conversation.
   const handleSendMessage = useCallback(async (messageText?: string) => {
     const textToSend = messageText || input;
+    // A "silent" message is one that shouldn't be displayed in the chat, like an image choice.
     const isSilent = textToSend.startsWith("I choose image number");
 
     if ((!textToSend.trim() && uploadedFiles.length === 0) || isJobRunning || isSending) {
@@ -168,6 +214,7 @@ const Index = () => {
     
     const filesToProcess = [...uploadedFiles];
 
+    // Optimistically update the UI with the user's message immediately.
     if (!isSilent) {
       const optimisticMessage: Message = {
         from: 'user',
@@ -177,6 +224,7 @@ const Index = () => {
       setMessages(prev => [...prev, optimisticMessage]);
     }
 
+    // Clear inputs and set sending state.
     setInput("");
     setUploadedFiles([]);
     setIsSending(true);
@@ -196,11 +244,13 @@ const Index = () => {
         };
         if (!payload.userId) throw new Error("User session not found.");
         
+        // If there's a jobId, we're continuing an existing chat. Otherwise, we're starting a new one.
         if (jobId) {
             await supabase.functions.invoke("MIRA-AGENT-continue-job", { body: payload });
         } else {
             const { data, error } = await supabase.functions.invoke("MIRA-AGENT-master-worker", { body: payload });
             if (error) throw error;
+            // After creating a new job, navigate to its unique URL.
             navigate(`/chat/${data.reply.jobId}`);
         }
     } catch (error: any) {
@@ -209,6 +259,7 @@ const Index = () => {
     }
   }, [input, uploadedFiles, isJobRunning, isSending, jobId, session, isDesignerMode, selectedModelId, language, ratioMode, numImagesMode, supabase, navigate]);
 
+  // Central function to update the entire component's state based on the job data from the database.
   const processJobData = useCallback((jobData: any) => {
     if (!jobData) return;
     
@@ -218,14 +269,17 @@ const Index = () => {
     }
     setIsJobRunning(newIsJobRunning);
 
+    // Sync UI controls with the job's context.
     setChatTitle(jobData.original_prompt || "Untitled Chat");
     if (jobData.context?.isDesignerMode !== undefined) setIsDesignerMode(jobData.context.isDesignerMode);
     if (jobData.context?.selectedModelId) setSelectedModelId(jobData.context.selectedModelId);
     if (jobData.context?.ratioMode) setRatioMode(jobData.context.ratioMode);
     if (jobData.context?.numImagesMode) setNumImagesMode(jobData.context.numImagesMode);
 
+    // Re-parse the history to render the message list.
     let conversationMessages = parseHistoryToMessages(jobData.context?.history);
     
+    // Append a final status message based on the job's current state.
     if (jobData.status === 'processing') {
         conversationMessages.push({ from: 'bot', jobInProgress: { jobId: jobData.id, message: 'Thinking...' } });
     } else if (jobData.status === 'awaiting_refinement') {
@@ -233,6 +287,7 @@ const Index = () => {
     } else if (jobData.status === 'failed') {
         conversationMessages.push({ from: 'bot', text: jobData.error_message });
     } else if (jobData.status === 'awaiting_feedback') {
+        // Render the specific card that requires user feedback.
         if (jobData.final_result?.isImageChoiceProposal) {
             conversationMessages.push({ from: 'bot', imageChoiceProposal: jobData.final_result });
         } else if (jobData.final_result?.isRefinementProposal) {
@@ -241,10 +296,12 @@ const Index = () => {
             conversationMessages.push({ from: 'bot', text: jobData.final_result.text });
         }
     } else if (jobData.status === 'complete' && jobData.final_result) {
+        // Render the final result card.
         if (jobData.final_result.isCreativeProcess) {
             conversationMessages.push({ from: 'bot', creativeProcessResponse: jobData.final_result });
         } else if (jobData.final_result.text) {
             const lastMessage = conversationMessages[conversationMessages.length - 1];
+            // Avoid duplicating the final text message if it's already in the history.
             if (!lastMessage || lastMessage.from !== 'bot' || lastMessage.text !== jobData.final_result.text) {
                 conversationMessages.push({ from: 'bot', text: jobData.final_result.text });
             }
@@ -253,10 +310,12 @@ const Index = () => {
     setMessages(conversationMessages);
   }, []);
 
+  // Fetches the initial data for a chat when the page loads with a `jobId`.
   const fetchChatJob = async (jobId: string | undefined) => {
     if (!jobId || !session?.user) return null;
     const { data, error } = await supabase.from("mira-agent-jobs").select("*").eq("id", jobId).eq("user_id", session.user.id).single();
     if (error) {
+        // If the job doesn't exist or the user doesn't have access, redirect to a new chat.
         if (error.code === 'PGRST116') {
             navigate('/chat');
             return null;
@@ -266,6 +325,7 @@ const Index = () => {
     return data;
   };
 
+  // React Query hook to manage fetching and caching of the chat job data.
   const { data: jobData, error } = useQuery({
     queryKey: ['chatJob', jobId],
     queryFn: () => fetchChatJob(jobId),
@@ -274,10 +334,12 @@ const Index = () => {
     retry: 1,
   });
 
+  // This effect syncs the component's state with the fetched data from React Query.
   useEffect(() => {
     if (jobId && jobData) {
       processJobData(jobData);
     } else if (!jobId) {
+      // If there's no jobId, reset the chat to a clean "new chat" state.
       setMessages([{ from: "bot", text: "Ciao! Come posso aiutarti oggi?" }]);
       setChatTitle(t.newChat);
       setInput("");
@@ -287,13 +349,16 @@ const Index = () => {
     }
   }, [jobId, jobData, processJobData, t.newChat]);
 
+  // This effect manages the Supabase Realtime subscription.
   useEffect(() => {
+    // Clean up any existing channel before creating a new one. This is crucial to prevent
+    // multiple subscriptions and memory leaks when navigating between chats.
     if (channelRef.current) {
         supabase.removeChannel(channelRef.current);
         channelRef.current = null;
     }
 
-    if (!jobId) return;
+    if (!jobId) return; // Don't subscribe if there's no active chat.
 
     const newChannel = supabase.channel(`job-updates-${jobId}`);
     channelRef.current = newChannel;
@@ -304,6 +369,10 @@ const Index = () => {
         table: 'mira-agent-jobs', 
         filter: `id=eq.${jobId}` 
     }, (payload) => {
+        // When an update is received, we don't process it directly. Instead, we update
+        // the React Query cache. This triggers a re-render, and the `useEffect` above
+        // will then call `processJobData` with the new, cached data. This keeps the
+        // data flow consistent.
         console.log('[Realtime] Job update received via payload. Updating cache directly.');
         queryClient.setQueryData(['chatJob', jobId], payload.new);
     }).subscribe((status, err) => {
@@ -316,6 +385,8 @@ const Index = () => {
         }
     });
 
+    // The cleanup function returned by useEffect. This is called when the component
+    // unmounts or when the `jobId` changes, ensuring we unsubscribe from the old channel.
     return () => {
       if (channelRef.current) {
         supabase.removeChannel(channelRef.current);
@@ -324,6 +395,7 @@ const Index = () => {
     };
   }, [jobId, supabase, queryClient]);
 
+  // Handle errors from the initial data fetch.
   useEffect(() => {
     if (error) {
       showError(error.message);
@@ -384,6 +456,7 @@ const Index = () => {
       if (error) throw error;
       dismissToast(toastId);
       showSuccess(t.chatDeleted);
+      // Invalidate the job history query to update the sidebar.
       await queryClient.invalidateQueries({ queryKey: ["jobHistory"] });
       navigate("/chat");
     } catch (error: any) {
@@ -392,9 +465,11 @@ const Index = () => {
     }
   }, [jobId, supabase, navigate, queryClient, t]);
 
+  // Callback passed to the RefinementProposalCard to handle the result of a refinement.
   const handleRefinementComplete = useCallback((newImageUrl: string) => {
     setMessages(prev => {
-      const newMessages = prev.filter(m => !m.refinementProposal); // Remove old proposal
+      // Remove the old proposal card and add a new one with the refined image.
+      const newMessages = prev.filter(m => !m.refinementProposal);
       newMessages.push({
         from: 'bot',
         refinementProposal: {
