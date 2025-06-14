@@ -55,17 +55,7 @@ const Gallery = () => {
       .map((job: any) => {
         console.log(`[Gallery] Processing job ID: ${job.id}`, job);
         
-        // First, check if the final_result already contains the images.
-        // This handles simple agent generations and direct generator jobs.
-        if (job.final_result?.isImageGeneration && Array.isArray(job.final_result.images)) {
-            console.log(`[Gallery] Found images directly in final_result for job ${job.id}.`);
-            if (!job.context.source) {
-                job.context.source = 'agent'; // Default to agent if source is missing
-            }
-            return job;
-        }
-
-        // If not found in final_result, then search the history.
+        // If the job has a history, always check it for the latest image generation event.
         // This handles complex creative processes where the final_result might be a text summary.
         if (job.context?.history) {
           const history = job.context.history;
@@ -78,21 +68,23 @@ const Gallery = () => {
           );
 
           if (lastImageTurn) {
-            console.log(`[Gallery] Found image turn in history for job ${job.id}.`, lastImageTurn);
+            console.log(`[Gallery] Found image turn in history for job ${job.id}. Overwriting final_result for display.`, lastImageTurn);
             // Overwrite final_result to standardize it for the gallery
             job.final_result = {
                 isImageGeneration: true,
                 images: lastImageTurn.parts[0].functionResponse.response.images
             };
-            // Ensure agent jobs are categorized correctly if source is missing
-            if (!job.context.source) {
-                console.log(`[Gallery] Job ${job.id} missing source, defaulting to 'agent'.`);
-                job.context.source = 'agent';
-            }
           } else {
             console.log(`[Gallery] No image turn found in history for job ${job.id}.`);
           }
         }
+
+        // Standardize the source for categorization
+        if (!job.context.source) {
+            console.log(`[Gallery] Job ${job.id} missing source, defaulting to 'agent'.`);
+            job.context.source = 'agent';
+        }
+
         return job;
       })
       .filter(job => {
