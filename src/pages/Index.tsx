@@ -134,7 +134,7 @@ const Index = () => {
   const { supabase, session } = useSession();
   const { jobId } = useParams();
   const navigate = useNavigate();
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const queryClient = useQueryClient();
   
   const [messages, setMessages] = useState<Message[]>([]);
@@ -298,9 +298,9 @@ const Index = () => {
         schema: 'public', 
         table: 'mira-agent-jobs', 
         filter: `id=eq.${jobId}` 
-    }, () => {
-        console.log('[Realtime] Job update detected, invalidating query cache.');
-        queryClient.invalidateQueries({ queryKey: ['chatJob', jobId] });
+    }, (payload) => {
+        console.log('[Realtime] Job update received via payload. Updating cache directly.');
+        queryClient.setQueryData(['chatJob', jobId], payload.new);
     }).subscribe((status, err) => {
         if (status === 'SUBSCRIBED') {
             console.log(`[Realtime] Subscribed to job-updates-${jobId}`);
