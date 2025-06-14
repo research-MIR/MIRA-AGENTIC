@@ -16,6 +16,8 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useLanguage } from "@/context/LanguageContext";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { Switch } from "@/components/ui/switch";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface ImageResult {
   publicUrl: string;
@@ -46,15 +48,14 @@ const Generator = () => {
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [aspectRatio, setAspectRatio] = useState("1024x1024");
   const [isLoading, setIsLoading] = useState(false);
-  const [isHelperRunning, setIsHelperRunning] = useState(false);
   const [results, setResults] = useState<ImageResult[]>([]);
-  const [intermediateResult, setIntermediateResult] = useState<ImageResult | null>(null);
-  const [useTwoStage, setUseTwoStage] = useState(false);
+  const [finalPromptUsed, setFinalPromptUsed] = useState<string | null>(null);
   
   const [styleReferenceImageFile, setStyleReferenceImageFile] = useState<File | null>(null);
   const [styleReferenceImageUrl, setStyleReferenceImageUrl] = useState<string | null>(null);
   const [garmentReferenceImageFile, setGarmentReferenceImageFile] = useState<File | null>(null);
   const [garmentReferenceImageUrl, setGarmentReferenceImageUrl] = useState<string | null>(null);
+  const [isHelperEnabled, setIsHelperEnabled] = useState(true);
 
   const createChangeHandler = (setFile: (file: File | null) => void, setUrl: (url: string | null) => void) => (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -95,102 +96,59 @@ const Generator = () => {
     return publicUrl;
   };
 
-  const handleGenerateWithHelper = async () => {
-    if (!prompt.trim()) return showError("Please enter a base prompt to get started.");
-    if (!garmentReferenceImageFile && !styleReferenceImageFile) return showError("Please upload at least one reference image to use the helper.");
-
-    setIsHelperRunning(true);
-    const toastId = showLoading("AI Helper is analyzing your references...");
-
-    try {
-      const garment_image_url = await uploadFileAndGetUrl(garmentReferenceImageFile, 'mira-agent-user-uploads');
-      const style_image_url = await uploadFileAndGetUrl(styleReferenceImageFile, 'mira-agent-user-uploads');
-
-      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-direct-generator-prompt-helper', {
-        body: { user_prompt: prompt, garment_image_url, style_image_url }
-      });
-
-      if (error) throw error;
-      
-      setPrompt(data.final_prompt);
-      dismissToast(toastId);
-
-    } catch (err: any) {
-      showError(err.message || "An unknown error occurred with the AI Helper.");
-      console.error("[PromptHelper] Error:", err);
-      dismissToast(toastId);
-    } finally {
-      setIsHelperRunning(false);
-    }
-  };
-
   const handleGenerate = async () => {
     if (!prompt.trim()) return showError("Please enter a prompt.");
     if (!session?.user) return showError("You must be logged in to generate images.");
 
     setIsLoading(true);
     setResults([]);
-    setIntermediateResult(null);
+    setFinalPromptUsed(null);
     let toastId = showLoading("Warming up the engines...");
-    let finalImages: ImageResult[] = [];
+    let promptToUse = prompt;
 
     try {
-      if (useTwoStage) {
+      if (isHelperEnabled && (garmentReferenceImageFile || styleReferenceImageFile)) {
         dismissToast(toastId);
-        toastId = showLoading("Stage 1: Generating base image...");
-        
-        if (!selectedModelId) throw new Error("Please select a model for the first stage.");
-        
-        const { data: stage1Result, error: stage1Error } = await supabase.functions.invoke('MIRA-AGENT-tool-generate-image-google', { 
-            body: { 
-                prompt, 
-                number_of_images: 1, 
-                model_id: selectedModelId, 
-                invoker_user_id: session.user.id,
-                size: aspectRatio
-            } 
-        });
-        if (stage1Error || !stage1Result.images || stage1Result.images.length === 0) throw new Error(`Stage 1 failed: ${stage1Error?.message || 'No image returned'}`);
-        
-        const stage1Images = stage1Result.images;
-        setIntermediateResult(stage1Images[0]);
+        toastId = showLoading("AI Helper is analyzing your references...");
+        const garment_image_url = await uploadFileAndGetUrl(garmentReferenceImageFile, 'mira-agent-user-uploads');
+        const style_image_url = await uploadFileAndGetUrl(styleReferenceImageFile, 'mira-agent-user-uploads');
 
-        dismissToast(toastId);
-        toastId = showLoading("Stage 2: Refining image...");
-        const { data: falResult, error: falError } = await supabase.functions.invoke('MIRA-AGENT-tool-fal-image-to-image', {
-          body: { image_urls: [stage1Images[0].publicUrl], prompt: prompt, invoker_user_id: session.user.id }
+        const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-direct-generator-prompt-helper', {
+          body: { user_prompt: prompt, garment_image_url, style_image_url }
         });
-        if (falError) throw new Error(`Stage 2 failed: ${falError.message}`);
-        finalImages = falResult.images;
-        setResults(finalImages);
 
-      } else {
-        // Single Stage Pipeline
-        dismissToast(toastId);
-        toastId = showLoading(`Generating images...`);
-        if (!selectedModelId) throw new Error("Please select a model.");
-        
-        const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-generate-image-google', { 
-            body: { 
-                prompt, 
-                negative_prompt: negativePrompt, 
-                number_of_images: numImages, 
-                seed, 
-                model_id: selectedModelId, 
-                invoker_user_id: session.user.id,
-                size: aspectRatio
-            } 
-        });
         if (error) throw error;
-        if (!data.images) throw new Error("The generator did not return any images.");
-        finalImages = data.images;
-        setResults(finalImages);
+        promptToUse = data.final_prompt;
+        setFinalPromptUsed(promptToUse);
+      } else {
+        setFinalPromptUsed(prompt);
       }
+
+      dismissToast(toastId);
+      toastId = showLoading(`Generating images...`);
+      if (!selectedModelId) throw new Error("Please select a model.");
+      
+      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-generate-image-google', { 
+          body: { 
+              prompt: promptToUse, 
+              negative_prompt: negativePrompt, 
+              number_of_images: numImages, 
+              seed, 
+              model_id: selectedModelId, 
+              invoker_user_id: session.user.id,
+              size: aspectRatio
+          } 
+      });
+      if (error) throw error;
+      if (!data.images) throw new Error("The generator did not return any images.");
+      
+      const finalImages = data.images;
+      setResults(finalImages);
 
       if (finalImages.length > 0) {
         const jobPayload = {
             user_id: session.user.id,
-            original_prompt: `Direct: ${prompt.slice(0, 40)}...`,
+            original_prompt: `Direct: ${promptToUse.slice(0, 40)}...`,
             status: 'complete',
             final_result: { isImageGeneration: true, images: finalImages },
             context: { source: 'direct_generator' }
@@ -284,13 +242,18 @@ const Generator = () => {
               <CardTitle>{t.configureSettings}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-               <Alert>
-                  <Info className="h-4 w-4" />
-                  <AlertTitle>Pro Tip!</AlertTitle>
-                  <AlertDescription>
-                    {t.refinerSuggestion}
-                  </AlertDescription>
-                </Alert>
+               <div className="flex items-center justify-between rounded-lg border p-3 shadow-sm">
+                <div className="space-y-0.5">
+                  <Label>AI Prompt Helper</Label>
+                  <p className="text-[0.8rem] text-muted-foreground">
+                    Automatically enhance your prompt using your reference images.
+                  </p>
+                </div>
+                <Switch
+                  checked={isHelperEnabled}
+                  onCheckedChange={setIsHelperEnabled}
+                />
+              </div>
               <div>
                 <Label>{t.model}</Label>
                 <ModelSelector selectedModelId={selectedModelId} onModelChange={setSelectedModelId} />
@@ -313,7 +276,7 @@ const Generator = () => {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="num-images">{t.images}</Label>
-                  <Input id="num-images" type="number" value={numImages} onChange={(e) => setNumImages(Math.max(1, parseInt(e.target.value, 10)))} min="1" max="8" disabled={useTwoStage} />
+                  <Input id="num-images" type="number" value={numImages} onChange={(e) => setNumImages(Math.max(1, parseInt(e.target.value, 10)))} min="1" max="8" />
                 </div>
                 <div>
                   <Label htmlFor="seed">{t.seed}</Label>
@@ -323,16 +286,10 @@ const Generator = () => {
             </CardContent>
           </Card>
 
-          <div className="flex gap-2">
-            <Button onClick={handleGenerateWithHelper} disabled={isLoading || isHelperRunning} className="w-full" variant="outline">
-              {isHelperRunning ? <Sparkles className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-              AI Helper
-            </Button>
-            <Button onClick={handleGenerate} disabled={isLoading || isHelperRunning} className="w-full">
-              {isLoading ? <Wand2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
-              {t.generate}
-            </Button>
-          </div>
+          <Button onClick={handleGenerate} disabled={isLoading} className="w-full">
+            {isLoading ? <Wand2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+            {t.generate}
+          </Button>
         </div>
 
         <div className="lg:col-span-2">
@@ -341,34 +298,17 @@ const Generator = () => {
               <CardTitle>{t.results}</CardTitle>
             </CardHeader>
             <CardContent>
+              {finalPromptUsed && (
+                <div className="mb-4">
+                  <Label>Final Prompt Used</Label>
+                  <Textarea readOnly value={finalPromptUsed} className="mt-1 h-24 font-mono text-xs" />
+                </div>
+              )}
               {isLoading ? (
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   {[...Array(numImages)].map((_, i) => (
                     <Skeleton key={i} className="aspect-square w-full" />
                   ))}
-                </div>
-              ) : intermediateResult && results.length > 0 ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <h3 className="font-semibold mb-2 text-center">{t.stage1BaseImage}</h3>
-                        <button onClick={() => showImage({ images: [{ url: intermediateResult.publicUrl }], currentIndex: 0 })} className="block w-full h-full">
-                            <img
-                                src={intermediateResult.publicUrl}
-                                alt="Intermediate stage 1 result"
-                                className="rounded-lg aspect-square object-cover w-full h-full hover:opacity-80 transition-opacity"
-                            />
-                        </button>
-                    </div>
-                    <div>
-                        <h3 className="font-semibold mb-2 text-center">{t.stage2RefinedImage}</h3>
-                        <button onClick={() => showImage({ images: results.map(img => ({ url: img.publicUrl })), currentIndex: 0 })} className="block w-full h-full">
-                            <img
-                                src={results[0].publicUrl}
-                                alt="Final refined stage 2 result"
-                                className="rounded-lg aspect-square object-cover w-full h-full hover:opacity-80 transition-opacity"
-                            />
-                        </button>
-                    </div>
                 </div>
               ) : results.length > 0 ? (
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

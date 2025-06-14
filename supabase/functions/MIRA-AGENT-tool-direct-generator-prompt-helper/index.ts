@@ -14,7 +14,7 @@ const garmentAnalysisPrompt = `You are a fashion expert. Your task is to analyze
 
 const styleAnalysisPrompt = `You are a professional photographer and art director. Analyze the provided image and describe its key stylistic elements. Respond with a JSON object with the following keys: "photography_style" (e.g., "cinematic, editorial fashion"), "lighting" (e.g., "soft, diffused natural light"), "color_palette" (e.g., "warm, earthy tones"), and "subject_pose" (e.g., "standing with hands on hips").`;
 
-const synthesisSystemPrompt = `You are a master prompt crafter. Your task is to combine the following elements into a single, coherent, and detailed text-to-image prompt.
+const synthesisSystemPrompt = `You are a master prompt crafter. Your task is to combine the following elements into a single, coherent, and detailed text-to-image prompt. The final prompt MUST be in English.
 
 **Elements to Combine:**
 1.  **Base Prompt:** The user's original text.
@@ -22,7 +22,7 @@ const synthesisSystemPrompt = `You are a master prompt crafter. Your task is to 
 3.  **Style Analysis:** A JSON object describing the style of a second reference image.
 4.  **User Instructions on Style:** The user's base prompt may contain instructions on how to use the style (e.g., "use the pose from the reference"). You must follow these instructions, using the corresponding value from the Style Analysis.
 
-Combine these elements into a final, rich, photorealistic prompt. Do not respond in JSON, only the final text prompt.`;
+Combine these elements into a final, rich, photorealistic prompt in English. Do not respond in JSON, only the final text prompt.`;
 
 async function analyzeImage(ai: GoogleGenAI, imageUrl: string, systemPrompt: string, isJsonOutput: boolean = false): Promise<any> {
     const response = await fetch(imageUrl);
