@@ -80,7 +80,7 @@ You must respect any of the following preferences set by the user for this job:$
 
 
 async function getDynamicMasterTools(jobContext: any, supabase: SupabaseClient): Promise<FunctionDeclaration[]> {
-    const baseTools: FunctionDeclaration[] = [
+    let baseTools: FunctionDeclaration[] = [
       { name: "dispatch_to_brand_analyzer", description: "Analyzes a brand's online presence (website, social media) to understand its visual identity. Use this when the user asks to analyze a brand or generate content inspired by a brand, especially if they provide a URL.", parameters: { type: Type.OBJECT, properties: { brand_name: { type: Type.STRING, description: "The name of the brand to analyze." } }, required: ["brand_name"] } },
       { name: "dispatch_to_artisan_engine", description: "Generates or refines a detailed image prompt. This is the correct first step if the user provides a reference image.", parameters: { type: Type.OBJECT, properties: { user_request_summary: { type: Type.STRING, description: "A brief summary of the user's request for the Artisan Engine, noting that a reference image was provided for style/composition." } }, required: ["user_request_summary"] } },
       { name: "dispatch_to_refinement_agent", description: "When the user asks to refine, improve, or upscale the most recent image in the conversation, call this tool.", parameters: { type: Type.OBJECT, properties: { prompt: { type: Type.STRING, description: "The user's instructions for refinement." }, upscale_factor: { type: Type.NUMBER, description: "The upscale factor to use. 1.2 for 'refine', 1.4 for 'upscale', 2.0 for 'improve'." } }, required: ["prompt", "upscale_factor"] } },
@@ -132,7 +132,7 @@ async function getDynamicMasterTools(jobContext: any, supabase: SupabaseClient):
         }
     };
     
-    const allTools = [generateImageTool, ...baseTools];
+    let allTools = [generateImageTool, ...baseTools];
 
     const hasReferenceImage = jobContext?.user_provided_assets?.some((asset: any) => asset.type === 'image');
     if (hasReferenceImage && supportsImg2Img) {
@@ -151,6 +151,16 @@ async function getDynamicMasterTools(jobContext: any, supabase: SupabaseClient):
             }
         };
         allTools.push(generateWithReferenceTool);
+    }
+
+    // Check if the last action was a successful refinement to prevent loops
+    const history = jobContext?.history || [];
+    if (history.length > 0) {
+        const lastTurn = history[history.length - 1];
+        if (lastTurn.role === 'function' && lastTurn.parts[0]?.functionResponse?.name === 'dispatch_to_refinement_agent') {
+            console.log("[MasterWorker] Last action was a refinement. Temporarily removing refinement tool to prevent loop.");
+            allTools = allTools.filter(tool => tool.name !== 'dispatch_to_refinement_agent');
+        }
     }
 
     return allTools;
