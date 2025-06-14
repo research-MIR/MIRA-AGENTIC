@@ -280,8 +280,24 @@ serve(async (req) => {
     }
 
     console.log(`[MasterWorker][${currentJobId}] Continuing job...`);
-    const { data: job, error: fetchError } = await supabase.from('mira-agent-jobs').select('*').eq('id', currentJobId).single();
-    if (fetchError) throw fetchError;
+    
+    let job = null;
+    let fetchError = null;
+    for (let i = 0; i < MAX_RETRIES; i++) {
+        const { data, error } = await supabase.from('mira-agent-jobs').select('*').eq('id', currentJobId).single();
+        if (!error) {
+            job = data;
+            fetchError = null;
+            break;
+        }
+        fetchError = error;
+        console.warn(`[MasterWorker][${currentJobId}] Failed to fetch job, attempt ${i+1}. Retrying in ${RETRY_DELAY_MS}ms...`);
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+    }
+
+    if (fetchError || !job) {
+        throw fetchError || new Error("Failed to fetch job data after multiple retries.");
+    }
 
     if (job.status !== 'processing') {
         console.log(`[MasterWorker][${currentJobId}] Worker invoked for a job with status '${job.status}'. Halting execution as it's not 'processing'.`);
