@@ -11,7 +11,6 @@ import { UploadCloud, Wand2, Loader2, GitCompareArrows, Info, Sparkles } from "l
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useLanguage } from "@/context/LanguageContext";
-import { RealtimeChannel } from "@supabase/supabase-js";
 import { useImagePreview } from "@/context/ImagePreviewContext";
 import { Slider } from "@/components/ui/slider";
 import { ImageCompareModal } from "@/components/ImageCompareModal";
@@ -28,6 +27,14 @@ interface ComfyJob {
   error_message?: string;
 }
 
+const usePrevious = <T,>(value: T) => {
+  const ref = useRef<T>();
+  useEffect(() => {
+    ref.current = value;
+  });
+  return ref.current;
+};
+
 const Refine = () => {
   const { supabase, session } = useSession();
   const { t } = useLanguage();
@@ -36,8 +43,8 @@ const Refine = () => {
   const [prompt, setPrompt] = useState("");
   const [sourceImageFile, setSourceImageFile] = useState<File | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [activeJob, setActiveJob] = useState<ComfyJob | null>(null);
-  const channelRef = useRef<RealtimeChannel | null>(null);
+  const [trackedJobId, setTrackedJobId] = useState<string | null>(null);
+  const [lastCompletedJob, setLastCompletedJob] = useState<ComfyJob | null>(null);
   const [upscaleFactor, setUpscaleFactor] = useState(1.4);
   const [originalDimensions, setOriginalDimensions] = useState<{ width: number; height: number } | null>(null);
   const [isCompareModalOpen, setIsCompareModalOpen] = useState(false);
@@ -45,7 +52,7 @@ const Refine = () => {
   const [isAutoPromptEnabled, setIsAutoPromptEnabled] = useState(true);
   const [isLoadingAutoPrompt, setIsLoadingAutoPrompt] = useState(false);
 
-  const { data: activeComfyJobs, isLoading: isLoadingJobs } = useQuery({
+  const { data: activeComfyJobs } = useQuery<ComfyJob[]>({
     queryKey: ['activeComfyJobs', session?.user?.id],
     queryFn: async () => {
       if (!session?.user) return [];
@@ -59,81 +66,47 @@ const Refine = () => {
         console.error("Error fetching active jobs:", error);
         return [];
       }
-      return data as ComfyJob[];
+      return data;
     },
     enabled: !!session?.user,
-    refetchInterval: 30000,
   });
 
-  const isThisPageJobRunning = useMemo(() => {
-    return activeJob && (activeJob.status === 'queued' || activeJob.status === 'processing');
-  }, [activeJob]);
+  const activeJob = useMemo(() => {
+    if (!trackedJobId || !activeComfyJobs) return null;
+    return activeComfyJobs.find(j => j.id === trackedJobId) || null;
+  }, [activeComfyJobs, trackedJobId]);
+
+  const prevActiveJob = usePrevious(activeJob);
+
+  useEffect(() => {
+    if (prevActiveJob && !activeJob && trackedJobId) {
+      const fetchFinalStatus = async () => {
+        const { data } = await supabase
+          .from('mira-agent-comfyui-jobs')
+          .select('*')
+          .eq('id', trackedJobId)
+          .single();
+        if (data) {
+          setLastCompletedJob(data);
+          if (data.status === 'complete' && data.final_result?.publicUrl && sourceImageUrl) {
+            setComparisonImages({ before: sourceImageUrl, after: data.final_result.publicUrl });
+          }
+        }
+      };
+      fetchFinalStatus();
+    }
+  }, [activeJob, prevActiveJob, trackedJobId, supabase, sourceImageUrl]);
 
   const isAnyJobRunning = useMemo(() => {
     return activeComfyJobs && activeComfyJobs.length > 0;
   }, [activeComfyJobs]);
 
-  const showCancelButton = isAnyJobRunning && !isThisPageJobRunning;
+  const showCancelButton = isAnyJobRunning && !activeJob;
 
   const sourceImageUrl = useMemo(() => {
     if (sourceImageFile) return URL.createObjectURL(sourceImageFile);
     return null;
   }, [sourceImageFile]);
-
-  const subscribeToJobUpdates = useCallback((jobId: string) => {
-    if (channelRef.current) {
-      supabase.removeChannel(channelRef.current);
-    }
-    
-    channelRef.current = supabase.channel(`comfyui-job-${jobId}`)
-      .on<ComfyJob>(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'mira-agent-comfyui-jobs', filter: `id=eq.${jobId}` },
-        async (payload) => {
-          const newJob = payload.new as ComfyJob;
-          setActiveJob(newJob);
-          if (newJob.status === 'complete' || newJob.status === 'failed') {
-            queryClient.setQueryData(['activeComfyJobs', session?.user?.id], (oldData: ComfyJob[] | undefined) => {
-                return oldData ? oldData.filter(j => j.id !== newJob.id) : [];
-            });
-
-            if (newJob.status === 'complete' && newJob.final_result) {
-              showSuccess("Refinement complete!");
-              if (sourceImageUrl) {
-                setComparisonImages({ before: sourceImageUrl, after: newJob.final_result.publicUrl });
-              }
-              queryClient.invalidateQueries({ queryKey: ['generatedImages'] });
-            } else if (newJob.status === 'failed') {
-              showError(`Job failed: ${newJob.error_message}`);
-            }
-            
-            supabase.removeChannel(channelRef.current!);
-            channelRef.current = null;
-          }
-        }
-      )
-      .subscribe((status, err) => {
-        if (status === 'SUBSCRIBED') console.log(`[RefinePage] Subscribed to job ${jobId}`);
-        if (status === 'CHANNEL_ERROR') showError(`Realtime connection failed: ${err?.message}`);
-      });
-  }, [supabase, sourceImageUrl, queryClient, session?.user?.id]);
-
-  useEffect(() => {
-    if (activeComfyJobs && activeComfyJobs.length > 0 && !activeJob) {
-      const jobToTrack = activeComfyJobs[0];
-      console.log(`[RefinePage] Found active job ${jobToTrack.id}, resuming tracking.`);
-      setActiveJob(jobToTrack);
-      subscribeToJobUpdates(jobToTrack.id);
-    }
-  }, [activeComfyJobs, activeJob, subscribeToJobUpdates]);
-
-  useEffect(() => {
-    return () => {
-      if (channelRef.current) {
-        supabase.removeChannel(channelRef.current);
-      }
-    };
-  }, [supabase]);
 
   const handleFileChange = useCallback((files: FileList | null) => {
     const file = files?.[0];
@@ -143,7 +116,8 @@ const Refine = () => {
         return;
       }
       setSourceImageFile(file);
-      setActiveJob(null);
+      setTrackedJobId(null);
+      setLastCompletedJob(null);
       setComparisonImages(null);
       setPrompt("");
 
@@ -192,7 +166,8 @@ const Refine = () => {
     if (!session?.user) return showError("Devi essere loggato per usare questa funzione.");
 
     setIsLoading(true);
-    setActiveJob({ id: '', status: 'queued' });
+    setTrackedJobId(null);
+    setLastCompletedJob(null);
     setComparisonImages(null);
     const loadingMessage = isAutoPromptEnabled ? t.generatingAndSendingJob : t.sendingJob;
     let toastId = showLoading(loadingMessage);
@@ -216,11 +191,10 @@ const Refine = () => {
       
       dismissToast(toastId);
       showSuccess("Job ComfyUI accodato. In attesa del risultato...");
-      setActiveJob({ id: jobId, status: 'queued' });
-      subscribeToJobUpdates(jobId);
+      setTrackedJobId(jobId);
+      queryClient.invalidateQueries({ queryKey: ['activeComfyJobs', session.user.id] });
 
     } catch (err: any) {
-      setActiveJob(null);
       showError(`Errore: ${err.message}`);
       console.error("[Refine] Error:", err);
       dismissToast(toastId);
@@ -250,21 +224,22 @@ const Refine = () => {
   };
 
   const renderJobStatus = () => {
-    if (!activeJob) return null;
+    const jobToRender = activeJob || lastCompletedJob;
+    if (!jobToRender) return null;
 
-    switch (activeJob.status) {
+    switch (jobToRender.status) {
       case 'queued':
         return <div className="flex items-center justify-center h-full"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> In coda...</div>;
       case 'processing':
         return <div className="flex items-center justify-center h-full"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> In elaborazione...</div>;
       case 'complete':
-        return activeJob.final_result?.publicUrl ? (
-          <button onClick={() => showImage({ images: [{ url: activeJob.final_result!.publicUrl }], currentIndex: 0 })} className="block w-full h-full">
-            <img src={activeJob.final_result.publicUrl} alt="Refined by ComfyUI" className="rounded-lg aspect-square object-contain w-full hover:opacity-80 transition-opacity" />
+        return jobToRender.final_result?.publicUrl ? (
+          <button onClick={() => showImage({ images: [{ url: jobToRender.final_result!.publicUrl }], currentIndex: 0 })} className="block w-full h-full">
+            <img src={jobToRender.final_result.publicUrl} alt="Refined by ComfyUI" className="rounded-lg aspect-square object-contain w-full hover:opacity-80 transition-opacity" />
           </button>
         ) : <p>Job completato, ma nessun URL immagine trovato.</p>;
       case 'failed':
-        return <p className="text-destructive">Job fallito: {activeJob.error_message}</p>;
+        return <p className="text-destructive">Job fallito: {jobToRender.error_message}</p>;
       default:
         return null;
     }
@@ -276,7 +251,7 @@ const Refine = () => {
       disabled={isLoading || !sourceImageFile || isAnyJobRunning} 
       className="w-full"
     >
-      {isThisPageJobRunning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+      {activeJob ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
       {isAutoPromptEnabled ? t.generateAndRefine : t.refineButton}
     </Button>
   );
@@ -391,7 +366,7 @@ const Refine = () => {
                           <button onClick={() => showImage({ images: [{ url: sourceImageUrl }], currentIndex: 0 })} className="block w-full h-full">
                               <img src={sourceImageUrl} alt="Original" className="rounded-lg aspect-square object-contain w-full hover:opacity-80 transition-opacity" />
                           </button>
-                      ) : isThisPageJobRunning ? (
+                      ) : activeJob ? (
                           <div className="aspect-square bg-muted rounded-lg flex flex-col items-center justify-center text-muted-foreground text-center p-4">
                             <Info className="h-12 w-12 mb-4" />
                             <p>Job in corso... L'immagine originale non è disponibile per le sessioni riprese.</p>
@@ -406,8 +381,8 @@ const Refine = () => {
                   <div>
                       <h3 className="font-semibold mb-2 text-center">{t.refinedImage}</h3>
                       <div className="aspect-square bg-muted rounded-lg flex items-center justify-center">
-                          {isLoading && !activeJob ? <Skeleton className="h-full w-full" /> : renderJobStatus()}
-                          {!isLoading && !activeJob && <p className="text-muted-foreground text-center p-4">Il risultato apparirà qui.</p>}
+                          {isLoading && !activeJob && !lastCompletedJob ? <Skeleton className="h-full w-full" /> : renderJobStatus()}
+                          {!isLoading && !activeJob && !lastCompletedJob && <p className="text-muted-foreground text-center p-4">Il risultato apparirà qui.</p>}
                       </div>
                   </div>
               </CardContent>

@@ -40,46 +40,37 @@ export const ActiveJobsTracker = () => {
       return data;
     },
     enabled: !!session?.user,
-    refetchInterval: 60000, // Poll every minute as a fallback
   });
 
   useEffect(() => {
-    if (!activeJobs || activeJobs.length === 0) return;
-
-    const channels: RealtimeChannel[] = [];
-    activeJobs.forEach(job => {
-      const channel = supabase.channel(`comfyui-job-tracker-${job.id}`)
-        .on<ComfyJob>(
-          'postgres_changes',
-          { event: 'UPDATE', schema: 'public', table: 'mira-agent-comfyui-jobs', filter: `id=eq.${job.id}` },
-          (payload) => {
-            const updatedJob = payload.new as ComfyJob;
-            if (updatedJob.status === 'complete' || updatedJob.status === 'failed') {
-              if (updatedJob.status === 'complete' && updatedJob.final_result?.publicUrl) {
-                showSuccess(`Upscale complete! Downloading now...`);
-                downloadImage(updatedJob.final_result.publicUrl, `upscaled-${job.id.substring(0, 8)}.png`);
-              } else if (updatedJob.status === 'failed') {
-                showError(`Upscale failed: ${updatedJob.error_message || 'Unknown error'}`);
-              }
-              
-              // Optimistically update the UI by removing the completed job from the cache
-              queryClient.setQueryData(['activeComfyJobs', session?.user?.id], (oldData: ComfyJob[] | undefined) => {
-                return oldData ? oldData.filter(j => j.id !== updatedJob.id) : [];
-              });
-
-              // Invalidate gallery query to show the new image
-              queryClient.invalidateQueries({ queryKey: ['generatedImages'] });
+    const channel = supabase.channel('comfyui-jobs-tracker')
+      .on<ComfyJob>(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'mira-agent-comfyui-jobs', filter: `user_id=eq.${session?.user?.id}` },
+        (payload) => {
+          console.log('[ActiveJobsTracker] Realtime event received:', payload.eventType);
+          const updatedJob = payload.new as ComfyJob;
+          
+          if (payload.eventType === 'UPDATE' && (updatedJob.status === 'complete' || updatedJob.status === 'failed')) {
+            if (updatedJob.status === 'complete' && updatedJob.final_result?.publicUrl) {
+              showSuccess(`Upscale complete! Downloading now...`);
+              downloadImage(updatedJob.final_result.publicUrl, `upscaled-${updatedJob.id.substring(0, 8)}.png`);
+            } else if (updatedJob.status === 'failed') {
+              showError(`Upscale failed: ${updatedJob.error_message || 'Unknown error'}`);
             }
           }
-        )
-        .subscribe();
-      channels.push(channel);
-    });
+          
+          // Invalidate the query to force all components to refetch the list of active jobs
+          queryClient.invalidateQueries({ queryKey: ['activeComfyJobs', session?.user?.id] });
+          queryClient.invalidateQueries({ queryKey: ['generatedImages'] });
+        }
+      )
+      .subscribe();
 
     return () => {
-      channels.forEach(channel => supabase.removeChannel(channel));
+      supabase.removeChannel(channel);
     };
-  }, [activeJobs, supabase, queryClient, session?.user?.id]);
+  }, [supabase, session?.user?.id, queryClient]);
 
   if (isLoading || !activeJobs || activeJobs.length === 0) {
     return null;
