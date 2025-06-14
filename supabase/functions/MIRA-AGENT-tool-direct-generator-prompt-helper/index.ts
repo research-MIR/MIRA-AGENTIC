@@ -19,20 +19,19 @@ const systemPrompt = `You are a master prompt crafter. Your task is to combine m
 ### Your Inputs:
 You will receive a user request containing:
 1.  **Base Prompt:** The user's original text.
-2.  **Garment Image (Optional):** An image labeled "GARMENT REFERENCE".
+2.  **Garment Images (Optional, Multiple):** A list of images labeled "GARMENT REFERENCE 1", "GARMENT REFERENCE 2", etc.
 3.  **Style Image (Optional):** An image labeled "STYLE REFERENCE".
 
 ### Your Internal Thought Process (Do not include this in the output):
-1.  **Analyze the Garment Image:** If present, identify the main garment being worn. Note its color, pattern, and type.
+1.  **Analyze the Garment Images:** If multiple garment images are provided, analyze each one and describe the complete outfit they form.
 2.  **Analyze the Style Image:** If present, identify its key stylistic elements: photography style, lighting, color palette, and subject pose.
 3.  **Synthesize:** Combine your analysis with the user's base prompt.
-    -   Intelligently insert the garment description into the base prompt. If the base prompt mentions a generic 'garment' or 'clothing', replace it. Otherwise, add it to the subject's description.
+    -   Intelligently insert the full outfit description into the base prompt.
     -   Incorporate the stylistic elements from the style analysis into the final prompt.
-    -   If the user's base prompt gives specific instructions on how to use a reference (e.g., "use the pose from the reference"), prioritize that instruction.
 
 ### **IMPORTANT: Handling Missing Inputs**
 - **If NO images are provided:** Your task is to enrich and expand the user's base prompt. Add descriptive details to make it more vivid and suitable for a photorealistic generation, but do not invent new core concepts.
-- **If ONLY ONE image is provided:** Perform your analysis on the single image and integrate its elements into the base prompt as described above.
+- **If ONLY ONE type of image is provided (e.g., only garment(s) or only style):** Perform your analysis on the provided image(s) and integrate the results into the base prompt.
 
 ### Your Output:
 Your entire response MUST be a single, valid JSON object with ONE key, "final_prompt".
@@ -40,7 +39,7 @@ Your entire response MUST be a single, valid JSON object with ONE key, "final_pr
 **Example Output:**
 \`\`\`json
 {
-  "final_prompt": "A photorealistic, cinematic shot of a woman wearing a white t-shirt with red and green stripes, standing with her hands on her hips. The lighting is soft and diffused, with warm, earthy tones."
+  "final_prompt": "A photorealistic, cinematic shot of a woman wearing a white t-shirt with red and green stripes and blue jeans, standing with her hands on her hips. The lighting is soft and diffused, with warm, earthy tones."
 }
 \`\`\`
 `;
@@ -84,16 +83,19 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
 
   try {
-    const { user_prompt, garment_image_url, style_image_url } = await req.json();
+    const { user_prompt, garment_image_urls, style_image_url } = await req.json();
     if (!user_prompt) throw new Error("user_prompt is required.");
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
     const parts: Part[] = [{ text: `**Base Prompt:**\n${user_prompt}` }];
 
-    if (garment_image_url) {
-        console.log("Downloading garment image...");
-        const garmentParts = await downloadImageAsPart(garment_image_url, "GARMENT REFERENCE");
-        parts.push(...garmentParts);
+    if (garment_image_urls && Array.isArray(garment_image_urls)) {
+        console.log(`Downloading ${garment_image_urls.length} garment image(s)...`);
+        const garmentPromises = garment_image_urls.map((url, index) => 
+            downloadImageAsPart(url, `GARMENT REFERENCE ${index + 1}`)
+        );
+        const garmentPartsArrays = await Promise.all(garmentPromises);
+        parts.push(...garmentPartsArrays.flat());
     }
 
     if (style_image_url) {
