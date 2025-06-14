@@ -14,54 +14,66 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const garmentAnalysisPrompt = `You are a fashion expert. Your task is to analyze the provided image and describe the main garment being worn in a concise, descriptive phrase. Focus on color, pattern, and type. Example: "a white t-shirt with red and green stripes". Respond with only the description.`;
+const systemPrompt = `You are a master prompt crafter. Your task is to combine multiple inputs into a single, coherent, and detailed text-to-image prompt. The final prompt MUST be in English.
 
-const styleAnalysisPrompt = `You are a professional photographer and art director. Analyze the provided image and describe its key stylistic elements. Respond with a JSON object with the following keys: "photography_style" (e.g., "cinematic, editorial fashion"), "lighting" (e.g., "soft, diffused natural light"), "color_palette" (e.g., "warm, earthy tones"), and "subject_pose" (e.g., "standing with hands on hips").`;
-
-const synthesisSystemPrompt = `You are a master prompt crafter. Your task is to combine the following elements into a single, coherent, and detailed text-to-image prompt. The final prompt MUST be in English.
-
-**Elements to Combine:**
+### Your Inputs:
+You will receive a user request containing:
 1.  **Base Prompt:** The user's original text.
-2.  **Garment Description:** A description of a garment from a reference image. You MUST intelligently insert this into the base prompt. If the base prompt mentions a generic 'garment' or 'clothing', replace it. Otherwise, add it to the subject's description.
-3.  **Style Analysis:** A JSON object describing the style of a second reference image.
-4.  **User Instructions on Style:** The user's base prompt may contain instructions on how to use the style (e.g., "use the pose from the reference"). You must follow these instructions, using the corresponding value from the Style Analysis.
+2.  **Garment Image (Optional):** An image labeled "GARMENT REFERENCE".
+3.  **Style Image (Optional):** An image labeled "STYLE REFERENCE".
 
-Combine these elements into a final, rich, photorealistic prompt in English. Do not respond in JSON, only the final text prompt.`;
+### Your Internal Thought Process (Do not include this in the output):
+1.  **Analyze the Garment Image:** If present, identify the main garment being worn. Note its color, pattern, and type.
+2.  **Analyze the Style Image:** If present, identify its key stylistic elements: photography style, lighting, color palette, and subject pose.
+3.  **Synthesize:** Combine your analysis with the user's base prompt.
+    -   Intelligently insert the garment description into the base prompt. If the base prompt mentions a generic 'garment' or 'clothing', replace it. Otherwise, add it to the subject's description.
+    -   Incorporate the stylistic elements from the style analysis into the final prompt.
+    -   If the user's base prompt gives specific instructions on how to use a reference (e.g., "use the pose from the reference"), prioritize that instruction.
 
-async function analyzeImage(ai: GoogleGenAI, imageUrl: string, systemPrompt: string, isJsonOutput: boolean = false): Promise<any> {
+### Your Output:
+Your entire response MUST be a single, valid JSON object with ONE key, "final_prompt".
+
+**Example Output:**
+\`\`\`json
+{
+  "final_prompt": "A photorealistic, cinematic shot of a woman wearing a white t-shirt with red and green stripes, standing with her hands on her hips. The lighting is soft and diffused, with warm, earthy tones."
+}
+\`\`\`
+`;
+
+async function downloadImageAsPart(imageUrl: string, label: string): Promise<Part[]> {
     if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
         throw new Error("Supabase URL or Service Role Key are not set in environment variables.");
     }
-    
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-    
-    // Extract file path from the public URL
     const url = new URL(imageUrl);
     const filePath = url.pathname.split(`/${BUCKET_NAME}/`)[1];
-    if (!filePath) {
-        throw new Error(`Could not parse file path from URL: ${imageUrl}`);
-    }
+    if (!filePath) throw new Error(`Could not parse file path from URL: ${imageUrl}`);
 
-    console.log(`[PromptHelper] Downloading file from Supabase Storage at path: ${filePath}`);
-    const { data: fileBlob, error: downloadError } = await supabase.storage
-        .from(BUCKET_NAME)
-        .download(filePath);
-
-    if (downloadError) {
-        throw new Error(`Supabase download failed: ${downloadError.message}`);
-    }
+    const { data: fileBlob, error: downloadError } = await supabase.storage.from(BUCKET_NAME).download(filePath);
+    if (downloadError) throw new Error(`Supabase download failed: ${downloadError.message}`);
 
     const mimeType = fileBlob.type;
     const buffer = await fileBlob.arrayBuffer();
     const base64 = encodeBase64(buffer);
 
-    const result = await ai.models.generateContent({
-        model: MODEL_NAME,
-        contents: [{ role: "user", parts: [{ inlineData: { mimeType, data: base64 } }] }],
-        generationConfig: isJsonOutput ? { responseMimeType: "application/json" } : undefined,
-        config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
-    });
-    return isJsonOutput ? JSON.parse(result.text) : result.text.trim();
+    return [
+        { text: `--- ${label} ---` },
+        { inlineData: { mimeType, data: base64 } }
+    ];
+}
+
+function extractJson(text: string): any {
+    const match = text.match(/```json\s*([\s\S]*?)\s*```/);
+    if (match && match[1]) {
+        return JSON.parse(match[1]);
+    }
+    try {
+        return JSON.parse(text);
+    } catch (e) {
+        console.error("Failed to parse JSON from model response:", text);
+        throw new Error("The model returned a response that could not be parsed as JSON.");
+    }
 }
 
 serve(async (req) => {
@@ -72,39 +84,35 @@ serve(async (req) => {
     if (!user_prompt) throw new Error("user_prompt is required.");
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-    let garmentDescription = "";
-    let styleAnalysis = {};
+    const parts: Part[] = [{ text: `**Base Prompt:**\n${user_prompt}` }];
 
     if (garment_image_url) {
-        console.log("Analyzing garment image...");
-        garmentDescription = await analyzeImage(ai, garment_image_url, garmentAnalysisPrompt);
-        console.log("Garment description:", garmentDescription);
+        console.log("Downloading garment image...");
+        const garmentParts = await downloadImageAsPart(garment_image_url, "GARMENT REFERENCE");
+        parts.push(...garmentParts);
     }
 
     if (style_image_url) {
-        console.log("Analyzing style image...");
-        styleAnalysis = await analyzeImage(ai, style_image_url, styleAnalysisPrompt, true);
-        console.log("Style analysis:", styleAnalysis);
+        console.log("Downloading style image...");
+        const styleParts = await downloadImageAsPart(style_image_url, "STYLE REFERENCE");
+        parts.push(...styleParts);
     }
 
-    const synthesisParts: Part[] = [
-        { text: `**Base Prompt:**\n${user_prompt}` }
-    ];
-    if (garmentDescription) {
-        synthesisParts.push({ text: `\n\n**Garment to Insert:**\n${garmentDescription}` });
-    }
-    if (Object.keys(styleAnalysis).length > 0) {
-        synthesisParts.push({ text: `\n\n**Style Analysis:**\n${JSON.stringify(styleAnalysis, null, 2)}` });
-    }
-
-    console.log("Synthesizing final prompt...");
-    const finalResult = await ai.models.generateContent({
+    console.log("Synthesizing final prompt with all inputs...");
+    const result = await ai.models.generateContent({
         model: MODEL_NAME,
-        contents: [{ role: 'user', parts: synthesisParts }],
-        config: { systemInstruction: { role: "system", parts: [{ text: synthesisSystemPrompt }] } }
+        contents: [{ role: 'user', parts }],
+        generationConfig: { responseMimeType: "application/json" },
+        config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
     });
 
-    const finalPrompt = finalResult.text.trim();
+    const responseJson = extractJson(result.text);
+    const finalPrompt = responseJson.final_prompt;
+
+    if (!finalPrompt) {
+        throw new Error("AI Helper did not return a final prompt in the expected format.");
+    }
+
     console.log("Final synthesized prompt:", finalPrompt);
 
     return new Response(JSON.stringify({ final_prompt: finalPrompt }), {
