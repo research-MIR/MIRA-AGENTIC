@@ -77,59 +77,27 @@ const parseHistoryToMessages = (history: any[], jobStatus: string): Message[] =>
             }
         } else if (turn.role === 'function') {
             const response = turn.parts[0]?.functionResponse?.response;
-            const name = turn.parts[0]?.functionResponse?.name;
+            if (!response) continue;
 
-            if (name === 'finish_task' && response) {
+            // Data-driven parsing: check the content of the response, not the tool name
+            if (response.isCreativeProcess) {
                 flushCreativeProcessBuffer();
-                if (response.isCreativeProcess) {
-                    messages.push({ from: 'bot', creativeProcessResponse: response });
-                } else if (response.isImageGeneration) {
-                    messages.push({ from: 'bot', imageGenerationResponse: response });
-                } else if (response.isBrandAnalysis) {
-                    messages.push({ from: 'bot', brandAnalysisResponse: response });
-                }
-                continue;
-            }
-
-            if (response) {
-                if (name === 'dispatch_to_refinement_agent' && response.isImageGeneration) {
-                    flushCreativeProcessBuffer();
-                    messages.push({ from: 'bot', imageGenerationResponse: response });
-                    continue;
-                }
-
-                if (name === 'dispatch_to_artisan_engine') {
-                    if (creativeProcessBuffer.length > 0) flushCreativeProcessBuffer();
-                    creativeProcessBuffer.push({ artisan_result: response });
-                } else if (['generate_image', 'generate_image_with_reference'].includes(name)) {
-                    if (creativeProcessBuffer.length === 0) {
-                        if (response.isImageGeneration) {
-                            flushCreativeProcessBuffer();
-                            messages.push({ from: 'bot', imageGenerationResponse: response });
-                            continue;
-                        }
-                    }
-                    const lastIteration = creativeProcessBuffer[creativeProcessBuffer.length - 1];
-                    if (lastIteration) {
-                       lastIteration.initial_generation_result = { toolName: name, response: response };
-                    }
-                } else if (name === 'fal_image_to_image') {
-                    if (creativeProcessBuffer.length > 0) {
-                       const lastIteration = creativeProcessBuffer[creativeProcessBuffer.length - 1];
-                       lastIteration.refined_generation_result = { toolName: name, response: response };
-                    }
-                } else if (name === 'critique_images') {
-                    if (creativeProcessBuffer.length > 0) {
-                        const lastIteration = creativeProcessBuffer[creativeProcessBuffer.length - 1];
-                        lastIteration.critique_result = response;
-                        if (response.is_good_enough === false) {
-                            flushCreativeProcessBuffer();
-                        }
-                    }
-                } else if (response.isBrandAnalysis) {
-                    flushCreativeProcessBuffer();
-                    messages.push({ from: 'bot', brandAnalysisResponse: response });
-                }
+                messages.push({ from: 'bot', creativeProcessResponse: response });
+            } else if (response.isImageGeneration) {
+                flushCreativeProcessBuffer();
+                messages.push({ from: 'bot', imageGenerationResponse: response });
+            } else if (response.isBrandAnalysis) {
+                flushCreativeProcessBuffer();
+                messages.push({ from: 'bot', brandAnalysisResponse: response });
+            } else if (response.isRefinementProposal) {
+                flushCreativeProcessBuffer();
+                messages.push({ from: 'bot', refinementProposal: response });
+            } else if (response.isImageChoiceProposal) {
+                flushCreativeProcessBuffer();
+                messages.push({ from: 'bot', imageChoiceProposal: response });
+            } else if (response.isArtisanResponse) {
+                if (creativeProcessBuffer.length > 0) flushCreativeProcessBuffer();
+                creativeProcessBuffer.push({ artisan_result: response });
             }
         }
     }
