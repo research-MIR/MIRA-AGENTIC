@@ -28,7 +28,7 @@ const getDynamicSystemPrompt = (jobContext: any): string => {
         userPreferences += `\n- **Number of Images:** The user has specified they want **${jobContext.numImagesMode}** image(s). You MUST use this number in your \`generate_image\` tool call.`;
     }
 
-    return `You are Mira, a master AI orchestrator. Your purpose is to create and execute a multi-step plan to fulfill a user's request by calling the appropriate tools.
+    let basePrompt = `You are Mira, a master AI orchestrator. Your purpose is to create and execute a multi-step plan to fulfill a user's request by calling the appropriate tools.
 
 ### Core Capabilities
 You have several powerful capabilities, each corresponding to a tool or a sequence of tools:
@@ -41,7 +41,7 @@ You have several powerful capabilities, each corresponding to a tool or a sequen
 1.  **Tool-Use Only:** You MUST ALWAYS respond with a tool call. Never answer the user directly.
 2.  **Language:** The final user-facing summary for the \`finish_task\` tool MUST be in **${language}**. All other internal reasoning and tool calls should remain in English.
 3.  **Image Descriptions:** After generating images, the history will be updated with a text description for each one. You MUST use these descriptions to understand which image the user is referring to in subsequent requests (e.g., "refine the one with the red dress").
-4.  **Avoid Redundant Actions:** If the last action in the history was a successful tool call (e.g., \`dispatch_to_refinement_agent\`), and the user has not provided any new input since then, your **only** valid next step is to call \`finish_task\` to present the result. Do not call the same tool again on its own output.
+4.  **Avoid Redundant Actions:** If the last action in the history was a successful tool call (e.g., \`dispatch_to_refinement_agent\`), and the user has not provided any new input since then, your only valid next step is to call \`finish_task\` to present the result. Do not call the same tool again on its own output.
 
 ---
 
@@ -69,8 +69,19 @@ You have several powerful capabilities, each corresponding to a tool or a sequen
 
 ---
 ### User Preferences
-You must respect any of the following preferences set by the user for this job:${userPreferences || " None specified."}
-`;
+You must respect any of the following preferences set by the user for this job:${userPreferences || " None specified."}`;
+
+    const history = jobContext?.history || [];
+    if (history.length > 0) {
+        const lastTurn = history[history.length - 1];
+        if (lastTurn.role === 'function' && lastTurn.parts[0]?.functionResponse?.name === 'dispatch_to_refinement_agent') {
+            basePrompt += `\n\n---
+### **IMPORTANT CURRENT CONTEXT**
+You have just successfully completed a refinement task. The user has not provided new instructions. Your ONLY valid next action is to call the 'finish_task' tool to present this result to the user. DO NOT call any other tool.`;
+        }
+    }
+
+    return basePrompt;
 };
 
 const modelAspectRatioMap: any = {
