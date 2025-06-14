@@ -16,6 +16,8 @@ import { useLanguage } from "@/context/LanguageContext";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Switch } from "@/components/ui/switch";
+import { useDropzone } from "@/hooks/useDropzone";
+import { cn } from "@/lib/utils";
 
 interface ImageResult {
   publicUrl: string;
@@ -55,8 +57,8 @@ const Generator = () => {
   const [garmentReferenceImageUrls, setGarmentReferenceImageUrls] = useState<string[]>([]);
   const [isHelperEnabled, setIsHelperEnabled] = useState(true);
 
-  const handleStyleReferenceImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const handleStyleReferenceImageChange = useCallback((files: FileList | null) => {
+    const file = files?.[0];
     if (file) {
       if (file.type.startsWith('video/') || file.type === 'image/avif') {
         showError("Unsupported file type. AVIF and video formats are not allowed.");
@@ -65,7 +67,7 @@ const Generator = () => {
       setStyleReferenceImageFile(file);
       setStyleReferenceImageUrl(URL.createObjectURL(file));
     }
-  };
+  }, []);
 
   const handleRemoveStyleReferenceImage = () => {
     if (styleReferenceImageUrl) URL.revokeObjectURL(styleReferenceImageUrl);
@@ -73,8 +75,7 @@ const Generator = () => {
     setStyleReferenceImageUrl(null);
   };
 
-  const handleGarmentImagesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
+  const handleGarmentImagesChange = useCallback((files: FileList | null) => {
     if (files) {
       const validFiles: File[] = [];
       const invalidFiles: string[] = [];
@@ -97,13 +98,16 @@ const Generator = () => {
         setGarmentReferenceImageUrls(prev => [...prev, ...newUrls]);
       }
     }
-  };
+  }, []);
 
   const handleRemoveGarmentImage = (indexToRemove: number) => {
     URL.revokeObjectURL(garmentReferenceImageUrls[indexToRemove]);
     setGarmentReferenceImageFiles(prev => prev.filter((_, index) => index !== indexToRemove));
     setGarmentReferenceImageUrls(prev => prev.filter((_, index) => index !== indexToRemove));
   };
+
+  const { isDraggingOver: isStyleDragging, dropzoneProps: styleDropzoneProps } = useDropzone({ onDrop: handleStyleReferenceImageChange });
+  const { isDraggingOver: isGarmentDragging, dropzoneProps: garmentDropzoneProps } = useDropzone({ onDrop: handleGarmentImagesChange });
 
   useEffect(() => {
     return () => {
@@ -195,7 +199,7 @@ const Generator = () => {
   };
 
   const renderGarmentUploader = () => (
-    <div>
+    <div {...garmentDropzoneProps}>
       <Label>{t.garmentReference}</Label>
       <div className="mt-2 grid grid-cols-3 gap-2">
         {garmentReferenceImageUrls.map((url, index) => (
@@ -207,23 +211,23 @@ const Generator = () => {
           </div>
         ))}
       </div>
-      <div className="mt-2 flex justify-center rounded-lg border border-dashed border-border px-6 py-4">
+      <div className={cn("mt-2 flex justify-center rounded-lg border border-dashed border-border px-6 py-4 transition-colors", isGarmentDragging && "border-primary bg-primary/10")}>
         <div className="text-center">
           <UploadCloud className="mx-auto h-8 w-8 text-muted-foreground" />
           <div className="mt-2 flex text-sm leading-6 text-muted-foreground">
             <Label htmlFor="garment-reference-image-upload" className="relative cursor-pointer rounded-md bg-background font-semibold text-primary focus-within:outline-none focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 hover:text-primary/80">
               <span>Upload file(s)</span>
-              <Input id="garment-reference-image-upload" type="file" className="sr-only" onChange={handleGarmentImagesChange} accept="image/*" multiple />
+              <Input id="garment-reference-image-upload" type="file" className="sr-only" onChange={(e) => handleGarmentImagesChange(e.target.files)} accept="image/*" multiple />
             </Label>
           </div>
-          <p className="text-xs leading-5 text-muted-foreground">PNG, JPG, etc.</p>
+          <p className="text-xs leading-5 text-muted-foreground">or drag and drop</p>
         </div>
       </div>
     </div>
   );
 
   const renderStyleUploader = () => (
-    <div>
+    <div {...styleDropzoneProps}>
       <Label>{t.styleReference}</Label>
       {styleReferenceImageUrl ? (
         <div className="mt-2 relative">
@@ -233,16 +237,16 @@ const Generator = () => {
           </Button>
         </div>
       ) : (
-        <div className="mt-2 flex justify-center rounded-lg border border-dashed border-border px-6 py-10">
+        <div className={cn("mt-2 flex justify-center rounded-lg border border-dashed border-border px-6 py-10 transition-colors", isStyleDragging && "border-primary bg-primary/10")}>
           <div className="text-center">
             <UploadCloud className="mx-auto h-12 w-12 text-muted-foreground" />
             <div className="mt-4 flex text-sm leading-6 text-muted-foreground">
               <Label htmlFor="style-reference-image-upload" className="relative cursor-pointer rounded-md bg-background font-semibold text-primary focus-within:outline-none focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 hover:text-primary/80">
                 <span>Upload a file</span>
-                <Input id="style-reference-image-upload" type="file" className="sr-only" onChange={handleStyleReferenceImageChange} accept="image/*" />
+                <Input id="style-reference-image-upload" type="file" className="sr-only" onChange={(e) => handleStyleReferenceImageChange(e.target.files)} accept="image/*" />
               </Label>
             </div>
-            <p className="text-xs leading-5 text-muted-foreground">PNG, JPG, etc.</p>
+            <p className="text-xs leading-5 text-muted-foreground">or drag and drop</p>
           </div>
         </div>
       )}

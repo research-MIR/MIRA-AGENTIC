@@ -18,6 +18,8 @@ import { ImageCompareModal } from "@/components/ImageCompareModal";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Switch } from "@/components/ui/switch";
+import { useDropzone } from "@/hooks/useDropzone";
+import { cn } from "@/lib/utils";
 
 interface ComfyJob {
   id: string;
@@ -128,8 +130,8 @@ const Refine = () => {
     };
   }, [supabase]);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const handleFileChange = useCallback((files: FileList | null) => {
+    const file = files?.[0];
     if (file) {
       if (file.type.startsWith('video/') || file.type === 'image/avif') {
         showError("Unsupported file type. AVIF and video formats are not allowed.");
@@ -156,7 +158,9 @@ const Refine = () => {
         setOriginalDimensions(null);
         setSourceImageFile(null);
     }
-  };
+  }, [isAutoPromptEnabled]);
+
+  const { isDraggingOver, dropzoneProps } = useDropzone({ onDrop: handleFileChange });
 
   const handleAutoPrompt = async (dataUrl: string, mimeType: string) => {
     setIsLoadingAutoPrompt(true);
@@ -290,8 +294,12 @@ const Refine = () => {
           <div className="lg:col-span-1 space-y-6">
             <Card>
               <CardHeader><CardTitle>{t.sourceImage}</CardTitle></CardHeader>
-              <CardContent>
-                <Input id="source-image-upload" type="file" accept="image/*" onChange={handleFileChange} />
+              <CardContent {...dropzoneProps} className={cn("p-4 border-2 border-dashed rounded-lg transition-colors", isDraggingOver && "border-primary bg-primary/10")}>
+                <Input id="source-image-upload" type="file" accept="image/*" onChange={(e) => handleFileChange(e.target.files)} className="hidden" />
+                <Label htmlFor="source-image-upload" className="cursor-pointer flex flex-col items-center justify-center text-center text-muted-foreground">
+                  <UploadCloud className="h-12 w-12 mb-4" />
+                  <p>Drag & drop an image here, or click to select a file.</p>
+                </Label>
               </CardContent>
             </Card>
             <Card>
