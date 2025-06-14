@@ -10,6 +10,7 @@ const corsHeaders = {
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
+const POLLING_INTERVAL_MS = 5000; // 5 seconds for rapid polling
 
 async function findOutputImage(historyOutputs: any): Promise<any | null> {
     if (!historyOutputs) return null;
@@ -101,6 +102,9 @@ serve(async (req) => {
   console.log(`[Poller][${job_id}] Invoked to check status.`);
 
   try {
+    // Mark the job as being polled right now to prevent watchdog conflicts
+    await supabase.from('mira-agent-comfyui-jobs').update({ last_polled_at: new Date().toISOString() }).eq('id', job_id);
+
     const { data: job, error: fetchError } = await supabase
       .from('mira-agent-comfyui-jobs')
       .select('*')
@@ -117,7 +121,10 @@ serve(async (req) => {
     const historyUrl = `${job.comfyui_address}/history/${job.comfyui_prompt_id}`;
     const historyResponse = await fetch(historyUrl);
     if (!historyResponse.ok) {
-        console.warn(`[Poller][${job_id}] ComfyUI history not available yet. Will retry on next watchdog cycle.`);
+        console.warn(`[Poller][${job_id}] ComfyUI history not available yet. Will retry.`);
+        setTimeout(() => {
+            supabase.functions.invoke('MIRA-AGENT-poller-comfyui', { body: { job_id } }).catch(console.error);
+        }, POLLING_INTERVAL_MS);
         return new Response(JSON.stringify({ success: true, status: 'queued' }), { headers: corsHeaders });
     }
     
@@ -125,7 +132,10 @@ serve(async (req) => {
     const promptHistory = historyData[job.comfyui_prompt_id];
 
     if (!promptHistory) {
-        console.log(`[Poller][${job_id}] Job not yet in history. Will retry on next watchdog cycle.`);
+        console.log(`[Poller][${job_id}] Job not yet in history. Will retry.`);
+        setTimeout(() => {
+            supabase.functions.invoke('MIRA-AGENT-poller-comfyui', { body: { job_id } }).catch(console.error);
+        }, POLLING_INTERVAL_MS);
         return new Response(JSON.stringify({ success: true, status: 'queued' }), { headers: corsHeaders });
     }
 
@@ -156,8 +166,11 @@ serve(async (req) => {
 
         return new Response(JSON.stringify({ success: true, status: 'complete', publicUrl }), { headers: corsHeaders });
     } else {
-        console.log(`[Poller][${job_id}] Job is running, but output not ready. Will retry on next watchdog cycle.`);
+        console.log(`[Poller][${job_id}] Job is running, but output not ready. Re-polling in ${POLLING_INTERVAL_MS}ms.`);
         await supabase.from('mira-agent-comfyui-jobs').update({ status: 'processing' }).eq('id', job_id);
+        setTimeout(() => {
+            supabase.functions.invoke('MIRA-AGENT-poller-comfyui', { body: { job_id } }).catch(console.error);
+        }, POLLING_INTERVAL_MS);
         return new Response(JSON.stringify({ success: true, status: 'processing' }), { headers: corsHeaders });
     }
 
