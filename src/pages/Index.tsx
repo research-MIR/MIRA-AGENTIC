@@ -14,7 +14,6 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { PlusCircle, Trash2 } from "lucide-react";
-import { RefinementProposalCard } from "@/components/RefinementProposalCard";
 
 interface UploadedFile {
   name: string;
@@ -30,7 +29,7 @@ const sanitizeFilename = (filename: string): string => {
     .replace(/\.{2,}/g, '.');
 };
 
-const parseHistoryToMessages = (history: any[], jobStatus: string): Message[] => {
+const parseHistoryToMessages = (history: any[]): Message[] => {
     const messages: Message[] = [];
     if (!history) return messages;
 
@@ -38,11 +37,9 @@ const parseHistoryToMessages = (history: any[], jobStatus: string): Message[] =>
 
     const flushCreativeProcessBuffer = () => {
         if (creativeProcessBuffer.length > 0) {
-            const lastIterationWithRefinement = [...creativeProcessBuffer].reverse().find(it => it.refined_generation_result);
-            const finalGeneration = lastIterationWithRefinement 
-                ? lastIterationWithRefinement.refined_generation_result 
-                : [...creativeProcessBuffer].reverse().find(it => it.initial_generation_result)?.initial_generation_result;
-            
+            const lastIteration = creativeProcessBuffer[creativeProcessBuffer.length - 1];
+            const finalGeneration = lastIteration.refined_generation_result || lastIteration.initial_generation_result;
+
             messages.push({
                 from: 'bot',
                 creativeProcessResponse: {
@@ -58,68 +55,79 @@ const parseHistoryToMessages = (history: any[], jobStatus: string): Message[] =>
     for (let i = 0; i < history.length; i++) {
         const turn = history[i];
 
-        if (turn.role === 'user') {
+        // Handle simple user/bot text messages
+        if (turn.role === 'user' || (turn.role === 'model' && turn.parts[0]?.text)) {
             flushCreativeProcessBuffer();
-            const userMessage: Message = { from: 'user', imageUrls: [] };
+            const message: Message = { from: turn.role, imageUrls: [] };
             const textPart = turn.parts.find((p: any) => p.text);
             const imageParts = turn.parts.filter((p: any) => p.inlineData);
 
-            if (textPart) userMessage.text = textPart.text;
+            if (textPart) message.text = textPart.text;
             if (imageParts.length > 0) {
-                userMessage.imageUrls = imageParts.map((p: any) => `data:${p.inlineData.mimeType};base64,${p.inlineData.data}`);
+                message.imageUrls = imageParts.map((p: any) => `data:${p.inlineData.mimeType};base64,${p.inlineData.data}`);
             }
-            if (userMessage.text || (userMessage.imageUrls && userMessage.imageUrls.length > 0)) {
-                messages.push(userMessage);
+            if (message.text || (message.imageUrls && message.imageUrls.length > 0)) {
+                messages.push(message);
             }
-        } else if (turn.role === 'model') {
-            const textPart = turn.parts.find((p: any) => p.text);
-            if (textPart && textPart.text) {
-                flushCreativeProcessBuffer();
-                messages.push({ from: 'bot', text: textPart.text });
-            }
-        } else if (turn.role === 'function') {
-            const response = turn.parts[0]?.functionResponse?.response;
-            if (!response) continue;
+            continue;
+        }
 
-            if (response.isImageChoiceProposal) {
-                flushCreativeProcessBuffer();
-                const choiceMessage: Message = { from: 'bot', imageChoiceProposal: response };
-                
-                // Look ahead to see if the next message is the user's choice
-                const nextTurn = history[i + 1];
-                if (nextTurn && nextTurn.role === 'user' && nextTurn.parts[0]?.text?.startsWith("I choose image number")) {
-                    const match = nextTurn.parts[0].text.match(/I choose image number (\d+)/);
-                    if (match && match[1]) {
-                        choiceMessage.imageChoiceSelectedIndex = parseInt(match[1], 10) - 1;
-                        i++; // Skip the user's choice message so it doesn't get rendered separately
-                    }
-                }
-                messages.push(choiceMessage);
-            } else if (response.isCreativeProcess) {
-                flushCreativeProcessBuffer();
-                messages.push({ from: 'bot', creativeProcessResponse: response });
-            } else if (response.isImageGeneration) {
-                flushCreativeProcessBuffer();
-                messages.push({ from: 'bot', imageGenerationResponse: response });
-            } else if (response.isBrandAnalysis) {
-                flushCreativeProcessBuffer();
-                messages.push({ from: 'bot', brandAnalysisResponse: response });
-            } else if (response.isRefinementProposal) {
-                flushCreativeProcessBuffer();
-                messages.push({ from: 'bot', refinementProposal: response });
-            } else if (response.isArtisanResponse) {
-                if (creativeProcessBuffer.length > 0) flushCreativeProcessBuffer();
+        // Handle complex function calls/responses
+        if (turn.role === 'function') {
+            const response = turn.parts[0]?.functionResponse?.response;
+            const callName = history[i - 1]?.parts[0]?.functionCall?.name;
+
+            if (!response || !callName) continue;
+
+            // Group creative process steps into a buffer
+            if (callName === 'dispatch_to_artisan_engine') {
+                flushCreativeProcessBuffer(); // Start of a new creative process
                 creativeProcessBuffer.push({ artisan_result: response });
+            } else if (callName === 'generate_image' || callName === 'generate_image_with_reference') {
+                if (creativeProcessBuffer.length > 0) {
+                    const currentIteration = creativeProcessBuffer[creativeProcessBuffer.length - 1];
+                    if (!currentIteration.initial_generation_result) {
+                        currentIteration.initial_generation_result = { toolName: callName, response };
+                    } else {
+                        currentIteration.refined_generation_result = { toolName: callName, response };
+                    }
+                } else {
+                    // Standalone image generation
+                    flushCreativeProcessBuffer();
+                    messages.push({ from: 'bot', imageGenerationResponse: response });
+                }
+            } else if (callName === 'critique_images') {
+                if (creativeProcessBuffer.length > 0) {
+                    creativeProcessBuffer[creativeProcessBuffer.length - 1].critique_result = response;
+                }
+            } else {
+                // Any other tool call ends the creative process buffer
+                flushCreativeProcessBuffer();
+                if (response.isImageChoiceProposal) {
+                    const choiceMessage: Message = { from: 'bot', imageChoiceProposal: response };
+                    const nextTurn = history[i + 1];
+                    if (nextTurn && nextTurn.role === 'user' && nextTurn.parts[0]?.text?.startsWith("I choose image number")) {
+                        const match = nextTurn.parts[0].text.match(/I choose image number (\d+)/);
+                        if (match && match[1]) {
+                            choiceMessage.imageChoiceSelectedIndex = parseInt(match[1], 10) - 1;
+                            i++; 
+                        }
+                    }
+                    messages.push(choiceMessage);
+                } else if (response.isBrandAnalysis) {
+                    messages.push({ from: 'bot', brandAnalysisResponse: response });
+                } else if (response.isRefinementProposal) {
+                    messages.push({ from: 'bot', refinementProposal: response });
+                }
             }
         }
     }
     
-    if (creativeProcessBuffer.length > 0 || jobStatus === 'failed') {
-        flushCreativeProcessBuffer();
-    }
+    flushCreativeProcessBuffer();
     
     return messages;
 };
+
 
 const Index = () => {
   const { supabase, session } = useSession();
@@ -216,7 +224,7 @@ const Index = () => {
     if (jobData.context?.ratioMode) setRatioMode(jobData.context.ratioMode);
     if (jobData.context?.numImagesMode) setNumImagesMode(jobData.context.numImagesMode);
 
-    let conversationMessages = parseHistoryToMessages(jobData.context?.history, jobData.status);
+    let conversationMessages = parseHistoryToMessages(jobData.context?.history);
     
     if (jobData.status === 'processing') {
         conversationMessages.push({ from: 'bot', jobInProgress: { jobId: jobData.id, message: 'Thinking...' } });
@@ -232,10 +240,14 @@ const Index = () => {
         } else if (jobData.final_result?.text) {
             conversationMessages.push({ from: 'bot', text: jobData.final_result.text });
         }
-    } else if (jobData.status === 'complete' && jobData.final_result?.text) {
-        const lastMessage = conversationMessages[conversationMessages.length - 1];
-        if (!lastMessage || lastMessage.from !== 'bot' || lastMessage.text !== jobData.final_result.text) {
-            conversationMessages.push({ from: 'bot', text: jobData.final_result.text });
+    } else if (jobData.status === 'complete' && jobData.final_result) {
+        if (jobData.final_result.isCreativeProcess) {
+            conversationMessages.push({ from: 'bot', creativeProcessResponse: jobData.final_result });
+        } else if (jobData.final_result.text) {
+            const lastMessage = conversationMessages[conversationMessages.length - 1];
+            if (!lastMessage || lastMessage.from !== 'bot' || lastMessage.text !== jobData.final_result.text) {
+                conversationMessages.push({ from: 'bot', text: jobData.final_result.text });
+            }
         }
     }
     setMessages(conversationMessages);
