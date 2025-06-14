@@ -34,6 +34,7 @@ const parseHistoryToMessages = (history: any[]): Message[] => {
     if (!history) return messages;
 
     let creativeProcessBuffer: any[] = [];
+    let lastCreativeProcessIndex = -1;
 
     const flushCreativeProcessBuffer = () => {
         if (creativeProcessBuffer.length > 0) {
@@ -46,7 +47,8 @@ const parseHistoryToMessages = (history: any[]): Message[] => {
                     isCreativeProcess: true,
                     iterations: [...creativeProcessBuffer],
                     final_generation_result: finalGeneration,
-                }
+                },
+                rawHistoryEndIndex: lastCreativeProcessIndex
             });
             creativeProcessBuffer = [];
         }
@@ -57,7 +59,7 @@ const parseHistoryToMessages = (history: any[]): Message[] => {
 
         if (turn.role === 'user' || (turn.role === 'model' && turn.parts[0]?.text)) {
             flushCreativeProcessBuffer();
-            const message: Message = { from: turn.role, imageUrls: [] };
+            const message: Message = { from: turn.role, imageUrls: [], rawHistoryEndIndex: i };
             const textPart = turn.parts.find((p: any) => p.text);
             const imageParts = turn.parts.filter((p: any) => p.inlineData);
 
@@ -80,11 +82,12 @@ const parseHistoryToMessages = (history: any[]): Message[] => {
             if (callName === 'finish_task') {
                 flushCreativeProcessBuffer();
                 if (response.text) {
-                    messages.push({ from: 'bot', text: response.text });
+                    messages.push({ from: 'bot', text: response.text, rawHistoryEndIndex: i });
                 }
             } else if (callName === 'dispatch_to_artisan_engine') {
                 flushCreativeProcessBuffer();
                 creativeProcessBuffer.push({ artisan_result: response });
+                lastCreativeProcessIndex = i;
             } else if (callName === 'generate_image' || callName === 'generate_image_with_reference') {
                 if (creativeProcessBuffer.length > 0) {
                     const currentIteration = creativeProcessBuffer[creativeProcessBuffer.length - 1];
@@ -93,18 +96,20 @@ const parseHistoryToMessages = (history: any[]): Message[] => {
                     } else {
                         currentIteration.refined_generation_result = { toolName: callName, response };
                     }
+                    lastCreativeProcessIndex = i;
                 } else {
                     flushCreativeProcessBuffer();
-                    messages.push({ from: 'bot', imageGenerationResponse: response });
+                    messages.push({ from: 'bot', imageGenerationResponse: response, rawHistoryEndIndex: i });
                 }
             } else if (callName === 'critique_images') {
                 if (creativeProcessBuffer.length > 0) {
                     creativeProcessBuffer[creativeProcessBuffer.length - 1].critique_result = response;
+                    lastCreativeProcessIndex = i;
                 }
             } else {
                 flushCreativeProcessBuffer();
                 if (response.isImageChoiceProposal) {
-                    const choiceMessage: Message = { from: 'bot', imageChoiceProposal: response };
+                    const choiceMessage: Message = { from: 'bot', imageChoiceProposal: response, rawHistoryEndIndex: i };
                     const nextTurn = history[i + 1];
                     if (nextTurn && nextTurn.role === 'user' && nextTurn.parts[0]?.text?.startsWith("I choose image number")) {
                         const match = nextTurn.parts[0].text.match(/I choose image number (\d+)/);
@@ -115,9 +120,9 @@ const parseHistoryToMessages = (history: any[]): Message[] => {
                     }
                     messages.push(choiceMessage);
                 } else if (response.isBrandAnalysis) {
-                    messages.push({ from: 'bot', brandAnalysisResponse: response });
+                    messages.push({ from: 'bot', brandAnalysisResponse: response, rawHistoryEndIndex: i });
                 } else if (response.isRefinementProposal) {
-                    messages.push({ from: 'bot', refinementProposal: response });
+                    messages.push({ from: 'bot', refinementProposal: response, rawHistoryEndIndex: i });
                 }
             }
         }
@@ -436,6 +441,41 @@ const Index = () => {
     });
   }, [jobId]);
 
+  const handleBranchConversation = useCallback(async (endIndex: number) => {
+    if (!jobData || !session?.user) return;
+
+    const toastId = showLoading("Branching conversation...");
+    try {
+      const oldHistory = jobData.context.history;
+      const newHistory = oldHistory.slice(0, endIndex + 1);
+
+      const newJobPayload = {
+        user_id: session.user.id,
+        original_prompt: `Branched from: ${chatTitle}`,
+        status: 'awaiting_feedback',
+        context: { ...jobData.context, history: newHistory },
+        final_result: { text: "This is a branched conversation. What would you like to do next?" }
+      };
+
+      const { data: newJob, error } = await supabase
+        .from('mira-agent-jobs')
+        .insert(newJobPayload)
+        .select('id')
+        .single();
+
+      if (error) throw error;
+
+      await queryClient.invalidateQueries({ queryKey: ["jobHistory"] });
+      navigate(`/chat/${newJob.id}`);
+      dismissToast(toastId);
+      showSuccess("Conversation branched successfully!");
+
+    } catch (error: any) {
+      dismissToast(toastId);
+      showError(`Failed to branch conversation: ${error.message}`);
+    }
+  }, [jobData, session, chatTitle, supabase, navigate, queryClient]);
+
   return (
     <div className="flex flex-col h-full relative" onDragEnter={() => setIsDragging(true)}>
       {isDragging && <FileDropzone onDrop={(files) => handleFileUpload(files)} onDragStateChange={setIsDragging} />}
@@ -465,7 +505,13 @@ const Index = () => {
 
       <div className="flex-1 overflow-y-auto">
         <div className="p-4 md:p-6 space-y-4">
-            <MessageList messages={messages} jobId={jobId} onRefinementComplete={handleRefinementComplete} onSendMessage={handleSendMessage} />
+            <MessageList 
+              messages={messages} 
+              jobId={jobId} 
+              onRefinementComplete={handleRefinementComplete} 
+              onSendMessage={handleSendMessage}
+              onBranch={handleBranchConversation}
+            />
             <div ref={messagesEndRef} />
         </div>
       </div>
