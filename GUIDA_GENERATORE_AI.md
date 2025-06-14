@@ -70,7 +70,7 @@ Essere così specifici ti dà il massimo controllo e ti permette di mescolare e 
 Immagina di voler creare questa immagine:
 
 1.  **Scrivi un prompt di base:**
-    > "Una modella in un contesto urbano. Usa la posa dall'immagine di stile."
+    > "Una modella in un contesto urbano."
 
 2.  **Carica i Riferimenti Indumento:**
     *   Una foto di una giacca di pelle nera.
@@ -81,10 +81,10 @@ Immagina di voler creare questa immagine:
 
 4.  **Attiva l'AI Prompt Helper e clicca "Genera".**
 
-L'AI combinerà tutto questo e creerà un prompt finale incredibilmente dettagliato, simile a questo:
+Senza ulteriori istruzioni, l'AI combinerà tutto in modo intelligente. Sintetizzerà un prompt finale incredibilmente dettagliato, simile a questo:
 
 > *"Un ritratto fotorealistico di una modella appoggiata a un muro, che indossa una giacca di pelle nera e jeans blu strappati, su una strada cittadina di notte, illuminata da vibranti luci al neon, con uno stile cinematografico e un'atmosfera suggestiva."*
 
-Il risultato sarà un'immagine che cattura perfettamente la tua visione complessa, combinando elementi da tre fonti diverse in un'unica, coerente creazione.
+Il risultato sarà un'immagine che cattura perfettamente la tua visione complessa, combinando elementi da tre fonti diverse in un'unica, coerente creazione. Per un controllo ancora maggiore, puoi usare i suggerimenti della sezione "Consiglio Avanzato".
 
 Sperimenta con questi nuovi strumenti per portare le tue idee a un livello superiore!
