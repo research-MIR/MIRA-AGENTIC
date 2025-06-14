@@ -12,7 +12,7 @@ export const ImageGenerationResponseSchema = z.object({
   isImageGeneration: z.literal(true),
   images: z.array(ImageResultSchema),
   follow_up_message: z.string().optional(),
-});
+}).passthrough();
 
 // Schema for the Artisan Engine's analysis and prompt generation
 export const ArtisanEngineResponseSchema = z.object({
@@ -22,7 +22,7 @@ export const ArtisanEngineResponseSchema = z.object({
   prompt: z.string(),
   rationale: z.string(),
   follow_up_message: z.string().optional(),
-});
+}).passthrough();
 
 // Schemas for the Brand Analyzer tool
 const SiteAnalysisSchema = z.object({
@@ -36,7 +36,7 @@ const SiteAnalysisSchema = z.object({
     synthesis: z.string().optional(),
     error: z.string().optional(),
     reason: z.string().optional(),
-});
+}).passthrough();
 
 export const BrandAnalyzerResponseSchema = z.object({
   isBrandAnalysis: z.literal(true),
@@ -45,7 +45,7 @@ export const BrandAnalyzerResponseSchema = z.object({
   social_media_analysis: z.object({ url: z.string(), analysis: SiteAnalysisSchema }).optional(),
   combined_synthesis: z.string(),
   follow_up_message: z.string().optional(),
-});
+}).passthrough();
 
 // Schema for the multi-step creative process response
 export const CreativeProcessResponseSchema = z.object({
@@ -53,7 +53,7 @@ export const CreativeProcessResponseSchema = z.object({
     iterations: z.array(z.any()), // Keeping this flexible for now
     final_generation_result: z.any(), // And this
     follow_up_message: z.string().optional(),
-});
+}).passthrough();
 
 // Schema for when the agent proposes a refinement
 export const RefinementProposalSchema = z.object({
@@ -62,10 +62,10 @@ export const RefinementProposalSchema = z.object({
         url: z.string().url(),
         jobId: z.string().uuid(),
     })),
-});
+}).passthrough();
 
 // Schema for when the agent asks the user to choose an image
 export const ImageChoiceProposalSchema = z.object({
     summary: z.string(),
     images: z.array(ImageResultSchema),
-});
+}).passthrough();
