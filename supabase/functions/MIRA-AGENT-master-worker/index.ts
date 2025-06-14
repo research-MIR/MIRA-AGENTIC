@@ -388,13 +388,23 @@ serve(async (req) => {
             finalResult.isCreativeProcess = true;
         }
         
-        // Always include summary and follow-up if they exist
         if (summary) finalResult.text = summary;
         if (follow_up_message) finalResult.follow_up_message = follow_up_message;
         
         if (response_type === 'clarification_question') {
             finalStatus = 'awaiting_feedback';
         }
+
+        // Add the function response to the history to make it complete
+        history.push({
+            role: 'function',
+            parts: [{
+                functionResponse: {
+                    name: 'finish_task',
+                    response: finalResult
+                }
+            }]
+        });
 
         currentContext.history = history;
         currentContext.iteration_number = iterationNumber;
