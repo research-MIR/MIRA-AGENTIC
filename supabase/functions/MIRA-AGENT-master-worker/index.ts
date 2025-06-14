@@ -293,12 +293,11 @@ serve(async (req) => {
     let history: Content[] = currentContext.history || [];
     let iterationNumber = currentContext.iteration_number || 1;
     
-    // Check for and inject a pending user choice into the history for the planner
     if (currentContext.pending_user_choice) {
         console.log(`[MasterWorker][${currentJobId}] Found pending user choice. Injecting into history.`);
         history.push({ role: 'user', parts: [{ text: currentContext.pending_user_choice }] });
-        delete currentContext.pending_user_choice; // Remove from context
-        currentContext.history = history; // Update history in context
+        delete currentContext.pending_user_choice;
+        currentContext.history = history;
     }
 
     console.log(`[MasterWorker][${currentJobId}] History has ${history.length} turns. Iteration: ${iterationNumber}. Preparing to send to Gemini planner.`);
@@ -325,11 +324,17 @@ serve(async (req) => {
 
     if (!result) throw new Error("AI planner failed to respond after all retries.");
 
+    console.log(`[MasterWorker][${currentJobId}] Raw response from Gemini planner:`, JSON.stringify(result, null, 2));
+
     const functionCalls = result.functionCalls;
-    if (!functionCalls || functionCalls.length === 0) throw new Error("Orchestrator did not return a tool call.");
+    if (!functionCalls || functionCalls.length === 0) {
+        console.error(`[MasterWorker][${currentJobId}] Orchestrator did not return a tool call. Finishing task with an error message.`);
+        await supabase.from('mira-agent-jobs').update({ status: 'failed', error_message: "The agent could not decide on a next step." }).eq('id', currentJobId);
+        return new Response(JSON.stringify({ error: "Agent failed to decide on a next step." }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
+    }
 
     const call = functionCalls[0];
-    console.log(`[MasterWorker][${currentJobId}] Gemini decided to call tool: ${call.name} with args:`, call.args);
+    console.log(`[MasterWorker][${currentJobId}] Gemini decided to call tool: ${call.name} with args:`, JSON.stringify(call.args, null, 2));
     history.push({ role: 'model', parts: [{ functionCall: call }] });
     
     let toolResponseData;
@@ -393,7 +398,6 @@ serve(async (req) => {
         });
         if (error) throw error;
 
-        // The refinement executor will pause the job, so we just return here.
         return new Response(JSON.stringify({ success: true, message: "Refinement job dispatched." }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
     } else if (call.name === 'dispatch_to_artisan_engine' || call.name === 'critique_images') {
