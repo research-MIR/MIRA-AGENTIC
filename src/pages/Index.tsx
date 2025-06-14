@@ -55,7 +55,6 @@ const parseHistoryToMessages = (history: any[]): Message[] => {
     for (let i = 0; i < history.length; i++) {
         const turn = history[i];
 
-        // Handle simple user/bot text messages
         if (turn.role === 'user' || (turn.role === 'model' && turn.parts[0]?.text)) {
             flushCreativeProcessBuffer();
             const message: Message = { from: turn.role, imageUrls: [] };
@@ -72,16 +71,21 @@ const parseHistoryToMessages = (history: any[]): Message[] => {
             continue;
         }
 
-        // Handle complex function calls/responses
         if (turn.role === 'function') {
             const response = turn.parts[0]?.functionResponse?.response;
             const callName = history[i - 1]?.parts[0]?.functionCall?.name;
 
             if (!response || !callName) continue;
 
-            // Group creative process steps into a buffer
-            if (callName === 'dispatch_to_artisan_engine') {
-                flushCreativeProcessBuffer(); // Start of a new creative process
+            if (callName === 'finish_task') {
+                flushCreativeProcessBuffer();
+                if (response.text) {
+                    messages.push({ from: 'bot', text: response.text });
+                } else if (response.isCreativeProcess) {
+                    messages.push({ from: 'bot', creativeProcessResponse: response });
+                }
+            } else if (callName === 'dispatch_to_artisan_engine') {
+                flushCreativeProcessBuffer();
                 creativeProcessBuffer.push({ artisan_result: response });
             } else if (callName === 'generate_image' || callName === 'generate_image_with_reference') {
                 if (creativeProcessBuffer.length > 0) {
@@ -92,7 +96,6 @@ const parseHistoryToMessages = (history: any[]): Message[] => {
                         currentIteration.refined_generation_result = { toolName: callName, response };
                     }
                 } else {
-                    // Standalone image generation
                     flushCreativeProcessBuffer();
                     messages.push({ from: 'bot', imageGenerationResponse: response });
                 }
@@ -101,7 +104,6 @@ const parseHistoryToMessages = (history: any[]): Message[] => {
                     creativeProcessBuffer[creativeProcessBuffer.length - 1].critique_result = response;
                 }
             } else {
-                // Any other tool call ends the creative process buffer
                 flushCreativeProcessBuffer();
                 if (response.isImageChoiceProposal) {
                     const choiceMessage: Message = { from: 'bot', imageChoiceProposal: response };
