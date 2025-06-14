@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -56,6 +56,9 @@ const Generator = () => {
   const [garmentReferenceImageFiles, setGarmentReferenceImageFiles] = useState<File[]>([]);
   const [garmentReferenceImageUrls, setGarmentReferenceImageUrls] = useState<string[]>([]);
   const [isHelperEnabled, setIsHelperEnabled] = useState(true);
+
+  const garmentInputRef = useRef<HTMLInputElement>(null);
+  const styleInputRef = useRef<HTMLInputElement>(null);
 
   const handleStyleReferenceImageChange = useCallback((files: FileList | null) => {
     const file = files?.[0];
@@ -211,18 +214,29 @@ const Generator = () => {
           </div>
         ))}
       </div>
-      <div className={cn("mt-2 flex justify-center rounded-lg border border-dashed border-border px-6 py-4 transition-colors", isGarmentDragging && "border-primary bg-primary/10")}>
-        <div className="text-center">
+      <div 
+        className={cn("mt-2 flex justify-center rounded-lg border border-dashed border-border px-6 py-4 transition-colors cursor-pointer", isGarmentDragging && "border-primary bg-primary/10")}
+        onClick={() => garmentInputRef.current?.click()}
+      >
+        <div className="text-center pointer-events-none">
           <UploadCloud className="mx-auto h-8 w-8 text-muted-foreground" />
           <div className="mt-2 flex text-sm leading-6 text-muted-foreground">
-            <Label htmlFor="garment-reference-image-upload" className="relative cursor-pointer rounded-md bg-background font-semibold text-primary focus-within:outline-none focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 hover:text-primary/80">
-              <span>Upload file(s)</span>
-              <Input id="garment-reference-image-upload" type="file" className="sr-only" onChange={(e) => handleGarmentImagesChange(e.target.files)} accept="image/*" multiple />
-            </Label>
+            <span className="relative rounded-md bg-background font-semibold text-primary">
+              Upload file(s)
+            </span>
           </div>
           <p className="text-xs leading-5 text-muted-foreground">or drag and drop</p>
         </div>
       </div>
+      <Input 
+        ref={garmentInputRef}
+        id="garment-reference-image-upload" 
+        type="file" 
+        className="sr-only" 
+        onChange={(e) => handleGarmentImagesChange(e.target.files)} 
+        accept="image/*" 
+        multiple 
+      />
     </div>
   );
 
@@ -237,19 +251,29 @@ const Generator = () => {
           </Button>
         </div>
       ) : (
-        <div className={cn("mt-2 flex justify-center rounded-lg border border-dashed border-border px-6 py-10 transition-colors", isStyleDragging && "border-primary bg-primary/10")}>
-          <div className="text-center">
+        <div 
+          className={cn("mt-2 flex justify-center rounded-lg border border-dashed border-border px-6 py-10 transition-colors cursor-pointer", isStyleDragging && "border-primary bg-primary/10")}
+          onClick={() => styleInputRef.current?.click()}
+        >
+          <div className="text-center pointer-events-none">
             <UploadCloud className="mx-auto h-12 w-12 text-muted-foreground" />
             <div className="mt-4 flex text-sm leading-6 text-muted-foreground">
-              <Label htmlFor="style-reference-image-upload" className="relative cursor-pointer rounded-md bg-background font-semibold text-primary focus-within:outline-none focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 hover:text-primary/80">
-                <span>Upload a file</span>
-                <Input id="style-reference-image-upload" type="file" className="sr-only" onChange={(e) => handleStyleReferenceImageChange(e.target.files)} accept="image/*" />
-              </Label>
+              <span className="relative rounded-md bg-background font-semibold text-primary">
+                Upload a file
+              </span>
             </div>
             <p className="text-xs leading-5 text-muted-foreground">or drag and drop</p>
           </div>
         </div>
       )}
+      <Input 
+        ref={styleInputRef}
+        id="style-reference-image-upload" 
+        type="file" 
+        className="sr-only" 
+        onChange={(e) => handleStyleReferenceImageChange(e.target.files)} 
+        accept="image/*" 
+      />
     </div>
   );
 
