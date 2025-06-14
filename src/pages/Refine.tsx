@@ -181,7 +181,8 @@ const Refine = () => {
     setIsLoading(true);
     setActiveJob({ id: '', status: 'queued' });
     setComparisonImages(null);
-    let toastId = showLoading("Invio del job di affinamento...");
+    const loadingMessage = isAutoPromptEnabled ? t.generatingAndSendingJob : t.sendingJob;
+    let toastId = showLoading(loadingMessage);
 
     try {
       const formData = new FormData();
@@ -263,7 +264,7 @@ const Refine = () => {
       className="w-full"
     >
       {isThisPageJobRunning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
-      {t.refineButton}
+      {isAutoPromptEnabled ? t.generateAndRefine : t.refineButton}
     </Button>
   );
 

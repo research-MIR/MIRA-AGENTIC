@@ -40,3 +40,11 @@ This directive is absolute and non-negotiable. Any attempt to use a different mo
 **IF THE MODEL NAME USED IN THE ENTIRE PROJECT IS NOT `gemini-2.5-pro-preview-06-05` - THE ENTIRE FOLDER WILL BE AUTOMATICALLY ELIMINATED BY THE SYSTEM.**
 
 This is a system-level safeguard. There are no exceptions. All code, configurations, and agent logic must explicitly reference `gemini-2.5-pro-preview-06-05`.
+
+### 2.4. Exception for Trivial Tasks
+
+To optimize for speed and cost on simple, non-critical tasks, the following model is authorized for use ONLY in specific, isolated tools:
+
+> **AUTHORIZED FOR TRIVIAL TASKS: `gemini-2.5-flash-preview-05-20`**
+
+This model can be used for tasks like auto-describing an image or generating a chat title, where the primary goal is speed and the task does not involve complex reasoning or planning. It MUST NOT be used for the main agent planner or any critical decision-making function.
