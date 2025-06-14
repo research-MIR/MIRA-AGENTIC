@@ -3,6 +3,7 @@ import { GoogleGenAI, Content, Part } from 'https://esm.sh/@google/genai@0.15.0'
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
+const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY');
 const MODEL_NAME = "gemini-2.5-pro-preview-06-05";
 
 const corsHeaders = {
@@ -25,7 +26,15 @@ const synthesisSystemPrompt = `You are a master prompt crafter. Your task is to 
 Combine these elements into a final, rich, photorealistic prompt in English. Do not respond in JSON, only the final text prompt.`;
 
 async function analyzeImage(ai: GoogleGenAI, imageUrl: string, systemPrompt: string, isJsonOutput: boolean = false): Promise<any> {
-    const response = await fetch(imageUrl);
+    if (!SUPABASE_ANON_KEY) {
+        throw new Error("SUPABASE_ANON_KEY is not set in environment variables.");
+    }
+    const response = await fetch(imageUrl, {
+        headers: {
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+            'apikey': SUPABASE_ANON_KEY
+        }
+    });
     if (!response.ok) throw new Error(`Failed to download image from ${imageUrl}`);
     const mimeType = response.headers.get("content-type") || "image/png";
     const buffer = await response.arrayBuffer();
