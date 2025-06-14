@@ -46,6 +46,7 @@ const Generator = () => {
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [aspectRatio, setAspectRatio] = useState("1024x1024");
   const [isLoading, setIsLoading] = useState(false);
+  const [isHelperRunning, setIsHelperRunning] = useState(false);
   const [results, setResults] = useState<ImageResult[]>([]);
   const [intermediateResult, setIntermediateResult] = useState<ImageResult | null>(null);
   const [useTwoStage, setUseTwoStage] = useState(false);
@@ -55,7 +56,7 @@ const Generator = () => {
   const [garmentReferenceImageFile, setGarmentReferenceImageFile] = useState<File | null>(null);
   const [garmentReferenceImageUrl, setGarmentReferenceImageUrl] = useState<string | null>(null);
 
-  const createChangeHandler = (setFile: (file: File) => void, setUrl: (url: string) => void) => (e: React.ChangeEvent<HTMLInputElement>) => {
+  const createChangeHandler = (setFile: (file: File | null) => void, setUrl: (url: string | null) => void) => (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       setFile(file);
@@ -83,6 +84,45 @@ const Generator = () => {
       if (garmentReferenceImageUrl) URL.revokeObjectURL(garmentReferenceImageUrl);
     };
   }, [styleReferenceImageUrl, garmentReferenceImageUrl]);
+
+  const uploadFileAndGetUrl = async (file: File | null, bucket: string): Promise<string | null> => {
+    if (!file) return null;
+    if (!session?.user) throw new Error("User session not found.");
+    const filePath = `${session.user.id}/${Date.now()}-${file.name}`;
+    const { error: uploadError } = await supabase.storage.from(bucket).upload(filePath, file);
+    if (uploadError) throw new Error(`Failed to upload file: ${uploadError.message}`);
+    const { data: { publicUrl } } = supabase.storage.from(bucket).getPublicUrl(filePath);
+    return publicUrl;
+  };
+
+  const handleGenerateWithHelper = async () => {
+    if (!prompt.trim()) return showError("Please enter a base prompt to get started.");
+    if (!garmentReferenceImageFile && !styleReferenceImageFile) return showError("Please upload at least one reference image to use the helper.");
+
+    setIsHelperRunning(true);
+    const toastId = showLoading("AI Helper is analyzing your references...");
+
+    try {
+      const garment_image_url = await uploadFileAndGetUrl(garmentReferenceImageFile, 'mira-agent-user-uploads');
+      const style_image_url = await uploadFileAndGetUrl(styleReferenceImageFile, 'mira-agent-user-uploads');
+
+      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-direct-generator-prompt-helper', {
+        body: { user_prompt: prompt, garment_image_url, style_image_url }
+      });
+
+      if (error) throw error;
+      
+      setPrompt(data.final_prompt);
+      dismissToast(toastId);
+
+    } catch (err: any) {
+      showError(err.message || "An unknown error occurred with the AI Helper.");
+      console.error("[PromptHelper] Error:", err);
+      dismissToast(toastId);
+    } finally {
+      setIsHelperRunning(false);
+    }
+  };
 
   const handleGenerate = async () => {
     if (!prompt.trim()) return showError("Please enter a prompt.");
@@ -229,8 +269,8 @@ const Generator = () => {
                     <AccordionTrigger>Reference Images (Optional)</AccordionTrigger>
                     <AccordionContent>
                       <div className="space-y-4 pt-4">
-                        {renderUploader(t.styleReference, styleReferenceImageUrl, handleStyleReferenceImageChange, handleRemoveStyleReferenceImage, "style-reference-image-upload")}
                         {renderUploader(t.garmentReference, garmentReferenceImageUrl, handleGarmentReferenceImageChange, handleRemoveGarmentReferenceImage, "garment-reference-image-upload")}
+                        {renderUploader(t.styleReference, styleReferenceImageUrl, handleStyleReferenceImageChange, handleRemoveStyleReferenceImage, "style-reference-image-upload")}
                       </div>
                     </AccordionContent>
                   </AccordionItem>
@@ -283,10 +323,16 @@ const Generator = () => {
             </CardContent>
           </Card>
 
-          <Button onClick={handleGenerate} disabled={isLoading} className="w-full">
-            {isLoading ? <Wand2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
-            {t.generate}
-          </Button>
+          <div className="flex gap-2">
+            <Button onClick={handleGenerateWithHelper} disabled={isLoading || isHelperRunning} className="w-full" variant="outline">
+              {isHelperRunning ? <Sparkles className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+              AI Helper
+            </Button>
+            <Button onClick={handleGenerate} disabled={isLoading || isHelperRunning} className="w-full">
+              {isLoading ? <Wand2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+              {t.generate}
+            </Button>
+          </div>
         </div>
 
         <div className="lg:col-span-2">
