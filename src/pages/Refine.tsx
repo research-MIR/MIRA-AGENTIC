@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { Skeleton } from "@/components/ui/skeleton";
-import { UploadCloud, Wand2, Loader2, GitCompareArrows, Info } from "lucide-react";
+import { UploadCloud, Wand2, Loader2, GitCompareArrows, Info, Sparkles } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useLanguage } from "@/context/LanguageContext";
@@ -17,6 +17,7 @@ import { Slider } from "@/components/ui/slider";
 import { ImageCompareModal } from "@/components/ImageCompareModal";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Switch } from "@/components/ui/switch";
 
 interface ComfyJob {
   id: string;
@@ -39,6 +40,8 @@ const Refine = () => {
   const [originalDimensions, setOriginalDimensions] = useState<{ width: number; height: number } | null>(null);
   const [isCompareModalOpen, setIsCompareModalOpen] = useState(false);
   const [comparisonImages, setComparisonImages] = useState<{ before: string; after: string } | null>(null);
+  const [isAutoPromptEnabled, setIsAutoPromptEnabled] = useState(true);
+  const [isLoadingAutoPrompt, setIsLoadingAutoPrompt] = useState(false);
 
   const { data: activeComfyJobs, isLoading: isLoadingJobs } = useQuery({
     queryKey: ['activeComfyJobs', session?.user?.id],
@@ -57,7 +60,7 @@ const Refine = () => {
       return data as ComfyJob[];
     },
     enabled: !!session?.user,
-    refetchInterval: 30000, // Poll every 30 seconds as a fallback
+    refetchInterval: 30000,
   });
 
   const isThisPageJobRunning = useMemo(() => {
@@ -131,12 +134,16 @@ const Refine = () => {
       setSourceImageFile(file);
       setActiveJob(null);
       setComparisonImages(null);
+      setPrompt("");
 
       const reader = new FileReader();
       reader.onload = (event) => {
           const img = new Image();
           img.onload = () => {
               setOriginalDimensions({ width: img.width, height: img.height });
+              if (isAutoPromptEnabled) {
+                handleAutoPrompt(event.target?.result as string, file.type);
+              }
           };
           img.src = event.target?.result as string;
       };
@@ -144,6 +151,25 @@ const Refine = () => {
     } else {
         setOriginalDimensions(null);
         setSourceImageFile(null);
+    }
+  };
+
+  const handleAutoPrompt = async (dataUrl: string, mimeType: string) => {
+    setIsLoadingAutoPrompt(true);
+    const toastId = showLoading("Analyzing image to create prompt...");
+    try {
+      const base64 = dataUrl.split(',')[1];
+      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-auto-describe-image', {
+        body: { base64_image_data: base64, mime_type: mimeType }
+      });
+      if (error) throw error;
+      setPrompt(data.auto_prompt);
+      dismissToast(toastId);
+    } catch (err: any) {
+      dismissToast(toastId);
+      showError(`Auto-prompt failed: ${err.message}`);
+    } finally {
+      setIsLoadingAutoPrompt(false);
     }
   };
 
@@ -266,7 +292,32 @@ const Refine = () => {
             <Card>
               <CardHeader><CardTitle>{t.refinementPrompt}</CardTitle></CardHeader>
               <CardContent>
-                <Textarea id="prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t.refinementPromptPlaceholder} rows={4} />
+                <div className="flex items-center justify-between mb-4">
+                  <Label htmlFor="auto-prompt-switch" className="flex flex-col space-y-1">
+                    <span>Auto-Prompt</span>
+                    <span className="font-normal leading-snug text-muted-foreground text-sm">
+                      Generate a detailed prompt from your image automatically.
+                    </span>
+                  </Label>
+                  <Switch
+                    id="auto-prompt-switch"
+                    checked={isAutoPromptEnabled}
+                    onCheckedChange={setIsAutoPromptEnabled}
+                  />
+                </div>
+                {isAutoPromptEnabled ? (
+                  <div className="p-3 border rounded-md bg-muted min-h-[108px] text-sm">
+                    {isLoadingAutoPrompt ? (
+                      <div className="flex items-center text-muted-foreground"><Loader2 className="mr-2 h-4 w-4 animate-spin" />Analyzing...</div>
+                    ) : prompt ? (
+                      <p className="font-mono text-xs">{prompt}</p>
+                    ) : (
+                      <p className="text-muted-foreground">Upload an image to generate an automatic prompt.</p>
+                    )}
+                  </div>
+                ) : (
+                  <Textarea id="prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t.refinementPromptPlaceholder} rows={4} />
+                )}
               </CardContent>
             </Card>
             <Card>
