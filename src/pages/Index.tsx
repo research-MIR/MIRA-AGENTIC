@@ -191,8 +191,6 @@ const Index = () => {
   const [numImagesMode, setNumImagesMode] = useState<'auto' | number>('auto');
   // A ref to the end of the message list, used to auto-scroll.
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
-  // A ref to the Supabase Realtime channel instance, crucial for proper subscription cleanup.
-  const channelRef = useRef<RealtimeChannel | null>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -328,14 +326,17 @@ const Index = () => {
             conversationMessages.push({ from: 'bot', text: jobData.final_result.text });
         }
     } else if (jobData.status === 'complete' && jobData.final_result) {
-        // Render the final result card.
-        if (jobData.final_result.isCreativeProcess) {
-            conversationMessages.push({ from: 'bot', creativeProcessResponse: jobData.final_result });
-        } else if (jobData.final_result.text) {
+        const result = jobData.final_result;
+        if (result.isCreativeProcess) {
+            conversationMessages.push({ from: 'bot', creativeProcessResponse: result });
+        } else if (result.isImageGeneration) {
+            conversationMessages.push({ from: 'bot', imageGenerationResponse: result });
+        } else if (result.isBrandAnalysis) {
+            conversationMessages.push({ from: 'bot', brandAnalysisResponse: result });
+        } else if (result.text) {
             const lastMessage = conversationMessages[conversationMessages.length - 1];
-            // Avoid duplicating the final text message if it's already in the history.
-            if (!lastMessage || lastMessage.from !== 'bot' || lastMessage.text !== jobData.final_result.text) {
-                conversationMessages.push({ from: 'bot', text: jobData.final_result.text });
+            if (!lastMessage || lastMessage.from !== 'bot' || lastMessage.text !== result.text) {
+                conversationMessages.push({ from: 'bot', text: result.text });
             }
         }
     }
@@ -385,31 +386,21 @@ const Index = () => {
 
   // This effect manages the Supabase Realtime subscription.
   useEffect(() => {
-    // Clean up any existing channel before creating a new one. This is crucial to prevent
-    // multiple subscriptions and memory leaks when navigating between chats.
-    if (channelRef.current) {
-        supabase.removeChannel(channelRef.current);
-        channelRef.current = null;
-    }
+    if (!jobId) return;
 
-    if (!jobId) return; // Don't subscribe if there's no active chat.
-
-    const newChannel = supabase.channel(`job-updates-${jobId}`);
-    channelRef.current = newChannel;
-    
-    const subscription = newChannel.on('postgres_changes', { 
-        event: 'UPDATE', 
-        schema: 'public', 
-        table: 'mira-agent-jobs', 
-        filter: `id=eq.${jobId}` 
-    }, (payload) => {
-        // When an update is received, we don't process it directly. Instead, we update
-        // the React Query cache. This triggers a re-render, and the `useEffect` above
-        // will then call `processJobData` with the new, cached data. This keeps the
-        // data flow consistent.
-        console.log('[Realtime] Job update received via payload. Updating cache directly.');
-        queryClient.setQueryData(['chatJob', jobId], payload.new);
-    }).subscribe((status, err) => {
+    const channel = supabase
+      .channel(`job-updates-${jobId}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'mira-agent-jobs', filter: `id=eq.${jobId}` },
+        (payload) => {
+          console.log('[Realtime] Job update received. Invalidating query cache to refetch.');
+          // Invalidate the query to force a refetch from the database.
+          // This is more robust than setting data directly from the payload.
+          queryClient.invalidateQueries({ queryKey: ['chatJob', jobId] });
+        }
+      )
+      .subscribe((status, err) => {
         if (status === 'SUBSCRIBED') {
             console.log(`[Realtime] Subscribed to job-updates-${jobId}`);
         }
@@ -417,15 +408,11 @@ const Index = () => {
             console.error('[Realtime] Channel error:', err);
             showError(`Realtime connection failed: ${err?.message}`);
         }
-    });
+      });
 
-    // The cleanup function returned by useEffect. This is called when the component
-    // unmounts or when the `jobId` changes, ensuring we unsubscribe from the old channel.
+    // The cleanup function returned by useEffect.
     return () => {
-      if (channelRef.current) {
-        supabase.removeChannel(channelRef.current);
-        channelRef.current = null;
-      }
+      supabase.removeChannel(channel);
     };
   }, [jobId, supabase, queryClient]);
 
