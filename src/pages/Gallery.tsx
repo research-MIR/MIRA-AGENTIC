@@ -39,6 +39,7 @@ const Gallery = () => {
 
   const fetchGeneratedImages = async () => {
     if (!session?.user) return [];
+    console.log("[Gallery] Fetching jobs from Supabase...");
     const { data, error } = await supabase
       .from("mira-agent-jobs")
       .select("id, final_result, context")
@@ -48,8 +49,11 @@ const Gallery = () => {
 
     if (error) throw new Error(error.message);
 
+    console.log(`[Gallery] Fetched ${data.length} raw jobs from DB.`, data);
+
     const processedJobs = data
       .map((job: any) => {
+        console.log(`[Gallery] Processing job ID: ${job.id}`, job);
         // For any job with a history, check for image generation artifacts.
         // This covers both simple agent generations and complex creative processes.
         if (job.context?.history) {
@@ -63,6 +67,7 @@ const Gallery = () => {
           );
 
           if (lastImageTurn) {
+            console.log(`[Gallery] Found image turn in history for job ${job.id}.`, lastImageTurn);
             // Overwrite final_result to standardize it for the gallery
             job.final_result = {
                 isImageGeneration: true,
@@ -70,15 +75,25 @@ const Gallery = () => {
             };
             // Ensure agent jobs are categorized correctly if source is missing
             if (!job.context.source) {
+                console.log(`[Gallery] Job ${job.id} missing source, defaulting to 'agent'.`);
                 job.context.source = 'agent';
             }
+          } else {
+            console.log(`[Gallery] No image turn found in history for job ${job.id}.`);
           }
         }
         // Jobs from direct generator or refiner should already have the correct final_result structure.
         return job;
       })
-      .filter(job => job.final_result?.isImageGeneration && Array.isArray(job.final_result.images) && job.final_result.images.length > 0);
-
+      .filter(job => {
+        const hasImages = job.final_result?.isImageGeneration && Array.isArray(job.final_result.images) && job.final_result.images.length > 0;
+        if (!hasImages) {
+            console.log(`[Gallery] Filtering out job ${job.id} because it has no valid images in final_result.`, job.final_result);
+        }
+        return hasImages;
+      });
+    
+    console.log(`[Gallery] Finished processing. ${processedJobs.length} jobs have images to display.`, processedJobs);
     return processedJobs;
   };
 
