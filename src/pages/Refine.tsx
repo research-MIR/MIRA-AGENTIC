@@ -131,6 +131,10 @@ const Refine = () => {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      if (file.type.startsWith('video/') || file.type === 'image/avif') {
+        showError("Unsupported file type. AVIF and video formats are not allowed.");
+        return;
+      }
       setSourceImageFile(file);
       setActiveJob(null);
       setComparisonImages(null);

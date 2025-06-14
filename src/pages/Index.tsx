@@ -318,9 +318,27 @@ const Index = () => {
 
   const handleFileUpload = useCallback(async (files: FileList | null): Promise<UploadedFile[]> => {
     if (!files || files.length === 0) return [];
-    const toastId = showLoading(`Uploading ${files.length} file(s)...`);
+    
+    const validFiles: File[] = [];
+    const invalidFiles: string[] = [];
+
+    Array.from(files).forEach(file => {
+      if (file.type.startsWith('video/') || file.type === 'image/avif') {
+        invalidFiles.push(file.name);
+      } else {
+        validFiles.push(file);
+      }
+    });
+
+    if (invalidFiles.length > 0) {
+      showError(`Unsupported file type(s): ${invalidFiles.join(', ')}. AVIF and video formats are not allowed.`);
+    }
+
+    if (validFiles.length === 0) return [];
+
+    const toastId = showLoading(`Uploading ${validFiles.length} file(s)...`);
     try {
-      const uploadPromises = Array.from(files).map(file => {
+      const uploadPromises = validFiles.map(file => {
         const fileExt = file.name.split('.').pop()?.toLowerCase();
         const sanitized = sanitizeFilename(file.name);
         const filePath = `${session?.user.id}/${Date.now()}-${sanitized}`;
@@ -334,7 +352,7 @@ const Index = () => {
       const newFiles = await Promise.all(uploadPromises);
       setUploadedFiles(prev => [...prev, ...newFiles]);
       dismissToast(toastId);
-      showSuccess(`${files.length} file(s) uploaded successfully!`);
+      showSuccess(`${newFiles.length} file(s) uploaded successfully!`);
       return newFiles;
     } catch (error: any) {
       dismissToast(toastId);

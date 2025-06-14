@@ -58,6 +58,10 @@ const Generator = () => {
   const handleStyleReferenceImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      if (file.type.startsWith('video/') || file.type === 'image/avif') {
+        showError("Unsupported file type. AVIF and video formats are not allowed.");
+        return;
+      }
       setStyleReferenceImageFile(file);
       setStyleReferenceImageUrl(URL.createObjectURL(file));
     }
@@ -72,10 +76,26 @@ const Generator = () => {
   const handleGarmentImagesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files) {
-      const newFiles = Array.from(files);
-      setGarmentReferenceImageFiles(prev => [...prev, ...newFiles]);
-      const newUrls = newFiles.map(file => URL.createObjectURL(file));
-      setGarmentReferenceImageUrls(prev => [...prev, ...newUrls]);
+      const validFiles: File[] = [];
+      const invalidFiles: string[] = [];
+
+      Array.from(files).forEach(file => {
+        if (file.type.startsWith('video/') || file.type === 'image/avif') {
+          invalidFiles.push(file.name);
+        } else {
+          validFiles.push(file);
+        }
+      });
+
+      if (invalidFiles.length > 0) {
+        showError(`Unsupported file type(s): ${invalidFiles.join(', ')}. AVIF and video formats are not allowed.`);
+      }
+
+      if (validFiles.length > 0) {
+        setGarmentReferenceImageFiles(prev => [...prev, ...validFiles]);
+        const newUrls = validFiles.map(file => URL.createObjectURL(file));
+        setGarmentReferenceImageUrls(prev => [...prev, ...newUrls]);
+      }
     }
   };
 
