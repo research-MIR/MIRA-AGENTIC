@@ -13,17 +13,20 @@ const corsHeaders = {
 const STALLED_THRESHOLD_MINUTES = 2;
 
 serve(async (req) => {
+  console.log("MIRA-AGENT-watchdog: Function invoked.");
+
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    console.log("MIRA-AGENT-watchdog: Creating Supabase client.");
+    const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
     
-    // Calculate the timestamp for the stalled threshold
     const threshold = new Date(Date.now() - STALLED_THRESHOLD_MINUTES * 60 * 1000).toISOString();
+    console.log(`MIRA-AGENT-watchdog: Checking for jobs stalled since ${threshold}`);
 
-    // Find jobs that are 'processing' and haven't been updated recently
+    console.log("MIRA-AGENT-watchdog: Querying for stalled jobs...");
     const { data: stalledJobs, error: queryError } = await supabase
       .from('mira-agent-jobs')
       .select('id')
@@ -31,11 +34,12 @@ serve(async (req) => {
       .lt('updated_at', threshold);
 
     if (queryError) {
+      console.error("MIRA-AGENT-watchdog: Error querying for stalled jobs:", queryError);
       throw new Error(`Failed to query for stalled jobs: ${queryError.message}`);
     }
 
     if (!stalledJobs || stalledJobs.length === 0) {
-      const message = "Watchdog check complete. No stalled jobs found.";
+      const message = "MIRA-AGENT-watchdog: No stalled jobs found. Check complete.";
       console.log(message);
       return new Response(JSON.stringify({ message }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -43,23 +47,24 @@ serve(async (req) => {
       });
     }
 
-    console.log(`Watchdog found ${stalledJobs.length} stalled job(s). Re-triggering now...`);
+    console.log(`MIRA-AGENT-watchdog: Found ${stalledJobs.length} stalled job(s). Re-triggering now...`);
 
     const triggerPromises = stalledJobs.map(job => {
-      console.log(`Re-triggering master-worker for stalled job: ${job.id}`);
+      console.log(`MIRA-AGENT-watchdog: Re-triggering master-worker for stalled job ID: ${job.id}`);
       return supabase.functions.invoke('MIRA-AGENT-master-worker', { body: { job_id: job.id } });
     });
 
     await Promise.allSettled(triggerPromises);
 
-    const successMessage = `Successfully re-triggered ${stalledJobs.length} stalled job(s).`;
+    const successMessage = `MIRA-AGENT-watchdog: Successfully re-triggered ${stalledJobs.length} stalled job(s).`;
+    console.log(successMessage);
     return new Response(JSON.stringify({ message: successMessage }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });
 
   } catch (error) {
-    console.error("Watchdog Error:", error);
+    console.error("MIRA-AGENT-watchdog: Unhandled error:", error);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,

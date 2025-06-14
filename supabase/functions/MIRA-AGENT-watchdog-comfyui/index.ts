@@ -20,11 +20,13 @@ serve(async (req) => {
   }
 
   try {
+    console.log("ComfyUI Watchdog: Creating Supabase client.");
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
     
     const threshold = new Date(Date.now() - STALLED_THRESHOLD_MINUTES * 60 * 1000).toISOString();
     console.log(`ComfyUI Watchdog: Checking for jobs stalled since ${threshold}`);
 
+    console.log("ComfyUI Watchdog: Querying for stalled jobs...");
     const { data: stalledJobs, error: queryError } = await supabase
       .from('mira-agent-comfyui-jobs')
       .select('id')
@@ -32,6 +34,7 @@ serve(async (req) => {
       .lt('last_polled_at', threshold);
 
     if (queryError) {
+      console.error("ComfyUI Watchdog: Error querying for stalled jobs:", queryError);
       throw new Error(`Failed to query for stalled ComfyUI jobs: ${queryError.message}`);
     }
 
@@ -47,7 +50,7 @@ serve(async (req) => {
     console.log(`ComfyUI Watchdog: Found ${stalledJobs.length} stalled job(s). Re-triggering poller now...`);
 
     const triggerPromises = stalledJobs.map(job => {
-      console.log(`ComfyUI Watchdog: Re-triggering poller for stalled job: ${job.id}`);
+      console.log(`ComfyUI Watchdog: Re-triggering poller for stalled job ID: ${job.id}`);
       // We don't await this, just fire and forget
       supabase.functions.invoke('MIRA-AGENT-poller-comfyui', { body: { job_id: job.id } });
       return job.id;
@@ -63,7 +66,7 @@ serve(async (req) => {
     });
 
   } catch (error) {
-    console.error("[ComfyUI Watchdog] Error:", error);
+    console.error("ComfyUI Watchdog: Unhandled error:", error);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,
