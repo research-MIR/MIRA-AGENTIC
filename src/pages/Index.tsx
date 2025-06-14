@@ -55,7 +55,9 @@ const parseHistoryToMessages = (history: any[], jobStatus: string): Message[] =>
         }
     };
 
-    for (const turn of history) {
+    for (let i = 0; i < history.length; i++) {
+        const turn = history[i];
+
         if (turn.role === 'user') {
             flushCreativeProcessBuffer();
             const userMessage: Message = { from: 'user', imageUrls: [] };
@@ -79,8 +81,21 @@ const parseHistoryToMessages = (history: any[], jobStatus: string): Message[] =>
             const response = turn.parts[0]?.functionResponse?.response;
             if (!response) continue;
 
-            // Data-driven parsing: check the content of the response, not the tool name
-            if (response.isCreativeProcess) {
+            if (response.isImageChoiceProposal) {
+                flushCreativeProcessBuffer();
+                const choiceMessage: Message = { from: 'bot', imageChoiceProposal: response };
+                
+                // Look ahead to see if the next message is the user's choice
+                const nextTurn = history[i + 1];
+                if (nextTurn && nextTurn.role === 'user' && nextTurn.parts[0]?.text?.startsWith("I choose image number")) {
+                    const match = nextTurn.parts[0].text.match(/I choose image number (\d+)/);
+                    if (match && match[1]) {
+                        choiceMessage.imageChoiceSelectedIndex = parseInt(match[1], 10) - 1;
+                        i++; // Skip the user's choice message so it doesn't get rendered separately
+                    }
+                }
+                messages.push(choiceMessage);
+            } else if (response.isCreativeProcess) {
                 flushCreativeProcessBuffer();
                 messages.push({ from: 'bot', creativeProcessResponse: response });
             } else if (response.isImageGeneration) {
@@ -92,9 +107,6 @@ const parseHistoryToMessages = (history: any[], jobStatus: string): Message[] =>
             } else if (response.isRefinementProposal) {
                 flushCreativeProcessBuffer();
                 messages.push({ from: 'bot', refinementProposal: response });
-            } else if (response.isImageChoiceProposal) {
-                flushCreativeProcessBuffer();
-                messages.push({ from: 'bot', imageChoiceProposal: response });
             } else if (response.isArtisanResponse) {
                 if (creativeProcessBuffer.length > 0) flushCreativeProcessBuffer();
                 creativeProcessBuffer.push({ artisan_result: response });

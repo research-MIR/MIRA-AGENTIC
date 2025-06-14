@@ -45,15 +45,17 @@ export interface Message {
     jobInProgress?: { jobId: string; message: string; };
     refinementProposal?: RefinementProposalData;
     imageChoiceProposal?: ImageChoiceProposalData;
+    imageChoiceSelectedIndex?: number;
 }
 
-const SafeComponent = ({ schema, data, Component, jobId, onRefinementComplete, onSendMessage }: any) => {
+const SafeComponent = ({ schema, data, Component, jobId, onRefinementComplete, onSendMessage, selectedIndex }: any) => {
   const parseResult = schema.safeParse(data);
   if (parseResult.success) {
     const props: any = { data: parseResult.data };
     if (jobId) props.jobId = jobId;
     if (onRefinementComplete) props.onRefinementComplete = onRefinementComplete;
     if (onSendMessage) props.onChoose = onSendMessage;
+    if (selectedIndex !== undefined) props.selectedIndex = selectedIndex;
     return <Component {...props} />;
   } else {
     console.error("Zod validation failed:", parseResult.error.flatten());
@@ -99,7 +101,7 @@ export const MessageList = ({ messages, jobId, onRefinementComplete, onSendMessa
             ) : message.refinementProposal ? (
               <SafeComponent schema={RefinementProposalSchema} data={message.refinementProposal} Component={RefinementProposalCard} onRefinementComplete={onRefinementComplete} />
             ) : message.imageChoiceProposal ? (
-              <SafeComponent schema={ImageChoiceProposalSchema} data={message.imageChoiceProposal} Component={ImageChoiceProposalCard} onSendMessage={onSendMessage} />
+              <SafeComponent schema={ImageChoiceProposalSchema} data={message.imageChoiceProposal} Component={ImageChoiceProposalCard} onSendMessage={onSendMessage} selectedIndex={message.imageChoiceSelectedIndex} />
             ) : message.artisanResponse ? (
               <div className="flex items-center gap-2">
                 <SafeComponent schema={ArtisanEngineResponseSchema} data={message.artisanResponse} Component={ArtisanEngineResponse} />

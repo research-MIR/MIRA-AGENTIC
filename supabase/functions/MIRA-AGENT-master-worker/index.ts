@@ -289,25 +289,22 @@ serve(async (req) => {
     }
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-    let history: Content[] = job.context?.history || [];
-    let iterationNumber = job.context?.iteration_number || 1;
+    let currentContext = { ...job.context };
+    let history: Content[] = currentContext.history || [];
+    let iterationNumber = currentContext.iteration_number || 1;
     
     // Check for and inject a pending user choice into the history for the planner
-    if (job.context?.pending_user_choice) {
-        console.log(`[MasterWorker][${currentJobId}] Found pending user choice. Injecting into history for planner.`);
-        history.push({ role: 'user', parts: [{ text: job.context.pending_user_choice }] });
-        // Clear it from the context immediately after processing it
-        const { error: updateError } = await supabase.from('mira-agent-jobs').update({
-            context: { ...job.context, pending_user_choice: undefined }
-        }).eq('id', currentJobId);
-        if (updateError) console.error(`[MasterWorker][${currentJobId}] Failed to clear pending_user_choice:`, updateError);
+    if (currentContext.pending_user_choice) {
+        console.log(`[MasterWorker][${currentJobId}] Found pending user choice. Injecting into history.`);
+        history.push({ role: 'user', parts: [{ text: currentContext.pending_user_choice }] });
+        delete currentContext.pending_user_choice; // Remove from context
+        currentContext.history = history; // Update history in context
     }
 
     console.log(`[MasterWorker][${currentJobId}] History has ${history.length} turns. Iteration: ${iterationNumber}. Preparing to send to Gemini planner.`);
-    console.log(`[MasterWorker][${currentJobId}] Full history being sent to planner:`, JSON.stringify(history, null, 2));
     
-    const dynamicTools = await getDynamicMasterTools(job.context, supabase);
-    const systemPrompt = getDynamicSystemPrompt(job.context);
+    const dynamicTools = await getDynamicMasterTools(currentContext, supabase);
+    const systemPrompt = getDynamicSystemPrompt(currentContext);
 
     let result: GenerationResult | null = null;
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
@@ -340,9 +337,8 @@ serve(async (req) => {
 
     if (call.name === 'dispatch_to_brand_analyzer') {
         console.log(`[MasterWorker][${currentJobId}] Dispatching to brand analyzer...`);
-        await supabase.from('mira-agent-jobs').update({ 
-            context: { ...job.context, brand_name: call.args.brand_name } 
-        }).eq('id', currentJobId);
+        currentContext.brand_name = call.args.brand_name;
+        await supabase.from('mira-agent-jobs').update({ context: currentContext }).eq('id', currentJobId);
 
         const { error } = await supabase.functions.invoke('MIRA-AGENT-executor-brand-analyzer', { body: { job_id: currentJobId } });
         if (error) throw error;
@@ -351,7 +347,7 @@ serve(async (req) => {
 
     } else if (call.name === 'generate_image') {
         console.log(`[MasterWorker][${currentJobId}] Dispatching to text-to-image generator...`);
-        const finalModelId = job.context?.selectedModelId;
+        const finalModelId = currentContext.selectedModelId;
         if (!finalModelId) throw new Error("Cannot generate image without a selected model in the job context.");
         
         const { data: modelDetails } = await supabase.from('mira-agent-models').select('provider').eq('model_id_string', finalModelId).single();
@@ -365,15 +361,15 @@ serve(async (req) => {
             invoker_user_id: job.user_id
         };
 
-        if (job.context.numImagesMode && job.context.numImagesMode !== 'auto') {
-            payload.number_of_images = job.context.numImagesMode;
+        if (currentContext.numImagesMode && currentContext.numImagesMode !== 'auto') {
+            payload.number_of_images = currentContext.numImagesMode;
         } else if (call.args.number_of_images) {
             payload.number_of_images = call.args.number_of_images;
         }
 
-        if (job.context.ratioMode && job.context.ratioMode !== 'auto') {
+        if (currentContext.ratioMode && currentContext.ratioMode !== 'auto') {
             const supportedRatios = modelAspectRatioMap[provider] || modelAspectRatioMap.google;
-            payload.size = mapToClosestRatio(job.context.ratioMode, supportedRatios);
+            payload.size = mapToClosestRatio(currentContext.ratioMode, supportedRatios);
         } else if (call.args.size) {
             payload.size = call.args.size;
         }
@@ -402,7 +398,7 @@ serve(async (req) => {
 
     } else if (call.name === 'dispatch_to_artisan_engine' || call.name === 'critique_images') {
         const toolName = call.name === 'dispatch_to_artisan_engine' ? 'MIRA-AGENT-tool-generate-image-prompt' : 'MIRA-AGENT-tool-critique-images';
-        const payload = { body: { history: history, iteration_number: iterationNumber, is_designer_mode: job.context?.isDesignerMode } };
+        const payload = { body: { history: history, iteration_number: iterationNumber, is_designer_mode: currentContext.isDesignerMode } };
         console.log(`[MasterWorker][${currentJobId}] Invoking ${toolName} with payload...`);
         const { data, error } = await supabase.functions.invoke(toolName, { body: payload.body });
         if (error) throw error;
@@ -459,7 +455,9 @@ serve(async (req) => {
         
         if (follow_up_message) finalResult.follow_up_message = follow_up_message;
 
-        await supabase.from('mira-agent-jobs').update({ status: finalStatus, final_result: finalResult, context: { ...job.context, history, iteration_number: iterationNumber } }).eq('id', currentJobId);
+        currentContext.history = history;
+        currentContext.iteration_number = iterationNumber;
+        await supabase.from('mira-agent-jobs').update({ status: finalStatus, final_result: finalResult, context: currentContext }).eq('id', currentJobId);
         console.log(`[MasterWorker][${currentJobId}] Job status set to '${finalStatus}'. Job is complete.`);
         return new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     } else {
@@ -467,7 +465,9 @@ serve(async (req) => {
     }
     
     history.push({ role: 'function', parts: historyParts });
-    await supabase.from('mira-agent-jobs').update({ context: { ...job.context, history: history, iteration_number: iterationNumber }, status: 'processing' }).eq('id', currentJobId);
+    currentContext.history = history;
+    currentContext.iteration_number = iterationNumber;
+    await supabase.from('mira-agent-jobs').update({ context: currentContext, status: 'processing' }).eq('id', currentJobId);
     
     console.log(`[MasterWorker][${currentJobId}] Step complete. Invoking next step...`);
     supabase.functions.invoke('MIRA-AGENT-master-worker', { body: { job_id: currentJobId } });

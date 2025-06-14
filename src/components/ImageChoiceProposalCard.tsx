@@ -17,9 +17,10 @@ interface ImageChoiceProposal {
 interface Props {
   data: ImageChoiceProposal;
   onChoose: (choiceText: string) => void;
+  selectedIndex?: number;
 }
 
-export const ImageChoiceProposalCard = ({ data, onChoose }: Props) => {
+export const ImageChoiceProposalCard = ({ data, onChoose, selectedIndex }: Props) => {
   const { t } = useLanguage();
 
   const handleChoose = (image: ImageResult, index: number) => {
@@ -34,23 +35,30 @@ export const ImageChoiceProposalCard = ({ data, onChoose }: Props) => {
       </CardHeader>
       <CardContent>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {data.images.map((image, index) => (
-            <div key={index} className="space-y-2">
-              <img
-                src={image.publicUrl}
-                alt={`Choice option ${index + 1}`}
-                className="rounded-lg aspect-square object-cover w-full"
-              />
-              <Button
-                size="sm"
-                className="w-full"
-                onClick={() => handleChoose(image, index)}
-              >
-                <CheckCircle className="mr-2 h-4 w-4" />
-                Choose this one
-              </Button>
-            </div>
-          ))}
+          {data.images.map((image, index) => {
+            const isSelected = selectedIndex === index;
+            const isDisabled = selectedIndex !== undefined;
+
+            return (
+              <div key={index} className="space-y-2">
+                <img
+                  src={image.publicUrl}
+                  alt={`Choice option ${index + 1}`}
+                  className="rounded-lg aspect-square object-cover w-full"
+                />
+                <Button
+                  size="sm"
+                  className="w-full"
+                  onClick={() => handleChoose(image, index)}
+                  disabled={isDisabled}
+                  variant={isSelected ? "secondary" : "default"}
+                >
+                  <CheckCircle className="mr-2 h-4 w-4" />
+                  {isSelected ? "Selected" : "Choose this one"}
+                </Button>
+              </div>
+            );
+          })}
         </div>
       </CardContent>
     </Card>
