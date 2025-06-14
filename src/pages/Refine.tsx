@@ -71,6 +71,11 @@ const Refine = () => {
     enabled: !!session?.user,
   });
 
+  const sourceImageUrl = useMemo(() => {
+    if (sourceImageFile) return URL.createObjectURL(sourceImageFile);
+    return null;
+  }, [sourceImageFile]);
+
   const activeJob = useMemo(() => {
     if (!trackedJobId || !activeComfyJobs) return null;
     return activeComfyJobs.find(j => j.id === trackedJobId) || null;
@@ -102,11 +107,6 @@ const Refine = () => {
   }, [activeComfyJobs]);
 
   const showCancelButton = isAnyJobRunning && !activeJob;
-
-  const sourceImageUrl = useMemo(() => {
-    if (sourceImageFile) return URL.createObjectURL(sourceImageFile);
-    return null;
-  }, [sourceImageFile]);
 
   const handleFileChange = useCallback((files: FileList | null) => {
     const file = files?.[0];
