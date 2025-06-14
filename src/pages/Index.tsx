@@ -327,17 +327,13 @@ const Index = () => {
         }
     } else if (jobData.status === 'complete' && jobData.final_result) {
         const result = jobData.final_result;
-        if (result.isCreativeProcess) {
-            conversationMessages.push({ from: 'bot', creativeProcessResponse: result });
-        } else if (result.isImageGeneration) {
-            conversationMessages.push({ from: 'bot', imageGenerationResponse: result });
-        } else if (result.isBrandAnalysis) {
-            conversationMessages.push({ from: 'bot', brandAnalysisResponse: result });
-        } else if (result.text) {
-            const lastMessage = conversationMessages[conversationMessages.length - 1];
-            if (!lastMessage || lastMessage.from !== 'bot' || lastMessage.text !== result.text) {
-                conversationMessages.push({ from: 'bot', text: result.text });
-            }
+        // The main result card (e.g., CreativeProcessResponse) is rendered by parseHistoryToMessages.
+        // Here, we only need to add the final text-based messages from the agent.
+        if (result.text) {
+            conversationMessages.push({ from: 'bot', text: result.text });
+        }
+        if (result.follow_up_message) {
+            conversationMessages.push({ from: 'bot', text: result.follow_up_message });
         }
     }
     setMessages(conversationMessages);

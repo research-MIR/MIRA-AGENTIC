@@ -443,21 +443,21 @@ serve(async (req) => {
 
     } else if (call.name === 'finish_task') {
         const { response_type, summary, follow_up_message } = call.args;
-        let finalResult;
+        let finalResult: any = {};
         let finalStatus = 'complete';
 
         console.log(`[MasterWorker][${currentJobId}] Finish task called with type: ${response_type}.`);
         if (response_type === 'creative_process_complete') {
-            finalResult = { isCreativeProcess: true };
-        } else {
-            finalResult = { text: summary };
+            finalResult.isCreativeProcess = true;
         }
+        
+        // Always include summary and follow-up if they exist
+        if (summary) finalResult.text = summary;
+        if (follow_up_message) finalResult.follow_up_message = follow_up_message;
         
         if (response_type === 'clarification_question') {
             finalStatus = 'awaiting_feedback';
         }
-        
-        if (follow_up_message) finalResult.follow_up_message = follow_up_message;
 
         currentContext.history = history;
         currentContext.iteration_number = iterationNumber;
