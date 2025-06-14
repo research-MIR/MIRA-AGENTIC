@@ -1,6 +1,6 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { User, Bot, Copy } from "lucide-react";
+import { User, Bot, Copy, AlertTriangle } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ArtisanEngineResponse } from "@/components/ArtisanEngineResponse";
@@ -13,6 +13,14 @@ import { showSuccess } from "@/utils/toast";
 import { RefinementProposalCard } from "../RefinementProposalCard";
 import { useLanguage } from "@/context/LanguageContext";
 import { ImageChoiceProposalCard } from "../ImageChoiceProposalCard";
+import { 
+  ArtisanEngineResponseSchema,
+  BrandAnalyzerResponseSchema,
+  CreativeProcessResponseSchema,
+  ImageGenerationResponseSchema,
+  RefinementProposalSchema,
+  ImageChoiceProposalSchema
+} from "@/lib/schemas";
 
 // Re-defining types here to make the component self-contained
 // In a larger app, these would be in a central types file.
@@ -39,6 +47,29 @@ export interface Message {
     imageChoiceProposal?: ImageChoiceProposalData;
 }
 
+const SafeComponent = ({ schema, data, Component, jobId, onRefinementComplete, onSendMessage }: any) => {
+  const parseResult = schema.safeParse(data);
+  if (parseResult.success) {
+    const props: any = { data: parseResult.data };
+    if (jobId) props.jobId = jobId;
+    if (onRefinementComplete) props.onRefinementComplete = onRefinementComplete;
+    if (onSendMessage) props.onChoose = onSendMessage;
+    return <Component {...props} />;
+  } else {
+    console.error("Zod validation failed:", parseResult.error.flatten());
+    return (
+      <Card className="max-w-lg bg-destructive/10 border-destructive">
+        <CardContent className="p-3">
+          <div className="flex items-center gap-3 text-destructive">
+            <AlertTriangle size={20} />
+            <p className="font-semibold">Agent response has an unexpected format and cannot be displayed.</p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+};
+
 interface MessageListProps {
   messages: Message[];
   jobId?: string;
@@ -53,7 +84,6 @@ export const MessageList = ({ messages, jobId, onRefinementComplete, onSendMessa
   return (
     <>
       {messages.map((message, index) => {
-        // Create a more stable key than just the index
         const key = `${message.from}-${index}-${message.text || message.jobInProgress?.message || 'structured'}`;
         
         return (
@@ -63,20 +93,20 @@ export const MessageList = ({ messages, jobId, onRefinementComplete, onSendMessa
             {message.jobInProgress ? (
               <JobStatusCard message={message.jobInProgress.message} />
             ) : message.creativeProcessResponse ? (
-              <CreativeProcessResponse data={message.creativeProcessResponse} jobId={jobId} />
+              <SafeComponent schema={CreativeProcessResponseSchema} data={message.creativeProcessResponse} Component={CreativeProcessResponse} jobId={jobId} />
             ) : message.imageGenerationResponse ? (
-              <ImageGenerationResponse data={message.imageGenerationResponse} jobId={jobId} />
+              <SafeComponent schema={ImageGenerationResponseSchema} data={message.imageGenerationResponse} Component={ImageGenerationResponse} jobId={jobId} />
             ) : message.refinementProposal ? (
-              <RefinementProposalCard data={message.refinementProposal} onRefinementComplete={onRefinementComplete} />
+              <SafeComponent schema={RefinementProposalSchema} data={message.refinementProposal} Component={RefinementProposalCard} onRefinementComplete={onRefinementComplete} />
             ) : message.imageChoiceProposal ? (
-              <ImageChoiceProposalCard data={message.imageChoiceProposal} onChoose={onSendMessage} />
+              <SafeComponent schema={ImageChoiceProposalSchema} data={message.imageChoiceProposal} Component={ImageChoiceProposalCard} onSendMessage={onSendMessage} />
             ) : message.artisanResponse ? (
               <div className="flex items-center gap-2">
-                <ArtisanEngineResponse data={message.artisanResponse} />
+                <SafeComponent schema={ArtisanEngineResponseSchema} data={message.artisanResponse} Component={ArtisanEngineResponse} />
                 <Button variant="outline" size="sm" onClick={() => { navigator.clipboard.writeText(message.artisanResponse!.prompt); showSuccess("Prompt copied!"); }}><Copy className="h-4 w-4 mr-2" /> Copy</Button>
               </div>
             ) : message.brandAnalysisResponse ? (
-              <BrandAnalyzerResponse data={message.brandAnalysisResponse} />
+              <SafeComponent schema={BrandAnalyzerResponseSchema} data={message.brandAnalysisResponse} Component={BrandAnalyzerResponse} />
             ) : (
               <Card className={`max-w-lg ${message.from === "user" ? "bg-primary text-primary-foreground" : "bg-secondary"}`}>
                 <CardContent className="p-3">
