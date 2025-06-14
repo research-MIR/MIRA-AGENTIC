@@ -1,6 +1,6 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { User, Bot, Copy, AlertTriangle, GitBranch } from "lucide-react";
+import { User, Bot, Copy, AlertTriangle } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ArtisanEngineResponse } from "@/components/ArtisanEngineResponse";
@@ -46,7 +46,6 @@ export interface Message {
     refinementProposal?: RefinementProposalData;
     imageChoiceProposal?: ImageChoiceProposalData;
     imageChoiceSelectedIndex?: number;
-    rawHistoryEndIndex?: number;
 }
 
 const SafeComponent = ({ schema, data, Component, jobId, onRefinementComplete, onSendMessage, selectedIndex }: any) => {
@@ -78,10 +77,9 @@ interface MessageListProps {
   jobId?: string;
   onRefinementComplete: (newImageUrl: string) => void;
   onSendMessage: (message: string) => void;
-  onBranch: (endIndex: number) => void;
 }
 
-export const MessageList = ({ messages, jobId, onRefinementComplete, onSendMessage, onBranch }: MessageListProps) => {
+export const MessageList = ({ messages, jobId, onRefinementComplete, onSendMessage }: MessageListProps) => {
   const { showImage } = useImagePreview();
   const { t } = useLanguage();
 
@@ -90,64 +88,50 @@ export const MessageList = ({ messages, jobId, onRefinementComplete, onSendMessa
       {messages.map((message, index) => {
         const key = `${message.from}-${index}-${message.text || message.jobInProgress?.message || 'structured'}`;
         
-        const renderBranchButton = () => {
-          if (message.from === 'bot' && message.rawHistoryEndIndex !== undefined) {
-            return (
-              <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => onBranch(message.rawHistoryEndIndex!)} title="Branch conversation from here">
-                <GitBranch className="h-4 w-4" />
-              </Button>
-            );
-          }
-          return null;
-        };
-
         return (
-          <div key={key} className={`flex items-start gap-3 group ${message.from === "user" ? "justify-end" : ""}`}>
+          <div key={key} className={`flex items-start gap-3 ${message.from === "user" ? "justify-end" : ""}`}>
             {message.from === "bot" && !message.artisanResponse && !message.brandAnalysisResponse && !message.jobInProgress && !message.imageGenerationResponse && !message.creativeProcessResponse && !message.refinementProposal && !message.imageChoiceProposal && <div className="p-2 bg-primary rounded-full text-primary-foreground self-start"><Bot size={20} /></div>}
             
-            <div className="flex items-center gap-2">
-              {renderBranchButton()}
-              {message.jobInProgress ? (
-                <JobStatusCard message={message.jobInProgress.message} />
-              ) : message.creativeProcessResponse ? (
-                <SafeComponent schema={CreativeProcessResponseSchema} data={message.creativeProcessResponse} Component={CreativeProcessResponse} jobId={jobId} />
-              ) : message.imageGenerationResponse ? (
-                <SafeComponent schema={ImageGenerationResponseSchema} data={message.imageGenerationResponse} Component={ImageGenerationResponse} jobId={jobId} />
-              ) : message.refinementProposal ? (
-                <SafeComponent schema={RefinementProposalSchema} data={message.refinementProposal} Component={RefinementProposalCard} onRefinementComplete={onRefinementComplete} />
-              ) : message.imageChoiceProposal ? (
-                <SafeComponent schema={ImageChoiceProposalSchema} data={message.imageChoiceProposal} Component={ImageChoiceProposalCard} onSendMessage={onSendMessage} selectedIndex={message.imageChoiceSelectedIndex} />
-              ) : message.artisanResponse ? (
-                <div className="flex items-center gap-2">
-                  <SafeComponent schema={ArtisanEngineResponseSchema} data={message.artisanResponse} Component={ArtisanEngineResponse} />
-                  <Button variant="outline" size="sm" onClick={() => { navigator.clipboard.writeText(message.artisanResponse!.prompt); showSuccess("Prompt copied!"); }}><Copy className="h-4 w-4 mr-2" /> Copy</Button>
-                </div>
-              ) : message.brandAnalysisResponse ? (
-                <SafeComponent schema={BrandAnalyzerResponseSchema} data={message.brandAnalysisResponse} Component={BrandAnalyzerResponse} />
-              ) : (
-                <Card className={`max-w-lg ${message.from === "user" ? "bg-primary text-primary-foreground" : "bg-secondary"}`}>
-                  <CardContent className="p-3">
-                    {message.imageUrls && message.imageUrls.length > 0 && (
-                      <div className="grid grid-cols-2 gap-2 mb-2">
-                        {message.imageUrls.map((url, i) => (
-                          <button 
-                            key={i} 
-                            onClick={() => showImage({ 
-                              images: message.imageUrls!.map(u => ({ url: u, jobId })),
-                              currentIndex: i
-                            })} 
-                            className="block w-full h-full"
-                          >
-                              <img src={url} alt={`User upload ${i+1}`} className="rounded-md max-w-full" />
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                    {message.text && <div className="markdown-content"><ReactMarkdown remarkPlugins={[remarkGfm]}>{(t[message.text as keyof typeof t]) || message.text}</ReactMarkdown></div>}
-                  </CardContent>
-                </Card>
-              )}
-            </div>
+            {message.jobInProgress ? (
+              <JobStatusCard message={message.jobInProgress.message} />
+            ) : message.creativeProcessResponse ? (
+              <SafeComponent schema={CreativeProcessResponseSchema} data={message.creativeProcessResponse} Component={CreativeProcessResponse} jobId={jobId} />
+            ) : message.imageGenerationResponse ? (
+              <SafeComponent schema={ImageGenerationResponseSchema} data={message.imageGenerationResponse} Component={ImageGenerationResponse} jobId={jobId} />
+            ) : message.refinementProposal ? (
+              <SafeComponent schema={RefinementProposalSchema} data={message.refinementProposal} Component={RefinementProposalCard} onRefinementComplete={onRefinementComplete} />
+            ) : message.imageChoiceProposal ? (
+              <SafeComponent schema={ImageChoiceProposalSchema} data={message.imageChoiceProposal} Component={ImageChoiceProposalCard} onSendMessage={onSendMessage} selectedIndex={message.imageChoiceSelectedIndex} />
+            ) : message.artisanResponse ? (
+              <div className="flex items-center gap-2">
+                <SafeComponent schema={ArtisanEngineResponseSchema} data={message.artisanResponse} Component={ArtisanEngineResponse} />
+                <Button variant="outline" size="sm" onClick={() => { navigator.clipboard.writeText(message.artisanResponse!.prompt); showSuccess("Prompt copied!"); }}><Copy className="h-4 w-4 mr-2" /> Copy</Button>
+              </div>
+            ) : message.brandAnalysisResponse ? (
+              <SafeComponent schema={BrandAnalyzerResponseSchema} data={message.brandAnalysisResponse} Component={BrandAnalyzerResponse} />
+            ) : (
+              <Card className={`max-w-lg ${message.from === "user" ? "bg-primary text-primary-foreground" : "bg-secondary"}`}>
+                <CardContent className="p-3">
+                  {message.imageUrls && message.imageUrls.length > 0 && (
+                    <div className="grid grid-cols-2 gap-2 mb-2">
+                      {message.imageUrls.map((url, i) => (
+                        <button 
+                          key={i} 
+                          onClick={() => showImage({ 
+                            images: message.imageUrls!.map(u => ({ url: u, jobId })),
+                            currentIndex: i
+                          })} 
+                          className="block w-full h-full"
+                        >
+                            <img src={url} alt={`User upload ${i+1}`} className="rounded-md max-w-full" />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {message.text && <div className="markdown-content"><ReactMarkdown remarkPlugins={[remarkGfm]}>{(t[message.text as keyof typeof t]) || message.text}</ReactMarkdown></div>}
+                </CardContent>
+              </Card>
+            )}
 
             {message.from === "user" && <div className="p-2 bg-secondary rounded-full text-secondary-foreground self-start"><User size={20} /></div>}
           </div>
