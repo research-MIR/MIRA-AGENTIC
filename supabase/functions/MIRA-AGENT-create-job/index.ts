@@ -62,10 +62,10 @@ serve(async (req) => {
       .from('mira-agent-jobs')
       .insert({ 
           original_prompt: prompt, 
-          status: 'processing', // Start as processing so the UI shows a loading state
+          status: 'processing',
           user_id: userId,
           context: { 
-              history: [], // FIX: Initialize with an empty history to prevent duplication
+              history: [{ role: 'user', parts: userParts }],
               user_provided_assets: userProvidedAssets,
               iteration_number: 1,
               safety_retry_count: 0,
@@ -78,7 +78,7 @@ serve(async (req) => {
               source: 'agent'
           } 
       })
-      .select('id, context, original_prompt, status, created_at, updated_at, final_result, error_message, user_id') // Select all fields for the cache
+      .select('id, context, original_prompt, status, created_at, updated_at, final_result, error_message, user_id')
       .single();
     
     if (createError) throw createError;
@@ -89,6 +89,11 @@ serve(async (req) => {
     supabase.functions.invoke('MIRA-AGENT-tool-generate-chat-title', {
       body: { job_id: newJobId, user_parts: userParts }
     }).catch(err => console.error(`[CreateJob][${newJobId}] Error invoking chat titler:`, err));
+
+    console.log(`[CreateJob][${newJobId}] Invoking master-worker to start the conversation...`);
+    supabase.functions.invoke('MIRA-AGENT-master-worker', {
+        body: { job_id: newJobId }
+    }).catch(err => console.error(`[CreateJob][${newJobId}] Error invoking master-worker:`, err));
 
     console.log(`[CreateJob][${newJobId}] Returning new job data to client.`);
     return new Response(JSON.stringify({ newJob }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
