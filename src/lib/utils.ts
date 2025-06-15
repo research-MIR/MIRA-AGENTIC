@@ -61,29 +61,16 @@ export const optimizeImage = (file: File, quality = 0.8): Promise<File> => {
       img.src = event.target?.result as string;
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        const MAX_WIDTH = 1920;
-        const MAX_HEIGHT = 1080;
-        let { width, height } = img;
+        
+        // Set canvas dimensions to the original image dimensions, preserving resolution
+        canvas.width = img.width;
+        canvas.height = img.height;
 
-        if (width > height) {
-          if (width > MAX_WIDTH) {
-            height *= MAX_WIDTH / width;
-            width = MAX_WIDTH;
-          }
-        } else {
-          if (height > MAX_HEIGHT) {
-            width *= MAX_HEIGHT / height;
-            height = MAX_HEIGHT;
-          }
-        }
-
-        canvas.width = width;
-        canvas.height = height;
         const ctx = canvas.getContext('2d');
         if (!ctx) {
           return reject(new Error('Failed to get canvas context'));
         }
-        ctx.drawImage(img, 0, 0, width, height);
+        ctx.drawImage(img, 0, 0, img.width, img.height);
 
         canvas.toBlob(
           (blob) => {
