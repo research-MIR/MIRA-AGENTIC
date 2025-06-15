@@ -60,14 +60,20 @@ export const CreativeProcessResponse = ({ data, jobId }: Props) => {
       <CardContent className="p-4 pt-0">
         <Accordion type="multiple" className="w-full space-y-2">
           {data.iterations.map((iteration, index) => {
-            const critiqueResult = iteration.critique_result;
-            const isApproved = critiqueResult?.is_good_enough;
+            const { artisan_result, initial_generation_result, critique_result } = iteration;
+            
+            // If there's nothing to show for this iteration, don't render the card at all.
+            if (!artisan_result && !initial_generation_result && !critique_result) {
+                return null;
+            }
+
+            const isApproved = critique_result?.is_good_enough;
             const isLastIteration = index === totalIterations - 1;
 
             let statusText = "";
             let statusColor = "text-muted-foreground";
 
-            if (critiqueResult) {
+            if (critique_result) {
                 statusText = isApproved ? "Approved" : "Rejected";
                 statusColor = isApproved ? 'text-green-500' : 'text-destructive';
             } else if (isLastIteration && isProcessComplete) {
@@ -88,26 +94,26 @@ export const CreativeProcessResponse = ({ data, jobId }: Props) => {
                     </div>
                   </AccordionTrigger>
                   <AccordionContent className="p-3 pt-0 space-y-3">
-                      {iteration.artisan_result && (
+                      {artisan_result && (
                         <>
-                          <h4 className="text-xs font-semibold uppercase text-muted-foreground">Artisan Prompt V{iteration.artisan_result.version || index + 1}</h4>
-                          <ArtisanEngineResponse data={iteration.artisan_result} />
+                          <h4 className="text-xs font-semibold uppercase text-muted-foreground">Artisan Prompt V{artisan_result.version || index + 1}</h4>
+                          <ArtisanEngineResponse data={artisan_result} />
                         </>
                       )}
                       
-                      {iteration.initial_generation_result && (
+                      {initial_generation_result && (
                         <>
                           <h4 className="text-xs font-semibold uppercase text-muted-foreground mt-4">Generated Images (Iteration {index + 1})</h4>
-                          <ImageGenerationResponse data={iteration.initial_generation_result.response} jobId={jobId} />
+                          <ImageGenerationResponse data={initial_generation_result.response} jobId={jobId} />
                         </>
                       )}
 
-                      {critiqueResult && (
+                      {critique_result && (
                         <>
                           <h4 className="text-xs font-semibold uppercase text-muted-foreground mt-4">Art Director's Critique</h4>
                           <Card className="bg-secondary/80">
                               <CardContent className="p-3">
-                                  <p className="text-sm italic">"{critiqueResult.critique_text}"</p>
+                                  <p className="text-sm italic">"{critique_result.critique_text}"</p>
                               </CardContent>
                           </Card>
                         </>

@@ -88,6 +88,13 @@ export const MessageList = ({ messages, jobId, onRefinementComplete, onSendMessa
       {messages.map((message, index) => {
         const key = `${message.from}-${index}-${message.text || message.jobInProgress?.message || 'structured'}`;
         
+        const nextMessage = messages[index + 1];
+        if (message.imageGenerationResponse && nextMessage?.creativeProcessResponse) {
+            // Heuristic: If an image generation card is immediately followed by a creative process summary,
+            // assume the images are included in the summary and don't render the standalone card to avoid duplication.
+            return null;
+        }
+
         return (
           <div key={key} className={`flex items-start gap-3 ${message.from === "user" ? "justify-end" : ""}`}>
             {message.from === "bot" && !message.artisanResponse && !message.brandAnalysisResponse && !message.jobInProgress && !message.imageGenerationResponse && !message.creativeProcessResponse && !message.refinementProposal && !message.imageChoiceProposal && <div className="p-2 bg-primary rounded-full text-primary-foreground self-start"><Bot size={20} /></div>}
