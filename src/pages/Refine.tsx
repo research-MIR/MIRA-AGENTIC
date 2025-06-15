@@ -228,7 +228,17 @@ const Refine = () => {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-1 space-y-6">
             <Card>
-              <CardHeader><CardTitle>{selectedJob ? "Loaded Job" : "Start New Job"}</CardTitle></CardHeader>
+              <CardHeader>
+                <div className="flex justify-between items-center">
+                  <CardTitle>{selectedJob ? "Loaded Job" : "Start New Job"}</CardTitle>
+                  {selectedJob && (
+                    <Button variant="outline" size="sm" onClick={resetToNewJobState}>
+                      <X className="h-4 w-4 mr-2" />
+                      New Job
+                    </Button>
+                  )}
+                </div>
+              </CardHeader>
               <CardContent {...dropzoneProps} className={cn("p-4 border-2 border-dashed rounded-lg transition-colors", isDraggingOver && "border-primary bg-primary/10")}>
                 <Input id="source-image-upload" type="file" accept="image/*" onChange={(e) => handleFileChange(e.target.files)} className="hidden" />
                 <Label htmlFor="source-image-upload" className="cursor-pointer flex flex-col items-center justify-center text-center text-muted-foreground">
