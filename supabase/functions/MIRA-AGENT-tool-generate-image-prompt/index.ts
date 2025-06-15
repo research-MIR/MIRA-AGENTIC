@@ -1,8 +1,10 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { GoogleGenAI, Content } from 'https://esm.sh/@google/genai@0.15.0';
+import { GoogleGenAI, Content, GenerationResult } from 'https://esm.sh/@google/genai@0.15.0';
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const MODEL_NAME = "gemini-2.5-pro-preview-06-05";
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 1000;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -91,32 +93,44 @@ serve(async (req) => {
   try {
     console.log("[ArtisanEngine] Tool invoked.");
     const requestBody = await req.json();
-    console.log("[ArtisanEngine] Received raw request body:", JSON.stringify(requestBody));
-
     const history = requestBody.history;
-    console.log("[ArtisanEngine] 'history' variable is:", JSON.stringify(history));
 
     if (!history || !Array.isArray(history)) { 
-      console.error("[ArtisanEngine] History validation failed. 'history' is not a valid array.");
-      throw new Error(`Missing or invalid 'history' array in request body. Body was: ${JSON.stringify(requestBody)}`); 
+      throw new Error(`Missing or invalid 'history' array in request body.`); 
     }
     
     console.log(`[ArtisanEngine] History validation passed. Array length is: ${history.length}`);
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-    console.log("[ArtisanEngine] Calling Gemini model...");
-    const result = await ai.models.generateContent({
-        model: MODEL_NAME,
-        contents: history,
-        generationConfig: {
-            responseMimeType: "application/json",
-        },
-        config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
-    });
+    let result: GenerationResult | null = null;
 
-    const rawJsonResponse = result.text;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+            console.log(`[ArtisanEngine] Calling Gemini model, attempt ${attempt}...`);
+            result = await ai.models.generateContent({
+                model: MODEL_NAME,
+                contents: history,
+                generationConfig: {
+                    responseMimeType: "application/json",
+                },
+                config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
+            });
+
+            if (result?.text) {
+                break; // Success, exit the loop
+            }
+            console.warn(`[ArtisanEngine] Attempt ${attempt} resulted in an empty response. Retrying...`);
+
+        } catch (error) {
+            console.warn(`[ArtisanEngine] Attempt ${attempt} failed:`, error.message);
+            if (attempt === MAX_RETRIES) throw error; // Rethrow the last error
+        }
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+    }
+
+    const rawJsonResponse = result?.text;
     if (!rawJsonResponse) {
-        console.error("[ArtisanEngine] Gemini response was empty or blocked. Full response:", JSON.stringify(result.response, null, 2));
+        console.error("[ArtisanEngine] Gemini response was empty or blocked after all retries. Full response:", JSON.stringify(result, null, 2));
         throw new Error("The AI model failed to return a valid response. It may have been blocked due to safety settings.");
     }
     
