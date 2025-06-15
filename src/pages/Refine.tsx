@@ -87,8 +87,17 @@ const Refine = () => {
   }, [selectedJob, supabase]);
 
   const sourceImageUrl = useMemo(() => {
-    if (selectedJob) return selectedJob.metadata?.source_image_url;
-    if (sourceImageFile) return URL.createObjectURL(sourceImageFile);
+    if (selectedJob) {
+      const url = selectedJob.metadata?.source_image_url;
+      console.log(`[RefinePage] Derived sourceImageUrl from selectedJob: ${url}`);
+      return url;
+    }
+    if (sourceImageFile) {
+      const url = URL.createObjectURL(sourceImageFile);
+      console.log(`[RefinePage] Derived sourceImageUrl from local file: ${url}`);
+      return url;
+    }
+    console.log("[RefinePage] No source image available.");
     return null;
   }, [selectedJob, sourceImageFile]);
 
@@ -183,6 +192,7 @@ const Refine = () => {
   };
 
   const handleJobSelect = (job: ComfyJob) => {
+    console.log("[RefinePage] Job selected from history:", job);
     setSelectedJob(job);
     setSourceImageFile(null);
     setPrompt(job.metadata?.prompt || "");
