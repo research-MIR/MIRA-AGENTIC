@@ -30,7 +30,59 @@ const sanitizeFilename = (filename: string): string => {
     .replace(/\.{2,}/g, '.');
 };
 
-const parseHistoryToMessages = (history: any[]): Message[] => {
+function assembleCreativeProcessResult(history: any[]): any {
+    const iterations: any[] = [];
+    let currentIteration: any = {};
+
+    for (const turn of history) {
+        if (turn.role === 'function') {
+            const callName = turn.parts[0]?.functionResponse?.name;
+            const response = turn.parts[0]?.functionResponse?.response;
+
+            if (!callName || !response) continue;
+
+            switch (callName) {
+                case 'dispatch_to_artisan_engine':
+                    if (Object.keys(currentIteration).length > 0) {
+                        iterations.push(currentIteration);
+                    }
+                    currentIteration = { artisan_result: response };
+                    break;
+                case 'generate_image':
+                case 'generate_image_with_reference':
+                    if (currentIteration.initial_generation_result) {
+                        currentIteration.refined_generation_result = { toolName: callName, response };
+                    } else {
+                        currentIteration.initial_generation_result = { toolName: callName, response };
+                    }
+                    break;
+                case 'critique_images':
+                    currentIteration.critique_result = response;
+                    break;
+            }
+        }
+    }
+
+    if (Object.keys(currentIteration).length > 0) {
+        iterations.push(currentIteration);
+    }
+
+    if (iterations.length === 0) {
+        return null;
+    }
+
+    const lastIteration = iterations[iterations.length - 1];
+    const final_generation_result = lastIteration.refined_generation_result || lastIteration.initial_generation_result;
+
+    return {
+        isCreativeProcess: true,
+        iterations: iterations,
+        final_generation_result: final_generation_result,
+    };
+}
+
+const parseHistoryToMessages = (jobData: any): Message[] => {
+    const history = jobData?.context?.history;
     const messages: Message[] = [];
     if (!history) return messages;
 
@@ -82,8 +134,6 @@ const parseHistoryToMessages = (history: any[]): Message[] => {
                 flushCreativeProcessBuffer();
                 const result = response;
                 if (result.isCreativeProcess) {
-                    // The buffer was just flushed, which created the main card.
-                    // Now, just append the final text summary if it exists.
                     if (result.text) {
                         messages.push({ from: 'bot', text: result.text });
                     }
@@ -135,6 +185,26 @@ const parseHistoryToMessages = (history: any[]): Message[] => {
     }
     
     flushCreativeProcessBuffer();
+
+    // Fallback logic for completed jobs
+    if (jobData.status === 'complete') {
+        const lastMessage = messages[messages.length - 1];
+        if (lastMessage && !lastMessage.creativeProcessResponse) {
+            console.log("[Fallback] Job is complete but last message is not a creative process card. Attempting to assemble one.");
+            const creativeResult = assembleCreativeProcessResult(history);
+            if (creativeResult) {
+                console.log("[Fallback] Successfully assembled a creative process result. Replacing last message.");
+                // Remove simple text messages at the end that might be part of the incomplete final response
+                while (messages.length > 0 && messages[messages.length - 1].text) {
+                    messages.pop();
+                }
+                messages.push({
+                    from: 'bot',
+                    creativeProcessResponse: creativeResult
+                });
+            }
+        }
+    }
     
     return messages;
 };
@@ -241,7 +311,7 @@ const Index = () => {
     if (jobData.context?.ratioMode) setRatioMode(jobData.context.ratioMode);
     if (jobData.context?.numImagesMode) setNumImagesMode(jobData.context.numImagesMode);
 
-    let conversationMessages = parseHistoryToMessages(jobData.context?.history);
+    let conversationMessages = parseHistoryToMessages(jobData);
     
     if (jobData.status === 'processing') {
         conversationMessages.push({ from: 'bot', jobInProgress: { jobId: jobData.id, message: 'Thinking...' } });
@@ -258,7 +328,6 @@ const Index = () => {
             conversationMessages.push({ from: 'bot', text: jobData.final_result.text });
         }
     }
-    // The 'complete' status is now fully handled by the history parser, so no extra logic is needed here.
     
     setMessages(conversationMessages);
   }, []);
