@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -18,6 +18,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Switch } from "@/components/ui/switch";
 import { useDropzone } from "@/hooks/useDropzone";
 import { cn } from "@/lib/utils";
+import { RealtimeChannel } from "@supabase/supabase-js";
 
 interface ComfyJob {
   id: string;
@@ -62,6 +63,28 @@ const Refine = () => {
     },
     enabled: !!session?.user,
   });
+
+  // Realtime listener for the currently selected job
+  useEffect(() => {
+    if (!selectedJob || !supabase || (selectedJob.status !== 'queued' && selectedJob.status !== 'processing')) {
+      return;
+    }
+
+    const channel: RealtimeChannel = supabase.channel(`refine-job-tracker-${selectedJob.id}`)
+      .on<ComfyJob>(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'mira-agent-comfyui-jobs', filter: `id=eq.${selectedJob.id}` },
+        (payload) => {
+          console.log(`[RefinePage] Realtime update for selected job ${selectedJob.id}:`, payload.new);
+          setSelectedJob(payload.new as ComfyJob);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [selectedJob, supabase]);
 
   const sourceImageUrl = useMemo(() => {
     if (selectedJob) return selectedJob.metadata?.source_image_url;
