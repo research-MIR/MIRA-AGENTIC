@@ -5,6 +5,15 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+const formatBytes = (bytes: number, decimals = 2) => {
+  if (bytes === 0) return '0 Bytes';
+  const k = 1024;
+  const dm = decimals < 0 ? 0 : decimals;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+}
+
 export const downloadImage = async (url: string, filename: string) => {
   try {
     // Fetch the image data as a blob
@@ -36,8 +45,11 @@ export const downloadImage = async (url: string, filename: string) => {
 
 export const optimizeImage = (file: File, quality = 0.8): Promise<File> => {
   return new Promise((resolve, reject) => {
+    const originalSize = file.size;
+
     // We only optimize common image types. Others (like GIF) are passed through.
     if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      console.log(`[ImageOptimizer] Skipped optimization for ${file.type}. Passing through original file.`);
       resolve(file);
       return;
     }
@@ -83,6 +95,9 @@ export const optimizeImage = (file: File, quality = 0.8): Promise<File> => {
               type: 'image/webp',
               lastModified: Date.now(),
             });
+            
+            console.log(`[ImageOptimizer] Optimized ${file.name}: ${formatBytes(originalSize)} -> ${formatBytes(newFile.size)}`);
+
             resolve(newFile);
           },
           'image/webp',
