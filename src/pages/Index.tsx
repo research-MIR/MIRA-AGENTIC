@@ -30,87 +30,16 @@ const sanitizeFilename = (filename: string): string => {
     .replace(/\.{2,}/g, '.');
 };
 
-function assembleCreativeProcessResult(history: any[]): any {
-    const iterations: any[] = [];
-    let currentIteration: any = {};
-
-    for (const turn of history) {
-        if (turn.role === 'function') {
-            const callName = turn.parts[0]?.functionResponse?.name;
-            const response = turn.parts[0]?.functionResponse?.response;
-
-            if (!callName || !response) continue;
-
-            switch (callName) {
-                case 'dispatch_to_artisan_engine':
-                    if (Object.keys(currentIteration).length > 0) {
-                        iterations.push(currentIteration);
-                    }
-                    currentIteration = { artisan_result: response };
-                    break;
-                case 'generate_image':
-                case 'generate_image_with_reference':
-                    if (currentIteration.initial_generation_result) {
-                        currentIteration.refined_generation_result = { toolName: callName, response };
-                    } else {
-                        currentIteration.initial_generation_result = { toolName: callName, response };
-                    }
-                    break;
-                case 'critique_images':
-                    currentIteration.critique_result = response;
-                    break;
-            }
-        }
-    }
-
-    if (Object.keys(currentIteration).length > 0) {
-        iterations.push(currentIteration);
-    }
-
-    if (iterations.length === 0) {
-        return null;
-    }
-
-    const lastIteration = iterations[iterations.length - 1];
-    const final_generation_result = lastIteration.refined_generation_result || lastIteration.initial_generation_result;
-
-    return {
-        isCreativeProcess: true,
-        iterations: iterations,
-        final_generation_result: final_generation_result,
-    };
-}
-
 const parseHistoryToMessages = (jobData: any): Message[] => {
     const history = jobData?.context?.history;
     const messages: Message[] = [];
     if (!history) return messages;
 
-    let creativeProcessBuffer: any[] = [];
-
-    const flushCreativeProcessBuffer = () => {
-        if (creativeProcessBuffer.length > 0) {
-            const lastIteration = creativeProcessBuffer[creativeProcessBuffer.length - 1];
-            const finalGeneration = lastIteration.refined_generation_result || lastIteration.initial_generation_result;
-
-            messages.push({
-                from: 'bot',
-                creativeProcessResponse: {
-                    isCreativeProcess: true,
-                    iterations: [...creativeProcessBuffer],
-                    final_generation_result: finalGeneration,
-                }
-            });
-            creativeProcessBuffer = [];
-        }
-    };
-
     for (let i = 0; i < history.length; i++) {
         const turn = history[i];
 
-        if (turn.role === 'user' || (turn.role === 'model' && turn.parts[0]?.text)) {
-            flushCreativeProcessBuffer();
-            const message: Message = { from: turn.role, imageUrls: [] };
+        if (turn.role === 'user') {
+            const message: Message = { from: 'user', imageUrls: [] };
             const textPart = turn.parts.find((p: any) => p.text);
             const imageParts = turn.parts.filter((p: any) => p.inlineData);
 
@@ -129,42 +58,22 @@ const parseHistoryToMessages = (jobData: any): Message[] => {
             const callName = history[i - 1]?.parts[0]?.functionCall?.name;
 
             if (!response || !callName) continue;
+            
+            // We no longer render the final 'finish_task' from history, as it's handled by the job's final_result field.
+            if (callName === 'finish_task') continue;
 
-            if (callName === 'finish_task') {
-                flushCreativeProcessBuffer();
-                const result = response;
-                if (result.isCreativeProcess) {
-                    if (result.text) {
-                        messages.push({ from: 'bot', text: result.text });
-                    }
-                } else if (result.text) {
-                    messages.push({ from: 'bot', text: result.text });
-                }
-                if (result.follow_up_message) {
-                    messages.push({ from: 'bot', text: result.follow_up_message });
-                }
-            } else if (callName === 'dispatch_to_artisan_engine') {
-                flushCreativeProcessBuffer();
-                creativeProcessBuffer.push({ artisan_result: response });
-            } else if (callName === 'generate_image' || callName === 'generate_image_with_reference') {
-                if (creativeProcessBuffer.length > 0) {
-                    const currentIteration = creativeProcessBuffer[creativeProcessBuffer.length - 1];
-                    if (!currentIteration.initial_generation_result) {
-                        currentIteration.initial_generation_result = { toolName: callName, response };
-                    } else {
-                        currentIteration.refined_generation_result = { toolName: callName, response };
-                    }
-                } else {
-                    flushCreativeProcessBuffer();
+            switch (callName) {
+                case 'dispatch_to_artisan_engine':
+                    messages.push({ from: 'bot', artisanResponse: response });
+                    break;
+                case 'generate_image':
+                case 'generate_image_with_reference':
                     messages.push({ from: 'bot', imageGenerationResponse: response });
-                }
-            } else if (callName === 'critique_images') {
-                if (creativeProcessBuffer.length > 0) {
-                    creativeProcessBuffer[creativeProcessBuffer.length - 1].critique_result = response;
-                }
-            } else {
-                flushCreativeProcessBuffer();
-                if (response.isImageChoiceProposal) {
+                    break;
+                case 'dispatch_to_brand_analyzer':
+                    messages.push({ from: 'bot', brandAnalysisResponse: response });
+                    break;
+                case 'present_image_choice':
                     const choiceMessage: Message = { from: 'bot', imageChoiceProposal: response };
                     const nextTurn = history[i + 1];
                     if (nextTurn && nextTurn.role === 'user' && nextTurn.parts[0]?.text?.startsWith("I choose image number")) {
@@ -175,32 +84,15 @@ const parseHistoryToMessages = (jobData: any): Message[] => {
                         }
                     }
                     messages.push(choiceMessage);
-                } else if (response.isBrandAnalysis) {
-                    messages.push({ from: 'bot', brandAnalysisResponse: response });
-                } else if (response.isRefinementProposal) {
-                    messages.push({ from: 'bot', refinementProposal: response });
-                }
+                    break;
+                case 'critique_images':
+                    // Do not render internal critiques to keep the chat clean.
+                    break;
+                default:
+                    break;
             }
         }
     }
-    
-    flushCreativeProcessBuffer();
-
-    // Fallback logic for completed jobs, now runs regardless of status
-    const lastMessage = messages[messages.length - 1];
-    if (lastMessage && !lastMessage.creativeProcessResponse) {
-        const creativeResult = assembleCreativeProcessResult(history);
-        if (creativeResult) {
-            while (messages.length > 0 && messages[messages.length - 1].text) {
-                messages.pop();
-            }
-            messages.push({
-                from: 'bot',
-                creativeProcessResponse: creativeResult
-            });
-        }
-    }
-    
     return messages;
 };
 
@@ -294,8 +186,6 @@ const Index = () => {
   const processJobData = useCallback((jobData: any) => {
     if (!jobData) return;
     
-    let isRunning = jobData.status === 'processing' || jobData.status === 'awaiting_refinement';
-
     setChatTitle(jobData.original_prompt || "Untitled Chat");
     if (jobData.context?.isDesignerMode !== undefined) setIsDesignerMode(jobData.context.isDesignerMode);
     if (jobData.context?.selectedModelId) setSelectedModelId(jobData.context.selectedModelId);
@@ -303,19 +193,25 @@ const Index = () => {
     if (jobData.context?.numImagesMode) setNumImagesMode(jobData.context.numImagesMode);
 
     let conversationMessages = parseHistoryToMessages(jobData);
-    
-    const lastParsedMessage = conversationMessages[conversationMessages.length - 1];
-    if (isRunning && lastParsedMessage?.creativeProcessResponse) {
-        console.log("[ProcessJobData] Overriding 'running' status because a final creative card was assembled.");
-        isRunning = false;
-    }
+    const isRunning = jobData.status === 'processing' || jobData.status === 'awaiting_refinement';
 
+    setIsJobRunning(isRunning);
     if (!isRunning) {
         setIsSending(false);
     }
-    setIsJobRunning(isRunning);
     
-    if (isRunning) {
+    if (jobData.status === 'complete') {
+        const finalResult = jobData.final_result;
+        if (finalResult?.isCreativeProcess) {
+            conversationMessages.push({ from: 'bot', creativeProcessResponse: finalResult });
+        } else if (finalResult?.isImageGeneration) {
+            conversationMessages.push({ from: 'bot', imageGenerationResponse: finalResult });
+        } else if (finalResult?.isBrandAnalysis) {
+            conversationMessages.push({ from: 'bot', brandAnalysisResponse: finalResult });
+        } else if (finalResult?.text) {
+            conversationMessages.push({ from: 'bot', text: finalResult.text });
+        }
+    } else if (isRunning) {
         const message = jobData.status === 'processing' ? 'Thinking...' : 'Refining image in the background...';
         conversationMessages.push({ from: 'bot', jobInProgress: { jobId: jobData.id, message } });
     } else if (jobData.status === 'failed') {

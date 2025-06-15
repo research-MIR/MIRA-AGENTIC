@@ -40,6 +40,7 @@ export const CreativeProcessResponse = ({ data, jobId }: Props) => {
   const finalTitle = data.final_generation_result?.toolName === 'fal_image_to_image' 
     ? "Final Refined Result" 
     : "Final Approved Result";
+  const isProcessComplete = !!data.final_generation_result;
 
   return (
     <Card className="max-w-2xl w-full bg-secondary/50">
@@ -61,8 +62,20 @@ export const CreativeProcessResponse = ({ data, jobId }: Props) => {
           {data.iterations.map((iteration, index) => {
             const critiqueResult = iteration.critique_result;
             const isApproved = critiqueResult?.is_good_enough;
-            const statusText = critiqueResult ? (isApproved ? "Approved" : "Rejected") : "In Progress...";
-            const statusColor = critiqueResult ? (isApproved ? 'text-green-500' : 'text-destructive') : 'text-muted-foreground';
+            const isLastIteration = index === totalIterations - 1;
+
+            let statusText = "";
+            let statusColor = "text-muted-foreground";
+
+            if (critiqueResult) {
+                statusText = isApproved ? "Approved" : "Rejected";
+                statusColor = isApproved ? 'text-green-500' : 'text-destructive';
+            } else if (isLastIteration && isProcessComplete) {
+                statusText = "Final";
+                statusColor = "text-primary";
+            } else if (!isProcessComplete) {
+                statusText = "In Progress...";
+            }
 
             return (
               <Card key={index} className="bg-background/50">
@@ -70,7 +83,7 @@ export const CreativeProcessResponse = ({ data, jobId }: Props) => {
                   <AccordionTrigger className="p-3 hover:no-underline">
                     <div className="flex items-center gap-2">
                       <span className={`text-sm font-semibold ${statusColor}`}>
-                          Iteration {index + 1}: {statusText}
+                          Iteration {index + 1}{statusText ? `: ${statusText}` : ''}
                       </span>
                     </div>
                   </AccordionTrigger>
