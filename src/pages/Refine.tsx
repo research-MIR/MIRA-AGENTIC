@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { Skeleton } from "@/components/ui/skeleton";
-import { UploadCloud, Wand2, Loader2, GitCompareArrows, Info, Sparkles, X } from "lucide-react";
+import { UploadCloud, Wand2, Loader2, GitCompareArrows, X } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useLanguage } from "@/context/LanguageContext";
@@ -15,7 +15,6 @@ import { useImagePreview } from "@/context/ImagePreviewContext";
 import { Slider } from "@/components/ui/slider";
 import { ImageCompareModal } from "@/components/ImageCompareModal";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Switch } from "@/components/ui/switch";
 import { useDropzone } from "@/hooks/useDropzone";
 import { cn } from "@/lib/utils";
@@ -37,20 +36,13 @@ const Refine = () => {
   const { showImage } = useImagePreview();
   const queryClient = useQueryClient();
   
-  // State for the "workbench"
   const [selectedJob, setSelectedJob] = useState<ComfyJob | null>(null);
-  
-  // State for creating a NEW job
   const [prompt, setPrompt] = useState("");
   const [sourceImageFile, setSourceImageFile] = useState<File | null>(null);
   const [upscaleFactor, setUpscaleFactor] = useState(1.4);
   const [isAutoPromptEnabled, setIsAutoPromptEnabled] = useState(true);
-  
-  // Loading states
   const [isQueueing, setIsQueueing] = useState(false);
   const [isLoadingAutoPrompt, setIsLoadingAutoPrompt] = useState(false);
-
-  // UI state
   const [isCompareModalOpen, setIsCompareModalOpen] = useState(false);
   const [originalDimensions, setOriginalDimensions] = useState<{ width: number; height: number } | null>(null);
 
@@ -171,7 +163,7 @@ const Refine = () => {
     setSelectedJob(job);
     setSourceImageFile(null);
     setPrompt(job.metadata?.prompt || "");
-    setOriginalDimensions(null); // We don't know the original dimensions from the job data
+    setOriginalDimensions(null);
   };
 
   const renderJobResult = (job: ComfyJob) => {
@@ -206,26 +198,44 @@ const Refine = () => {
           </div>
         </header>
 
-        <Card className="mb-8">
-          <CardHeader><CardTitle>Recent Refinements</CardTitle></CardHeader>
-          <CardContent>
-            {isLoadingRecentJobs ? (
-              <div className="flex gap-4"><Skeleton className="h-24 w-24" /><Skeleton className="h-24 w-24" /><Skeleton className="h-24 w-24" /></div>
-            ) : recentJobs && recentJobs.length > 0 ? (
-              <div className="flex gap-4 overflow-x-auto pb-2">
-                {recentJobs.map(job => (
-                  <button key={job.id} onClick={() => handleJobSelect(job)} className={cn("border-2 rounded-lg p-1 flex-shrink-0", selectedJob?.id === job.id ? "border-primary" : "border-transparent")}>
-                    <img src={job.metadata?.source_image_url} alt="Job source" className="w-24 h-24 object-cover rounded-md" />
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <p className="text-muted-foreground">Your recent refinement jobs will appear here.</p>
-            )}
-          </CardContent>
-        </Card>
-
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* Left Column: Workbench */}
+          <div className="lg:col-span-2">
+            <Card className="min-h-[60vh]">
+              <CardHeader><CardTitle>Workbench</CardTitle></CardHeader>
+              <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                      <h3 className="font-semibold mb-2 text-center">{t.originalImage}</h3>
+                      <div className="aspect-square bg-muted rounded-lg flex items-center justify-center">
+                        {sourceImageUrl ? (
+                            <button onClick={() => showImage({ images: [{ url: sourceImageUrl }], currentIndex: 0 })} className="block w-full h-full">
+                                <img src={sourceImageUrl} alt="Original" className="rounded-lg aspect-square object-contain w-full hover:opacity-80 transition-opacity" />
+                            </button>
+                        ) : (
+                            <div className="text-center text-muted-foreground p-4">
+                                <UploadCloud className="h-12 w-12 mb-4 mx-auto" />
+                                <p>Upload an image or select a recent job.</p>
+                            </div>
+                        )}
+                      </div>
+                  </div>
+                  <div>
+                      <h3 className="font-semibold mb-2 text-center">{t.refinedImage}</h3>
+                      <div className="aspect-square bg-muted rounded-lg flex items-center justify-center">
+                          {selectedJob ? renderJobResult(selectedJob) : <p className="text-muted-foreground text-center p-4">Result will appear here.</p>}
+                      </div>
+                  </div>
+              </CardContent>
+            </Card>
+            {selectedJob?.status === 'complete' && selectedJob?.final_result?.publicUrl && (
+              <Button onClick={() => setIsCompareModalOpen(true)} className="mt-4 w-full">
+                <GitCompareArrows className="mr-2 h-4 w-4" />
+                {t.compareResults}
+              </Button>
+            )}
+          </div>
+
+          {/* Right Column: Controls */}
           <div className="lg:col-span-1 space-y-6">
             <Card>
               <CardHeader>
@@ -283,42 +293,27 @@ const Refine = () => {
               Queue Refinement Job
             </Button>
           </div>
-
-          <div className="lg:col-span-2">
-            <Card className="min-h-[60vh]">
-              <CardHeader><CardTitle>Workbench</CardTitle></CardHeader>
-              <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                      <h3 className="font-semibold mb-2 text-center">{t.originalImage}</h3>
-                      <div className="aspect-square bg-muted rounded-lg flex items-center justify-center">
-                        {sourceImageUrl ? (
-                            <button onClick={() => showImage({ images: [{ url: sourceImageUrl }], currentIndex: 0 })} className="block w-full h-full">
-                                <img src={sourceImageUrl} alt="Original" className="rounded-lg aspect-square object-contain w-full hover:opacity-80 transition-opacity" />
-                            </button>
-                        ) : (
-                            <div className="text-center text-muted-foreground p-4">
-                                <UploadCloud className="h-12 w-12 mb-4 mx-auto" />
-                                <p>Upload an image or select a recent job.</p>
-                            </div>
-                        )}
-                      </div>
-                  </div>
-                  <div>
-                      <h3 className="font-semibold mb-2 text-center">{t.refinedImage}</h3>
-                      <div className="aspect-square bg-muted rounded-lg flex items-center justify-center">
-                          {selectedJob ? renderJobResult(selectedJob) : <p className="text-muted-foreground text-center p-4">Result will appear here.</p>}
-                      </div>
-                  </div>
-              </CardContent>
-            </Card>
-            {selectedJob?.status === 'complete' && selectedJob?.final_result?.publicUrl && (
-              <Button onClick={() => setIsCompareModalOpen(true)} className="mt-4 w-full">
-                <GitCompareArrows className="mr-2 h-4 w-4" />
-                {t.compareResults}
-              </Button>
-            )}
-          </div>
         </div>
+
+        {/* History at the bottom */}
+        <Card className="mt-8">
+          <CardHeader><CardTitle>Recent Refinements</CardTitle></CardHeader>
+          <CardContent>
+            {isLoadingRecentJobs ? (
+              <div className="flex gap-4"><Skeleton className="h-24 w-24" /><Skeleton className="h-24 w-24" /><Skeleton className="h-24 w-24" /></div>
+            ) : recentJobs && recentJobs.length > 0 ? (
+              <div className="flex gap-4 overflow-x-auto pb-2">
+                {recentJobs.map(job => (
+                  <button key={job.id} onClick={() => handleJobSelect(job)} className={cn("border-2 rounded-lg p-1 flex-shrink-0", selectedJob?.id === job.id ? "border-primary" : "border-transparent")}>
+                    <img src={job.metadata?.source_image_url} alt="Job source" className="w-24 h-24 object-cover rounded-md" />
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="text-muted-foreground">Your recent refinement jobs will appear here.</p>
+            )}
+          </CardContent>
+        </Card>
       </div>
       {selectedJob && selectedJob.metadata?.source_image_url && selectedJob.final_result?.publicUrl && (
         <ImageCompareModal
