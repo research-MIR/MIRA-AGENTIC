@@ -59,7 +59,6 @@ const parseHistoryToMessages = (jobData: any): Message[] => {
 
             if (!response || !callName) continue;
             
-            // We no longer render the final 'finish_task' from history, as it's handled by the job's final_result field.
             if (callName === 'finish_task') continue;
 
             switch (callName) {
@@ -86,7 +85,6 @@ const parseHistoryToMessages = (jobData: any): Message[] => {
                     messages.push(choiceMessage);
                     break;
                 case 'critique_images':
-                    // Do not render internal critiques to keep the chat clean.
                     break;
                 default:
                     break;
@@ -117,6 +115,7 @@ const Index = () => {
   const [ratioMode, setRatioMode] = useState<'auto' | string>('auto');
   const [numImagesMode, setNumImagesMode] = useState<'auto' | number>('auto');
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const channelRef = useRef<RealtimeChannel | null>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -265,6 +264,11 @@ const Index = () => {
   }, [jobId, jobData, processJobData, t.newChat]);
 
   useEffect(() => {
+    if (channelRef.current) {
+      supabase.removeChannel(channelRef.current);
+      channelRef.current = null;
+    }
+
     if (!jobId) return;
 
     const channel = supabase
@@ -286,9 +290,14 @@ const Index = () => {
             showError(`Realtime connection failed: ${err?.message}`);
         }
       });
+    
+    channelRef.current = channel;
 
     return () => {
-      supabase.removeChannel(channel);
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
     };
   }, [jobId, supabase, queryClient]);
 
