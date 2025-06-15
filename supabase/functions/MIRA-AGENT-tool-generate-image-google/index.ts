@@ -144,7 +144,11 @@ serve(async (req)=>{
             aspectRatio: aspectRatioString, 
             negativePrompt: negative_prompt, 
             seed: seed ? Number(seed) + i : undefined,
-            addWatermark: false // Fix: Disable watermark to allow seed usage
+            addWatermark: false,
+            outputOptions: {
+                mimeType: "image/jpeg",
+                compressionQuality: 95
+            }
         }
       };
       return (async () => {
@@ -181,12 +185,12 @@ serve(async (req)=>{
 
     const uploadPromises = successfulPredictions.map(async (prediction, index) => {
       const imageBuffer = decodeBase64(prediction.bytesBase64Encoded);
-      const filePath = `${invoker_user_id}/${Date.now()}_${index}.png`;
-      await supabaseAdmin.storage.from(GENERATED_IMAGES_BUCKET).upload(filePath, imageBuffer, { contentType: 'image/png', upsert: true });
+      const filePath = `${invoker_user_id}/${Date.now()}_${index}.jpeg`;
+      await supabaseAdmin.storage.from(GENERATED_IMAGES_BUCKET).upload(filePath, imageBuffer, { contentType: 'image/jpeg', upsert: true });
       const { data: { publicUrl } } = supabaseAdmin.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
       
       // Self-analysis step
-      const description = await describeImage(prediction.bytesBase64Encoded, 'image/png');
+      const description = await describeImage(prediction.bytesBase64Encoded, 'image/jpeg');
       console.log(`[ImageGenerator-Google][${requestId}] Generated description for image ${index + 1}: "${description}"`);
 
       return { storagePath: filePath, publicUrl, description };
