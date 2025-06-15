@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { useLanguage } from "@/context/LanguageContext";
-import { Loader2, AlertTriangle } from "lucide-react";
+import { Loader2, AlertTriangle, Image as ImageIcon } from "lucide-react";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import {
   AlertDialog,
@@ -21,12 +21,23 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { useQueryClient } from "@tanstack/react-query";
+import { optimizeImage } from "@/lib/utils";
+import { Slider } from "@/components/ui/slider";
 
 interface ComfyJob {
   id: string;
   status: 'queued' | 'processing' | 'complete' | 'failed';
   final_result?: { publicUrl: string };
   error_message?: string;
+}
+
+const formatBytes = (bytes: number, decimals = 2) => {
+  if (bytes === 0) return '0 Bytes';
+  const k = 1024;
+  const dm = decimals < 0 ? 0 : decimals;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 }
 
 const Developer = () => {
@@ -44,6 +55,14 @@ const Developer = () => {
   const [comfyPrompt, setComfyPrompt] = useState("");
   const [sourceImage, setSourceImage] = useState<File | null>(null);
 
+  // Image Optimizer State
+  const [originalImage, setOriginalImage] = useState<File | null>(null);
+  const [optimizedImage, setOptimizedImage] = useState<File | null>(null);
+  const [quality, setQuality] = useState(80);
+
+  const originalImageUrl = originalImage ? URL.createObjectURL(originalImage) : null;
+  const optimizedImageUrl = optimizedImage ? URL.createObjectURL(optimizedImage) : null;
+
   useEffect(() => {
     const devAuthStatus = sessionStorage.getItem('dev_authenticated') === 'true';
     if (devAuthStatus) setIsDevAuthenticated(true);
@@ -53,8 +72,23 @@ const Developer = () => {
         console.log("[DevPage] Cleaning up Realtime channel.");
         supabase.removeChannel(channelRef.current);
       }
+      if (originalImageUrl) URL.revokeObjectURL(originalImageUrl);
+      if (optimizedImageUrl) URL.revokeObjectURL(optimizedImageUrl);
     };
-  }, [supabase]);
+  }, [supabase, originalImageUrl, optimizedImageUrl]);
+
+  const handleImageTestChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setOriginalImage(file);
+    }
+  };
+
+  useEffect(() => {
+    if (originalImage) {
+      optimizeImage(originalImage, quality / 100).then(setOptimizedImage);
+    }
+  }, [originalImage, quality]);
 
   const handlePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -215,16 +249,29 @@ const Developer = () => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         <div className="space-y-4">
           <Card>
-            <CardHeader><CardTitle>Workflow Inputs</CardTitle></CardHeader>
+            <CardHeader><CardTitle>Image Optimization Tester</CardTitle></CardHeader>
             <CardContent className="space-y-4">
-              <div>
-                <Label htmlFor="comfy-prompt">Prompt Text</Label>
-                <Textarea id="comfy-prompt" value={comfyPrompt} onChange={(e) => setComfyPrompt(e.target.value)} placeholder="The prompt to inject into your workflow..." />
-              </div>
-              <div>
-                <Label htmlFor="source-image">Source Image (for Img2Img/Upscale)</Label>
-                <Input id="source-image" type="file" onChange={(e) => setSourceImage(e.target.files?.[0] || null)} accept="image/*" />
-              </div>
+              <Input id="image-test-upload" type="file" accept="image/*" onChange={handleImageTestChange} />
+              {originalImage && (
+                <div className="space-y-4">
+                  <div>
+                    <Label>Quality: {quality}%</Label>
+                    <Slider value={[quality]} onValueChange={(v) => setQuality(v[0])} min={10} max={100} step={5} />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <h4 className="font-semibold text-center">Original</h4>
+                      {originalImageUrl && <img src={originalImageUrl} alt="Original" className="w-full rounded-md mt-2" />}
+                      <p className="text-sm text-center text-muted-foreground mt-1">{formatBytes(originalImage.size)}</p>
+                    </div>
+                    <div>
+                      <h4 className="font-semibold text-center">Optimized (WebP)</h4>
+                      {optimizedImageUrl && <img src={optimizedImageUrl} alt="Optimized" className="w-full rounded-md mt-2" />}
+                      {optimizedImage && <p className="text-sm text-center text-muted-foreground mt-1">{formatBytes(optimizedImage.size)}</p>}
+                    </div>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
 
