@@ -186,23 +186,18 @@ const parseHistoryToMessages = (jobData: any): Message[] => {
     
     flushCreativeProcessBuffer();
 
-    // Fallback logic for completed jobs
-    if (jobData.status === 'complete') {
-        const lastMessage = messages[messages.length - 1];
-        if (lastMessage && !lastMessage.creativeProcessResponse) {
-            console.log("[Fallback] Job is complete but last message is not a creative process card. Attempting to assemble one.");
-            const creativeResult = assembleCreativeProcessResult(history);
-            if (creativeResult) {
-                console.log("[Fallback] Successfully assembled a creative process result. Replacing last message.");
-                // Remove simple text messages at the end that might be part of the incomplete final response
-                while (messages.length > 0 && messages[messages.length - 1].text) {
-                    messages.pop();
-                }
-                messages.push({
-                    from: 'bot',
-                    creativeProcessResponse: creativeResult
-                });
+    // Fallback logic for completed jobs, now runs regardless of status
+    const lastMessage = messages[messages.length - 1];
+    if (lastMessage && !lastMessage.creativeProcessResponse) {
+        const creativeResult = assembleCreativeProcessResult(history);
+        if (creativeResult) {
+            while (messages.length > 0 && messages[messages.length - 1].text) {
+                messages.pop();
             }
+            messages.push({
+                from: 'bot',
+                creativeProcessResponse: creativeResult
+            });
         }
     }
     
@@ -299,11 +294,7 @@ const Index = () => {
   const processJobData = useCallback((jobData: any) => {
     if (!jobData) return;
     
-    const newIsJobRunning = jobData.status === 'processing' || jobData.status === 'awaiting_refinement';
-    if (!newIsJobRunning) {
-        setIsSending(false);
-    }
-    setIsJobRunning(newIsJobRunning);
+    let isRunning = jobData.status === 'processing' || jobData.status === 'awaiting_refinement';
 
     setChatTitle(jobData.original_prompt || "Untitled Chat");
     if (jobData.context?.isDesignerMode !== undefined) setIsDesignerMode(jobData.context.isDesignerMode);
@@ -313,10 +304,20 @@ const Index = () => {
 
     let conversationMessages = parseHistoryToMessages(jobData);
     
-    if (jobData.status === 'processing') {
-        conversationMessages.push({ from: 'bot', jobInProgress: { jobId: jobData.id, message: 'Thinking...' } });
-    } else if (jobData.status === 'awaiting_refinement') {
-        conversationMessages.push({ from: 'bot', jobInProgress: { jobId: jobData.id, message: 'Refining image in the background...' } });
+    const lastParsedMessage = conversationMessages[conversationMessages.length - 1];
+    if (isRunning && lastParsedMessage?.creativeProcessResponse) {
+        console.log("[ProcessJobData] Overriding 'running' status because a final creative card was assembled.");
+        isRunning = false;
+    }
+
+    if (!isRunning) {
+        setIsSending(false);
+    }
+    setIsJobRunning(isRunning);
+    
+    if (isRunning) {
+        const message = jobData.status === 'processing' ? 'Thinking...' : 'Refining image in the background...';
+        conversationMessages.push({ from: 'bot', jobInProgress: { jobId: jobData.id, message } });
     } else if (jobData.status === 'failed') {
         conversationMessages.push({ from: 'bot', text: jobData.error_message });
     } else if (jobData.status === 'awaiting_feedback') {
