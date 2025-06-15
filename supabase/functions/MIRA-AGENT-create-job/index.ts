@@ -65,7 +65,7 @@ serve(async (req) => {
           status: 'processing', // Start as processing so the UI shows a loading state
           user_id: userId,
           context: { 
-              history: [{ role: "user", parts: userParts }], 
+              history: [], // FIX: Initialize with an empty history to prevent duplication
               user_provided_assets: userProvidedAssets,
               iteration_number: 1,
               safety_retry_count: 0,
