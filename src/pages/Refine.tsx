@@ -170,15 +170,15 @@ const Refine = () => {
     switch (job.status) {
       case 'queued':
       case 'processing':
-        return <div className="flex items-center justify-center h-full text-muted-foreground"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> In progress...</div>;
+        return <div className="flex items-center justify-center h-full text-muted-foreground"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> {t.inProgress}</div>;
       case 'complete':
         return job.final_result?.publicUrl ? (
           <button onClick={() => showImage({ images: [{ url: job.final_result!.publicUrl }], currentIndex: 0 })} className="block w-full h-full">
             <img src={job.final_result.publicUrl} alt="Refined by ComfyUI" className="rounded-lg aspect-square object-contain w-full hover:opacity-80 transition-opacity" />
           </button>
-        ) : <p>Job completed, but no image URL found.</p>;
+        ) : <p>{t.jobCompletedNoUrl}</p>;
       case 'failed':
-        return <p className="text-destructive text-sm p-2">Job failed: {job.error_message}</p>;
+        return <p className="text-destructive text-sm p-2">{t.jobFailed}: {job.error_message}</p>;
       default:
         return null;
     }
@@ -202,7 +202,7 @@ const Refine = () => {
           {/* Left Column: Workbench */}
           <div className="lg:col-span-2">
             <Card className="min-h-[60vh]">
-              <CardHeader><CardTitle>Workbench</CardTitle></CardHeader>
+              <CardHeader><CardTitle>{t.workbench}</CardTitle></CardHeader>
               <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                       <h3 className="font-semibold mb-2 text-center">{t.originalImage}</h3>
@@ -214,7 +214,7 @@ const Refine = () => {
                         ) : (
                             <div className="text-center text-muted-foreground p-4">
                                 <UploadCloud className="h-12 w-12 mb-4 mx-auto" />
-                                <p>Upload an image or select a recent job.</p>
+                                <p>{t.uploadOrSelect}</p>
                             </div>
                         )}
                       </div>
@@ -222,7 +222,7 @@ const Refine = () => {
                   <div>
                       <h3 className="font-semibold mb-2 text-center">{t.refinedImage}</h3>
                       <div className="aspect-square bg-muted rounded-lg flex items-center justify-center">
-                          {selectedJob ? renderJobResult(selectedJob) : <p className="text-muted-foreground text-center p-4">Result will appear here.</p>}
+                          {selectedJob ? renderJobResult(selectedJob) : <p className="text-muted-foreground text-center p-4">{t.resultWillAppear}</p>}
                       </div>
                   </div>
               </CardContent>
@@ -240,11 +240,11 @@ const Refine = () => {
             <Card>
               <CardHeader>
                 <div className="flex justify-between items-center">
-                  <CardTitle>{selectedJob ? "Loaded Job" : "Start New Job"}</CardTitle>
+                  <CardTitle>{selectedJob ? t.loadedJob : t.startNewJob}</CardTitle>
                   {selectedJob && (
                     <Button variant="outline" size="sm" onClick={resetToNewJobState}>
                       <X className="h-4 w-4 mr-2" />
-                      New Job
+                      {t.newJob}
                     </Button>
                   )}
                 </div>
@@ -253,7 +253,7 @@ const Refine = () => {
                 <Input id="source-image-upload" type="file" accept="image/*" onChange={(e) => handleFileChange(e.target.files)} className="hidden" />
                 <Label htmlFor="source-image-upload" className="cursor-pointer flex flex-col items-center justify-center text-center text-muted-foreground">
                   <UploadCloud className="h-12 w-12 mb-4" />
-                  <p>Drag & drop or click to upload a new image and start a new job.</p>
+                  <p>{t.uploadHelper}</p>
                 </Label>
               </CardContent>
             </Card>
@@ -262,9 +262,9 @@ const Refine = () => {
               <CardContent>
                 <div className="flex items-center justify-between mb-4">
                   <Label htmlFor="auto-prompt-switch" className="flex flex-col space-y-1">
-                    <span>Auto-Prompt</span>
+                    <span>{t.autoPrompt}</span>
                     <span className="font-normal leading-snug text-muted-foreground text-sm">
-                      Generate a detailed prompt from your image automatically.
+                      {t.autoPromptDescription}
                     </span>
                   </Label>
                   <Switch id="auto-prompt-switch" checked={isAutoPromptEnabled} onCheckedChange={setIsAutoPromptEnabled} disabled={!!selectedJob} />
@@ -290,14 +290,14 @@ const Refine = () => {
             </Card>
             <Button onClick={handleRefine} disabled={isQueueing || !sourceImageFile} className="w-full">
               {isQueueing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
-              Queue Refinement Job
+              {t.queueRefinementJob}
             </Button>
           </div>
         </div>
 
         {/* History at the bottom */}
         <Card className="mt-8">
-          <CardHeader><CardTitle>Recent Refinements</CardTitle></CardHeader>
+          <CardHeader><CardTitle>{t.recentRefinements}</CardTitle></CardHeader>
           <CardContent>
             {isLoadingRecentJobs ? (
               <div className="flex gap-4"><Skeleton className="h-24 w-24" /><Skeleton className="h-24 w-24" /><Skeleton className="h-24 w-24" /></div>
@@ -310,7 +310,7 @@ const Refine = () => {
                 ))}
               </div>
             ) : (
-              <p className="text-muted-foreground">Your recent refinement jobs will appear here.</p>
+              <p className="text-muted-foreground">{t.noImagesDescription}</p>
             )}
           </CardContent>
         </Card>
