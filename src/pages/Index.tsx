@@ -37,6 +37,7 @@ const parseHistoryToMessages = (jobData: any): Message[] => {
 
     for (let i = 0; i < history.length; i++) {
         const turn = history[i];
+        const historyIndex = i;
 
         if (turn.role === 'user') {
             const message: Message = { from: 'user', imageUrls: [] };
@@ -61,34 +62,38 @@ const parseHistoryToMessages = (jobData: any): Message[] => {
             
             if (callName === 'finish_task') continue;
 
+            const botMessage: Message = { from: 'bot', historyIndex };
+
             switch (callName) {
                 case 'dispatch_to_artisan_engine':
-                    messages.push({ from: 'bot', artisanResponse: response });
+                    botMessage.artisanResponse = response;
                     break;
                 case 'generate_image':
                 case 'generate_image_with_reference':
-                    messages.push({ from: 'bot', imageGenerationResponse: response });
+                    botMessage.imageGenerationResponse = response;
                     break;
                 case 'dispatch_to_brand_analyzer':
-                    messages.push({ from: 'bot', brandAnalysisResponse: response });
+                    botMessage.brandAnalysisResponse = response;
                     break;
                 case 'present_image_choice':
-                    const choiceMessage: Message = { from: 'bot', imageChoiceProposal: response };
+                    botMessage.imageChoiceProposal = response;
                     const nextTurn = history[i + 1];
                     if (nextTurn && nextTurn.role === 'user' && nextTurn.parts[0]?.text?.startsWith("I choose image number")) {
                         const match = nextTurn.parts[0].text.match(/I choose image number (\d+)/);
                         if (match && match[1]) {
-                            choiceMessage.imageChoiceSelectedIndex = parseInt(match[1], 10) - 1;
+                            botMessage.imageChoiceSelectedIndex = parseInt(match[1], 10) - 1;
                             i++;
                         }
                     }
-                    messages.push(choiceMessage);
                     break;
                 case 'critique_images':
-                    break;
+                    // Don't render critique messages for now to keep UI clean
+                    continue;
                 default:
-                    break;
+                    // Don't render unknown tool calls
+                    continue;
             }
+            messages.push(botMessage);
         }
     }
     return messages;
@@ -397,6 +402,30 @@ const Index = () => {
     });
   }, [jobId]);
 
+  const handleBranch = useCallback(async (historyIndex: number) => {
+    if (!jobId || !session?.user) return;
+    const toastId = showLoading("Creating new branch...");
+    try {
+      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-branch-job', {
+        body: {
+          source_job_id: jobId,
+          history_index: historyIndex,
+          invoker_user_id: session.user.id
+        }
+      });
+      if (error) throw error;
+      
+      dismissToast(toastId);
+      showSuccess("Branched chat created.");
+      await queryClient.invalidateQueries({ queryKey: ["jobHistory"] });
+      navigate(`/chat/${data.newJobId}`);
+
+    } catch (err: any) {
+      dismissToast(toastId);
+      showError(`Failed to branch chat: ${err.message}`);
+    }
+  }, [jobId, session, supabase, navigate, queryClient]);
+
   return (
     <div className="flex flex-col h-full relative" onDragEnter={() => setIsDragging(true)}>
       {isDragging && <FileDropzone onDrop={(files) => handleFileUpload(files)} onDragStateChange={setIsDragging} />}
@@ -426,7 +455,7 @@ const Index = () => {
 
       <div className="flex-1 overflow-y-auto">
         <div className="p-4 md:p-6 space-y-4">
-            <MessageList messages={messages} jobId={jobId} onRefinementComplete={handleRefinementComplete} onSendMessage={handleSendMessage} />
+            <MessageList messages={messages} jobId={jobId} onRefinementComplete={handleRefinementComplete} onSendMessage={handleSendMessage} onBranch={handleBranch} />
             <div ref={messagesEndRef} />
         </div>
       </div>
