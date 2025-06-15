@@ -26,7 +26,7 @@ export const Sidebar = () => {
       .from("mira-agent-jobs")
       .select("id, original_prompt")
       .eq("user_id", session.user.id)
-      .or("context->>source.eq.agent,context->>source.is.null")
+      .or("context->>source.eq.agent,context->>source.is.null,context->>source.eq.agent_branch")
       .order("created_at", { ascending: false })
       .limit(20);
     if (error) throw new Error(error.message);
@@ -89,7 +89,7 @@ export const Sidebar = () => {
           </div>
         ) : (
           jobHistory?.map(job => (
-            <NavLink key={job.id} to={`/chat/${job.id}`} className={({ isActive }) => `block p-2 rounded-md text-sm truncate ${isActive ? 'bg-muted font-semibold' : 'hover:bg-muted'}`}>
+            <NavLink key={job.id} to={`/chat/${job.id}`} className={({ isActive }) => `block p-2 rounded-md text-sm truncate ${isActive ? 'bg-primary font-semibold' : 'hover:bg-muted'}`}>
               {job.original_prompt || "Untitled Chat"}
             </NavLink>
           ))
