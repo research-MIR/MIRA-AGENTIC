@@ -14,6 +14,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { PlusCircle, Trash2 } from "lucide-react";
+import { optimizeImage } from "@/lib/utils";
 
 interface UploadedFile {
   name: string;
@@ -218,8 +219,6 @@ const Index = () => {
             queryClient.setQueryData(['chatJob', newJob.id], newJob);
             
             navigate(`/chat/${newJob.id}`);
-
-            await supabase.functions.invoke("MIRA-AGENT-continue-job", { body: { ...payload, jobId: newJob.id } });
         }
     } catch (error: any) {
       showError("Error communicating with Mira: " + error.message);
@@ -354,26 +353,40 @@ const Index = () => {
 
     if (validFiles.length === 0) return [];
 
-    const toastId = showLoading(`Uploading ${validFiles.length} file(s)...`);
+    const optimizationToastId = showLoading(`Optimizing ${validFiles.length} file(s)...`);
+    
     try {
-      const uploadPromises = validFiles.map(file => {
-        const fileExt = file.name.split('.').pop()?.toLowerCase();
+      const optimizationPromises = validFiles.map(file => {
+        if (file.type.startsWith('image/')) {
+          return optimizeImage(file);
+        }
+        return Promise.resolve(file); // Pass non-image files through
+      });
+
+      const optimizedFiles = await Promise.all(optimizationPromises);
+      dismissToast(optimizationToastId);
+
+      const uploadToastId = showLoading(`Uploading ${optimizedFiles.length} file(s)...`);
+      
+      const uploadPromises = optimizedFiles.map(file => {
         const sanitized = sanitizeFilename(file.name);
         const filePath = `${session?.user.id}/${Date.now()}-${sanitized}`;
         return supabase.storage.from('mira-agent-user-uploads').upload(filePath, file).then(({ error }) => {
           if (error) throw error;
-          const isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(fileExt || '');
+          const isImage = file.type.startsWith('image/');
           const previewUrl = isImage ? URL.createObjectURL(file) : '';
           return { name: file.name, path: filePath, previewUrl, isImage };
         });
       });
+
       const newFiles = await Promise.all(uploadPromises);
       setUploadedFiles(prev => [...prev, ...newFiles]);
-      dismissToast(toastId);
+      dismissToast(uploadToastId);
       showSuccess(`${newFiles.length} file(s) uploaded successfully!`);
       return newFiles;
+
     } catch (error: any) {
-      dismissToast(toastId);
+      dismissToast(optimizationToastId);
       showError("Upload failed: " + error.message);
       return [];
     }
