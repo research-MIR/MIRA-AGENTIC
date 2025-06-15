@@ -89,7 +89,7 @@ export const Sidebar = () => {
           </div>
         ) : (
           jobHistory?.map(job => (
-            <NavLink key={job.id} to={`/chat/${job.id}`} className={({ isActive }) => `block p-2 rounded-md text-sm truncate ${isActive ? 'bg-primary font-semibold' : 'hover:bg-muted'}`}>
+            <NavLink key={job.id} to={`/chat/${job.id}`} className={({ isActive }) => `block p-2 rounded-md text-sm truncate ${isActive ? 'bg-primary text-primary-foreground font-semibold' : 'hover:bg-muted'}`}>
               {job.original_prompt || "Untitled Chat"}
             </NavLink>
           ))
