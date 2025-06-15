@@ -433,7 +433,7 @@ serve(async (req)=>{
         sourceImageUrl = `agent_history_image.png`;
       }
     }
-    const { invoker_user_id, upscale_factor, original_prompt_for_gallery, main_agent_job_id, prompt_text } = body;
+    const { invoker_user_id, upscale_factor, original_prompt_for_gallery, main_agent_job_id, prompt_text, source } = body;
     if (!invoker_user_id) throw new Error("Missing required parameter: invoker_user_id");
     if (!prompt_text) throw new Error("Missing required parameter: prompt_text");
     if (!imageFile) throw new Error("Missing image data.");
@@ -473,6 +473,8 @@ serve(async (req)=>{
       status: 'queued',
       main_agent_job_id: main_agent_job_id,
       metadata: {
+        source: source || 'refiner', // Default to 'refiner' if not provided
+        prompt: prompt_text,
         original_prompt_for_gallery: original_prompt_for_gallery || `Refined: ${prompt_text?.slice(0, 40) || 'image'}...`,
         invoker_user_id: invoker_user_id,
         source_image_url: sourceImageUrl
