@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo, useRef } from "react";
+import React, { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { useDropzone } from "@/hooks/useDropzone";
 import { optimizeImage } from "@/lib/utils";
 import { SegmentationMask } from "@/components/SegmentationMask";
+import { RealtimeChannel } from "@supabase/supabase-js";
 
 const ImageUploader = ({ onFileSelect, title, isDraggingOver, t }: { onFileSelect: (file: File) => void, title: string, isDraggingOver: boolean, t: any }) => {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -46,7 +47,6 @@ const ImageUploader = ({ onFileSelect, title, isDraggingOver, t }: { onFileSelec
   );
 };
 
-
 const VirtualTryOn = () => {
   const { supabase, session } = useSession();
   const { t } = useLanguage();
@@ -59,9 +59,47 @@ const VirtualTryOn = () => {
   const [isPersonDragging, setIsPersonDragging] = useState(false);
   const [isGarmentDragging, setIsGarmentDragging] = useState(false);
   const [personImageDimensions, setPersonImageDimensions] = useState<{width: number, height: number} | null>(null);
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const channelRef = useRef<RealtimeChannel | null>(null);
 
   const personImageUrl = useMemo(() => personImageFile ? URL.createObjectURL(personImageFile) : null, [personImageFile]);
   const garmentImageUrl = useMemo(() => garmentImageFile ? URL.createObjectURL(garmentImageFile) : null, [garmentImageFile]);
+
+  useEffect(() => {
+    if (channelRef.current) {
+      supabase.removeChannel(channelRef.current);
+    }
+
+    if (activeJobId) {
+      const channel = supabase.channel(`segmentation-job-${activeJobId}`)
+        .on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'mira-agent-segmentation-jobs', filter: `id=eq.${activeJobId}` },
+          (payload) => {
+            const job = payload.new;
+            if (job.status === 'complete') {
+              setSegmentationResult(job.result);
+              setIsLoading(false);
+              showSuccess("Segmentation complete!");
+              setActiveJobId(null);
+            } else if (job.status === 'failed') {
+              showError(`Segmentation failed: ${job.error_message}`);
+              setIsLoading(false);
+              setActiveJobId(null);
+            }
+          }
+        )
+        .subscribe();
+      
+      channelRef.current = channel;
+    }
+
+    return () => {
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+      }
+    };
+  }, [activeJobId, supabase]);
 
   const handlePersonFileSelect = (file: File) => {
     setPersonImageFile(file);
@@ -95,7 +133,7 @@ const VirtualTryOn = () => {
     }
     setIsLoading(true);
     setSegmentationResult(null);
-    const toastId = showLoading("Uploading images and starting analysis...");
+    const toastId = showLoading("Uploading images and queueing job...");
 
     try {
       const person_image_url = await uploadFileAndGetUrl(personImageFile, 'mira-agent-user-uploads');
@@ -105,21 +143,23 @@ const VirtualTryOn = () => {
         throw new Error("Failed to upload one or both images.");
       }
       
-      dismissToast(toastId);
-      showLoading("AI is analyzing the images...");
-
-      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-segment-garment', {
-        body: { person_image_url, garment_image_url, user_prompt: prompt }
+      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-segmentation', {
+        body: { 
+          person_image_url, 
+          garment_image_url, 
+          user_prompt: prompt,
+          user_id: session?.user.id
+        }
       });
 
       if (error) throw error;
 
-      setSegmentationResult(data.segmentation_result);
-      showSuccess("Segmentation complete!");
+      setActiveJobId(data.jobId);
+      dismissToast(toastId);
+      showSuccess("Job queued! The result will appear below when ready.");
 
     } catch (err: any) {
       showError(err.message);
-    } finally {
       setIsLoading(false);
       dismissToast(toastId);
     }
@@ -199,6 +239,12 @@ const VirtualTryOn = () => {
                   {garmentImageUrl ? <img src={garmentImageUrl} alt="Garment" className="w-full rounded-md" /> : <div className="aspect-square bg-muted rounded-md flex items-center justify-center"><ImageIcon className="h-12 w-12 text-muted-foreground" /></div>}
                 </div>
               </div>
+              {isLoading && (
+                <div className="text-center text-muted-foreground py-4">
+                  <Loader2 className="h-8 w-8 animate-spin mx-auto" />
+                  <p className="mt-2">Processing job... this may take a minute.</p>
+                </div>
+              )}
               {segmentationResult && (
                 <div>
                   <Label>Segmentation JSON Output</Label>
