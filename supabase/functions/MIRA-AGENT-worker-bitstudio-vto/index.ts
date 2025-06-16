@@ -41,7 +41,7 @@ async function uploadToBitStudio(supabase: SupabaseClient, imageUrl: string, typ
 }
 
 serve(async (req) => {
-  const { job_id } = await req.json();
+  const { job_id, prompt } = await req.json();
   if (!job_id) return new Response(JSON.stringify({ error: "job_id is required." }), { status: 400, headers: corsHeaders });
 
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
@@ -60,15 +60,21 @@ serve(async (req) => {
         status: 'processing'
     }).eq('id', job_id);
 
+    const tryOnPayload: any = {
+        person_image_id: personImageId,
+        outfit_image_id: garmentImageId,
+        resolution: "high",
+        num_images: 1
+    };
+
+    if (prompt) {
+        tryOnPayload.prompt = prompt;
+    }
+
     const tryOnResponse = await fetch(`${BITSTUDIO_BASE_URL}/images/virtual-try-on`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            person_image_id: personImageId,
-            outfit_image_id: garmentImageId,
-            resolution: "high",
-            num_images: 1
-        })
+        body: JSON.stringify(tryOnPayload)
     });
 
     if (!tryOnResponse.ok) {

@@ -61,10 +61,35 @@ serve(async (req) => {
         if (cropError) throw cropError;
 
         await supabase.from('mira-agent-vto-pipeline-jobs').update({
-            status: 'pending_tryon',
+            status: 'pending_prompt_generation',
             cropped_image_url: cropResult.cropped_image_url
         }).eq('id', job_id);
         
+        supabase.functions.invoke('MIRA-AGENT-worker-vto-pipeline', { body: { job_id } });
+        break;
+      }
+      case 'pending_prompt_generation': {
+        console.log(`[VTO Worker][${job_id}] Starting prompt generation...`);
+        if (!job.cropped_image_url) throw new Error("Cropped image URL is missing for prompt generation step.");
+
+        const { data: promptResult, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-worker-vto-prompt-generator', {
+            body: {
+                person_image_url: job.cropped_image_url,
+                garment_image_url: job.source_garment_image_url
+            }
+        });
+        if (promptError) throw promptError;
+
+        const generatedPrompt = promptResult.result?.prompt;
+        if (!generatedPrompt) throw new Error("Prompt generation worker did not return a valid prompt.");
+
+        const newSegmentationResult = { ...job.segmentation_result, generated_prompt: generatedPrompt };
+
+        await supabase.from('mira-agent-vto-pipeline-jobs').update({
+            status: 'pending_tryon',
+            segmentation_result: newSegmentationResult
+        }).eq('id', job_id);
+
         supabase.functions.invoke('MIRA-AGENT-worker-vto-pipeline', { body: { job_id } });
         break;
       }
@@ -72,11 +97,14 @@ serve(async (req) => {
         console.log(`[VTO Worker][${job_id}] Starting virtual try-on...`);
         if (!job.cropped_image_url) throw new Error("Cropped image URL is missing for try-on step.");
 
+        const prompt = job.segmentation_result?.generated_prompt;
+
         const { data: bitstudioJob, error: bitstudioError } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio-vto', {
             body: {
-                person_image_url: job.cropped_image_url, // Use the cropped image
+                person_image_url: job.cropped_image_url,
                 garment_image_url: job.source_garment_image_url,
-                user_id: job.user_id
+                user_id: job.user_id,
+                prompt: prompt
             }
         });
         if (bitstudioError) throw bitstudioError;

@@ -15,7 +15,7 @@ serve(async (req) => {
   }
 
   try {
-    const { person_image_url, garment_image_url, user_id } = await req.json();
+    const { person_image_url, garment_image_url, user_id, prompt } = await req.json();
     if (!person_image_url || !garment_image_url || !user_id) {
       throw new Error("person_image_url, garment_image_url, and user_id are required.");
     }
@@ -37,7 +37,7 @@ serve(async (req) => {
 
     // Asynchronously invoke the worker
     supabase.functions.invoke('MIRA-AGENT-worker-bitstudio-vto', {
-      body: { job_id: newJob.id }
+      body: { job_id: newJob.id, prompt: prompt }
     }).catch(console.error);
 
     return new Response(JSON.stringify({ success: true, jobId: newJob.id }), {
