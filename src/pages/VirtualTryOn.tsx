@@ -31,7 +31,7 @@ interface VtoPipelineJob {
   };
 }
 
-const ImageUploader = ({ onFileSelect, title, isDraggingOver, t, imageUrl, onClear, isLoading }: { onFileSelect: (file: File) => void, title: string, isDraggingOver: boolean, t: any, imageUrl: string | null, onClear: () => void, isLoading?: boolean }) => {
+const ImageUploader = ({ onFileSelect, title, t, imageUrl, onClear, isLoading }: { onFileSelect: (file: File) => void, title: string, t: any, imageUrl: string | null, onClear: () => void, isLoading?: boolean }) => {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -40,7 +40,7 @@ const ImageUploader = ({ onFileSelect, title, isDraggingOver, t, imageUrl, onCle
     }
   };
 
-  const { dropzoneProps } = useDropzone({
+  const { dropzoneProps, isDraggingOver } = useDropzone({
     onDrop: (files) => {
       if (files && files[0]) {
         onFileSelect(files[0]);
@@ -48,32 +48,33 @@ const ImageUploader = ({ onFileSelect, title, isDraggingOver, t, imageUrl, onCle
     }
   });
 
-  if (isLoading) {
-    return <Skeleton className="aspect-square w-full h-full" />;
-  }
-
-  if (imageUrl) {
+  if (!imageUrl) {
     return (
-      <div className="relative aspect-square">
-        <img src={imageUrl} alt={title} className="w-full h-full object-cover rounded-md" />
-        <Button variant="destructive" size="icon" className="absolute top-2 right-2 h-6 w-6" onClick={onClear}>
-          <X className="h-4 w-4" />
-        </Button>
+      <div 
+        {...dropzoneProps}
+        className={cn("flex aspect-square justify-center items-center rounded-lg border border-dashed border-border p-6 transition-colors cursor-pointer", isDraggingOver && "border-primary bg-primary/10")}
+        onClick={() => inputRef.current?.click()}
+      >
+        <div className="text-center pointer-events-none">
+          <UploadCloud className="mx-auto h-12 w-12 text-muted-foreground" />
+          <p className="mt-2 font-semibold">{title}</p>
+        </div>
+        <Input ref={inputRef} type="file" className="hidden" accept="image/*" onChange={handleFileChange} />
       </div>
     );
   }
 
   return (
-    <div 
-      {...dropzoneProps}
-      className={cn("flex aspect-square justify-center items-center rounded-lg border border-dashed border-border p-6 transition-colors cursor-pointer", isDraggingOver && "border-primary bg-primary/10")}
-      onClick={() => inputRef.current?.click()}
-    >
-      <div className="text-center pointer-events-none">
-        <UploadCloud className="mx-auto h-12 w-12 text-muted-foreground" />
-        <p className="mt-2 font-semibold">{title}</p>
-      </div>
-      <Input ref={inputRef} type="file" className="hidden" accept="image/*" onChange={handleFileChange} />
+    <div className="relative aspect-square">
+      <img src={imageUrl} alt={title} className="w-full h-full object-cover rounded-md" />
+      <Button variant="destructive" size="icon" className="absolute top-2 right-2 h-6 w-6 z-10" onClick={onClear}>
+        <X className="h-4 w-4" />
+      </Button>
+      {isLoading && (
+        <div className="absolute inset-0 bg-black/60 flex items-center justify-center rounded-md">
+          <Loader2 className="h-8 w-8 animate-spin text-white" />
+        </div>
+      )}
     </div>
   );
 };
@@ -204,6 +205,9 @@ const VirtualTryOn = () => {
             } finally {
                 setIsJobImageLoading(false);
             }
+        } else {
+            setPersonImageBlobUrl(null);
+            setGarmentImageBlobUrl(null);
         }
     };
 
@@ -271,8 +275,8 @@ const VirtualTryOn = () => {
               </div>
             </CardHeader>
             <CardContent className="grid grid-cols-2 gap-4">
-              <ImageUploader onFileSelect={setPersonImageFile} title="Person Image" isDraggingOver={false} t={t} imageUrl={personImageUrl} onClear={() => { setPersonImageFile(null); if(selectedJob) setSelectedJob(null); }} isLoading={isJobImageLoading && !!selectedJob} />
-              <ImageUploader onFileSelect={setGarmentImageFile} title="Garment Image" isDraggingOver={false} t={t} imageUrl={garmentImageUrl} onClear={() => { setGarmentImageFile(null); if(selectedJob) setSelectedJob(null); }} isLoading={isJobImageLoading && !!selectedJob} />
+              <ImageUploader onFileSelect={setPersonImageFile} title="Person Image" t={t} imageUrl={personImageUrl} onClear={() => { setPersonImageFile(null); if(selectedJob) setSelectedJob(null); }} isLoading={isJobImageLoading && !!selectedJob} />
+              <ImageUploader onFileSelect={setGarmentImageFile} title="Garment Image" t={t} imageUrl={garmentImageUrl} onClear={() => { setGarmentImageFile(null); if(selectedJob) setSelectedJob(null); }} isLoading={isJobImageLoading && !!selectedJob} />
             </CardContent>
           </Card>
           {!selectedJob && (
