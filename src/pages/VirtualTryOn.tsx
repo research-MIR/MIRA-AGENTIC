@@ -17,7 +17,7 @@ import { RecentJobThumbnail } from "@/components/RecentJobThumbnail";
 import { useSecureImage } from "@/hooks/useSecureImage";
 import { useImagePreview } from "@/context/ImagePreviewContext";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 
 interface VtoPipelineJob {
   id: string;
@@ -313,19 +313,22 @@ const VirtualTryOn = () => {
           <Card>
             <CardHeader><CardTitle>2. Select Mode</CardTitle></CardHeader>
             <CardContent>
-              <div className="flex items-center justify-between rounded-lg border p-3 shadow-sm">
-                <div className="space-y-0.5">
-                  <Label>Mode: <span className="font-bold">{mode === 'edit' ? 'Creative Edit' : 'Virtual Try-On'}</span></Label>
-                  <p className="text-[0.8rem] text-muted-foreground">
-                    {mode === 'edit' ? 'Re-imagine the scene with a new pose.' : 'Swap the garment on the existing pose.'}
-                  </p>
+              <RadioGroup value={mode} onValueChange={(value) => setMode(value as 'edit' | 'vton')} className="space-y-2" disabled={!!selectedJobId}>
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="edit" id="mode-edit" />
+                  <Label htmlFor="mode-edit" className="flex flex-col">
+                    <span>Creative Edit</span>
+                    <span className="font-normal text-xs text-muted-foreground">Re-imagine the scene with a new pose and style.</span>
+                  </Label>
                 </div>
-                <Switch
-                  checked={mode === 'vton'}
-                  onCheckedChange={(checked) => setMode(checked ? 'vton' : 'edit')}
-                  disabled={!!selectedJobId}
-                />
-              </div>
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="vton" id="mode-vton" />
+                  <Label htmlFor="mode-vton" className="flex flex-col">
+                    <span>Virtual Try-On</span>
+                    <span className="font-normal text-xs text-muted-foreground">Swap the garment onto the existing pose.</span>
+                  </Label>
+                </div>
+              </RadioGroup>
             </CardContent>
           </Card>
           {!selectedJobId && (
