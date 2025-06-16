@@ -3,6 +3,8 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { AdjustmentLayer, HueSaturationSettings, LevelsSettings, CurvesSettings } from "@/types/editor";
 import { useLanguage } from "@/context/LanguageContext";
+import { useState, useRef, MouseEvent } from "react";
+import { cn } from "@/lib/utils";
 
 interface AdjustmentPanelProps {
   selectedLayer?: AdjustmentLayer;
@@ -38,17 +40,19 @@ const LevelsControls = ({ settings, onUpdate }: { settings: LevelsSettings, onUp
     <div className="space-y-4">
       <div>
         <Label>{t.inputLevels}</Label>
-        {/* Placeholder for histogram */}
-        <div className="h-24 bg-muted rounded-md my-2 flex items-center justify-center text-sm text-muted-foreground">{t.preview}</div>
-        <div className="flex justify-between text-xs">
-          <span>{t.shadows}</span>
-          <span>{t.midtones}</span>
-          <span>{t.highlights}</span>
+        <div className="h-24 bg-muted rounded-md my-2 flex items-center justify-center text-sm text-muted-foreground relative p-2">
+          {/* Placeholder for histogram */}
+          <div className="w-full h-full bg-gradient-to-r from-black via-gray-500 to-white opacity-50"></div>
+        </div>
+        <div className="space-y-2">
+            <Slider value={[settings.inputShadow, settings.inputHighlight]} onValueChange={(v) => onUpdate({ inputShadow: v[0], inputHighlight: v[1] })} min={0} max={255} step={1} />
+            <Slider value={[settings.inputMidtone]} onValueChange={(v) => onUpdate({ inputMidtone: v[0] })} min={0.1} max={9.9} step={0.1} />
         </div>
       </div>
       <div>
         <Label>{t.outputLevels}</Label>
         <div className="h-8 bg-gradient-to-r from-black to-white rounded-md my-2"></div>
+        <Slider value={[settings.outputShadow, settings.outputHighlight]} onValueChange={(v) => onUpdate({ outputShadow: v[0], outputHighlight: v[1] })} min={0} max={255} step={1} />
       </div>
     </div>
   );
@@ -56,12 +60,92 @@ const LevelsControls = ({ settings, onUpdate }: { settings: LevelsSettings, onUp
 
 const CurvesControls = ({ settings, onUpdate }: { settings: CurvesSettings, onUpdate: (newSettings: Partial<CurvesSettings>) => void }) => {
   const { t } = useLanguage();
+  const graphRef = useRef<HTMLDivElement>(null);
+  const [draggingPointIndex, setDraggingPointIndex] = useState<number | null>(null);
+
+  const getCoords = (e: MouseEvent) => {
+    if (!graphRef.current) return { x: 0, y: 0 };
+    const rect = graphRef.current.getBoundingClientRect();
+    const x = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
+    const y = Math.max(0, Math.min(rect.height, e.clientY - rect.top));
+    return { x: (x / rect.width) * 255, y: 255 - (y / rect.height) * 255 };
+  };
+
+  const handleMouseDown = (e: MouseEvent, index: number) => {
+    e.preventDefault();
+    setDraggingPointIndex(index);
+  };
+
+  const handleMouseMove = (e: MouseEvent) => {
+    if (draggingPointIndex === null) return;
+    const { x, y } = getCoords(e);
+    const newPoints = [...settings.points];
+    // Prevent start/end points from moving horizontally
+    if (draggingPointIndex > 0 && draggingPointIndex < newPoints.length - 1) {
+      newPoints[draggingPointIndex].x = x;
+    }
+    newPoints[draggingPointIndex].y = y;
+    onUpdate({ points: newPoints.sort((a, b) => a.x - b.x) });
+  };
+
+  const handleMouseUp = () => {
+    setDraggingPointIndex(null);
+  };
+  
+  const handleGraphClick = (e: MouseEvent) => {
+      if (e.target !== graphRef.current) return;
+      const { x, y } = getCoords(e);
+      const newPoints = [...settings.points, { x, y }].sort((a, b) => a.x - b.x);
+      onUpdate({ points: newPoints });
+  }
+
   return (
     <div className="space-y-4">
       <div>
         <Label>{t.curves}</Label>
-        {/* Placeholder for curves graph */}
-        <div className="aspect-square bg-muted rounded-md my-2 flex items-center justify-center text-sm text-muted-foreground">{t.preview}</div>
+        <div 
+          ref={graphRef}
+          className="aspect-square bg-muted rounded-md my-2 relative cursor-crosshair"
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+          onClick={handleGraphClick}
+        >
+          {/* Grid lines */}
+          <div className="absolute top-0 left-1/4 w-px h-full bg-foreground/10"></div>
+          <div className="absolute top-0 left-1/2 w-px h-full bg-foreground/20"></div>
+          <div className="absolute top-0 left-3/4 w-px h-full bg-foreground/10"></div>
+          <div className="absolute left-0 top-1/4 h-px w-full bg-foreground/10"></div>
+          <div className="absolute left-0 top-1/2 h-px w-full bg-foreground/20"></div>
+          <div className="absolute left-0 top-3/4 h-px w-full bg-foreground/10"></div>
+          
+          {/* Curve line */}
+          <svg className="absolute top-0 left-0 w-full h-full" viewBox="0 0 255 255" preserveAspectRatio="none">
+            <path 
+              d={`M ${settings.points.map((p, i) => `${i === 0 ? '' : 'L '}${p.x} ${255 - p.y}`).join(' ')}`}
+              stroke="hsl(var(--primary))"
+              strokeWidth="2"
+              fill="none"
+            />
+          </svg>
+
+          {/* Points */}
+          {settings.points.map((point, index) => (
+            <div
+              key={index}
+              className={cn(
+                "absolute w-3 h-3 rounded-full border-2 bg-background cursor-pointer",
+                draggingPointIndex === index ? "border-primary scale-125" : "border-primary/50"
+              )}
+              style={{
+                left: `${(point.x / 255) * 100}%`,
+                top: `${100 - (point.y / 255) * 100}%`,
+                transform: 'translate(-50%, -50%)'
+              }}
+              onMouseDown={(e) => handleMouseDown(e, index)}
+            />
+          ))}
+        </div>
       </div>
     </div>
   );
