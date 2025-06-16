@@ -1,7 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
-import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AdjustmentLayer, HueSaturationSettings, LevelsSettings, CurvesSettings } from "@/types/editor";
 import { useLanguage } from "@/context/LanguageContext";
@@ -82,7 +81,6 @@ const CurvesControls = ({ settings, onUpdate }: { settings: CurvesSettings, onUp
     if (draggingPointIndex === null) return;
     const { x, y, isOutside } = getCoords(e);
     
-    // Delete point if dragged outside (but not start/end points)
     if (isOutside && draggingPointIndex > 0 && draggingPointIndex < settings.points.length - 1) {
         const newPoints = settings.points.filter((_, i) => i !== draggingPointIndex);
         onUpdate({ points: newPoints });
@@ -102,7 +100,7 @@ const CurvesControls = ({ settings, onUpdate }: { settings: CurvesSettings, onUp
     setDraggingPointIndex(null);
   };
   
-  const handleGraphClick = (e: MouseEvent) => {
+  const handleGraphDoubleClick = (e: MouseEvent) => {
       if (e.target !== graphRef.current) return;
       const { x, y } = getCoords(e);
       const newPoints = [...settings.points, { x, y }].sort((a, b) => a.x - b.x);
@@ -131,7 +129,7 @@ const CurvesControls = ({ settings, onUpdate }: { settings: CurvesSettings, onUp
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
-          onClick={handleGraphClick}
+          onDoubleClick={handleGraphDoubleClick}
         >
           {/* Grid lines */}
           <div className="absolute top-0 left-1/4 w-px h-full bg-foreground/10"></div>
