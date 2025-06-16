@@ -1,12 +1,12 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { GoogleGenAI, Content, Part } from 'https://esm.sh/@google/genai@0.15.0';
+import { GoogleGenAI, Content, Part, GenerationResult } from 'https://esm.sh/@google/genai@0.15.0';
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-const MODEL_NAME = "gemini-2.5-flash-preview-05-20";
+const MODEL_NAME = "gemini-1.5-flash-latest"; // Using latest flash model
 const BUCKET_NAME = 'mira-agent-user-uploads';
 
 const corsHeaders = {
@@ -125,6 +125,20 @@ serve(async (req) => {
     });
     const duration = Date.now() - startTime;
     console.log(`[SegmentGarment][${requestId}] Received response from Gemini after ${duration}ms.`);
+
+    if (!result.text) {
+        console.error(`[SegmentGarment][${requestId}] Gemini response was empty. Full response object:`, JSON.stringify(result, null, 2));
+        const blockReason = result.response?.promptFeedback?.blockReason;
+        const blockMessage = result.response?.promptFeedback?.blockReasonMessage;
+        let errorMessage = "The AI model failed to return a valid response.";
+        if (blockReason) {
+            errorMessage += ` Reason: ${blockReason}.`;
+        }
+        if (blockMessage) {
+            errorMessage += ` Details: ${blockMessage}`;
+        }
+        throw new Error(errorMessage);
+    }
 
     const responseJson = extractJson(result.text, requestId);
     const segmentationResult = responseJson.segmentation_result;
