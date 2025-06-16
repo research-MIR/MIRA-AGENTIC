@@ -13,10 +13,25 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// --- EXPERIMENT: Temporarily simplified system prompt ---
-const systemPrompt = `You are an image analysis AI. Your task is to analyze the provided image and return a JSON object describing it. The JSON should contain a description and a list of segmentation masks where each entry contains the 2D bounding box in the key "box_2d" and the text label in the key "label". Use descriptive labels.`;
+const systemPrompt = `You are a precise image segmentation AI. Your task is to analyze the provided image and return a JSON object containing a description and ONLY ONE segmentation mask.
 
-// --- EXPERIMENT: Temporarily simplified response schema (NO MASK) ---
+### CRITICAL RULES:
+1.  **SINGLE MASK ONLY:** You MUST return one and only one item in the 'masks' array.
+2.  **COMBINED MASK:** The single mask MUST enclose the main person and their primary garment(s) as a single object. Do not segment individual items of clothing.
+3.  **LABEL:** The label for this single mask must be "person_with_garment".
+
+### Example Output:
+{
+  "description": "A close-up shot of a golden retriever puppy playing in a field of green grass.",
+  "masks": [
+    {
+      "box_2d": [100, 150, 800, 850],
+      "label": "person_with_garment",
+      "mask": "iVBORw0KGgoAAAANSUhEUg..."
+    }
+  ]
+}`;
+
 const responseSchema = {
   type: Type.OBJECT,
   properties: {
@@ -26,7 +41,7 @@ const responseSchema = {
     },
     'masks': {
         type: Type.ARRAY,
-        description: "A list of segmentation masks.",
+        description: "A list containing a single segmentation mask for the person and their garment.",
         items: {
             type: Type.OBJECT,
             properties: {
@@ -38,9 +53,13 @@ const responseSchema = {
                 'label': {
                     type: Type.STRING,
                     description: "A descriptive label for the segmented object."
+                },
+                'mask': {
+                    type: Type.STRING,
+                    description: "The base64 encoded mask of the segmented object."
                 }
             },
-            required: ['box_2d', 'label']
+            required: ['box_2d', 'label', 'mask']
         }
     }
   },
@@ -57,7 +76,7 @@ function extractJson(text: string): any {
 
 serve(async (req) => {
   const reqId = `req_${Date.now()}`;
-  console.log(`[SegmentAI Log][${reqId}] Function invoked (Experiment: No Mask).`);
+  console.log(`[SegmentAI Log][${reqId}] Function invoked (Attempting single mask).`);
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
@@ -121,9 +140,22 @@ serve(async (req) => {
 
     const rawTextResponse = result.text;
     const responseJson = extractJson(rawTextResponse);
-    console.log(`[SegmentAI Log][${reqId}] Successfully parsed JSON. Found ${responseJson.masks?.length || 0} items.`);
+    console.log(`[SegmentAI Log][${reqId}] Successfully parsed JSON. Found ${responseJson.masks?.length || 0} mask(s).`);
 
-    // No post-processing needed in this experiment as we don't have mask data.
+    // Post-processing to convert base64 mask to a public URL
+    if (responseJson.masks && responseJson.masks.length > 0) {
+        const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
+        for (const mask of responseJson.masks) {
+            if (mask.mask) {
+                const maskBuffer = decodeBase64(mask.mask);
+                const filePath = `${user_id}/masks/mask_${Date.now()}.png`;
+                await supabase.storage.from('mira-agent-user-uploads').upload(filePath, maskBuffer, { contentType: 'image/png', upsert: true });
+                const { data: { publicUrl } } = supabase.storage.from('mira-agent-user-uploads').getPublicUrl(filePath);
+                mask.mask_url = publicUrl; // Add the URL
+                delete mask.mask; // Remove the heavy base64 data
+            }
+        }
+    }
 
     return new Response(JSON.stringify(responseJson), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
