@@ -12,7 +12,6 @@ import { cn } from "@/lib/utils";
 import { useDropzone } from "@/hooks/useDropzone";
 import { optimizeImage } from "@/lib/utils";
 import { RealtimeChannel } from "@supabase/supabase-js";
-import { SegmentationMask } from "@/components/SegmentationMask";
 
 interface MaskItem {
   box_2d: [number, number, number, number];
@@ -69,11 +68,48 @@ const VirtualTryOn = () => {
   const [isPersonDragging, setIsPersonDragging] = useState(false);
   const [isGarmentDragging, setIsGarmentDragging] = useState(false);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
-  const [personImageDimensions, setPersonImageDimensions] = useState<{ width: number; height: number } | null>(null);
+  const [croppedImageUrl, setCroppedImageUrl] = useState<string | null>(null);
+  const [cropMetadata, setCropMetadata] = useState<MaskItem | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
 
   const personImageUrl = useMemo(() => personImageFile ? URL.createObjectURL(personImageFile) : null, [personImageFile]);
   const garmentImageUrl = useMemo(() => garmentImageFile ? URL.createObjectURL(garmentImageFile) : null, [garmentImageFile]);
+
+  const processImageCrop = useCallback((imageSrc: string, mask: MaskItem) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        const [y_min, x_min, y_max, x_max] = mask.box_2d;
+        const cropX = (x_min / 1000) * img.naturalWidth;
+        const cropY = (y_min / 1000) * img.naturalHeight;
+        const cropWidth = ((x_max - x_min) / 1000) * img.naturalWidth;
+        const cropHeight = ((y_max - y_min) / 1000) * img.naturalHeight;
+
+        canvas.width = cropWidth;
+        canvas.height = cropHeight;
+
+        ctx.drawImage(img, cropX, cropY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
+
+        // Make it black and white for testing
+        const imageData = ctx.getImageData(0, 0, cropWidth, cropHeight);
+        const data = imageData.data;
+        for (let i = 0; i < data.length; i += 4) {
+            const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
+            data[i] = avg;
+            data[i + 1] = avg;
+            data[i + 2] = avg;
+        }
+        ctx.putImageData(imageData, 0, 0);
+
+        setCroppedImageUrl(canvas.toDataURL());
+        setCropMetadata(mask);
+    };
+    img.src = imageSrc;
+  }, []);
 
   useEffect(() => {
     if (!activeJobId) {
@@ -103,6 +139,9 @@ const VirtualTryOn = () => {
             setIsLoading(false);
             showSuccess("Analysis complete!");
             setActiveJobId(null);
+            if (job.result.masks && job.result.masks.length > 0 && personImageUrl) {
+              processImageCrop(personImageUrl, job.result.masks[0]);
+            }
           } else if (job.status === 'failed') {
             showError(`Analysis failed: ${job.error_message}`);
             setIsLoading(false);
@@ -120,7 +159,7 @@ const VirtualTryOn = () => {
         channelRef.current = null;
       }
     };
-  }, [activeJobId, supabase]);
+  }, [activeJobId, supabase, personImageUrl, processImageCrop]);
 
   const uploadFileAndGetUrl = async (file: File | null, bucket: string): Promise<string | null> => {
     if (!file) return null;
@@ -135,12 +174,29 @@ const VirtualTryOn = () => {
     return publicUrl;
   };
 
+  const handleFileSelect = (file: File, type: 'person' | 'garment') => {
+    if (file.type.startsWith('video/') || file.type === 'image/avif') {
+      showError("Unsupported file type. AVIF and video formats are not allowed.");
+      return;
+    }
+    setSegmentationResult(null);
+    setCroppedImageUrl(null);
+    setCropMetadata(null);
+    if (type === 'person') {
+      setPersonImageFile(file);
+    } else {
+      setGarmentImageFile(file);
+    }
+  };
+
   const handleSegment = async () => {
     if (!personImageFile || !garmentImageFile) {
       return showError("Please upload both a person and a garment image.");
     }
     setIsLoading(true);
     setSegmentationResult(null);
+    setCroppedImageUrl(null);
+    setCropMetadata(null);
     const toastId = showLoading("Uploading images and queueing job...");
 
     try {
@@ -186,8 +242,8 @@ const VirtualTryOn = () => {
           <Card>
             <CardHeader><CardTitle>1. Upload Images</CardTitle></CardHeader>
             <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <ImageUploader onFileSelect={setPersonImageFile} title="Person Image" isDraggingOver={isPersonDragging} t={t} />
-              <ImageUploader onFileSelect={setGarmentImageFile} title="Garment Image" isDraggingOver={isGarmentDragging} t={t} />
+              <ImageUploader onFileSelect={(file) => handleFileSelect(file, 'person')} title="Person Image" isDraggingOver={isPersonDragging} t={t} />
+              <ImageUploader onFileSelect={(file) => handleFileSelect(file, 'garment')} title="Garment Image" isDraggingOver={isGarmentDragging} t={t} />
             </CardContent>
           </Card>
           <Card>
@@ -211,20 +267,27 @@ const VirtualTryOn = () => {
                 <div className="relative">
                   <h3 className="font-semibold text-center mb-2">Person</h3>
                   {personImageUrl ? (
-                    <img 
-                      src={personImageUrl} 
-                      alt="Person" 
-                      className="w-full rounded-md" 
-                      onLoad={(e) => setPersonImageDimensions({ width: e.currentTarget.naturalWidth, height: e.currentTarget.naturalHeight })}
-                    />
+                    <div className="relative">
+                      <img 
+                        src={personImageUrl} 
+                        alt="Person" 
+                        className="w-full rounded-md"
+                      />
+                      {croppedImageUrl && cropMetadata && (
+                        <img
+                          src={croppedImageUrl}
+                          alt="Processed Crop"
+                          className="absolute pointer-events-none"
+                          style={{
+                            top: `${(cropMetadata.box_2d[0] / 1000) * 100}%`,
+                            left: `${(cropMetadata.box_2d[1] / 1000) * 100}%`,
+                            width: `${((cropMetadata.box_2d[3] - cropMetadata.box_2d[1]) / 1000) * 100}%`,
+                            height: `${((cropMetadata.box_2d[2] - cropMetadata.box_2d[0]) / 1000) * 100}%`,
+                          }}
+                        />
+                      )}
+                    </div>
                   ) : <div className="aspect-square bg-muted rounded-md flex items-center justify-center"><ImageIcon className="h-12 w-12 text-muted-foreground" /></div>}
-                  {segmentationResult && personImageDimensions && (
-                    <SegmentationMask 
-                      masks={segmentationResult.masks} 
-                      width={personImageDimensions.width} 
-                      height={personImageDimensions.height} 
-                    />
-                  )}
                 </div>
                 <div>
                   <h3 className="font-semibold text-center mb-2">Garment</h3>
