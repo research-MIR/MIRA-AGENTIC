@@ -182,9 +182,6 @@ const VirtualTryOn = () => {
     const fetchAndSetUrls = async () => {
         if (selectedJob) {
             setIsJobImageLoading(true);
-            setPersonImageBlobUrl(null);
-            setGarmentImageBlobUrl(null);
-
             try {
                 const personPath = new URL(selectedJob.source_person_image_url).pathname.split('/public/mira-agent-user-uploads/')[1];
                 if (personPath) {
