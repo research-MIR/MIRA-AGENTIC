@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
+import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -22,9 +23,11 @@ serve(async (req) => {
     }
 
     const blob = await response.blob();
+    const buffer = await blob.arrayBuffer();
+    const base64 = encodeBase64(buffer);
     
-    return new Response(blob, {
-      headers: { ...corsHeaders, 'Content-Type': blob.type || 'application/octet-stream' },
+    return new Response(JSON.stringify({ base64, mimeType: blob.type }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });
 

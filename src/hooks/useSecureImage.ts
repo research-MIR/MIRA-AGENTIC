@@ -19,7 +19,6 @@ export const useSecureImage = (imageUrl: string | null | undefined) => {
       setError(null);
 
       try {
-        let blob: Blob;
         if (imageUrl.includes('supabase.co')) {
           const url = new URL(imageUrl);
           const bucketIdentifier = '/public/mira-agent-user-uploads/';
@@ -28,15 +27,18 @@ export const useSecureImage = (imageUrl: string | null | undefined) => {
           const storagePath = decodeURIComponent(url.pathname.substring(pathStartIndex + bucketIdentifier.length));
           const { data, error } = await supabase.storage.from('mira-agent-user-uploads').download(storagePath);
           if (error) throw error;
-          blob = data;
+          objectUrl = URL.createObjectURL(data);
+          setDisplayUrl(objectUrl);
         } else {
-          // Use a proxy for external URLs to avoid CORS issues in the browser
+          // Use the proxy for external URLs
           const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-image-download', { body: { url: imageUrl } });
-          if (error) throw new Error(`Image proxy failed: ${error.message || 'Unknown error'}`);
-          blob = data;
+          if (error) throw new Error(`Proxy failed: ${error.message}`);
+          if (data.base64 && data.mimeType) {
+            setDisplayUrl(`data:${data.mimeType};base64,${data.base64}`);
+          } else {
+            throw new Error("Proxy did not return valid image data.");
+          }
         }
-        objectUrl = URL.createObjectURL(blob);
-        setDisplayUrl(objectUrl);
       } catch (err: any) {
         console.error(`Failed to load image from ${imageUrl}:`, err);
         setError(err.message);
