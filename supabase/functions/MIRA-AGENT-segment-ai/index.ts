@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { GoogleGenAI, Type, Part, Content, createPartFromUri } from 'https://esm.sh/@google/genai@0.15.0';
+import { GoogleGenAI, Type, Part, createPartFromUri } from 'https://esm.sh/@google/genai@0.15.0';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
@@ -13,20 +13,10 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const systemPrompt = `You are an image analysis AI. Your task is to analyze the provided image and return a JSON object describing it. The JSON should contain a description and a list of segmentation masks where each entry contains the 2D bounding box in the key "box_2d", the segmentation mask in key "mask", and the text label in the key "label". Use descriptive labels.
+// --- EXPERIMENT: Temporarily simplified system prompt ---
+const systemPrompt = `You are an image analysis AI. Your task is to analyze the provided image and return a JSON object describing it. The JSON should contain a description and a list of segmentation masks where each entry contains the 2D bounding box in the key "box_2d" and the text label in the key "label". Use descriptive labels.`;
 
-Example Output:
-{
-  "description": "A close-up shot of a golden retriever puppy playing in a field of green grass.",
-  "masks": [
-    {
-      "box_2d": [100, 150, 800, 850],
-      "label": "golden_retriever",
-      "mask": "iVBORw0KGgoAAAANSUhEUg..."
-    }
-  ]
-}`;
-
+// --- EXPERIMENT: Temporarily simplified response schema (NO MASK) ---
 const responseSchema = {
   type: Type.OBJECT,
   properties: {
@@ -48,13 +38,9 @@ const responseSchema = {
                 'label': {
                     type: Type.STRING,
                     description: "A descriptive label for the segmented object."
-                },
-                'mask': {
-                    type: Type.STRING,
-                    description: "A base64 encoded PNG string of the segmentation mask."
                 }
             },
-            required: ['box_2d', 'label', 'mask']
+            required: ['box_2d', 'label']
         }
     }
   },
@@ -71,7 +57,7 @@ function extractJson(text: string): any {
 
 serve(async (req) => {
   const reqId = `req_${Date.now()}`;
-  console.log(`[SegmentAI Log][${reqId}] Function invoked.`);
+  console.log(`[SegmentAI Log][${reqId}] Function invoked (Experiment: No Mask).`);
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
@@ -87,7 +73,6 @@ serve(async (req) => {
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
-    // --- New Files API Logic ---
     console.log(`[SegmentAI Log][${reqId}] Uploading file to Google Files API...`);
     const imageBuffer = decodeBase64(base64_image_data);
     const imageBlob = new Blob([imageBuffer], { type: mime_type });
@@ -99,19 +84,24 @@ serve(async (req) => {
     console.log(`[SegmentAI Log][${reqId}] File upload initiated. File name: ${uploadResult.name}`);
 
     let file = await ai.files.get({ name: uploadResult.name as string });
-    while (file.state === 'PROCESSING') {
-        console.log(`[SegmentAI Log][${reqId}] File is still processing. Retrying in 3 seconds...`);
+    let retries = 0;
+    const maxRetries = 10; // Poll for 30 seconds max
+    while (file.state === 'PROCESSING' && retries < maxRetries) {
+        console.log(`[SegmentAI Log][${reqId}] File is still processing. Retrying in 3 seconds... (Attempt ${retries + 1}/${maxRetries})`);
         await new Promise(resolve => setTimeout(resolve, 3000));
         file = await ai.files.get({ name: uploadResult.name as string });
+        retries++;
     }
 
     if (file.state === 'FAILED') {
         throw new Error('File processing failed on Google\'s side.');
     }
+    if (file.state !== 'ACTIVE') {
+        throw new Error(`File processing timed out after ${retries * 3} seconds. Last state: ${file.state}`);
+    }
     console.log(`[SegmentAI Log][${reqId}] File is now ACTIVE. URI: ${file.uri}`);
     
     const imagePart = createPartFromUri(file.uri, file.mimeType);
-    // --- End of New Files API Logic ---
 
     const requestPayload = {
         model: MODEL_NAME,
@@ -127,39 +117,13 @@ serve(async (req) => {
 
     console.log(`[SegmentAI Log][${reqId}] Calling Gemini API with file reference...`);
     const result = await ai.models.generateContent(requestPayload);
+    console.log(`[SegmentAI Log][${reqId}] Successfully received response from Gemini API.`);
 
-    console.log(`[SegmentAI Log][${reqId}] Received raw response from Gemini API.`);
     const rawTextResponse = result.text;
-    
     const responseJson = extractJson(rawTextResponse);
-    console.log(`[SegmentAI Log][${reqId}] Successfully parsed JSON. Found ${responseJson.masks?.length || 0} masks.`);
+    console.log(`[SegmentAI Log][${reqId}] Successfully parsed JSON. Found ${responseJson.masks?.length || 0} items.`);
 
-    console.log(`[SegmentAI Log][${reqId}] Starting post-processing to convert masks to URLs.`);
-    const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-
-    for (const maskItem of responseJson.masks) {
-        if (maskItem.mask) {
-            const maskBuffer = decodeBase64(maskItem.mask);
-            const filePath = `${user_id}/masks/${Date.now()}_${maskItem.label.replace(/[^a-zA-Z0-9]/g, '_')}.png`;
-            
-            const { error: uploadError } = await supabase.storage
-                .from('mira-agent-user-uploads')
-                .upload(filePath, maskBuffer, { contentType: 'image/png', upsert: true });
-
-            if (uploadError) {
-                console.error(`[SegmentAI Log][${reqId}] Failed to upload mask to storage:`, uploadError);
-                continue;
-            }
-
-            const { data: { publicUrl } } = supabase.storage
-                .from('mira-agent-user-uploads')
-                .getPublicUrl(filePath);
-            
-            maskItem.mask_url = publicUrl;
-            delete maskItem.mask;
-        }
-    }
-    console.log(`[SegmentAI Log][${reqId}] Finished post-processing.`);
+    // No post-processing needed in this experiment as we don't have mask data.
 
     return new Response(JSON.stringify(responseJson), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
