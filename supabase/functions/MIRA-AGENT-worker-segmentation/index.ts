@@ -1,12 +1,12 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { GoogleGenAI, Content, Part, GenerationResult } from 'https://esm.sh/@google/genai@0.15.0';
+import { GoogleGenAI, Content, Part } from 'https://esm.sh/@google/genai@0.15.0';
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-const MODEL_NAME = "gemini-2.5-pro-preview-06-05"; // Using the correct, more powerful model
+const MODEL_NAME = "gemini-1.5-pro-latest";
 const BUCKET_NAME = 'mira-agent-user-uploads';
 
 const corsHeaders = {
@@ -46,14 +46,14 @@ The value of this key must be an object with the following structure:
 `;
 
 async function downloadImageAsPart(supabase: SupabaseClient, imageUrl: string, label: string, requestId: string): Promise<Part[]> {
-    console.log(`[SegmentGarment][${requestId}] Downloading image for '${label}' from URL: ${imageUrl}`);
+    console.log(`[SegmentWorker][${requestId}] Downloading image for '${label}' from URL: ${imageUrl}`);
     const url = new URL(imageUrl);
     const rawPath = url.pathname.split(`/${BUCKET_NAME}/`)[1];
     if (!rawPath) {
         throw new Error(`Could not parse file path from URL: ${imageUrl}`);
     }
     const filePath = decodeURIComponent(rawPath);
-    console.log(`[SegmentGarment][${requestId}] Parsed and decoded storage path: ${filePath}`);
+    console.log(`[SegmentWorker][${requestId}] Parsed and decoded storage path: ${filePath}`);
 
     const { data: fileBlob, error: downloadError } = await supabase.storage.from(BUCKET_NAME).download(filePath);
     if (downloadError) throw new Error(`Supabase download failed for ${filePath}: ${downloadError.message}`);
@@ -61,7 +61,7 @@ async function downloadImageAsPart(supabase: SupabaseClient, imageUrl: string, l
     const mimeType = fileBlob.type;
     const buffer = await fileBlob.arrayBuffer();
     const base64 = encodeBase64(buffer);
-    console.log(`[SegmentGarment][${requestId}] Successfully downloaded and encoded '${label}'. Size: ${buffer.byteLength} bytes.`);
+    console.log(`[SegmentWorker][${requestId}] Successfully downloaded and encoded '${label}'. Size: ${buffer.byteLength} bytes.`);
 
     return [
         { text: `--- ${label} ---` },
@@ -70,44 +70,50 @@ async function downloadImageAsPart(supabase: SupabaseClient, imageUrl: string, l
 }
 
 function extractJson(text: string, requestId: string): any {
-    console.log(`[SegmentGarment][${requestId}] Attempting to extract JSON from model response.`);
+    console.log(`[SegmentWorker][${requestId}] Attempting to extract JSON from model response.`);
     const match = text.match(/```json\s*([\s\S]*?)\s*```/);
     if (match && match[1]) {
-        console.log(`[SegmentGarment][${requestId}] Found JSON in markdown block.`);
+        console.log(`[SegmentWorker][${requestId}] Found JSON in markdown block.`);
         return JSON.parse(match[1]);
     }
     try {
-        console.log(`[SegmentGarment][${requestId}] Attempting to parse raw text as JSON.`);
+        console.log(`[SegmentWorker][${requestId}] Attempting to parse raw text as JSON.`);
         return JSON.parse(text);
     } catch (e) {
-        console.error(`[SegmentGarment][${requestId}] Failed to parse JSON from model response. Raw text:`, text);
+        console.error(`[SegmentWorker][${requestId}] Failed to parse JSON from model response. Raw text:`, text);
         throw new Error("The model returned a response that could not be parsed as JSON.");
     }
 }
 
 serve(async (req) => {
-  const requestId = req.headers.get("x-request-id") || `segment-${Date.now()}`;
-  console.log(`[SegmentGarment][${requestId}] Function invoked.`);
-
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
+  const { job_id } = await req.json();
+  if (!job_id) {
+    return new Response(JSON.stringify({ error: "job_id is required." }), { status: 400, headers: corsHeaders });
+  }
+
+  const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
+
   try {
-    const { person_image_url, garment_image_url, user_prompt } = await req.json();
-    console.log(`[SegmentGarment][${requestId}] Request body parsed successfully.`);
+    await supabase.from('mira-agent-segmentation-jobs').update({ status: 'processing' }).eq('id', job_id);
 
-    if (!person_image_url || !garment_image_url) {
-      throw new Error("person_image_url and garment_image_url are required.");
-    }
+    const { data: job, error: fetchError } = await supabase
+      .from('mira-agent-segmentation-jobs')
+      .select('*')
+      .eq('id', job_id)
+      .single();
 
-    const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
+    if (fetchError) throw fetchError;
+
+    const { person_image_url, garment_image_url, user_prompt } = job;
+
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
-    console.log(`[SegmentGarment][${requestId}] Downloading images...`);
-    const personParts = await downloadImageAsPart(supabase, person_image_url, "PERSON IMAGE", requestId);
-    const garmentParts = await downloadImageAsPart(supabase, garment_image_url, "GARMENT IMAGE", requestId);
-    console.log(`[SegmentGarment][${requestId}] All images downloaded.`);
+    const personParts = await downloadImageAsPart(supabase, person_image_url, "PERSON IMAGE", job_id);
+    const garmentParts = await downloadImageAsPart(supabase, garment_image_url, "GARMENT IMAGE", job_id);
 
     const userParts: Part[] = [...personParts, ...garmentParts];
     if (user_prompt) {
@@ -115,47 +121,49 @@ serve(async (req) => {
         userParts.push({ text: user_prompt });
     }
 
-    console.log(`[SegmentGarment][${requestId}] Calling Gemini for segmentation with model ${MODEL_NAME}.`);
-    const startTime = Date.now();
+    console.log(`[SegmentWorker][${job_id}] Calling Gemini for segmentation with model ${MODEL_NAME}.`);
     const result = await ai.models.generateContent({
         model: MODEL_NAME,
         contents: [{ role: 'user', parts: userParts }],
         generationConfig: { responseMimeType: "application/json" },
         config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
     });
-    const duration = Date.now() - startTime;
-    console.log(`[SegmentGarment][${requestId}] Received response from Gemini after ${duration}ms.`);
 
     if (!result.text) {
-        console.error(`[SegmentGarment][${requestId}] Gemini response was empty. Full response object:`, JSON.stringify(result, null, 2));
+        console.error(`[SegmentWorker][${job_id}] Gemini response was empty. Full response object:`, JSON.stringify(result, null, 2));
         const blockReason = result.response?.promptFeedback?.blockReason;
         const blockMessage = result.response?.promptFeedback?.blockReasonMessage;
         let errorMessage = "The AI model failed to return a valid response.";
-        if (blockReason) {
-            errorMessage += ` Reason: ${blockReason}.`;
-        }
-        if (blockMessage) {
-            errorMessage += ` Details: ${blockMessage}`;
-        }
+        if (blockReason) errorMessage += ` Reason: ${blockReason}.`;
+        if (blockMessage) errorMessage += ` Details: ${blockMessage}`;
         throw new Error(errorMessage);
     }
 
-    const responseJson = extractJson(result.text, requestId);
+    const responseJson = extractJson(result.text, job_id);
     const segmentationResult = responseJson.segmentation_result;
 
     if (!segmentationResult || !segmentationResult.mask) {
       throw new Error("AI did not return a valid segmentation result in the JSON payload.");
     }
 
-    console.log(`[SegmentGarment][${requestId}] Segmentation successful. Label: "${segmentationResult.label}". Sending response.`);
+    await supabase.from('mira-agent-segmentation-jobs').update({
+      status: 'complete',
+      result: segmentationResult
+    }).eq('id', job_id);
 
-    return new Response(JSON.stringify({ segmentation_result: segmentationResult }), {
+    console.log(`[SegmentWorker][${job_id}] Job complete. Result stored in database.`);
+
+    return new Response(JSON.stringify({ success: true }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });
 
   } catch (error) {
-    console.error(`[SegmentGarment][${requestId}] Error:`, error);
+    console.error(`[SegmentWorker][${job_id}] Error:`, error);
+    await supabase.from('mira-agent-segmentation-jobs').update({
+      status: 'failed',
+      error_message: error.message
+    }).eq('id', job_id);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,

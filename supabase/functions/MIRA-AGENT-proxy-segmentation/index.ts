@@ -36,7 +36,7 @@ serve(async (req) => {
 
     if (insertError) throw insertError;
 
-    // Asynchronously invoke the worker function
+    // Asynchronously invoke the worker function without awaiting it
     supabase.functions.invoke('MIRA-AGENT-worker-segmentation', {
       body: { job_id: newJob.id }
     }).catch(console.error);
