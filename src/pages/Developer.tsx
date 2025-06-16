@@ -101,9 +101,8 @@ const Developer = () => {
                     <img src={segPersonImageUrl} alt="Segmentation Source" className="w-full h-auto rounded-md" />
                     {(() => {
                       if (segmentationResult) {
-                        console.log('[Developer.tsx] Rendering SegmentationMask. segmentationResult is:', JSON.stringify(segmentationResult, null, 2));
-                        console.log('[Developer.tsx] segmentationResult.masks is:', segmentationResult.masks);
-                        return <SegmentationMask masks={segmentationResult.masks} />;
+                        const masks = Array.isArray(segmentationResult) ? segmentationResult : segmentationResult.masks;
+                        return <SegmentationMask masks={masks} />;
                       }
                       return null;
                     })()}
