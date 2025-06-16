@@ -318,14 +318,14 @@ const VirtualTryOn = () => {
                   <RadioGroupItem value="edit" id="mode-edit" />
                   <Label htmlFor="mode-edit" className="flex flex-col">
                     <span>Creative Edit</span>
-                    <span className="font-normal text-xs text-muted-foreground">Re-imagine the scene with a new pose and style.</span>
+                    <span className="font-normal text-xs text-muted-foreground">Swap the garment onto the existing pose.</span>
                   </Label>
                 </div>
                 <div className="flex items-center space-x-2">
                   <RadioGroupItem value="vton" id="mode-vton" />
                   <Label htmlFor="mode-vton" className="flex flex-col">
                     <span>Virtual Try-On</span>
-                    <span className="font-normal text-xs text-muted-foreground">Swap the garment onto the existing pose.</span>
+                    <span className="font-normal text-xs text-muted-foreground">Re-imagine the scene with a new pose and style.</span>
                   </Label>
                 </div>
               </RadioGroup>
