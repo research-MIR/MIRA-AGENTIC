@@ -133,11 +133,6 @@ const VirtualTryOn = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
-  
-  const selectedJobIdRef = useRef(selectedJobId);
-  useEffect(() => {
-    selectedJobIdRef.current = selectedJobId;
-  }, [selectedJobId]);
 
   const { data: recentJobs, isLoading: isLoadingRecentJobs } = useQuery<VtoPipelineJob[]>({
     queryKey: ['vtoPipelineJobs', session?.user?.id],
@@ -171,25 +166,32 @@ const VirtualTryOn = () => {
   });
 
   useEffect(() => {
-    if (!session?.user) return;
-    const channelName = `vto-pipeline-jobs-tracker-${session.user.id}`;
-    
-    if (channelRef.current && channelRef.current.topic === `realtime:public:mira-agent-vto-pipeline-jobs:user_id=eq.${session.user.id}`) {
-        return;
+    if (channelRef.current) {
+      supabase.removeChannel(channelRef.current);
+      channelRef.current = null;
     }
 
-    const channel = supabase.channel(channelName)
+    if (!session?.user) return;
+
+    const channel = supabase.channel(`vto-pipeline-jobs-tracker-${session.user.id}`)
       .on<VtoPipelineJob>(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'mira-agent-vto-pipeline-jobs', filter: `user_id=eq.${session.user.id}` },
         (payload) => {
-          queryClient.invalidateQueries({ queryKey: ['vtoPipelineJobs'] });
-          if (payload.new.id === selectedJobIdRef.current) {
-            queryClient.invalidateQueries({ queryKey: ['vtoPipelineJob', selectedJobIdRef.current] });
-          }
+          console.log('[VTO Realtime] Update received:', payload.eventType, payload.new.id);
+          queryClient.invalidateQueries({ queryKey: ['vtoPipelineJobs', session.user?.id] });
+          queryClient.invalidateQueries({ queryKey: ['vtoPipelineJob', payload.new.id] });
         }
       )
-      .subscribe();
+      .subscribe((status, err) => {
+        if (status === 'SUBSCRIBED') {
+          console.log(`[VTO Realtime] Successfully subscribed to channel.`);
+        }
+        if (err) {
+          console.error('[VTO Realtime] Subscription error:', err);
+        }
+      });
+      
     channelRef.current = channel;
 
     return () => {
