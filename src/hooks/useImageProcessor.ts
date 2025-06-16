@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Layer, HSLAdjustment, LevelsAdjustment } from '@/types/editor';
+import { Layer, HSLAdjustment, LevelsAdjustment, PaintLayer } from '@/types/editor';
 import { rgbToHsl, hslToRgb } from '@/lib/colorUtils';
 
 const applyHsl = (imageData: ImageData, settings: HSLAdjustment[]) => {
@@ -59,6 +59,7 @@ const applyLevels = (imageData: ImageData, settings: LevelsAdjustment) => {
 export const useImageProcessor = (
   baseImage: HTMLImageElement | null,
   layers: Layer[],
+  layerCanvases: Map<string, HTMLCanvasElement>,
   canvasRef: React.RefObject<HTMLCanvasElement>
 ) => {
   useEffect(() => {
@@ -71,26 +72,41 @@ export const useImageProcessor = (
     canvas.width = baseImage.naturalWidth;
     canvas.height = baseImage.naturalHeight;
 
-    ctx.drawImage(baseImage, 0, 0);
+    // Start with a fresh copy of the base image
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = canvas.width;
+    tempCanvas.height = canvas.height;
+    const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
+    if (!tempCtx) return;
+    
+    tempCtx.drawImage(baseImage, 0, 0);
 
-    if (layers.length === 0) return;
-
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-
+    // Apply layers in order
     layers.forEach(layer => {
       if (!layer.visible) return;
 
-      switch (layer.type) {
-        case 'hsl':
+      if (layer.type === 'hsl' || layer.type === 'levels') {
+        const imageData = tempCtx.getImageData(0, 0, canvas.width, canvas.height);
+        if (layer.type === 'hsl') {
           applyHsl(imageData, layer.settings as HSLAdjustment[]);
-          break;
-        case 'levels':
+        } else {
           applyLevels(imageData, layer.settings as LevelsAdjustment);
-          break;
+        }
+        tempCtx.putImageData(imageData, 0, 0);
+      } else if (layer.type === 'dodge-burn') {
+        const paintCanvas = layerCanvases.get(layer.id);
+        if (paintCanvas) {
+          tempCtx.globalCompositeOperation = 'color-dodge';
+          tempCtx.drawImage(paintCanvas, 0, 0);
+          tempCtx.globalCompositeOperation = 'color-burn';
+          tempCtx.drawImage(paintCanvas, 0, 0);
+          tempCtx.globalCompositeOperation = 'source-over'; // Reset blend mode
+        }
       }
     });
 
-    ctx.putImageData(imageData, 0, 0);
+    // Draw the final result to the visible canvas
+    ctx.drawImage(tempCanvas, 0, 0);
 
-  }, [baseImage, layers, canvasRef]);
+  }, [baseImage, layers, layerCanvases, canvasRef]);
 };
