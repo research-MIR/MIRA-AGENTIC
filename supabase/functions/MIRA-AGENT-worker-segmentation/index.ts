@@ -1,7 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { GoogleGenAI, Part } from 'https://esm.sh/@google/genai@0.15.0';
-import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
@@ -28,25 +27,6 @@ You MUST return a single, valid JSON object with the following structure:
 - "mask": A base64 encoded string of a PNG image representing the segmentation mask of the garment.
 
 Analyze the images and provide the single JSON object as your output.`;
-
-async function downloadImageAsPart(supabase: SupabaseClient, imageUrl: string, label: string): Promise<Part[]> {
-    const url = new URL(imageUrl);
-    const bucketName = 'mira-agent-user-uploads';
-    const filePath = url.pathname.split(`/${bucketName}/`)[1];
-    if (!filePath) throw new Error(`Could not parse file path from URL: ${imageUrl}`);
-
-    const { data: fileBlob, error: downloadError } = await supabase.storage.from(bucketName).download(filePath);
-    if (downloadError) throw new Error(`Supabase download failed for ${filePath}: ${downloadError.message}`);
-
-    const mimeType = fileBlob.type;
-    const buffer = await fileBlob.arrayBuffer();
-    const base64 = encodeBase64(buffer);
-
-    return [
-        { text: `--- ${label} ---` },
-        { inlineData: { mimeType, data: base64 } }
-    ];
-}
 
 function extractJson(text: string): any {
     // First, try to find a JSON markdown block
@@ -85,40 +65,24 @@ function extractJson(text: string): any {
 serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
 
-  const { job_id } = await req.json();
-  if (!job_id) {
-    return new Response(JSON.stringify({ error: "job_id is required." }), { status: 400, headers: corsHeaders });
+  const { job_id, person_image_base64, person_image_mime, garment_image_base64, garment_image_mime, user_prompt } = await req.json();
+  if (!job_id || !person_image_base64 || !garment_image_base64) {
+    return new Response(JSON.stringify({ error: "job_id and image data are required." }), { status: 400, headers: corsHeaders });
   }
 
-  console.log(`[SegmentationWorker][${job_id}] Invoked.`);
+  console.log(`[SegmentationWorker][${job_id}] Invoked with image data.`);
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
 
   try {
-    console.log(`[SegmentationWorker][${job_id}] Fetching job details...`);
-    const { data: job, error: fetchError } = await supabase
-      .from('mira-agent-segmentation-jobs')
-      .select('person_image_url, garment_image_url, user_prompt')
-      .eq('id', job_id)
-      .single();
-
-    if (fetchError) throw fetchError;
-    console.log(`[SegmentationWorker][${job_id}] Job details fetched successfully.`);
-
-    console.log(`[SegmentationWorker][${job_id}] Downloading person image from: ${job.person_image_url}`);
-    const personParts = await downloadImageAsPart(supabase, job.person_image_url, "Person Image");
-    console.log(`[SegmentationWorker][${job_id}] Person image downloaded.`);
-
-    console.log(`[SegmentationWorker][${job_id}] Downloading garment image from: ${job.garment_image_url}`);
-    const garmentParts = await downloadImageAsPart(supabase, job.garment_image_url, "Garment Image");
-    console.log(`[SegmentationWorker][${job_id}] Garment image downloaded.`);
-
     const userParts: Part[] = [
-        ...personParts,
-        ...garmentParts
+        { text: `--- Person Image ---` },
+        { inlineData: { mimeType: person_image_mime, data: person_image_base64 } },
+        { text: `--- Garment Image ---` },
+        { inlineData: { mimeType: garment_image_mime, data: garment_image_base64 } }
     ];
 
-    if (job.user_prompt) {
-        userParts.push({ text: `Additional user instructions: ${job.user_prompt}` });
+    if (user_prompt) {
+        userParts.push({ text: `Additional user instructions: ${user_prompt}` });
     }
 
     console.log(`[SegmentationWorker][${job_id}] Calling Gemini model...`);
