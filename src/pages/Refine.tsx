@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { Skeleton } from "@/components/ui/skeleton";
-import { UploadCloud, Wand2, Loader2, GitCompareArrows, X, Info } from "lucide-react";
+import { UploadCloud, Wand2, Loader2, GitCompareArrows, X } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useLanguage } from "@/context/LanguageContext";
@@ -20,7 +20,6 @@ import { useDropzone } from "@/hooks/useDropzone";
 import { cn } from "@/lib/utils";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { RecentJobThumbnail } from "@/components/RecentJobThumbnail";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface ComfyJob {
   id: string;
@@ -282,19 +281,8 @@ const Refine = () => {
           <div className="lg:col-span-2">
             <Card className="min-h-[60vh]">
               <CardHeader>
-                <div className="flex items-center gap-2">
-                  <CardTitle>{t.workbench}</CardTitle>
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Info className="h-4 w-4 text-muted-foreground cursor-help" />
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>{t.refineWorkbenchTooltip}</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                </div>
+                <CardTitle>{t.workbench}</CardTitle>
+                <p className="text-sm text-muted-foreground pt-1">{t.refineWorkbenchTooltip}</p>
               </CardHeader>
               <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
