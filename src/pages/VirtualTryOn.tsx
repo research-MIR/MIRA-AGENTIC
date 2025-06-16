@@ -105,6 +105,12 @@ const VirtualTryOn = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
+
+  const [displayPersonUrl, setDisplayPersonUrl] = useState<string | null>(null);
+  const [displayGarmentUrl, setDisplayGarmentUrl] = useState<string | null>(null);
+  const [displayCroppedUrl, setDisplayCroppedUrl] = useState<string | null>(null);
+  const [displayTryOnUrl, setDisplayTryOnUrl] = useState<string | null>(null);
+  const [displayCompositeUrl, setDisplayCompositeUrl] = useState<string | null>(null);
   
   const selectedJobIdRef = useRef(selectedJobId);
   useEffect(() => {
@@ -172,8 +178,74 @@ const VirtualTryOn = () => {
     };
   }, [supabase, session?.user?.id, queryClient]);
 
-  const displayPersonUrl = personImageFile ? URL.createObjectURL(personImageFile) : selectedJob?.source_person_image_url || null;
-  const displayGarmentUrl = garmentImageFile ? URL.createObjectURL(garmentImageFile) : selectedJob?.source_garment_image_url || null;
+  useEffect(() => {
+    let personObjUrl: string | null = null;
+    if (personImageFile) {
+      personObjUrl = URL.createObjectURL(personImageFile);
+      setDisplayPersonUrl(personObjUrl);
+    } else if (!selectedJob) {
+      setDisplayPersonUrl(null);
+    }
+    return () => { if (personObjUrl) URL.revokeObjectURL(personObjUrl); };
+  }, [personImageFile, selectedJob]);
+
+  useEffect(() => {
+    let garmentObjUrl: string | null = null;
+    if (garmentImageFile) {
+      garmentObjUrl = URL.createObjectURL(garmentImageFile);
+      setDisplayGarmentUrl(garmentObjUrl);
+    } else if (!selectedJob) {
+      setDisplayGarmentUrl(null);
+    }
+    return () => { if (garmentObjUrl) URL.revokeObjectURL(garmentObjUrl); };
+  }, [garmentImageFile, selectedJob]);
+
+  useEffect(() => {
+    const objectUrls: string[] = [];
+    const downloadAndSet = async (storageUrl: string, setDisplayUrl: React.Dispatch<React.SetStateAction<string | null>>) => {
+      try {
+        if (!storageUrl) return;
+
+        const url = new URL(storageUrl);
+        const bucketIdentifier = '/public/mira-agent-user-uploads/';
+        const pathStartIndex = url.pathname.indexOf(bucketIdentifier);
+
+        if (pathStartIndex === -1) {
+          throw new Error(`Could not find bucket identifier '${bucketIdentifier}' in URL path: ${url.pathname}`);
+        }
+        
+        const storagePath = decodeURIComponent(url.pathname.substring(pathStartIndex + bucketIdentifier.length));
+        
+        const { data: blob, error } = await supabase.storage.from('mira-agent-user-uploads').download(storagePath);
+        if (error) throw error;
+
+        const newObjUrl = URL.createObjectURL(blob);
+        objectUrls.push(newObjUrl);
+        setDisplayUrl(newObjUrl);
+      } catch (err) {
+        console.error(`Failed to download and display image from ${storageUrl}:`, err);
+        setDisplayUrl(null);
+      }
+    };
+
+    if (selectedJob) {
+      setDisplayPersonUrl(null);
+      setDisplayGarmentUrl(null);
+      setDisplayCroppedUrl(null);
+      setDisplayTryOnUrl(null);
+      setDisplayCompositeUrl(null);
+
+      if (selectedJob.source_person_image_url) downloadAndSet(selectedJob.source_person_image_url, setDisplayPersonUrl);
+      if (selectedJob.source_garment_image_url) downloadAndSet(selectedJob.source_garment_image_url, setDisplayGarmentUrl);
+      if (selectedJob.cropped_image_url) downloadAndSet(selectedJob.cropped_image_url, setDisplayCroppedUrl);
+      if (selectedJob.bitstudio_job?.final_image_url) downloadAndSet(selectedJob.bitstudio_job.final_image_url, setDisplayTryOnUrl);
+      if (selectedJob.final_composite_url) downloadAndSet(selectedJob.final_composite_url, setDisplayCompositeUrl);
+    }
+
+    return () => {
+      objectUrls.forEach(url => URL.revokeObjectURL(url));
+    };
+  }, [selectedJob, supabase.storage]);
 
   const uploadFileAndGetUrl = async (file: File | null): Promise<string | null> => {
     if (!file) return null;
@@ -223,10 +295,10 @@ const VirtualTryOn = () => {
 
   const renderJobResult = (job: VtoPipelineJob) => {
     const steps = [
-      { name: 'Segmentation', status: job.status !== 'pending_segmentation', imageUrl: job.source_person_image_url, children: job.segmentation_result && <SegmentationMask masks={job.segmentation_result.masks} /> },
-      { name: 'Cropped Image', status: !['pending_segmentation', 'pending_crop'].includes(job.status), imageUrl: job.cropped_image_url },
-      { name: 'AI Try-On', status: !['pending_segmentation', 'pending_crop', 'pending_tryon'].includes(job.status), imageUrl: job.bitstudio_job?.final_image_url },
-      { name: 'Final Composite', status: job.status === 'complete', imageUrl: job.final_composite_url }
+      { name: 'Segmentation', status: job.status !== 'pending_segmentation', imageUrl: displayPersonUrl, children: job.segmentation_result && <SegmentationMask masks={job.segmentation_result.masks} /> },
+      { name: 'Cropped Image', status: !['pending_segmentation', 'pending_crop'].includes(job.status), imageUrl: displayCroppedUrl },
+      { name: 'AI Try-On', status: !['pending_segmentation', 'pending_crop', 'pending_tryon'].includes(job.status), imageUrl: displayTryOnUrl },
+      { name: 'Final Composite', status: job.status === 'complete', imageUrl: displayCompositeUrl }
     ];
 
     if (job.status === 'failed') {
