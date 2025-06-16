@@ -1,12 +1,13 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Plus, Trash2, Eye, EyeOff } from "lucide-react";
-import { Layer, AdjustmentLayer } from "@/types/editor";
+import { Layer, AdjustmentLayer, BlendMode } from "@/types/editor";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/context/LanguageContext";
 import { useRef } from "react";
 import { Slider } from "@/components/ui/slider";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 interface LayerPanelProps {
   layers: Layer[];
@@ -17,9 +18,26 @@ interface LayerPanelProps {
   onDeleteLayer: (id: string) => void;
   onReorderLayers: (sourceIndex: number, destIndex: number) => void;
   onUpdateOpacity: (id: string, opacity: number) => void;
+  onUpdateBlendMode: (id: string, blendMode: BlendMode) => void;
 }
 
-export const LayerPanel = ({ layers, selectedLayerId, onSelectLayer, onAddLayer, onToggleVisibility, onDeleteLayer, onReorderLayers, onUpdateOpacity }: LayerPanelProps) => {
+const blendModes: BlendMode[] = [
+  'normal', 'multiply', 'screen', 'overlay', 'soft-light', 'hard-light', 
+  'color-dodge', 'color-burn', 'difference', 'exclusion', 'hue', 
+  'saturation', 'color', 'luminosity'
+];
+
+export const LayerPanel = ({ 
+  layers, 
+  selectedLayerId, 
+  onSelectLayer, 
+  onAddLayer, 
+  onToggleVisibility, 
+  onDeleteLayer, 
+  onReorderLayers, 
+  onUpdateOpacity,
+  onUpdateBlendMode
+}: LayerPanelProps) => {
   const { t } = useLanguage();
   const dragItem = useRef<number | null>(null);
   const dragOverItem = useRef<number | null>(null);
@@ -69,7 +87,7 @@ export const LayerPanel = ({ layers, selectedLayerId, onSelectLayer, onAddLayer,
               onDragOver={(e) => e.preventDefault()}
               onClick={() => onSelectLayer(layer.id)}
               className={cn(
-                "p-2 rounded-md cursor-grab border",
+                "p-2 rounded-md cursor-grab border space-y-2",
                 selectedLayerId === layer.id ? "bg-primary/10 border-primary" : "bg-muted/50 hover:bg-muted"
               )}
             >
@@ -78,22 +96,34 @@ export const LayerPanel = ({ layers, selectedLayerId, onSelectLayer, onAddLayer,
                   <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); onToggleVisibility(layer.id); }}>
                     {layer.visible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4 text-muted-foreground" />}
                   </Button>
-                  <div className="w-10 h-8 bg-white border rounded-sm flex-shrink-0">
-                    {/* Placeholder for mask thumbnail */}
-                  </div>
                   <span className="text-sm font-medium">{layer.name}</span>
                 </div>
                 <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); onDeleteLayer(layer.id); }}>
                   <Trash2 className="h-4 w-4 text-destructive" />
                 </Button>
               </div>
-              <div className="mt-2 px-2">
-                <Label className="text-xs text-muted-foreground">Opacity</Label>
-                <Slider 
-                  value={[layer.opacity * 100]} 
-                  onValueChange={(v) => onUpdateOpacity(layer.id, v[0] / 100)}
-                  onClick={(e) => e.stopPropagation()}
-                />
+              <div className="px-1 space-y-2">
+                <div onClick={(e) => e.stopPropagation()}>
+                  <Label className="text-xs text-muted-foreground">Blend Mode</Label>
+                  <Select value={layer.blendMode} onValueChange={(value: BlendMode) => onUpdateBlendMode(layer.id, value)}>
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {blendModes.map(mode => (
+                        <SelectItem key={mode} value={mode} className="capitalize text-xs">{mode}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-xs text-muted-foreground">Opacity</Label>
+                  <Slider 
+                    value={[layer.opacity * 100]} 
+                    onValueChange={(v) => onUpdateOpacity(layer.id, v[0] / 100)}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                </div>
               </div>
             </div>
           ))}

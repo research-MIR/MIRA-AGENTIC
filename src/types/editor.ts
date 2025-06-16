@@ -22,12 +22,29 @@ export interface CurvesSettings {
   channel: 'rgb' | 'r' | 'g' | 'b';
 }
 
+export type BlendMode = 
+  | 'normal' 
+  | 'multiply' 
+  | 'screen' 
+  | 'overlay' 
+  | 'soft-light' 
+  | 'hard-light' 
+  | 'color-dodge' 
+  | 'color-burn' 
+  | 'difference' 
+  | 'exclusion' 
+  | 'hue' 
+  | 'saturation' 
+  | 'color' 
+  | 'luminosity';
+
 export interface AdjustmentLayer {
   id: string;
   name: string;
   type: 'hue-saturation' | 'curves' | 'levels';
   visible: boolean;
   opacity: number;
+  blendMode: BlendMode;
   settings: HueSaturationSettings | CurvesSettings | LevelsSettings;
   mask: Mask;
 }

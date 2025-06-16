@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { UploadCloud, Image as ImageIcon } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
-import { Layer, AdjustmentLayer, Mask } from "@/types/editor";
+import { Layer, AdjustmentLayer, Mask, BlendMode } from "@/types/editor";
 import { LayerPanel } from "@/components/Editor/LayerPanel";
 import { AdjustmentPanel } from "@/components/Editor/AdjustmentPanel";
 import { useImageProcessor } from "@/hooks/useImageProcessor";
@@ -49,15 +49,23 @@ const Editor = () => {
       enabled: true,
     };
 
+    const commonProps = {
+      id: `layer-${Date.now()}`,
+      visible: true,
+      opacity: 1,
+      blendMode: 'normal' as BlendMode,
+      mask: defaultMask,
+    };
+
     switch (type) {
       case 'hue-saturation':
-        newLayer = { id: `layer-${Date.now()}`, name: t.hueSaturation, type, visible: true, opacity: 1, mask: defaultMask, settings: { hue: 0, saturation: 1, lightness: 0 } };
+        newLayer = { ...commonProps, name: t.hueSaturation, type, settings: { hue: 0, saturation: 1, lightness: 0 } };
         break;
       case 'levels':
-        newLayer = { id: `layer-${Date.now()}`, name: t.levels, type, visible: true, opacity: 1, mask: defaultMask, settings: { inputShadow: 0, inputMidtone: 1, inputHighlight: 255, outputShadow: 0, outputHighlight: 255 } };
+        newLayer = { ...commonProps, name: t.levels, type, settings: { inputShadow: 0, inputMidtone: 1, inputHighlight: 255, outputShadow: 0, outputHighlight: 255 } };
         break;
       case 'curves':
-        newLayer = { id: `layer-${Date.now()}`, name: t.curves, type, visible: true, opacity: 1, mask: defaultMask, settings: { channel: 'rgb', points: [{ x: 0, y: 0 }, { x: 255, y: 255 }] } };
+        newLayer = { ...commonProps, name: t.curves, type, settings: { channel: 'rgb', points: [{ x: 0, y: 0 }, { x: 255, y: 255 }] } };
         break;
     }
     
@@ -74,6 +82,12 @@ const Editor = () => {
   const updateLayerOpacity = (layerId: string, opacity: number) => {
     setLayers(layers => layers.map(l => 
       l.id === layerId ? { ...l, opacity } : l
+    ));
+  };
+
+  const updateLayerBlendMode = (layerId: string, blendMode: BlendMode) => {
+    setLayers(layers => layers.map(l =>
+      l.id === layerId ? { ...l, blendMode } : l
     ));
   };
 
@@ -124,6 +138,7 @@ const Editor = () => {
               onDeleteLayer={deleteLayer}
               onReorderLayers={reorderLayers}
               onUpdateOpacity={updateLayerOpacity}
+              onUpdateBlendMode={updateLayerBlendMode}
             />
             <AdjustmentPanel 
               selectedLayer={selectedLayer}

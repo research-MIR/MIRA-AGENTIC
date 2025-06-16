@@ -140,8 +140,8 @@ export const useImageProcessor = (
       const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
       if (!tempCtx) return;
 
-      const currentImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      tempCtx.putImageData(currentImageData, 0, 0);
+      // Draw the *current* state of the main canvas onto the temp canvas
+      tempCtx.drawImage(canvas, 0, 0);
       
       const layerImageData = tempCtx.getImageData(0, 0, canvas.width, canvas.height);
 
@@ -157,11 +157,18 @@ export const useImageProcessor = (
           break;
       }
       
+      // Put the modified data back onto the temp canvas
       tempCtx.putImageData(layerImageData, 0, 0);
 
+      // Now, draw the temp canvas (which contains the adjustment) onto the main canvas
+      // using the specified blend mode and opacity.
+      ctx.globalCompositeOperation = layer.blendMode;
       ctx.globalAlpha = layer.opacity;
       ctx.drawImage(tempCanvas, 0, 0);
-      ctx.globalAlpha = 1.0; // Reset for next layer
+      
+      // Reset for the next layer
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1.0;
     });
 
   }, [baseImage, layers, canvasRef]);
