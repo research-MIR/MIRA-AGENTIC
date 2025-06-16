@@ -1,7 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Plus, Trash2, Eye, EyeOff, Droplets, BarChartHorizontal, SunMoon } from "lucide-react";
-import { Layer } from "@/types/editor";
+import { Plus, Trash2, Eye, EyeOff } from "lucide-react";
+import { Layer, AdjustmentLayer } from "@/types/editor";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/context/LanguageContext";
 
@@ -9,7 +9,7 @@ interface LayerPanelProps {
   layers: Layer[];
   selectedLayerId: string | null;
   onSelectLayer: (id: string) => void;
-  onAddLayer: (type: 'hsl' | 'levels' | 'dodge-burn') => void;
+  onAddLayer: (type: AdjustmentLayer['type']) => void;
   onToggleVisibility: (id: string) => void;
   onDeleteLayer: (id: string) => void;
 }
@@ -24,17 +24,12 @@ export const LayerPanel = ({ layers, selectedLayerId, onSelectLayer, onAddLayer,
       </CardHeader>
       <CardContent>
         <div className="space-y-2">
-          <Button onClick={() => onAddLayer('hsl')} className="w-full">
-            <Droplets className="mr-2 h-4 w-4" /> {t.addHsl}
+          <Button onClick={() => onAddLayer('saturation')} className="w-full">
+            <Plus className="mr-2 h-4 w-4" /> {t.addSaturation}
           </Button>
-          <Button onClick={() => onAddLayer('levels')} className="w-full">
-            <BarChartHorizontal className="mr-2 h-4 w-4" /> {t.addLevels}
-          </Button>
-           <Button onClick={() => onAddLayer('dodge-burn')} className="w-full">
-            <SunMoon className="mr-2 h-4 w-4" /> {t.addDodgeBurn}
-          </Button>
+          {/* Add buttons for other layer types here in the future */}
         </div>
-        <div className="mt-4 space-y-2 max-h-60 overflow-y-auto">
+        <div className="mt-4 space-y-2">
           {layers.map(layer => (
             <div 
               key={layer.id}
