@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
-import { UploadCloud, Wand2, Loader2, Image as ImageIcon, X, PlusCircle } from "lucide-react";
+import { UploadCloud, Wand2, Loader2, Image as ImageIcon, X, PlusCircle, CheckCircle } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
 import { cn, sanitizeFilename } from "@/lib/utils";
 import { useDropzone } from "@/hooks/useDropzone";
@@ -74,6 +74,27 @@ const ImageUploader = ({ onFileSelect, title, t, imageUrl, onClear }: { onFileSe
   );
 };
 
+const PipelineStepCard = ({ title, imageUrl, status, children }: { title: string, imageUrl?: string | null, status: 'complete' | 'pending' | 'failed', children?: React.ReactNode }) => {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        {status === 'complete' && <CheckCircle className="h-4 w-4 text-green-500" />}
+        {status === 'pending' && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+        {status === 'failed' && <X className="h-4 w-4 text-destructive" />}
+        <h3 className="font-semibold text-sm">{title}</h3>
+      </div>
+      <div className="aspect-square bg-muted rounded-lg flex items-center justify-center relative">
+        {imageUrl ? (
+          <img src={imageUrl} alt={title} className="w-full h-full object-contain rounded-md" />
+        ) : (
+          status === 'pending' && <p className="text-xs text-muted-foreground">Waiting...</p>
+        )}
+        {children}
+      </div>
+    </div>
+  );
+};
+
 const VirtualTryOn = () => {
   const { supabase, session } = useSession();
   const { t } = useLanguage();
@@ -82,12 +103,8 @@ const VirtualTryOn = () => {
   const [personImageFile, setPersonImageFile] = useState<File | null>(null);
   const [garmentImageFile, setGarmentImageFile] = useState<File | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [selectedJob, setSelectedJob] = useState<VtoPipelineJob | null>(null);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
-
-  const [personImageBlobUrl, setPersonImageBlobUrl] = useState<string | null>(null);
-  const [garmentImageBlobUrl, setGarmentImageBlobUrl] = useState<string | null>(null);
-  const [isJobImageLoading, setIsJobImageLoading] = useState(false);
 
   const { data: recentJobs, isLoading: isLoadingRecentJobs } = useQuery<VtoPipelineJob[]>({
     queryKey: ['vtoPipelineJobs', session?.user?.id],
@@ -105,6 +122,21 @@ const VirtualTryOn = () => {
     enabled: !!session?.user,
   });
 
+  const { data: selectedJob, isLoading: isLoadingSelectedJob } = useQuery<VtoPipelineJob | null>({
+    queryKey: ['vtoPipelineJob', selectedJobId],
+    queryFn: async () => {
+      if (!selectedJobId) return null;
+      const { data, error } = await supabase
+        .from('mira-agent-vto-pipeline-jobs')
+        .select('*, bitstudio_job:bitstudio_job_id(final_image_url)')
+        .eq('id', selectedJobId)
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!selectedJobId,
+  });
+
   useEffect(() => {
     if (!session?.user) return;
     const channel = supabase.channel('vto-pipeline-jobs-tracker')
@@ -112,18 +144,16 @@ const VirtualTryOn = () => {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'mira-agent-vto-pipeline-jobs', filter: `user_id=eq.${session.user.id}` },
         (payload) => {
-          queryClient.invalidateQueries({ queryKey: ['vtoPipelineJobs', session.user.id] });
-          setSelectedJob(currentSelectedJob => {
-            if (currentSelectedJob && payload.new.id === currentSelectedJob.id) {
-              return payload.new as VtoPipelineJob;
-            }
-            return currentSelectedJob;
-          });
+          console.log('[VTO Realtime] Invalidating queries due to DB change.');
+          queryClient.invalidateQueries({ queryKey: ['vtoPipelineJobs'] });
+          if (selectedJobId && payload.new.id === selectedJobId) {
+            queryClient.invalidateQueries({ queryKey: ['vtoPipelineJob', selectedJobId] });
+          }
         }
       ).subscribe();
     channelRef.current = channel;
     return () => { if (channelRef.current) supabase.removeChannel(channelRef.current); };
-  }, [supabase, session?.user?.id, queryClient]);
+  }, [supabase, session?.user?.id, queryClient, selectedJobId]);
 
   const uploadFileAndGetUrl = async (file: File | null): Promise<string | null> => {
     if (!file) return null;
@@ -162,122 +192,51 @@ const VirtualTryOn = () => {
   const resetForm = () => {
     setPersonImageFile(null);
     setGarmentImageFile(null);
-    setSelectedJob(null);
+    setSelectedJobId(null);
   };
 
   const handleJobSelect = (job: VtoPipelineJob) => {
     setPersonImageFile(null);
     setGarmentImageFile(null);
-    setSelectedJob(job);
+    setSelectedJobId(job.id);
   };
 
-  useEffect(() => {
-    let personUrlToRevoke: string | null = null;
-    let garmentUrlToRevoke: string | null = null;
-
-    const preloadImage = (blob: Blob): Promise<string> => {
-        return new Promise((resolve, reject) => {
-            const url = URL.createObjectURL(blob);
-            const img = new window.Image();
-            img.onload = () => resolve(url);
-            img.onerror = (err) => {
-                URL.revokeObjectURL(url);
-                reject(err);
-            };
-            img.src = url;
-        });
-    };
-
-    const fetchAndSetUrls = async () => {
-        if (selectedJob) {
-            setIsJobImageLoading(true);
-            try {
-                const personPath = new URL(selectedJob.source_person_image_url).pathname.split('/public/mira-agent-user-uploads/')[1];
-                const garmentPath = new URL(selectedJob.source_garment_image_url).pathname.split('/public/mira-agent-user-uploads/')[1];
-
-                const [personBlobResult, garmentBlobResult] = await Promise.allSettled([
-                    supabase.storage.from('mira-agent-user-uploads').download(personPath).then(r => { if(r.error) throw r.error; return r.data; }),
-                    supabase.storage.from('mira-agent-user-uploads').download(garmentPath).then(r => { if(r.error) throw r.error; return r.data; })
-                ]);
-
-                if (personBlobResult.status === 'rejected' || garmentBlobResult.status === 'rejected') {
-                    throw new Error("Failed to download one or both images.");
-                }
-
-                const [personUrl, garmentUrl] = await Promise.all([
-                    preloadImage(personBlobResult.value),
-                    preloadImage(garmentBlobResult.value)
-                ]);
-                
-                personUrlToRevoke = personUrl;
-                garmentUrlToRevoke = garmentUrl;
-
-                setPersonImageBlobUrl(personUrl);
-                setGarmentImageBlobUrl(garmentUrl);
-
-            } catch (error) {
-                console.error("Failed to load selected job images:", error);
-                showError("Could not load selected job images.");
-                setPersonImageBlobUrl(null);
-                setGarmentImageBlobUrl(null);
-            } finally {
-                setIsJobImageLoading(false);
-            }
-        } else {
-            setPersonImageBlobUrl(null);
-            setGarmentImageBlobUrl(null);
-        }
-    };
-
-    fetchAndSetUrls();
-
-    return () => {
-        if (personUrlToRevoke) URL.revokeObjectURL(personUrlToRevoke);
-        if (garmentUrlToRevoke) URL.revokeObjectURL(garmentUrlToRevoke);
-    };
-  }, [selectedJob?.id]);
-
   const personImageUrl = useMemo(() => {
-    if (selectedJob) return personImageBlobUrl;
+    if (selectedJob) return selectedJob.source_person_image_url;
     return personImageFile ? URL.createObjectURL(personImageFile) : null;
-  }, [personImageFile, selectedJob, personImageBlobUrl]);
+  }, [personImageFile, selectedJob]);
 
   const garmentImageUrl = useMemo(() => {
-    if (selectedJob) return garmentImageBlobUrl;
+    if (selectedJob) return selectedJob.source_garment_image_url;
     return garmentImageFile ? URL.createObjectURL(garmentImageFile) : null;
-  }, [garmentImageFile, selectedJob, garmentImageBlobUrl]);
+  }, [garmentImageFile, selectedJob]);
 
   const renderJobResult = (job: VtoPipelineJob) => {
-    const isProcessing = ['pending_segmentation', 'pending_crop', 'pending_tryon', 'pending_composite'].includes(job.status);
-    let imageUrl = job.source_person_image_url;
-    let statusText = job.status.replace('_', ' ');
+    const steps = [
+      { name: 'Segmentation', status: job.status !== 'pending_segmentation', imageUrl: job.source_person_image_url, children: job.segmentation_result && <SegmentationMask masks={job.segmentation_result.masks} /> },
+      { name: 'Cropped Image', status: !['pending_segmentation', 'pending_crop'].includes(job.status), imageUrl: job.cropped_image_url },
+      { name: 'AI Try-On', status: !['pending_segmentation', 'pending_crop', 'pending_tryon'].includes(job.status), imageUrl: job.bitstudio_job?.final_image_url },
+      { name: 'Final Composite', status: job.status === 'complete', imageUrl: job.final_composite_url }
+    ];
 
-    if (job.status === 'pending_crop') imageUrl = job.source_person_image_url;
-    if (job.status === 'pending_tryon') imageUrl = job.cropped_image_url || job.source_person_image_url;
-    if (job.status === 'pending_composite') imageUrl = job.bitstudio_job?.final_image_url || job.cropped_image_url || job.source_person_image_url;
-    if (job.status === 'complete') imageUrl = job.final_composite_url || job.source_person_image_url;
-
-    if (isProcessing) {
-      return (
-        <div className="relative w-full h-full">
-          <img src={imageUrl} alt="Processing" className="w-full h-full object-contain rounded-md" />
-          <div className="absolute inset-0 bg-black/50 flex flex-col items-center justify-center text-white">
-            <Loader2 className="h-8 w-8 animate-spin" />
-            <p className="mt-2 text-sm capitalize">{statusText}...</p>
-          </div>
-          {job.status === 'pending_crop' && job.segmentation_result && <SegmentationMask masks={job.segmentation_result.masks} />}
-        </div>
-      );
+    if (job.status === 'failed') {
+      return <p className="text-destructive text-sm p-2">Job failed: {job.error_message}</p>;
     }
 
-    switch (job.status) {
-      case 'complete':
-        return job.final_composite_url ? <img src={job.final_composite_url} alt="Virtual Try-On Result" className="w-full h-full object-contain rounded-md" /> : <p>Job complete, but no image URL found.</p>;
-      case 'failed':
-        return <p className="text-destructive text-sm p-2">Job failed: {job.error_message}</p>;
-      default:
-        return null;
-    }
+    return (
+      <div className="grid grid-cols-2 gap-4">
+        {steps.map((step, index) => (
+          <PipelineStepCard 
+            key={index} 
+            title={step.name} 
+            imageUrl={step.imageUrl} 
+            status={step.status ? 'complete' : 'pending'}
+          >
+            {step.children}
+          </PipelineStepCard>
+        ))}
+      </div>
+    );
   };
 
   return (
@@ -288,24 +247,24 @@ const VirtualTryOn = () => {
           <Card>
             <CardHeader>
               <div className="flex justify-between items-center">
-                <CardTitle>{selectedJob ? "Selected Job" : "1. Upload Images"}</CardTitle>
-                {selectedJob && <Button variant="outline" size="sm" onClick={resetForm}><PlusCircle className="h-4 w-4 mr-2" />New Try-On</Button>}
+                <CardTitle>{selectedJobId ? "Selected Job" : "1. Upload Images"}</CardTitle>
+                {selectedJobId && <Button variant="outline" size="sm" onClick={resetForm}><PlusCircle className="h-4 w-4 mr-2" />New Try-On</Button>}
               </div>
             </CardHeader>
             <CardContent className="grid grid-cols-2 gap-4">
-              <ImageUploader onFileSelect={setPersonImageFile} title="Person Image" t={t} imageUrl={personImageUrl} onClear={() => { setPersonImageFile(null); if(selectedJob) setSelectedJob(null); }} />
-              <ImageUploader onFileSelect={setGarmentImageFile} title="Garment Image" t={t} imageUrl={garmentImageUrl} onClear={() => { setGarmentImageFile(null); if(selectedJob) setSelectedJob(null); }} />
+              <ImageUploader onFileSelect={setPersonImageFile} title="Person Image" t={t} imageUrl={personImageUrl} onClear={() => { setPersonImageFile(null); if(selectedJobId) setSelectedJobId(null); }} />
+              <ImageUploader onFileSelect={setGarmentImageFile} title="Garment Image" t={t} imageUrl={garmentImageUrl} onClear={() => { setGarmentImageFile(null); if(selectedJobId) setSelectedJobId(null); }} />
             </CardContent>
           </Card>
-          {!selectedJob && (
+          {!selectedJobId && (
             <Button onClick={handleTryOn} disabled={isLoading || !personImageFile || !garmentImageFile} className="w-full">{isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}Start Virtual Try-On</Button>
           )}
         </div>
         <div className="lg:col-span-2">
           <Card className="min-h-[60vh]">
             <CardHeader><CardTitle>Result</CardTitle></CardHeader>
-            <CardContent className="h-[50vh] flex items-center justify-center">
-              {isJobImageLoading ? <Loader2 className="h-8 w-8 animate-spin" /> : selectedJob ? renderJobResult(selectedJob) : <div className="text-center text-muted-foreground"><ImageIcon className="h-16 w-16 mx-auto mb-4" /><p>Your result will appear here.</p></div>}
+            <CardContent className="flex items-center justify-center">
+              {isLoadingSelectedJob ? <Loader2 className="h-8 w-8 animate-spin" /> : selectedJob ? renderJobResult(selectedJob) : <div className="text-center text-muted-foreground"><ImageIcon className="h-16 w-16 mx-auto mb-4" /><p>Your result will appear here.</p></div>}
             </CardContent>
           </Card>
         </div>
@@ -322,7 +281,7 @@ const VirtualTryOn = () => {
                   key={job.id}
                   job={job}
                   onClick={() => handleJobSelect(job)}
-                  isSelected={selectedJob?.id === job.id}
+                  isSelected={selectedJobId === job.id}
                 />
               ))}
             </div>
