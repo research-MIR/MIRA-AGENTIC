@@ -5,6 +5,8 @@ import { Layer, AdjustmentLayer } from "@/types/editor";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/context/LanguageContext";
 import { useRef } from "react";
+import { Slider } from "@/components/ui/slider";
+import { Label } from "@/components/ui/label";
 
 interface LayerPanelProps {
   layers: Layer[];
@@ -14,9 +16,10 @@ interface LayerPanelProps {
   onToggleVisibility: (id: string) => void;
   onDeleteLayer: (id: string) => void;
   onReorderLayers: (sourceIndex: number, destIndex: number) => void;
+  onUpdateOpacity: (id: string, opacity: number) => void;
 }
 
-export const LayerPanel = ({ layers, selectedLayerId, onSelectLayer, onAddLayer, onToggleVisibility, onDeleteLayer, onReorderLayers }: LayerPanelProps) => {
+export const LayerPanel = ({ layers, selectedLayerId, onSelectLayer, onAddLayer, onToggleVisibility, onDeleteLayer, onReorderLayers, onUpdateOpacity }: LayerPanelProps) => {
   const { t } = useLanguage();
   const dragItem = useRef<number | null>(null);
   const dragOverItem = useRef<number | null>(null);
@@ -66,23 +69,31 @@ export const LayerPanel = ({ layers, selectedLayerId, onSelectLayer, onAddLayer,
               onDragOver={(e) => e.preventDefault()}
               onClick={() => onSelectLayer(layer.id)}
               className={cn(
-                "flex items-center justify-between p-2 rounded-md cursor-grab border",
+                "p-2 rounded-md cursor-grab border",
                 selectedLayerId === layer.id ? "bg-primary/10 border-primary" : "bg-muted/50 hover:bg-muted"
               )}
             >
-              <div className="flex items-center gap-2">
-                <div className="w-10 h-8 bg-white border rounded-sm flex-shrink-0">
-                  {/* Placeholder for mask thumbnail */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); onToggleVisibility(layer.id); }}>
+                    {layer.visible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4 text-muted-foreground" />}
+                  </Button>
+                  <div className="w-10 h-8 bg-white border rounded-sm flex-shrink-0">
+                    {/* Placeholder for mask thumbnail */}
+                  </div>
+                  <span className="text-sm font-medium">{layer.name}</span>
                 </div>
-                <span className="text-sm font-medium">{layer.name}</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); onToggleVisibility(layer.id); }}>
-                  {layer.visible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4 text-muted-foreground" />}
-                </Button>
                 <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); onDeleteLayer(layer.id); }}>
                   <Trash2 className="h-4 w-4 text-destructive" />
                 </Button>
+              </div>
+              <div className="mt-2 px-2">
+                <Label className="text-xs text-muted-foreground">Opacity</Label>
+                <Slider 
+                  value={[layer.opacity * 100]} 
+                  onValueChange={(v) => onUpdateOpacity(layer.id, v[0] / 100)}
+                  onClick={(e) => e.stopPropagation()}
+                />
               </div>
             </div>
           ))}

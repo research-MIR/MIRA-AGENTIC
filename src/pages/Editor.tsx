@@ -49,13 +49,13 @@ const Editor = () => {
 
     switch (type) {
       case 'hue-saturation':
-        newLayer = { id: `layer-${Date.now()}`, name: t.hueSaturation, type, visible: true, mask: defaultMask, settings: { hue: 0, saturation: 1, lightness: 0 } };
+        newLayer = { id: `layer-${Date.now()}`, name: t.hueSaturation, type, visible: true, opacity: 1, mask: defaultMask, settings: { hue: 0, saturation: 1, lightness: 0 } };
         break;
       case 'levels':
-        newLayer = { id: `layer-${Date.now()}`, name: t.levels, type, visible: true, mask: defaultMask, settings: { inputShadow: 0, inputMidtone: 1, inputHighlight: 255, outputShadow: 0, outputHighlight: 255 } };
+        newLayer = { id: `layer-${Date.now()}`, name: t.levels, type, visible: true, opacity: 1, mask: defaultMask, settings: { inputShadow: 0, inputMidtone: 1, inputHighlight: 255, outputShadow: 0, outputHighlight: 255 } };
         break;
       case 'curves':
-        newLayer = { id: `layer-${Date.now()}`, name: t.curves, type, visible: true, mask: defaultMask, settings: { channel: 'rgb', points: [{ x: 0, y: 0 }, { x: 255, y: 255 }] } };
+        newLayer = { id: `layer-${Date.now()}`, name: t.curves, type, visible: true, opacity: 1, mask: defaultMask, settings: { channel: 'rgb', points: [{ x: 0, y: 0 }, { x: 255, y: 255 }] } };
         break;
     }
     
@@ -66,6 +66,12 @@ const Editor = () => {
   const updateLayer = (layerId: string, newSettings: any) => {
     setLayers(layers => layers.map(l => 
       l.id === layerId ? { ...l, settings: { ...(l.settings as any), ...newSettings } } : l
+    ));
+  };
+  
+  const updateLayerOpacity = (layerId: string, opacity: number) => {
+    setLayers(layers => layers.map(l => 
+      l.id === layerId ? { ...l, opacity } : l
     ));
   };
 
@@ -104,6 +110,7 @@ const Editor = () => {
             onToggleVisibility={toggleLayerVisibility}
             onDeleteLayer={deleteLayer}
             onReorderLayers={reorderLayers}
+            onUpdateOpacity={updateLayerOpacity}
           />
           <AdjustmentPanel 
             selectedLayer={selectedLayer}

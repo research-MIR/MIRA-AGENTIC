@@ -27,6 +27,7 @@ export interface AdjustmentLayer {
   name: string;
   type: 'hue-saturation' | 'curves' | 'levels';
   visible: boolean;
+  opacity: number;
   settings: HueSaturationSettings | CurvesSettings | LevelsSettings;
   mask: Mask;
 }
