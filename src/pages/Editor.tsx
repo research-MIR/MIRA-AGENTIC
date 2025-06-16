@@ -1,10 +1,9 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { UploadCloud, Image as ImageIcon } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
-import { Layer, AdjustmentLayer } from "@/types/editor";
+import { Layer, AdjustmentLayer, Mask } from "@/types/editor";
 import { LayerPanel } from "@/components/Editor/LayerPanel";
 import { AdjustmentPanel } from "@/components/Editor/AdjustmentPanel";
 import { useImageProcessor } from "@/hooks/useImageProcessor";
@@ -42,23 +41,31 @@ const Editor = () => {
   });
 
   const addLayer = (type: AdjustmentLayer['type']) => {
-    const newLayer: AdjustmentLayer = {
-      id: `layer-${Date.now()}`,
-      name: `${type.charAt(0).toUpperCase() + type.slice(1)}`,
-      type: type,
-      visible: true,
-      settings: {
-        saturation: 1,
-        // Default settings for other types would go here
-      },
+    let newLayer: AdjustmentLayer;
+    const defaultMask: Mask = {
+      imageData: new ImageData(1, 1), // Placeholder, will be resized
+      enabled: true,
     };
-    setLayers(prev => [...prev, newLayer]);
+
+    switch (type) {
+      case 'hue-saturation':
+        newLayer = { id: `layer-${Date.now()}`, name: t.hueSaturation, type, visible: true, mask: defaultMask, settings: { hue: 0, saturation: 1, lightness: 0 } };
+        break;
+      case 'levels':
+        newLayer = { id: `layer-${Date.now()}`, name: t.levels, type, visible: true, mask: defaultMask, settings: { inputShadow: 0, inputMidtone: 1, inputHighlight: 255, outputShadow: 0, outputHighlight: 255 } };
+        break;
+      case 'curves':
+        newLayer = { id: `layer-${Date.now()}`, name: t.curves, type, visible: true, mask: defaultMask, settings: { channel: 'rgb', points: [{ x: 0, y: 0 }, { x: 255, y: 255 }] } };
+        break;
+    }
+    
+    setLayers(prev => [newLayer, ...prev]);
     setSelectedLayerId(newLayer.id);
   };
 
   const updateLayer = (layerId: string, newSettings: any) => {
     setLayers(layers => layers.map(l => 
-      l.id === layerId ? { ...l, settings: { ...l.settings, ...newSettings } } : l
+      l.id === layerId ? { ...l, settings: { ...(l.settings as any), ...newSettings } } : l
     ));
   };
 
@@ -75,6 +82,13 @@ const Editor = () => {
     }
   };
 
+  const reorderLayers = (sourceIndex: number, destIndex: number) => {
+    const items = Array.from(layers);
+    const [reorderedItem] = items.splice(sourceIndex, 1);
+    items.splice(destIndex, 0, reorderedItem);
+    setLayers(items);
+  };
+
   const selectedLayer = layers.find(l => l.id === selectedLayerId) as AdjustmentLayer | undefined;
 
   return (
@@ -89,6 +103,7 @@ const Editor = () => {
             onAddLayer={addLayer}
             onToggleVisibility={toggleLayerVisibility}
             onDeleteLayer={deleteLayer}
+            onReorderLayers={reorderLayers}
           />
           <AdjustmentPanel 
             selectedLayer={selectedLayer}

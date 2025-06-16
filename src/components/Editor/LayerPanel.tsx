@@ -4,6 +4,7 @@ import { Plus, Trash2, Eye, EyeOff } from "lucide-react";
 import { Layer, AdjustmentLayer } from "@/types/editor";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/context/LanguageContext";
+import { useRef } from "react";
 
 interface LayerPanelProps {
   layers: Layer[];
@@ -12,10 +13,30 @@ interface LayerPanelProps {
   onAddLayer: (type: AdjustmentLayer['type']) => void;
   onToggleVisibility: (id: string) => void;
   onDeleteLayer: (id: string) => void;
+  onReorderLayers: (sourceIndex: number, destIndex: number) => void;
 }
 
-export const LayerPanel = ({ layers, selectedLayerId, onSelectLayer, onAddLayer, onToggleVisibility, onDeleteLayer }: LayerPanelProps) => {
+export const LayerPanel = ({ layers, selectedLayerId, onSelectLayer, onAddLayer, onToggleVisibility, onDeleteLayer, onReorderLayers }: LayerPanelProps) => {
   const { t } = useLanguage();
+  const dragItem = useRef<number | null>(null);
+  const dragOverItem = useRef<number | null>(null);
+
+  const handleDragStart = (e: React.DragEvent<HTMLDivElement>, index: number) => {
+    dragItem.current = index;
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragEnter = (e: React.DragEvent<HTMLDivElement>, index: number) => {
+    dragOverItem.current = index;
+  };
+
+  const handleDragEnd = () => {
+    if (dragItem.current !== null && dragOverItem.current !== null) {
+      onReorderLayers(dragItem.current, dragOverItem.current);
+    }
+    dragItem.current = null;
+    dragOverItem.current = null;
+  };
 
   return (
     <Card>
@@ -24,22 +45,37 @@ export const LayerPanel = ({ layers, selectedLayerId, onSelectLayer, onAddLayer,
       </CardHeader>
       <CardContent>
         <div className="space-y-2">
-          <Button onClick={() => onAddLayer('saturation')} className="w-full">
+          <Button onClick={() => onAddLayer('levels')} className="w-full">
+            <Plus className="mr-2 h-4 w-4" /> {t.addLevels}
+          </Button>
+          <Button onClick={() => onAddLayer('curves')} className="w-full">
+            <Plus className="mr-2 h-4 w-4" /> {t.addCurves}
+          </Button>
+          <Button onClick={() => onAddLayer('hue-saturation')} className="w-full">
             <Plus className="mr-2 h-4 w-4" /> {t.addSaturation}
           </Button>
-          {/* Add buttons for other layer types here in the future */}
         </div>
-        <div className="mt-4 space-y-2">
-          {layers.map(layer => (
+        <div className="mt-4 space-y-1">
+          {layers.map((layer, index) => (
             <div 
               key={layer.id}
+              draggable
+              onDragStart={(e) => handleDragStart(e, index)}
+              onDragEnter={(e) => handleDragEnter(e, index)}
+              onDragEnd={handleDragEnd}
+              onDragOver={(e) => e.preventDefault()}
               onClick={() => onSelectLayer(layer.id)}
               className={cn(
-                "flex items-center justify-between p-2 rounded-md cursor-pointer border",
+                "flex items-center justify-between p-2 rounded-md cursor-grab border",
                 selectedLayerId === layer.id ? "bg-primary/10 border-primary" : "bg-muted/50 hover:bg-muted"
               )}
             >
-              <span className="text-sm font-medium">{layer.name}</span>
+              <div className="flex items-center gap-2">
+                <div className="w-10 h-8 bg-white border rounded-sm flex-shrink-0">
+                  {/* Placeholder for mask thumbnail */}
+                </div>
+                <span className="text-sm font-medium">{layer.name}</span>
+              </div>
               <div className="flex items-center gap-1">
                 <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); onToggleVisibility(layer.id); }}>
                   {layer.visible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4 text-muted-foreground" />}
