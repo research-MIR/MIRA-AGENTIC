@@ -104,6 +104,16 @@ const VirtualTryOn = () => {
   });
 
   useEffect(() => {
+    if (selectedJob) {
+      console.log(`[VirtualTryOn] Selected job changed to ${selectedJob.id}.`);
+      console.log(`[VirtualTryOn] Person Image URL: ${selectedJob.source_person_image_url}`);
+      console.log(`[VirtualTryOn] Garment Image URL: ${selectedJob.source_garment_image_url}`);
+    } else {
+      console.log('[VirtualTryOn] Selection cleared.');
+    }
+  }, [selectedJob]);
+
+  useEffect(() => {
     if (!session?.user) return;
     const channel = supabase.channel('vto-pipeline-jobs-tracker')
       .on<VtoPipelineJob>(

@@ -27,7 +27,11 @@ export const RecentJobThumbnail = ({ job, onClick, isSelected }: Props) => {
     let objectUrl: string | null = null;
 
     const fetchImage = async () => {
-      if (!job.metadata?.source_image_url) {
+      const sourceUrl = job.metadata?.source_image_url;
+      console.log(`[RecentJobThumbnail][${job.id}] Starting fetch. Source URL from metadata:`, sourceUrl);
+
+      if (!sourceUrl) {
+        console.error(`[RecentJobThumbnail][${job.id}] No source_image_url in metadata.`);
         setIsLoading(false);
         setHasError(true);
         return;
@@ -37,12 +41,16 @@ export const RecentJobThumbnail = ({ job, onClick, isSelected }: Props) => {
       setHasError(false);
 
       try {
-        const url = new URL(job.metadata.source_image_url);
-        const pathParts = url.pathname.split('/mira-agent-user-uploads/');
-        if (pathParts.length < 2) {
-            throw new Error("Could not parse storage path from URL.");
-        };
-        const storagePath = pathParts[1];
+        const bucketIdentifier = '/mira-agent-user-uploads/';
+        const url = new URL(sourceUrl);
+        const pathStartIndex = url.pathname.indexOf(bucketIdentifier);
+
+        if (pathStartIndex === -1) {
+            throw new Error(`Could not find bucket identifier '${bucketIdentifier}' in URL path: ${url.pathname}`);
+        }
+        
+        const storagePath = decodeURIComponent(url.pathname.substring(pathStartIndex + bucketIdentifier.length));
+        console.log(`[RecentJobThumbnail][${job.id}] Parsed storage path:`, storagePath);
         
         const { data: blob, error } = await supabase.storage
           .from('mira-agent-user-uploads')
@@ -50,10 +58,12 @@ export const RecentJobThumbnail = ({ job, onClick, isSelected }: Props) => {
         
         if (error) throw error;
 
+        console.log(`[RecentJobThumbnail][${job.id}] Image blob downloaded successfully. Size: ${blob.size}`);
         objectUrl = URL.createObjectURL(blob);
         setImageUrl(objectUrl);
+        console.log(`[RecentJobThumbnail][${job.id}] Created object URL:`, objectUrl);
       } catch (err) {
-        console.error(`Failed to load thumbnail for job ${job.id}`, err);
+        console.error(`[RecentJobThumbnail][${job.id}] Failed to load thumbnail. Error:`, err);
         setHasError(true);
       } finally {
         setIsLoading(false);
