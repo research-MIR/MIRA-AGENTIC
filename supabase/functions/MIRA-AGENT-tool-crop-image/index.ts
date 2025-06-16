@@ -35,20 +35,47 @@ serve(async (req) => {
 
     const imageBuffer = await blob.arrayBuffer();
     const image = await Image.decode(imageBuffer);
+    const { width, height } = image;
 
-    // The box is normalized to 1000x1000. We need to scale it to the image dimensions.
-    const [y_min, x_min, y_max, x_max] = box;
-    const cropX = Math.floor((x_min / 1000) * image.width);
-    const cropY = Math.floor((y_min / 1000) * image.height);
-    const cropWidth = Math.floor(((x_max - x_min) / 1000) * image.width);
-    const cropHeight = Math.floor(((y_max - y_min) / 1000) * image.height);
+    // The box is normalized to 1000x1000. We need to map it to the image's coordinate space,
+    // accounting for the image's aspect ratio by simulating the image being fitted into a square.
+    const [y_min_norm, x_min_norm, y_max_norm, x_max_norm] = box;
 
-    image.crop(cropX, cropY, cropWidth, cropHeight);
+    let cropX, cropY, cropWidth, cropHeight;
+
+    if (width >= height) {
+      // Image is landscape or square. It's scaled based on width.
+      const scale = width / 1000;
+      const y_offset = (width - height) / 2;
+      
+      cropX = x_min_norm * scale;
+      cropY = y_min_norm * scale - y_offset;
+      cropWidth = (x_max_norm - x_min_norm) * scale;
+      cropHeight = (y_max_norm - y_min_norm) * scale;
+    } else {
+      // Image is portrait. It's scaled based on height.
+      const scale = height / 1000;
+      const x_offset = (height - width) / 2;
+
+      cropX = x_min_norm * scale - x_offset;
+      cropY = y_min_norm * scale;
+      cropWidth = (x_max_norm - x_min_norm) * scale;
+      cropHeight = (y_max_norm - y_min_norm) * scale;
+    }
+
+    // Clamp values to be within image bounds to prevent errors
+    const finalCropX = Math.max(0, cropX);
+    const finalCropY = Math.max(0, cropY);
+    const finalCropWidth = Math.min(width - finalCropX, cropWidth);
+    const finalCropHeight = Math.min(height - finalCropY, cropHeight);
+
+    image.crop(Math.floor(finalCropX), Math.floor(finalCropY), Math.floor(finalCropWidth), Math.floor(finalCropHeight));
 
     const croppedImageBuffer = await image.encode(0); // 0 for PNG
 
     // Upload the cropped image
-    const croppedFilename = `cropped_${Date.now()}_${storagePath.split('/').pop()}`;
+    const originalFilename = storagePath.split('/').pop() || 'image.png';
+    const croppedFilename = `cropped_${Date.now()}_${originalFilename}`;
     const croppedStoragePath = `${user_id}/${croppedFilename}`;
     
     const { error: uploadError } = await supabase.storage
