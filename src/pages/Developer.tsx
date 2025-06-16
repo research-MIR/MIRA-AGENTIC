@@ -118,11 +118,8 @@ const Developer = () => {
   };
 
   const handleCropTest = async () => {
-    console.log("[CropTest] Starting...");
     if (!sourceImagePublicUrl || !segmentationResult || segmentationResult.length === 0) {
-      const errorMsg = "Missing source image URL or segmentation result.";
-      console.error("[CropTest] Error:", errorMsg, { sourceImagePublicUrl, segmentationResult });
-      return showError(errorMsg);
+      return showError("Missing source image URL or segmentation result.");
     }
     setIsCropping(true);
     const toastId = showLoading("Cropping image...");
@@ -132,21 +129,15 @@ const Developer = () => {
       box: segmentationResult[0].box_2d,
       user_id: session?.user.id
     };
-    console.log("[CropTest] Invoking 'MIRA-AGENT-tool-crop-image' with payload:", payload);
 
     try {
       const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-crop-image', { body: payload });
-      
-      console.log("[CropTest] Response from function:", { data, error });
-
       if (error) throw error;
       
-      console.log("[CropTest] Setting cropped image URL state to:", data.cropped_image_url);
       setCroppedImageUrl(data.cropped_image_url);
       dismissToast(toastId);
       showSuccess("Image cropped successfully.");
     } catch (err: any) {
-      console.error("[CropTest] Catch block error:", err);
       showError(`Cropping failed: ${err.message}`);
       dismissToast(toastId);
     } finally {
@@ -201,23 +192,26 @@ const Developer = () => {
                             value={JSON.stringify(segmentationResult, null, 2)}
                             className="mt-1 h-48 font-mono text-xs"
                         />
-                        {maskImageUrl && (
-                          <div>
-                            <Label>Generated Mask</Label>
-                            <SecureImageDisplay imageUrl={maskImageUrl} alt="Segmentation Mask" />
-                          </div>
-                        )}
                         <Button onClick={handleCropTest} disabled={isCropping}>
                             {isCropping && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             Test Crop with BBox
                         </Button>
-                        {croppedImageUrl && (
-                            <div>
-                                <Label>Cropped Image Result</Label>
-                                <SecureImageDisplay imageUrl={croppedImageUrl} alt="Cropped Result" />
-                            </div>
-                        )}
                     </div>
+                )}
+                {croppedImageUrl && (
+                  <div className="space-y-4 pt-4 border-t">
+                    <h3 className="font-semibold">Crop Results</h3>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label>Cropped Image</Label>
+                        <SecureImageDisplay imageUrl={croppedImageUrl} alt="Cropped Result" />
+                      </div>
+                      <div>
+                        <Label>Corresponding Mask</Label>
+                        <SecureImageDisplay imageUrl={maskImageUrl} alt="Segmentation Mask" />
+                      </div>
+                    </div>
+                  </div>
                 )}
             </CardContent>
           </Card>
