@@ -69,7 +69,7 @@ export const RecentJobThumbnail = ({ job, onClick, isSelected }: Props) => {
         URL.revokeObjectURL(objectUrl);
       }
     };
-  }, [job.id, job.source_garment_image_url, supabase]);
+  }, [job.id]); // Dependency only on job.id to prevent re-runs
 
   if (isLoading) {
     return <Skeleton className="w-24 h-24 flex-shrink-0" />;

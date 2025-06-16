@@ -235,7 +235,7 @@ const VirtualTryOn = () => {
         if (personUrlToRevoke) URL.revokeObjectURL(personUrlToRevoke);
         if (garmentUrlToRevoke) URL.revokeObjectURL(garmentUrlToRevoke);
     };
-  }, [selectedJob, supabase.storage]);
+  }, [selectedJob?.id]);
 
   const personImageUrl = useMemo(() => {
     if (selectedJob) return personImageBlobUrl;
