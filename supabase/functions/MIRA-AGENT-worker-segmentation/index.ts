@@ -9,7 +9,7 @@ const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const MODEL_NAME = "gemini-2.5-flash-preview-05-20";
 const BUCKET_NAME = 'mira-agent-user-uploads';
 const MAX_RETRIES = 3;
-const INITIAL_RETRY_DELAY_MS = 2000; // Start with a 2-second delay
+const INITIAL_RETRY_DELAY_MS = 2000;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -29,7 +29,8 @@ const systemPrompt = `You are a specialist AI segmentation expert for virtual tr
 -   Generate a single, unified segmentation mask for this entire region. For example, if it's a t-shirt, the mask should cover the torso and arms where the shirt would be.
 
 ### Output Format:
-Your entire response MUST be a single, valid JSON object containing one key: "segmentation_result".
+Your entire response MUST be a single, valid JSON object inside a markdown block.
+The JSON object must contain one key: "segmentation_result".
 The value of this key must be an object with the following structure:
 -   \`label\`: A brief description of the segmented area (e.g., "t-shirt and torso area").
 -   \`box_2d\`: The bounding box of the mask as an array of four numbers: [x_min, y_min, x_max, y_max].
@@ -120,7 +121,6 @@ serve(async (req) => {
     const requestPayload = {
         model: MODEL_NAME,
         contents: [{ role: 'user', parts: userParts }],
-        generationConfig: { responseMimeType: "application/json" },
         config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
     };
 
@@ -130,20 +130,18 @@ serve(async (req) => {
             console.log(`[SegmentWorker][${job_id}] Sending request to Gemini (Attempt ${attempt}/${MAX_RETRIES})...`);
             result = await ai.models.generateContent(requestPayload);
             console.log(`[SegmentWorker][${job_id}] Gemini API call successful on attempt ${attempt}.`);
-            break; // Success, exit loop
+            break; 
         } catch (error) {
             console.warn(`[SegmentWorker][${job_id}] Attempt ${attempt} failed:`, error.message);
             if (attempt === MAX_RETRIES) {
                 console.error(`[SegmentWorker][${job_id}] All retry attempts failed. Rethrowing final error.`);
-                throw error; // Rethrow the last error if all retries fail
+                throw error;
             }
-            // Check if it's a server error (like 503) that is worth retrying
             if (error.name === 'ServerError') {
-                const delay = INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt - 1); // Exponential backoff
+                const delay = INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt - 1);
                 console.log(`[SegmentWorker][${job_id}] Model is overloaded. Retrying in ${delay}ms...`);
                 await new Promise(resolve => setTimeout(resolve, delay));
             } else {
-                // Don't retry on non-server errors (e.g., bad request)
                 throw error;
             }
         }
