@@ -9,7 +9,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const systemPrompt = `You are an image analysis AI. Your task is to analyze the provided image and return a JSON object describing it. The JSON should contain a description and a list of bounding boxes for the main objects you identify.
+const systemPrompt = `You are an image analysis AI. Your task is to analyze the provided image and return a JSON object describing it. The JSON should contain a description and a list of segmentation masks where each entry contains the 2D bounding box in the key "box_2d", the segmentation mask in key "mask", and the text label in the key "label". Use descriptive labels.
 
 Example Output:
 {
@@ -17,7 +17,8 @@ Example Output:
   "masks": [
     {
       "box_2d": [100, 150, 800, 850],
-      "label": "golden_retriever"
+      "label": "golden_retriever",
+      "mask": "iVBORw0KGgoAAAANSUhEUg..."
     }
   ]
 }`;
@@ -31,7 +32,7 @@ const responseSchema = {
     },
     'masks': {
         type: Type.ARRAY,
-        description: "A list of bounding boxes for the segmented objects.",
+        description: "A list of segmentation masks.",
         items: {
             type: Type.OBJECT,
             properties: {
@@ -43,9 +44,13 @@ const responseSchema = {
                 'label': {
                     type: Type.STRING,
                     description: "A descriptive label for the segmented object."
+                },
+                'mask': {
+                    type: Type.STRING,
+                    description: "A base64 encoded PNG string of the segmentation mask."
                 }
             },
-            required: ['box_2d', 'label']
+            required: ['box_2d', 'label', 'mask']
         }
     }
   },
