@@ -19,6 +19,7 @@ import { Switch } from "@/components/ui/switch";
 import { useDropzone } from "@/hooks/useDropzone";
 import { cn } from "@/lib/utils";
 import { RealtimeChannel } from "@supabase/supabase-js";
+import { RecentJobThumbnail } from "@/components/RecentJobThumbnail";
 
 interface ComfyJob {
   id: string;
@@ -381,9 +382,12 @@ const Refine = () => {
             ) : recentJobs && recentJobs.length > 0 ? (
               <div className="flex gap-4 overflow-x-auto pb-2">
                 {recentJobs.map(job => (
-                  <button key={job.id} onClick={() => handleJobSelect(job)} className={cn("border-2 rounded-lg p-1 flex-shrink-0", selectedJob?.id === job.id ? "border-primary" : "border-transparent")}>
-                    <img src={job.metadata?.source_image_url} alt="Job source" className="w-24 h-24 object-cover rounded-md" />
-                  </button>
+                  <RecentJobThumbnail
+                    key={job.id}
+                    job={job}
+                    onClick={() => handleJobSelect(job)}
+                    isSelected={selectedJob?.id === job.id}
+                  />
                 ))}
               </div>
             ) : (
