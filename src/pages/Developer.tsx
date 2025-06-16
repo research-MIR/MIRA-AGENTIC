@@ -90,6 +90,14 @@ const Developer = () => {
     }
   };
 
+  // DEBUG LOG: Check the state variables before rendering.
+  console.log('[Developer.tsx] Render check:', {
+    hasSegmentationResult: !!segmentationResult,
+    hasSourceImageDimensions: !!sourceImageDimensions,
+    segmentationResult: segmentationResult,
+    sourceImageDimensions: sourceImageDimensions,
+  });
+
   return (
     <div className="p-4 md:p-8 h-screen overflow-y-auto">
       <header className="pb-4 mb-8 border-b">
