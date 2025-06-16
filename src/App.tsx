@@ -10,6 +10,7 @@ import Layout from "./components/Layout";
 import ProtectedRoute from "./components/Auth/ProtectedRoute";
 import VirtualTryOn from "./pages/VirtualTryOn";
 import Refine from "./pages/Refine";
+import Editor from "./pages/Editor";
 import { useSession } from "./components/Auth/SessionContextProvider.tsx";
 import { useLanguage } from "./context/LanguageContext.tsx";
 import { useOnboardingTour } from "./context/OnboardingTourContext.tsx";
@@ -84,6 +85,7 @@ const App = () => {
             <Route path="/gallery" element={<Gallery />} />
             <Route path="/generator" element={<Generator />} />
             <Route path="/refine" element={<Refine />} />
+            <Route path="/editor" element={<Editor />} />
             <Route path="/developer" element={<Developer />} />
             <Route path="/virtual-try-on" element={<VirtualTryOn />} />
           </Route>
