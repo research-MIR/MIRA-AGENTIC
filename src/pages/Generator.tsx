@@ -367,7 +367,7 @@ const Generator = () => {
         </div>
       </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-1 space-y-6">
           <Card id="generator-prompt-card">
             <CardHeader>
@@ -405,7 +405,9 @@ const Generator = () => {
               </div>
             </CardContent>
           </Card>
+        </div>
 
+        <div className="lg:col-span-1 space-y-6">
           <Card id="generator-settings-card">
             <CardHeader>
               <CardTitle>{t.configureSettings}</CardTitle>
@@ -454,7 +456,6 @@ const Generator = () => {
               </div>
             </CardContent>
           </Card>
-
           <Button onClick={handleGenerate} disabled={isLoading} className="w-full">
             {isLoading ? <Wand2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
             {t.generate}
