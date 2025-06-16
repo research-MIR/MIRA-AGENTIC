@@ -11,7 +11,6 @@ import { useLanguage } from "@/context/LanguageContext";
 import { cn } from "@/lib/utils";
 import { useDropzone } from "@/hooks/useDropzone";
 import { optimizeImage } from "@/lib/utils";
-import { SegmentationMask } from "@/components/SegmentationMask";
 import { RealtimeChannel } from "@supabase/supabase-js";
 
 const ImageUploader = ({ onFileSelect, title, isDraggingOver, t }: { onFileSelect: (file: File) => void, title: string, isDraggingOver: boolean, t: any }) => {
@@ -55,10 +54,9 @@ const VirtualTryOn = () => {
   const [garmentImageFile, setGarmentImageFile] = useState<File | null>(null);
   const [prompt, setPrompt] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [segmentationResult, setSegmentationResult] = useState<any[] | null>(null);
+  const [segmentationResult, setSegmentationResult] = useState<{ description: string } | null>(null);
   const [isPersonDragging, setIsPersonDragging] = useState(false);
   const [isGarmentDragging, setIsGarmentDragging] = useState(false);
-  const [personImageDimensions, setPersonImageDimensions] = useState<{width: number, height: number} | null>(null);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
 
@@ -78,21 +76,12 @@ const VirtualTryOn = () => {
           (payload) => {
             const job = payload.new;
             if (job.status === 'complete') {
-              const resultData = job.result;
-              // Handle the case where the result is a single object
-              if (resultData && typeof resultData === 'object' && !Array.isArray(resultData)) {
-                setSegmentationResult([resultData]); // Wrap the single object in an array
-              } else {
-                setSegmentationResult([]); // Default to empty array if format is unexpected
-                if (resultData) {
-                  console.warn("Received segmentation result in an unexpected format:", resultData);
-                }
-              }
+              setSegmentationResult(job.result);
               setIsLoading(false);
-              showSuccess("Segmentation complete!");
+              showSuccess("Analysis complete!");
               setActiveJobId(null);
             } else if (job.status === 'failed') {
-              showError(`Segmentation failed: ${job.error_message}`);
+              showError(`Analysis failed: ${job.error_message}`);
               setIsLoading(false);
               setActiveJobId(null);
             }
@@ -109,19 +98,6 @@ const VirtualTryOn = () => {
       }
     };
   }, [activeJobId, supabase]);
-
-  const handlePersonFileSelect = (file: File) => {
-    setPersonImageFile(file);
-    const reader = new FileReader();
-    reader.onload = (e) => {
-        const img = new Image();
-        img.onload = () => {
-            setPersonImageDimensions({ width: img.width, height: img.height });
-        };
-        img.src = e.target?.result as string;
-    };
-    reader.readAsDataURL(file);
-  };
 
   const uploadFileAndGetUrl = async (file: File | null, bucket: string): Promise<string | null> => {
     if (!file) return null;
@@ -178,7 +154,7 @@ const VirtualTryOn = () => {
     <div className="p-4 md:p-8 h-screen overflow-y-auto">
       <header className="pb-4 mb-8 border-b">
         <h1 className="text-3xl font-bold">{t.virtualTryOn}</h1>
-        <p className="text-muted-foreground">{t.comingSoon}</p>
+        <p className="text-muted-foreground">Describe where a garment would fit on a person.</p>
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -187,19 +163,19 @@ const VirtualTryOn = () => {
           <Card>
             <CardHeader><CardTitle>1. Upload Images</CardTitle></CardHeader>
             <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <ImageUploader onFileSelect={handlePersonFileSelect} title="Person Image" isDraggingOver={isPersonDragging} t={t} />
+              <ImageUploader onFileSelect={setPersonImageFile} title="Person Image" isDraggingOver={isPersonDragging} t={t} />
               <ImageUploader onFileSelect={setGarmentImageFile} title="Garment Image" isDraggingOver={isGarmentDragging} t={t} />
             </CardContent>
           </Card>
           <Card>
             <CardHeader><CardTitle>2. Add Instructions (Optional)</CardTitle></CardHeader>
             <CardContent>
-              <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="e.g., 'Just the t-shirt, ignore the jacket'" />
+              <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="e.g., 'Focus on how the collar sits.'" />
             </CardContent>
           </Card>
           <Button onClick={handleSegment} disabled={isLoading} className="w-full">
             {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
-            Segment Garment Area
+            Analyze Placement
           </Button>
         </div>
 
@@ -209,16 +185,9 @@ const VirtualTryOn = () => {
             <CardHeader><CardTitle>Results</CardTitle></CardHeader>
             <CardContent>
               <div className="grid grid-cols-2 gap-4 mb-4">
-                <div className="relative">
+                <div>
                   <h3 className="font-semibold text-center mb-2">Person</h3>
                   {personImageUrl ? <img src={personImageUrl} alt="Person" className="w-full rounded-md" /> : <div className="aspect-square bg-muted rounded-md flex items-center justify-center"><ImageIcon className="h-12 w-12 text-muted-foreground" /></div>}
-                  {segmentationResult && personImageDimensions && (
-                    <SegmentationMask 
-                      masks={segmentationResult} 
-                      width={personImageDimensions.width} 
-                      height={personImageDimensions.height} 
-                    />
-                  )}
                 </div>
                 <div>
                   <h3 className="font-semibold text-center mb-2">Garment</h3>
@@ -228,15 +197,15 @@ const VirtualTryOn = () => {
               {isLoading && (
                 <div className="text-center text-muted-foreground py-4">
                   <Loader2 className="h-8 w-8 animate-spin mx-auto" />
-                  <p className="mt-2">Processing job... this may take a minute.</p>
+                  <p className="mt-2">Analyzing images... this may take a moment.</p>
                 </div>
               )}
               {segmentationResult && (
                 <div>
-                  <Label>Segmentation JSON Output</Label>
-                  <pre className="mt-2 p-2 bg-muted rounded-md text-xs overflow-x-auto">
-                    {JSON.stringify(segmentationResult, null, 2)}
-                  </pre>
+                  <Label>AI Description</Label>
+                  <div className="mt-2 p-3 bg-muted rounded-md text-sm">
+                    <p>{segmentationResult.description}</p>
+                  </div>
                 </div>
               )}
             </CardContent>
