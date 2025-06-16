@@ -78,7 +78,15 @@ const VirtualTryOn = () => {
           (payload) => {
             const job = payload.new;
             if (job.status === 'complete') {
-              setSegmentationResult(job.result?.segmentation_masks || []);
+              const resultData = job.result;
+              if (Array.isArray(resultData)) {
+                setSegmentationResult(resultData);
+              } else if (resultData && Array.isArray(resultData.segmentation_masks)) {
+                setSegmentationResult(resultData.segmentation_masks);
+              } else {
+                setSegmentationResult([]);
+                console.warn("Received segmentation result in an unknown format:", resultData);
+              }
               setIsLoading(false);
               showSuccess("Segmentation complete!");
               setActiveJobId(null);
