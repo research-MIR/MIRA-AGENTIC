@@ -159,12 +159,30 @@ USING ( auth.role() = 'service_role' );
 
 #### 4.3. Realtime Configuration
 
-The frontend relies on Realtime updates. You must enable this for the jobs table:
+The frontend relies on Realtime updates for a responsive user experience. The following tables must be added to the `supabase_realtime` publication:
+-   `mira-agent-jobs` (for the main agent chat and direct generator)
+-   `mira-agent-comfyui-jobs` (for tracking Refine & Upscale jobs)
+-   `mira-agent-vto-pipeline-jobs` (for tracking Virtual Try-On jobs)
+
+You can enable this in two ways:
+
+**1. Via the Supabase Dashboard (Recommended):**
 1.  Go to your Supabase Project Dashboard.
 2.  Navigate to **Database** -> **Publications**.
 3.  Click on the `supabase_realtime` publication.
-4.  Add the `mira-agent-jobs` table to this publication and ensure `INSERT`, `UPDATE`, and `DELETE` are toggled on.
+4.  Add the tables listed above to this publication and ensure `INSERT`, `UPDATE`, and `DELETE` are toggled on for each.
 5.  Save your changes.
+
+**2. Via SQL:**
+Alternatively, you can run the following command in the Supabase SQL Editor to ensure all necessary tables are included in the publication.
+
+```sql
+ALTER PUBLICATION supabase_realtime
+ADD TABLE 
+  public."mira-agent-jobs", 
+  public."mira-agent-comfyui-jobs", 
+  public."mira-agent-vto-pipeline-jobs";
+```
 
 #### 4.4. Environment Variables
 
