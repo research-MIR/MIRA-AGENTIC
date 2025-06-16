@@ -54,6 +54,7 @@ export const downloadImage = async (url: string, filename: string) => {
 export const optimizeImage = (file: File, quality = 0.92): Promise<File> => {
   return new Promise((resolve, reject) => {
     const originalSize = file.size;
+    const MAX_DIMENSION = 1440;
 
     if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
       console.log(`[ImageOptimizer] Skipped optimization for ${file.type}. Passing through original file.`);
@@ -69,14 +70,20 @@ export const optimizeImage = (file: File, quality = 0.92): Promise<File> => {
       img.onload = () => {
         const canvas = document.createElement('canvas');
         
-        canvas.width = img.width;
-        canvas.height = img.height;
+        const longestSide = Math.max(img.width, img.height);
+        const scale = longestSide > MAX_DIMENSION ? MAX_DIMENSION / longestSide : 1;
+        
+        const newWidth = img.width * scale;
+        const newHeight = img.height * scale;
+
+        canvas.width = newWidth;
+        canvas.height = newHeight;
 
         const ctx = canvas.getContext('2d');
         if (!ctx) {
           return reject(new Error('Failed to get canvas context'));
         }
-        ctx.drawImage(img, 0, 0, img.width, img.height);
+        ctx.drawImage(img, 0, 0, newWidth, newHeight);
 
         canvas.toBlob(
           (blob) => {
@@ -84,16 +91,16 @@ export const optimizeImage = (file: File, quality = 0.92): Promise<File> => {
               return reject(new Error('Canvas toBlob failed'));
             }
             const originalName = file.name.substring(0, file.name.lastIndexOf('.')) || file.name;
-            const newFile = new File([blob], `${originalName}.png`, {
-              type: 'image/png',
+            const newFile = new File([blob], `${originalName}.webp`, {
+              type: 'image/webp',
               lastModified: Date.now(),
             });
             
-            console.log(`[ImageOptimizer] Optimized ${file.name} to PNG: ${formatBytes(originalSize)} -> ${formatBytes(newFile.size)}`);
+            console.log(`[ImageOptimizer] Optimized ${file.name} to WebP: ${formatBytes(originalSize)} -> ${formatBytes(newFile.size)}`);
 
             resolve(newFile);
           },
-          'image/png',
+          'image/webp',
           quality
         );
       };
