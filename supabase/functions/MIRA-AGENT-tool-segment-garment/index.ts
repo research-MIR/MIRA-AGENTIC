@@ -6,7 +6,7 @@ import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-const MODEL_NAME = "gemini-1.5-flash-latest"; // Using latest flash model
+const MODEL_NAME = "gemini-2.5-pro-preview-06-05"; // Using the correct, more powerful model
 const BUCKET_NAME = 'mira-agent-user-uploads';
 
 const corsHeaders = {
@@ -48,12 +48,12 @@ The value of this key must be an object with the following structure:
 async function downloadImageAsPart(supabase: SupabaseClient, imageUrl: string, label: string, requestId: string): Promise<Part[]> {
     console.log(`[SegmentGarment][${requestId}] Downloading image for '${label}' from URL: ${imageUrl}`);
     const url = new URL(imageUrl);
-    const pathParts = url.pathname.split(`/${BUCKET_NAME}/`);
-    if (pathParts.length < 2) {
+    const rawPath = url.pathname.split(`/${BUCKET_NAME}/`)[1];
+    if (!rawPath) {
         throw new Error(`Could not parse file path from URL: ${imageUrl}`);
     }
-    const filePath = pathParts[1];
-    console.log(`[SegmentGarment][${requestId}] Parsed storage path: ${filePath}`);
+    const filePath = decodeURIComponent(rawPath);
+    console.log(`[SegmentGarment][${requestId}] Parsed and decoded storage path: ${filePath}`);
 
     const { data: fileBlob, error: downloadError } = await supabase.storage.from(BUCKET_NAME).download(filePath);
     if (downloadError) throw new Error(`Supabase download failed for ${filePath}: ${downloadError.message}`);
