@@ -64,37 +64,52 @@ const VirtualTryOn = () => {
   const garmentImageUrl = useMemo(() => garmentImageFile ? URL.createObjectURL(garmentImageFile) : null, [garmentImageFile]);
 
   useEffect(() => {
+    // If there's no active job, ensure any existing channel is removed.
+    if (!activeJobId) {
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+      return;
+    }
+
+    // If there's already a channel for this job, do nothing.
+    if (channelRef.current?.topic === `realtime:public:mira-agent-segmentation-jobs:id=eq.${activeJobId}`) {
+      return;
+    }
+
+    // If there's a channel for a *different* job, remove it before creating a new one.
     if (channelRef.current) {
       supabase.removeChannel(channelRef.current);
     }
 
-    if (activeJobId) {
-      const channel = supabase.channel(`segmentation-job-${activeJobId}`)
-        .on(
-          'postgres_changes',
-          { event: 'UPDATE', schema: 'public', table: 'mira-agent-segmentation-jobs', filter: `id=eq.${activeJobId}` },
-          (payload) => {
-            const job = payload.new;
-            if (job.status === 'complete') {
-              setSegmentationResult(job.result);
-              setIsLoading(false);
-              showSuccess("Analysis complete!");
-              setActiveJobId(null);
-            } else if (job.status === 'failed') {
-              showError(`Analysis failed: ${job.error_message}`);
-              setIsLoading(false);
-              setActiveJobId(null);
-            }
+    const channel = supabase.channel(`segmentation-job-${activeJobId}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'mira-agent-segmentation-jobs', filter: `id=eq.${activeJobId}` },
+        (payload) => {
+          const job = payload.new;
+          if (job.status === 'complete') {
+            setSegmentationResult(job.result);
+            setIsLoading(false);
+            showSuccess("Analysis complete!");
+            setActiveJobId(null); // This will trigger the cleanup
+          } else if (job.status === 'failed') {
+            showError(`Analysis failed: ${job.error_message}`);
+            setIsLoading(false);
+            setActiveJobId(null); // This will trigger the cleanup
           }
-        )
-        .subscribe();
-      
-      channelRef.current = channel;
-    }
+        }
+      )
+      .subscribe();
+    
+    channelRef.current = channel;
 
+    // The cleanup function will be called when the component unmounts or when activeJobId changes.
     return () => {
       if (channelRef.current) {
         supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
       }
     };
   }, [activeJobId, supabase]);

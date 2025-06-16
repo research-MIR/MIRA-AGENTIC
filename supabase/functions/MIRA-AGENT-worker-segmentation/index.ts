@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { GoogleGenAI, Type, Part } from 'https://esm.sh/@google/genai@0.15.0';
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
@@ -12,6 +12,7 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const MODEL_NAME = "gemini-2.5-pro-preview-06-05";
+const BUCKET_NAME = 'mira-agent-user-uploads';
 
 const systemPrompt = `You are a virtual stylist. You will be given two images: one of a person and one of a garment. Your task is to describe exactly where the garment would be placed on the person's body if they were to wear it. Be descriptive and clear. If the user provides additional instructions, take them into account.`;
 
@@ -26,13 +27,24 @@ const responseSchema = {
   required: ['description'],
 };
 
-async function downloadImageAsPart(imageUrl: string): Promise<Part> {
-    const response = await fetch(imageUrl);
-    if (!response.ok) {
-        throw new Error(`Failed to download image from ${imageUrl}. Status: ${response.status}`);
+async function downloadImageAsPart(supabase: SupabaseClient, imageUrl: string): Promise<Part> {
+    const url = new URL(imageUrl);
+    const pathParts = url.pathname.split(`/public/${BUCKET_NAME}/`);
+    if (pathParts.length < 2) {
+        throw new Error(`Could not parse storage path from URL: ${imageUrl}`);
     }
-    const mimeType = response.headers.get("content-type") || "image/jpeg";
-    const buffer = await response.arrayBuffer();
+    const storagePath = decodeURIComponent(pathParts[1]);
+
+    const { data: blob, error } = await supabase.storage
+        .from(BUCKET_NAME)
+        .download(storagePath);
+
+    if (error) {
+        throw new Error(`Supabase download failed for path ${storagePath}: ${error.message}`);
+    }
+
+    const mimeType = blob.type;
+    const buffer = await blob.arrayBuffer();
     const base64 = encodeBase64(buffer);
     return { inlineData: { mimeType, data: base64 } };
 }
@@ -68,8 +80,8 @@ serve(async (req) => {
 
     if (fetchError) throw fetchError;
 
-    const personImagePart = await downloadImageAsPart(job.person_image_url);
-    const garmentImagePart = await downloadImageAsPart(job.garment_image_url);
+    const personImagePart = await downloadImageAsPart(supabase, job.person_image_url);
+    const garmentImagePart = await downloadImageAsPart(supabase, job.garment_image_url);
 
     const userParts: Part[] = [
         { text: "Person Image:" },
