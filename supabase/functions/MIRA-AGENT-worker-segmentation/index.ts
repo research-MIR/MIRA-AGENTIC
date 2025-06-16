@@ -160,6 +160,8 @@ serve(async (req) => {
         throw new Error("AI model call failed to produce a text response after all retries.");
     }
     
+    console.log(`[SegmentWorker][${job_id}] Raw AI Response Text:`, result.text);
+    
     await supabase.from('mira-agent-segmentation-jobs').update({
       raw_ai_response: result.text
     }).eq('id', job_id);
