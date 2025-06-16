@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { UploadCloud, Image as ImageIcon } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
-import { Layer, AdjustmentLayer, PaintLayer, HSLAdjustment, LevelsAdjustment } from "@/types/editor";
+import { Layer, AdjustmentLayer, PaintLayer, HSLAdjustment, LevelsAdjustment, DodgeBurnSettings } from "@/types/editor";
 import { LayerPanel } from "@/components/Editor/LayerPanel";
 import { AdjustmentPanel } from "@/components/Editor/AdjustmentPanel";
 import { BrushPanel } from "@/components/Editor/BrushPanel";
@@ -21,6 +21,7 @@ const Editor = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isPainting = useRef(false);
   const lastPos = useRef<{ x: number, y: number } | null>(null);
+  const [brushPreview, setBrushPreview] = useState({ x: 0, y: 0, visible: false });
 
   useImageProcessor(baseImage, layers, layerCanvases, canvasRef);
 
@@ -175,8 +176,20 @@ const Editor = () => {
     
     lastPos.current = currentPos;
     
-    // Trigger a re-render by creating a new map
     setLayerCanvases(new Map(layerCanvases));
+  };
+
+  const handleMouseMoveForPreview = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (selectedLayer?.type !== 'dodge-burn') {
+        if (brushPreview.visible) setBrushPreview(p => ({ ...p, visible: false }));
+        return;
+    }
+    const rect = e.currentTarget.getBoundingClientRect();
+    setBrushPreview({
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top,
+        visible: true,
+    });
   };
 
   return (
@@ -203,14 +216,34 @@ const Editor = () => {
       </div>
 
       <main className="flex-1 flex items-center justify-center p-8" {...dropzoneProps} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}>
-        <div className={cn("w-full h-full flex items-center justify-center transition-colors", isDraggingOver && "bg-primary/10 rounded-lg")}>
+        <div 
+          className={cn("w-full h-full flex items-center justify-center transition-colors relative", isDraggingOver && "bg-primary/10 rounded-lg")}
+          onMouseMove={handleMouseMoveForPreview}
+          onMouseLeave={() => setBrushPreview(p => ({ ...p, visible: false }))}
+        >
           {baseImage ? (
-            <canvas 
-              ref={canvasRef} 
-              className="max-w-full max-h-full object-contain shadow-lg cursor-crosshair"
-              onMouseDown={handleMouseDown}
-              onMouseMove={handleMouseMove}
-            />
+            <>
+              <canvas 
+                ref={canvasRef} 
+                className="max-w-full max-h-full object-contain shadow-lg"
+                style={{ cursor: selectedLayer?.type === 'dodge-burn' ? 'none' : 'default' }}
+                onMouseDown={handleMouseDown}
+                onMouseMove={handleMouseMove}
+              />
+              {brushPreview.visible && selectedLayer?.type === 'dodge-burn' && (
+                <div
+                  className="absolute rounded-full border border-white/80 pointer-events-none"
+                  style={{
+                    left: brushPreview.x,
+                    top: brushPreview.y,
+                    width: (selectedLayer.settings as DodgeBurnSettings).size,
+                    height: (selectedLayer.settings as DodgeBurnSettings).size,
+                    transform: 'translate(-50%, -50%)',
+                    boxShadow: '0 0 0 1px black',
+                  }}
+                />
+              )}
+            </>
           ) : (
             <div className="text-center text-muted-foreground">
               <ImageIcon className="mx-auto h-24 w-24 mb-4" />
