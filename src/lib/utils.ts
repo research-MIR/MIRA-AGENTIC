@@ -56,7 +56,7 @@ export const optimizeImage = (file: File, quality = 0.92): Promise<File> => {
     const originalSize = file.size;
     const MAX_DIMENSION = 1440;
 
-    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+    if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type)) {
       console.log(`[ImageOptimizer] Skipped optimization for ${file.type}. Passing through original file.`);
       resolve(file);
       return;
@@ -91,17 +91,17 @@ export const optimizeImage = (file: File, quality = 0.92): Promise<File> => {
               return reject(new Error('Canvas toBlob failed'));
             }
             const originalName = file.name.substring(0, file.name.lastIndexOf('.')) || file.name;
-            const newFile = new File([blob], `${originalName}.webp`, {
-              type: 'image/webp',
+            const newFile = new File([blob], `${originalName}.png`, {
+              type: 'image/png',
               lastModified: Date.now(),
             });
             
-            console.log(`[ImageOptimizer] Optimized ${file.name} to WebP: ${formatBytes(originalSize)} -> ${formatBytes(newFile.size)}`);
+            console.log(`[ImageOptimizer] Optimized ${file.name} to PNG: ${formatBytes(originalSize)} -> ${formatBytes(newFile.size)}`);
 
             resolve(newFile);
           },
-          'image/webp',
-          quality
+          'image/png',
+          quality // For PNG, this is more about compression level, but the API is the same.
         );
       };
       img.onerror = (error) => reject(error);
