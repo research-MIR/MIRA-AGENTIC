@@ -66,33 +66,23 @@ serve(async (req) => {
     const { width: baseW, height: baseH } = baseImage;
     const [y_min_norm, x_min_norm, y_max_norm, x_max_norm] = box;
 
-    let targetPasteX, targetPasteY, targetPasteWidth, targetPasteHeight;
+    let targetPasteX, targetPasteY;
 
     if (baseW >= baseH) {
       const scale = baseW / 1000;
       const y_offset = (baseW - baseH) / 2;
       targetPasteX = x_min_norm * scale;
       targetPasteY = y_min_norm * scale - y_offset;
-      targetPasteWidth = (x_max_norm - x_min_norm) * scale;
-      targetPasteHeight = (y_max_norm - y_min_norm) * scale;
     } else {
       const scale = baseH / 1000;
       const x_offset = (baseH - baseW) / 2;
       targetPasteX = x_min_norm * scale - x_offset;
       targetPasteY = y_min_norm * scale;
-      targetPasteWidth = (x_max_norm - x_min_norm) * scale;
-      targetPasteHeight = (y_max_norm - y_min_norm) * scale;
     }
 
-    // Resize the overlay to fit within the target dimensions while preserving aspect ratio
-    overlayImage.contain(targetPasteWidth, targetPasteHeight);
-
-    // Calculate the offset to center the (potentially letterboxed) overlay within the target area
-    const offsetX = (targetPasteWidth - overlayImage.width) / 2;
-    const offsetY = (targetPasteHeight - overlayImage.height) / 2;
-
-    // Composite the correctly sized and positioned overlay
-    baseImage.composite(overlayImage, Math.floor(targetPasteX + offsetX), Math.floor(targetPasteY + offsetY));
+    // The overlay image is already the correct size because it was generated from the cropped source.
+    // We do not need to resize it. We simply paste it at the calculated top-left coordinate.
+    baseImage.composite(overlayImage, Math.floor(targetPasteX), Math.floor(targetPasteY));
 
     const finalImageBuffer = await baseImage.encode(0); // PNG
 
