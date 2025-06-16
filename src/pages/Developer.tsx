@@ -181,6 +181,7 @@ const Developer = () => {
 
   const handleSegmentation = async () => {
     if (!segmentationImage) return showError("Please select an image for segmentation.");
+    if (!session?.user) return showError("You must be logged in.");
     setIsSegmenting(true);
     setSegmentationResult(null);
     let toastId = showLoading("Optimizing image...");
@@ -199,7 +200,8 @@ const Developer = () => {
             const { data, error } = await supabase.functions.invoke('MIRA-AGENT-segment-ai', {
                 body: {
                     base64_image_data: base64Data,
-                    mime_type: optimizedFile.type // This will be 'image/webp'
+                    mime_type: optimizedFile.type,
+                    user_id: session.user.id
                 }
             });
 

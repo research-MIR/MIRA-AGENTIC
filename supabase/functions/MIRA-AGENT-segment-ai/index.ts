@@ -1,8 +1,12 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { GoogleGenAI, Type, Part } from 'https://esm.sh/@google/genai@0.15.0';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const MODEL_NAME = "gemini-2.5-pro-preview-06-05";
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -73,11 +77,11 @@ serve(async (req) => {
   }
 
   try {
-    const { base64_image_data, mime_type } = await req.json();
+    const { base64_image_data, mime_type, user_id } = await req.json();
     console.log("[SegmentAI] Received request payload.");
 
-    if (!base64_image_data || !mime_type) {
-      throw new Error("base64_image_data and mime_type are required.");
+    if (!base64_image_data || !mime_type || !user_id) {
+      throw new Error("base64_image_data, mime_type, and user_id are required.");
     }
     console.log(`[SegmentAI] Input validated. Mime type: ${mime_type}.`);
 
@@ -106,6 +110,36 @@ serve(async (req) => {
     console.log("[SegmentAI] Received response from Gemini API.");
     const responseJson = extractJson(result.text);
     console.log(`[SegmentAI] Successfully parsed JSON response. Found ${responseJson.masks?.length || 0} masks.`);
+
+    // --- Post-processing: Convert base64 masks to URLs ---
+    console.log("[SegmentAI] Starting post-processing to convert masks to URLs.");
+    const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
+
+    for (const maskItem of responseJson.masks) {
+        if (maskItem.mask) {
+            console.log(`[SegmentAI] Processing mask for label: ${maskItem.label}`);
+            const maskBuffer = decodeBase64(maskItem.mask);
+            const filePath = `${user_id}/masks/${Date.now()}_${maskItem.label.replace(/[^a-zA-Z0-9]/g, '_')}.png`;
+            
+            const { error: uploadError } = await supabase.storage
+                .from('mira-agent-user-uploads')
+                .upload(filePath, maskBuffer, { contentType: 'image/png', upsert: true });
+
+            if (uploadError) {
+                console.error(`[SegmentAI] Failed to upload mask to storage:`, uploadError);
+                continue; // Skip this mask if upload fails
+            }
+
+            const { data: { publicUrl } } = supabase.storage
+                .from('mira-agent-user-uploads')
+                .getPublicUrl(filePath);
+            
+            maskItem.mask_url = publicUrl;
+            delete maskItem.mask; // Remove the large base64 string
+            console.log(`[SegmentAI] Successfully converted mask for '${maskItem.label}' to URL: ${publicUrl}`);
+        }
+    }
+    console.log("[SegmentAI] Finished post-processing.");
 
     return new Response(JSON.stringify(responseJson), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
