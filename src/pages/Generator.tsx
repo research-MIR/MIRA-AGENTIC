@@ -299,10 +299,10 @@ const Generator = () => {
           <UploadCloud className="mx-auto h-8 w-8 text-muted-foreground" />
           <div className="mt-2 flex text-sm leading-6 text-muted-foreground">
             <span className="relative rounded-md bg-background font-semibold text-primary">
-              Upload file(s)
+              {t.uploadFiles}
             </span>
           </div>
-          <p className="text-xs leading-5 text-muted-foreground">or drag and drop</p>
+          <p className="text-xs leading-5 text-muted-foreground">{t.dragAndDrop}</p>
         </div>
       </div>
       <Input 
@@ -336,10 +336,10 @@ const Generator = () => {
             <UploadCloud className="mx-auto h-12 w-12 text-muted-foreground" />
             <div className="mt-4 flex text-sm leading-6 text-muted-foreground">
               <span className="relative rounded-md bg-background font-semibold text-primary">
-                Upload a file
+                {t.uploadAFile}
               </span>
             </div>
-            <p className="text-xs leading-5 text-muted-foreground">or drag and drop</p>
+            <p className="text-xs leading-5 text-muted-foreground">{t.dragAndDrop}</p>
           </div>
         </div>
       )}
@@ -359,7 +359,7 @@ const Generator = () => {
       <header className="pb-4 mb-8 border-b flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold">{t.imageGenerator}</h1>
-          <p className="text-muted-foreground">{t.generatorDescription}</p>
+          <p className="text-muted-foreground">{t.generatorIntro}</p>
         </div>
         <div className="flex items-center gap-2">
           <LanguageSwitcher />
@@ -372,11 +372,11 @@ const Generator = () => {
           <Card id="generator-prompt-card">
             <CardHeader>
               <div className="flex justify-between items-center">
-                <CardTitle>{selectedJobId ? "Loaded Job" : "New Generation"}</CardTitle>
+                <CardTitle>{selectedJobId ? t.loadedJob : t.newGeneration}</CardTitle>
                 {selectedJobId && (
                   <Button variant="outline" size="sm" onClick={resetForm}>
                     <PlusCircle className="h-4 w-4 mr-2" />
-                    New Job
+                    {t.newJob}
                   </Button>
                 )}
               </div>
@@ -393,7 +393,7 @@ const Generator = () => {
                 </div>
                 <Accordion type="single" collapsible className="w-full">
                   <AccordionItem value="item-1">
-                    <AccordionTrigger>Reference Images (Optional)</AccordionTrigger>
+                    <AccordionTrigger>{t.referenceImagesOptional}</AccordionTrigger>
                     <AccordionContent>
                       <div className="space-y-4 pt-4">
                         {renderGarmentUploader()}
@@ -415,9 +415,9 @@ const Generator = () => {
             <CardContent className="space-y-4">
                <div className="flex items-center justify-between rounded-lg border p-3 shadow-sm">
                 <div className="space-y-0.5">
-                  <Label>AI Prompt Helper</Label>
+                  <Label>{t.aiPromptHelper}</Label>
                   <p className="text-[0.8rem] text-muted-foreground">
-                    Automatically enhance your prompt using your reference images.
+                    {t.aiPromptHelperDescription}
                   </p>
                 </div>
                 <Switch
@@ -470,16 +470,16 @@ const Generator = () => {
             <CardContent>
               {finalPromptUsed && (
                 <div className="mb-4">
-                  <Label>Final Prompt Used</Label>
+                  <Label>{t.finalPromptUsed}</Label>
                   <Textarea readOnly value={finalPromptUsed} className="mt-1 h-24 font-mono text-xs" />
                 </div>
               )}
               <div className="flex flex-col items-center justify-center text-center text-muted-foreground h-64">
                 <Sparkles className="h-12 w-12 mb-4" />
-                <p>Your generated images will appear in the gallery.</p>
+                <p>{t.galleryPlaceholder}</p>
                 <Button variant="outline" className="mt-4" onClick={() => navigate('/gallery')}>
                   <GalleryHorizontal className="mr-2 h-4 w-4" />
-                  Go to Gallery
+                  {t.goToGallery}
                 </Button>
               </div>
             </CardContent>
@@ -488,7 +488,7 @@ const Generator = () => {
       </div>
 
       <Card className="mt-8">
-        <CardHeader><CardTitle>Recent Generations</CardTitle></CardHeader>
+        <CardHeader><CardTitle>{t.recentGenerations}</CardTitle></CardHeader>
         <CardContent>
           {isLoadingRecentJobs ? (
             <div className="flex gap-4"><Skeleton className="h-24 w-24" /><Skeleton className="h-24 w-24" /><Skeleton className="h-24 w-24" /></div>
@@ -505,7 +505,7 @@ const Generator = () => {
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center text-center text-muted-foreground h-24">
-              <p>Your generated images will appear here after your first job.</p>
+              <p>{t.noRecentJobs}</p>
             </div>
           )}
         </CardContent>
