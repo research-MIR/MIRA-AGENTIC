@@ -79,7 +79,11 @@ const Developer = () => {
 
       if (error) throw error;
 
-      setSegmentationResult(data.result);
+      // The AI can be inconsistent. Sometimes it returns {masks: [...]}, sometimes just [...].
+      // This handles both cases.
+      const masksArray = data.result.masks ? data.result.masks : data.result;
+      setSegmentationResult(masksArray);
+      
       dismissToast(toastId);
       showSuccess("Segmentation analysis complete.");
     } catch (err: any) {
@@ -90,7 +94,6 @@ const Developer = () => {
     }
   };
 
-  // DEBUG LOG: Check the state variables before rendering.
   console.log('[Developer.tsx] Render check:', {
     hasSegmentationResult: !!segmentationResult,
     hasSourceImageDimensions: !!sourceImageDimensions,
@@ -127,7 +130,7 @@ const Developer = () => {
                     <img src={segPersonImageUrl} alt="Segmentation Source" className="w-full h-auto rounded-md" />
                     {segmentationResult && sourceImageDimensions && (
                         <SegmentationMask 
-                            masks={segmentationResult.masks} 
+                            masks={segmentationResult} 
                             imageDimensions={sourceImageDimensions} 
                         />
                     )}
