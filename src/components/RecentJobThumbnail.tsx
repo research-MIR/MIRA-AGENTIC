@@ -67,7 +67,7 @@ export const RecentJobThumbnail = ({ job, onClick, isSelected }: Props) => {
         URL.revokeObjectURL(objectUrl);
       }
     };
-  }, [job.id, job.metadata?.source_image_url, supabase.storage]);
+  }, [job.id, job.metadata?.source_image_url, supabase]);
 
   if (isLoading) {
     return <Skeleton className="w-24 h-24 flex-shrink-0" />;
