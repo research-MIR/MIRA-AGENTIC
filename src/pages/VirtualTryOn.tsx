@@ -66,18 +66,25 @@ const VirtualTryOn = () => {
   const garmentImageUrl = useMemo(() => garmentImageFile ? URL.createObjectURL(garmentImageFile) : null, [garmentImageFile]);
 
   useEffect(() => {
+    console.log('[VirtualTryOn] segmentationResult state updated:', segmentationResult);
+  }, [segmentationResult]);
+
+  useEffect(() => {
     if (channelRef.current) {
       supabase.removeChannel(channelRef.current);
     }
 
     if (activeJobId) {
+      console.log('[VirtualTryOn] Setting up Realtime channel for job:', activeJobId);
       const channel = supabase.channel(`segmentation-job-${activeJobId}`)
         .on(
           'postgres_changes',
           { event: 'UPDATE', schema: 'public', table: 'mira-agent-segmentation-jobs', filter: `id=eq.${activeJobId}` },
           (payload) => {
+            console.log('[VirtualTryOn] Realtime payload received:', payload);
             const job = payload.new;
             if (job.status === 'complete') {
+              console.log('[VirtualTryOn] Job complete. Setting segmentation result:', job.result);
               setSegmentationResult(job.result);
               setIsLoading(false);
               showSuccess("Segmentation complete!");
@@ -96,6 +103,7 @@ const VirtualTryOn = () => {
 
     return () => {
       if (channelRef.current) {
+        console.log('[VirtualTryOn] Cleaning up Realtime channel.');
         supabase.removeChannel(channelRef.current);
       }
     };

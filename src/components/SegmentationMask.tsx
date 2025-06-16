@@ -23,20 +23,27 @@ const decodeRLE = (rle: Uint8Array, width: number, height: number): Uint8Clamped
 };
 
 
-export const SegmentationMask = ({ maskData, width, height }: SegmentationMaskProps) => {
+export const SegmentationMask = ({ maskData, width, height }: { maskData: string, width: number, height: number }) => {
   const [maskUrl, setMaskUrl] = useState<string | null>(null);
+  console.log('[SegmentationMask] Rendering with props:', { maskData, width, height });
 
   useEffect(() => {
-    if (!maskData || !width || !height) return;
+    console.log('[SegmentationMask] useEffect triggered. Processing maskData.');
+    if (!maskData || !width || !height) {
+        console.log('[SegmentationMask] Missing props, exiting useEffect.');
+        return;
+    }
 
     try {
       const decodedString = atob(maskData);
+      console.log('[SegmentationMask] Decoded Base64 string:', decodedString);
       let rleData: number[];
 
       try {
         // The AI is returning a Base64 encoded JSON array string.
         // We first decode the Base64, then parse the resulting string as JSON.
         rleData = JSON.parse(decodedString);
+        console.log('[SegmentationMask] Parsed RLE data from JSON:', rleData);
         if (!Array.isArray(rleData)) {
           throw new Error("Parsed mask data is not an array.");
         }
@@ -69,9 +76,10 @@ export const SegmentationMask = ({ maskData, width, height }: SegmentationMaskPr
 
       const objectUrl = canvas.toDataURL();
       setMaskUrl(objectUrl);
+      console.log('[SegmentationMask] Created mask URL.');
 
     } catch (error) {
-      console.error("Failed to decode and render mask:", error);
+      console.error("[SegmentationMask] Failed to decode and render mask:", error);
     }
 
   }, [maskData, width, height]);
