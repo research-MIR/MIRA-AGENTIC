@@ -5,6 +5,14 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+export const sanitizeFilename = (filename: string): string => {
+  return filename
+    .replace(/\s+/g, '_') // Replace spaces with underscores
+    .replace(/[^a-zA-Z0-9_.-]/g, '_') // Replace all other invalid chars with underscores
+    .replace(/_{2,}/g, '_') // Collapse multiple underscores
+    .replace(/\.{2,}/g, '.'); // Collapse multiple dots
+};
+
 const formatBytes = (bytes: number, decimals = 2) => {
   if (bytes === 0) return '0 Bytes';
   const k = 1024;

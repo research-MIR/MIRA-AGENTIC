@@ -6,7 +6,7 @@ import { useSession } from "@/components/Auth/SessionContextProvider";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { UploadCloud, Wand2, Loader2, Image as ImageIcon, X, PlusCircle } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
-import { cn } from "@/lib/utils";
+import { cn, sanitizeFilename } from "@/lib/utils";
 import { useDropzone } from "@/hooks/useDropzone";
 import { optimizeImage } from "@/lib/utils";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -19,11 +19,15 @@ interface VtoPipelineJob {
   status: 'pending_segmentation' | 'pending_crop' | 'pending_tryon' | 'pending_composite' | 'complete' | 'failed';
   source_person_image_url: string;
   source_garment_image_url: string;
+  cropped_image_url?: string;
   segmentation_result?: {
     masks: { box_2d: [number, number, number, number], label: string }[];
   };
   final_composite_url?: string;
   error_message?: string;
+  bitstudio_job?: {
+    final_image_url?: string;
+  };
 }
 
 const ImageUploader = ({ onFileSelect, title, isDraggingOver, t, imageUrl, onClear }: { onFileSelect: (file: File) => void, title: string, isDraggingOver: boolean, t: any, imageUrl: string | null, onClear: () => void }) => {
@@ -80,8 +84,8 @@ const VirtualTryOn = () => {
   const [selectedJob, setSelectedJob] = useState<VtoPipelineJob | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
 
-  const personImageUrl = useMemo(() => personImageFile ? URL.createObjectURL(personImageFile) : null, [personImageFile]);
-  const garmentImageUrl = useMemo(() => garmentImageFile ? URL.createObjectURL(garmentImageFile) : null, [garmentImageFile]);
+  const personImageUrl = useMemo(() => personImageFile ? URL.createObjectURL(personImageFile) : (selectedJob ? selectedJob.source_person_image_url : null), [personImageFile, selectedJob]);
+  const garmentImageUrl = useMemo(() => garmentImageFile ? URL.createObjectURL(garmentImageFile) : (selectedJob ? selectedJob.source_garment_image_url : null), [garmentImageFile, selectedJob]);
 
   const { data: recentJobs, isLoading: isLoadingRecentJobs } = useQuery<VtoPipelineJob[]>({
     queryKey: ['vtoPipelineJobs', session?.user?.id],
@@ -89,7 +93,7 @@ const VirtualTryOn = () => {
       if (!session?.user) return [];
       const { data, error } = await supabase
         .from('mira-agent-vto-pipeline-jobs')
-        .select('*')
+        .select('*, bitstudio_job:bitstudio_job_id(final_image_url)')
         .eq('user_id', session.user.id)
         .order('created_at', { ascending: false })
         .limit(10);
@@ -100,8 +104,7 @@ const VirtualTryOn = () => {
   });
 
   useEffect(() => {
-    if (!session?.user || channelRef.current) return;
-
+    if (!session?.user) return;
     const channel = supabase.channel('vto-pipeline-jobs-tracker')
       .on<VtoPipelineJob>(
         'postgres_changes',
@@ -116,22 +119,15 @@ const VirtualTryOn = () => {
           });
         }
       ).subscribe();
-      
     channelRef.current = channel;
-
-    return () => {
-      if (channelRef.current) {
-        supabase.removeChannel(channelRef.current);
-        channelRef.current = null;
-      }
-    };
+    return () => { if (channelRef.current) supabase.removeChannel(channelRef.current); };
   }, [supabase, session?.user?.id, queryClient]);
 
   const uploadFileAndGetUrl = async (file: File | null): Promise<string | null> => {
     if (!file) return null;
     if (!session?.user) throw new Error("User session not found.");
     const optimizedFile = await optimizeImage(file);
-    const filePath = `${session.user.id}/${Date.now()}-${optimizedFile.name}`;
+    const filePath = `${session.user.id}/${Date.now()}-${sanitizeFilename(optimizedFile.name)}`;
     const { error: uploadError } = await supabase.storage.from('mira-agent-user-uploads').upload(filePath, optimizedFile);
     if (uploadError) throw new Error(`Failed to upload file: ${uploadError.message}`);
     const { data: { publicUrl } } = supabase.storage.from('mira-agent-user-uploads').getPublicUrl(filePath);
@@ -167,18 +163,31 @@ const VirtualTryOn = () => {
     setSelectedJob(null);
   };
 
+  const handleJobSelect = (job: VtoPipelineJob) => {
+    setPersonImageFile(null);
+    setGarmentImageFile(null);
+    setSelectedJob(job);
+  };
+
   const renderJobResult = (job: VtoPipelineJob) => {
     const isProcessing = ['pending_segmentation', 'pending_crop', 'pending_tryon', 'pending_composite'].includes(job.status);
+    let imageUrl = job.source_person_image_url;
+    let statusText = job.status.replace('_', ' ');
+
+    if (job.status === 'pending_crop') imageUrl = job.source_person_image_url;
+    if (job.status === 'pending_tryon') imageUrl = job.cropped_image_url || job.source_person_image_url;
+    if (job.status === 'pending_composite') imageUrl = job.bitstudio_job?.final_image_url || job.cropped_image_url || job.source_person_image_url;
+    if (job.status === 'complete') imageUrl = job.final_composite_url || job.source_person_image_url;
 
     if (isProcessing) {
       return (
         <div className="relative w-full h-full">
-          <img src={job.source_person_image_url} alt="Processing" className="w-full h-full object-contain rounded-md" />
+          <img src={imageUrl} alt="Processing" className="w-full h-full object-contain rounded-md" />
           <div className="absolute inset-0 bg-black/50 flex flex-col items-center justify-center text-white">
             <Loader2 className="h-8 w-8 animate-spin" />
-            <p className="mt-2 text-sm capitalize">{job.status.replace('_', ' ')}...</p>
+            <p className="mt-2 text-sm capitalize">{statusText}...</p>
           </div>
-          {job.segmentation_result && <SegmentationMask masks={job.segmentation_result.masks} />}
+          {job.status === 'pending_crop' && job.segmentation_result && <SegmentationMask masks={job.segmentation_result.masks} />}
         </div>
       );
     }
@@ -199,22 +208,24 @@ const VirtualTryOn = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-1 space-y-6">
           <Card>
-            <CardHeader><CardTitle>1. Upload Images</CardTitle></CardHeader>
-            <CardContent className="grid grid-cols-2 gap-4">
-              <ImageUploader onFileSelect={setPersonImageFile} title="Person Image" isDraggingOver={false} t={t} imageUrl={personImageUrl} onClear={() => setPersonImageFile(null)} />
-              <ImageUploader onFileSelect={setGarmentImageFile} title="Garment Image" isDraggingOver={false} t={t} imageUrl={garmentImageUrl} onClear={() => setGarmentImageFile(null)} />
-            </CardContent>
-          </Card>
-          <Button onClick={handleTryOn} disabled={isLoading || !personImageFile || !garmentImageFile} className="w-full">{isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}Start Virtual Try-On</Button>
-        </div>
-        <div className="lg:col-span-2">
-          <Card className="min-h-[60vh]">
             <CardHeader>
               <div className="flex justify-between items-center">
-                <CardTitle>Result</CardTitle>
+                <CardTitle>{selectedJob ? "Selected Job" : "1. Upload Images"}</CardTitle>
                 {selectedJob && <Button variant="outline" size="sm" onClick={resetForm}><PlusCircle className="h-4 w-4 mr-2" />New Try-On</Button>}
               </div>
             </CardHeader>
+            <CardContent className="grid grid-cols-2 gap-4">
+              <ImageUploader onFileSelect={setPersonImageFile} title="Person Image" isDraggingOver={false} t={t} imageUrl={personImageUrl} onClear={() => { setPersonImageFile(null); if(selectedJob) setSelectedJob(null); }} />
+              <ImageUploader onFileSelect={setGarmentImageFile} title="Garment Image" isDraggingOver={false} t={t} imageUrl={garmentImageUrl} onClear={() => { setGarmentImageFile(null); if(selectedJob) setSelectedJob(null); }} />
+            </CardContent>
+          </Card>
+          {!selectedJob && (
+            <Button onClick={handleTryOn} disabled={isLoading || !personImageFile || !garmentImageFile} className="w-full">{isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}Start Virtual Try-On</Button>
+          )}
+        </div>
+        <div className="lg:col-span-2">
+          <Card className="min-h-[60vh]">
+            <CardHeader><CardTitle>Result</CardTitle></CardHeader>
             <CardContent className="h-[50vh] flex items-center justify-center">
               {selectedJob ? renderJobResult(selectedJob) : <div className="text-center text-muted-foreground"><ImageIcon className="h-16 w-16 mx-auto mb-4" /><p>Your result will appear here.</p></div>}
             </CardContent>
@@ -229,7 +240,7 @@ const VirtualTryOn = () => {
           ) : recentJobs && recentJobs.length > 0 ? (
             <div className="flex gap-4 overflow-x-auto pb-2">
               {recentJobs.map(job => (
-                <button key={job.id} onClick={() => setSelectedJob(job)} className={cn("border-2 rounded-lg p-1 flex-shrink-0", selectedJob?.id === job.id ? "border-primary" : "border-transparent")}>
+                <button key={job.id} onClick={() => handleJobSelect(job)} className={cn("border-2 rounded-lg p-1 flex-shrink-0", selectedJob?.id === job.id ? "border-primary" : "border-transparent")}>
                   <img src={job.source_garment_image_url} alt="Job source garment" className="w-24 h-24 object-cover rounded-md" />
                 </button>
               ))}
