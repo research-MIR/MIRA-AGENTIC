@@ -15,6 +15,7 @@ import { RealtimeChannel } from "@supabase/supabase-js";
 import { SegmentationMask } from "@/components/SegmentationMask";
 import { RecentJobThumbnail } from "@/components/RecentJobThumbnail";
 import { useSecureImage } from "@/hooks/useSecureImage";
+import { useImagePreview } from "@/context/ImagePreviewContext";
 
 interface VtoPipelineJob {
   id: string;
@@ -92,6 +93,13 @@ const SelectedJobImage = ({ imageUrl, onClear, title }: { imageUrl: string, onCl
 
 const PipelineStepCard = ({ title, imageUrl, status, children }: { title: string, imageUrl?: string | null, status: 'complete' | 'pending' | 'failed', children?: React.ReactNode }) => {
   const { displayUrl, isLoading } = useSecureImage(imageUrl);
+  const { showImage } = useImagePreview();
+
+  const handlePreview = () => {
+    if (displayUrl) {
+      showImage({ images: [{ url: displayUrl }], currentIndex: 0 });
+    }
+  };
 
   return (
     <div className="space-y-2">
@@ -103,7 +111,9 @@ const PipelineStepCard = ({ title, imageUrl, status, children }: { title: string
       </div>
       <div className="aspect-square bg-muted rounded-lg flex items-center justify-center relative">
         {isLoading ? <Loader2 className="h-6 w-6 animate-spin" /> : displayUrl ? (
-          <img src={displayUrl} alt={title} className="w-full h-full object-contain rounded-md" />
+          <button onClick={handlePreview} className="w-full h-full">
+            <img src={displayUrl} alt={title} className="w-full h-full object-contain rounded-md hover:opacity-80 transition-opacity" />
+          </button>
         ) : (
           status === 'pending' && <p className="text-xs text-muted-foreground">Waiting...</p>
         )}
