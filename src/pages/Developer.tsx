@@ -19,7 +19,10 @@ const Developer = () => {
   const [segPrompt, setSegPrompt] = useState("Segment the main garment on the person.");
   const [segmentationResult, setSegmentationResult] = useState<any | null>(null);
   const [isSegmenting, setIsSegmenting] = useState(false);
+  const [isCropping, setIsCropping] = useState(false);
   const [sourceImageDimensions, setSourceImageDimensions] = useState<{ width: number; height: number } | null>(null);
+  const [sourceImagePublicUrl, setSourceImagePublicUrl] = useState<string | null>(null);
+  const [croppedImageUrl, setCroppedImageUrl] = useState<string | null>(null);
 
   const segPersonImageUrl = segPersonImage ? URL.createObjectURL(segPersonImage) : null;
 
@@ -34,7 +37,9 @@ const Developer = () => {
     if (!file) return;
 
     setSegPersonImage(file);
-    setSegmentationResult(null); // Clear old results
+    setSegmentationResult(null);
+    setCroppedImageUrl(null);
+    setSourceImagePublicUrl(null);
 
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -61,10 +66,12 @@ const Developer = () => {
     if (!segPersonImage) return showError("Please select a person image for segmentation.");
     setIsSegmenting(true);
     setSegmentationResult(null);
+    setCroppedImageUrl(null);
     const toastId = showLoading("Running segmentation test...");
 
     try {
       const person_image_url = await uploadFileAndGetUrl(segPersonImage);
+      setSourceImagePublicUrl(person_image_url);
       const garment_image_url = await uploadFileAndGetUrl(segGarmentImage);
 
       if (!person_image_url) throw new Error("Failed to upload person image.");
@@ -79,8 +86,6 @@ const Developer = () => {
 
       if (error) throw error;
 
-      // The AI can be inconsistent. Sometimes it returns {masks: [...]}, sometimes just [...].
-      // This handles both cases.
       const masksArray = data.result.masks ? data.result.masks : data.result;
       setSegmentationResult(masksArray);
       
@@ -94,12 +99,31 @@ const Developer = () => {
     }
   };
 
-  console.log('[Developer.tsx] Render check:', {
-    hasSegmentationResult: !!segmentationResult,
-    hasSourceImageDimensions: !!sourceImageDimensions,
-    segmentationResult: segmentationResult,
-    sourceImageDimensions: sourceImageDimensions,
-  });
+  const handleCropTest = async () => {
+    if (!sourceImagePublicUrl || !segmentationResult || segmentationResult.length === 0) {
+      return showError("Missing source image URL or segmentation result.");
+    }
+    setIsCropping(true);
+    const toastId = showLoading("Cropping image...");
+    try {
+      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-crop-image', {
+        body: {
+          image_url: sourceImagePublicUrl,
+          box: segmentationResult[0].box_2d,
+          user_id: session?.user.id
+        }
+      });
+      if (error) throw error;
+      setCroppedImageUrl(data.cropped_image_url);
+      dismissToast(toastId);
+      showSuccess("Image cropped successfully.");
+    } catch (err: any) {
+      showError(`Cropping failed: ${err.message}`);
+      dismissToast(toastId);
+    } finally {
+      setIsCropping(false);
+    }
+  };
 
   return (
     <div className="p-4 md:p-8 h-screen overflow-y-auto">
@@ -141,13 +165,23 @@ const Developer = () => {
                     Run Segmentation Test
                 </Button>
                 {segmentationResult && (
-                    <div>
+                    <div className="space-y-4 pt-4 border-t">
                         <Label>JSON Response</Label>
                         <Textarea
                             readOnly
                             value={JSON.stringify(segmentationResult, null, 2)}
                             className="mt-1 h-48 font-mono text-xs"
                         />
+                        <Button onClick={handleCropTest} disabled={isCropping}>
+                            {isCropping && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            Test Crop with BBox
+                        </Button>
+                        {croppedImageUrl && (
+                            <div>
+                                <Label>Cropped Image Result</Label>
+                                <img src={croppedImageUrl} alt="Cropped Result" className="mt-2 rounded-md border" />
+                            </div>
+                        )}
                     </div>
                 )}
             </CardContent>
