@@ -14,6 +14,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { SegmentationMask } from "@/components/SegmentationMask";
 import { RecentJobThumbnail } from "@/components/RecentJobThumbnail";
+import { useSecureImage } from "@/hooks/useSecureImage";
 
 interface VtoPipelineJob {
   id: string;
@@ -75,6 +76,8 @@ const ImageUploader = ({ onFileSelect, title, t, imageUrl, onClear }: { onFileSe
 };
 
 const PipelineStepCard = ({ title, imageUrl, status, children }: { title: string, imageUrl?: string | null, status: 'complete' | 'pending' | 'failed', children?: React.ReactNode }) => {
+  const { displayUrl, isLoading } = useSecureImage(imageUrl);
+
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2">
@@ -84,8 +87,8 @@ const PipelineStepCard = ({ title, imageUrl, status, children }: { title: string
         <h3 className="font-semibold text-sm">{title}</h3>
       </div>
       <div className="aspect-square bg-muted rounded-lg flex items-center justify-center relative">
-        {imageUrl ? (
-          <img src={imageUrl} alt={title} className="w-full h-full object-contain rounded-md" />
+        {isLoading ? <Loader2 className="h-6 w-6 animate-spin" /> : displayUrl ? (
+          <img src={displayUrl} alt={title} className="w-full h-full object-contain rounded-md" />
         ) : (
           status === 'pending' && <p className="text-xs text-muted-foreground">Waiting...</p>
         )}
