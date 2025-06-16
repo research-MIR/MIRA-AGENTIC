@@ -99,7 +99,14 @@ const Developer = () => {
                 {segPersonImageUrl && (
                   <div className="relative w-full max-w-md mx-auto">
                     <img src={segPersonImageUrl} alt="Segmentation Source" className="w-full h-auto rounded-md" />
-                    {segmentationResult && <SegmentationMask masks={segmentationResult.masks} />}
+                    {(() => {
+                      if (segmentationResult) {
+                        console.log('[Developer.tsx] Rendering SegmentationMask. segmentationResult is:', JSON.stringify(segmentationResult, null, 2));
+                        console.log('[Developer.tsx] segmentationResult.masks is:', segmentationResult.masks);
+                        return <SegmentationMask masks={segmentationResult.masks} />;
+                      }
+                      return null;
+                    })()}
                   </div>
                 )}
                 <Button onClick={handleSegmentationTest} disabled={isSegmenting || !segPersonImage}>
