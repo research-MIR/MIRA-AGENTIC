@@ -18,7 +18,7 @@ serve(async (req) => {
   try {
     const { data: job, error: fetchError } = await supabase
       .from('mira-agent-vto-pipeline-jobs')
-      .select('*')
+      .select('*, bitstudio_job:bitstudio_job_id(final_image_url)')
       .eq('id', job_id)
       .single();
 
@@ -86,6 +86,30 @@ serve(async (req) => {
         }).eq('id', job_id);
         
         console.log(`[VTO Worker][${job_id}] Paused. Waiting for bitStudio job ${bitstudioJob.jobId} to complete.`);
+        break;
+      }
+      case 'pending_composite': {
+        console.log(`[VTO Worker][${job_id}] Starting final composite...`);
+        const bitstudioResultUrl = (job.bitstudio_job as any)?.final_image_url;
+        if (!bitstudioResultUrl) throw new Error("BitStudio try-on result URL is missing.");
+        if (!job.segmentation_result?.masks?.[0]?.box_2d) throw new Error("Segmentation box is missing for composite step.");
+
+        const { data: compositeResult, error: compositeError } = await supabase.functions.invoke('MIRA-AGENT-tool-composite-image', {
+            body: {
+                base_image_url: job.source_person_image_url,
+                overlay_image_url: bitstudioResultUrl,
+                box: job.segmentation_result.masks[0].box_2d,
+                user_id: job.user_id
+            }
+        });
+        if (compositeError) throw compositeError;
+
+        await supabase.from('mira-agent-vto-pipeline-jobs').update({
+            status: 'complete',
+            final_composite_url: compositeResult.final_composite_url
+        }).eq('id', job_id);
+        
+        console.log(`[VTO Worker][${job_id}] Pipeline complete!`);
         break;
       }
       default:

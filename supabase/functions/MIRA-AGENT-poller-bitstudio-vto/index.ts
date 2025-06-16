@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -11,6 +11,32 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const BITSTUDIO_API_KEY = Deno.env.get('BITSTUDIO_API_KEY');
 const BITSTUDIO_BASE_URL = 'https://api.bitstudio.ai';
 const POLLING_INTERVAL_MS = 5000; // 5 seconds
+
+async function handlePipelineContinuation(supabase: SupabaseClient, bitstudioJobId: string) {
+    console.log(`[BitStudioPoller] Checking if job ${bitstudioJobId} is part of a VTO pipeline.`);
+    const { data: pipelineJob, error } = await supabase
+        .from('mira-agent-vto-pipeline-jobs')
+        .select('id')
+        .eq('bitstudio_job_id', bitstudioJobId)
+        .single();
+
+    if (error) {
+        console.error(`[BitStudioPoller] Error checking for parent pipeline job:`, error);
+        return;
+    }
+
+    if (pipelineJob) {
+        console.log(`[BitStudioPoller] Job is part of pipeline ${pipelineJob.id}. Updating status and re-invoking worker.`);
+        await supabase
+            .from('mira-agent-vto-pipeline-jobs')
+            .update({ status: 'pending_composite' })
+            .eq('id', pipelineJob.id);
+        
+        supabase.functions.invoke('MIRA-AGENT-worker-vto-pipeline', { body: { job_id: pipelineJob.id } }).catch(console.error);
+    } else {
+        console.log(`[BitStudioPoller] Job ${bitstudioJobId} is a standalone job. No pipeline action needed.`);
+    }
+}
 
 serve(async (req) => {
   const { job_id } = await req.json();
@@ -42,6 +68,9 @@ serve(async (req) => {
             status: 'complete',
             final_image_url: statusData.path
         }).eq('id', job_id);
+        
+        await handlePipelineContinuation(supabase, job_id);
+
         return new Response(JSON.stringify({ success: true, status: 'complete' }), { headers: corsHeaders });
     } else if (statusData.status === 'failed') {
         await supabase.from('mira-agent-bitstudio-jobs').update({
