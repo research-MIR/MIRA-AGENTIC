@@ -11,7 +11,7 @@ const corsHeaders = {
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-const MODEL_NAME = "gemini-1.5-flash-preview-05-20";
+const MODEL_NAME = "gemini-2.5-flash-preview-05-20";
 const BUCKET_NAME = 'mira-agent-user-uploads';
 
 const systemPrompt = `You are an expert fashion cataloger. Your only task is to describe the provided garment image in a single, detailed sentence. Focus on type, material, color, and cut. Output only a JSON object with a 'prompt' key.
