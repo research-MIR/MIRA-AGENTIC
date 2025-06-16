@@ -11,7 +11,7 @@ const corsHeaders = {
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-const MODEL_NAME = "gemini-2.5-pro-preview-06-05";
+const MODEL_NAME = "gemini-2.5-flash-preview-05-20";
 const BUCKET_NAME = 'mira-agent-user-uploads';
 
 const systemPrompt = `You are a virtual stylist and expert image analyst. Your goal is to determine the precise placement of a new garment onto a person in an image. This is for a high-fidelity virtual try-on, so the bounding box you create will be used to crop the image for an AI garment swap. Accuracy and context are paramount.
@@ -28,15 +28,14 @@ Before generating the JSON, you MUST perform the following analysis internally. 
 
 1.  **Identify Existing Garments:** Analyze the model image. What is the person currently wearing in the area where the new garment will go? (e.g., "The model is wearing a white strapless feathered dress.")
 2.  **Analyze New Garment:** Analyze the garment image. What is it, and what is its likely fit? (e.g., "The new garment is a sheer, long-sleeved button-up shirt. It appears to have a standard or slightly loose fit.")
-3.  **Analyze Pose & Occlusion:** Analyze the model's pose. Are their arms, hands, or other objects overlapping the area where the garment will be? (e.g., "The model's arms are bent with hands on hips. The arms will be partially covered by the new shirt's sleeves.")
-4.  **Synthesize Bounding Box Strategy:** Based on the above, formulate a plan for the bounding box. (e.g., "My bounding box must cover the entire existing white dress. Because the new shirt has long sleeves and the model's arms are bent, I must expand the box to include the full arms from shoulder to hand to provide context for the garment swap AI.")
+3.  **Synthesize Bounding Box Strategy:** Based on the above, formulate a plan for the bounding box. (e.g., "My bounding box must cover the entire existing white dress. Because the new shirt has long sleeves, I must expand the box to include the full arms from shoulder to hand to provide context for the garment swap AI.")
 
 ---
 ### CRITICAL BOUNDING BOX RULES
 
 1.  **SINGLE BOX ONLY:** Your final output MUST contain only ONE bounding box.
 2.  **COVER EXISTING GARMENT:** The bounding box MUST completely cover any existing garment of a similar type that the person is already wearing.
-3.  **INCLUDE ARMS:** If the person's hands or arms are touching or would be covered by the new garment, the bounding box MUST be expanded to include the entire arms, from shoulder to fingertips. This is crucial for the garment swap AI.
+3.  **ALWAYS INCLUDE ARMS:** You MUST expand the box to include the full arms, from shoulder to fingertips, in all cases. This is crucial for the garment swap AI.
 4.  **CONSIDER FIT:** If the new garment appears to have a looser or larger fit than what the model is currently wearing, the bounding box must be expanded to accommodate this.
 
 ---
@@ -169,6 +168,27 @@ serve(async (req) => {
     console.log(`[SegmentationWorker][${job_id}] Received response from Gemini. Parsing JSON.`);
     const responseJson = extractJson(result.text);
     console.log(`[SegmentationWorker][${job_id}] JSON parsed successfully. Description: "${responseJson.description.substring(0, 50)}...", Bounding boxes found: ${responseJson.masks.length}`);
+
+    // Enlarge the bounding box by 1.25x
+    if (responseJson.masks && responseJson.masks.length > 0) {
+        console.log(`[SegmentationWorker][${job_id}] Original box:`, responseJson.masks[0].box_2d);
+        const [y_min, x_min, y_max, x_max] = responseJson.masks[0].box_2d;
+        const width = x_max - x_min;
+        const height = y_max - y_min;
+        const centerX = x_min + width / 2;
+        const centerY = y_min + height / 2;
+
+        const newWidth = width * 1.25;
+        const newHeight = height * 1.25;
+
+        const new_x_min = Math.max(0, centerX - newWidth / 2);
+        const new_y_min = Math.max(0, centerY - newHeight / 2);
+        const new_x_max = Math.min(1000, centerX + newWidth / 2);
+        const new_y_max = Math.min(1000, centerY + newHeight / 2);
+
+        responseJson.masks[0].box_2d = [new_y_min, new_x_min, new_y_max, new_y_max];
+        console.log(`[SegmentationWorker][${job_id}] Enlarged box:`, responseJson.masks[0].box_2d);
+    }
 
     console.log(`[SegmentationWorker][${job_id}] Updating job status to 'complete' with final result.`);
     await supabase.from('mira-agent-segmentation-jobs').update({
