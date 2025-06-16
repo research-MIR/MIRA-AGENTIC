@@ -6,7 +6,7 @@ import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-const MODEL_NAME = "gemini-1.5-flash-latest"; // Updated to a model known for segmentation
+const MODEL_NAME = "gemini-2.5-flash-preview-05-20";
 const BUCKET_NAME = 'mira-agent-user-uploads';
 
 const corsHeaders = {
@@ -30,16 +30,16 @@ const systemPrompt = `You are a specialist AI segmentation expert for virtual tr
 Your entire response MUST be a single, valid JSON object containing one key: "segmentation_result".
 The value of this key must be an object with the following structure:
 -   \`label\`: A brief description of the segmented area (e.g., "t-shirt and torso area").
--   \`box_2d\`: The bounding box of the mask as an array of four numbers normalized to [0, 1]: [y_min, x_min, y_max, x_max].
--   \`mask\`: The Base64 encoded PNG image data for the mask.
+-   \`box_2d\`: The bounding box of the mask as an array of four numbers: [x_min, y_min, x_max, y_max].
+-   \`mask\`: The Base64 encoded Run-Length Encoded (RLE) mask data.
 
 **Example Output:**
 \`\`\`json
 {
   "segmentation_result": {
     "label": "t-shirt area",
-    "box_2d": [0.2, 0.15, 0.8, 0.85],
-    "mask": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+    "box_2d": [150, 200, 450, 500],
+    "mask": "..."
   }
 }
 \`\`\`
@@ -128,7 +128,7 @@ serve(async (req) => {
         config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
     };
 
-    console.log(`[SegmentWorker][${job_id}] Sending request to Gemini...`);
+    console.log(`[SegmentWorker][${job_id}] Sending request to Gemini:`, JSON.stringify(requestPayload, null, 2));
     
     const result = await ai.models.generateContent(requestPayload);
 
@@ -151,7 +151,6 @@ serve(async (req) => {
       throw new Error("AI did not return a valid segmentation result in the JSON payload.");
     }
 
-    // The mask is already a Base64 string, so we just store it.
     await supabase.from('mira-agent-segmentation-jobs').update({
       status: 'complete',
       result: segmentationResult
