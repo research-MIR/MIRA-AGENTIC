@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Plus, Trash2, Eye, EyeOff, Sparkles } from "lucide-react";
+import { Plus, Trash2, Eye, EyeOff, Sparkles, SlidersHorizontal, Spline, Droplets } from "lucide-react";
 import { Layer, AdjustmentLayer, BlendMode } from "@/types/editor";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/context/LanguageContext";
@@ -8,6 +8,7 @@ import { useRef } from "react";
 import { Slider } from "@/components/ui/slider";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
 interface LayerPanelProps {
   layers: Layer[];
@@ -65,20 +66,32 @@ export const LayerPanel = ({
         <CardTitle>{t.layers}</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="space-y-2">
-          <Button onClick={() => onAddLayer('noise')} className="w-full">
-            <Sparkles className="mr-2 h-4 w-4" /> Add Noise
-          </Button>
-          <Button onClick={() => onAddLayer('levels')} className="w-full">
-            <Plus className="mr-2 h-4 w-4" /> {t.addLevels}
-          </Button>
-          <Button onClick={() => onAddLayer('curves')} className="w-full">
-            <Plus className="mr-2 h-4 w-4" /> {t.addCurves}
-          </Button>
-          <Button onClick={() => onAddLayer('hue-saturation')} className="w-full">
-            <Plus className="mr-2 h-4 w-4" /> {t.addSaturation}
-          </Button>
-        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button className="w-full">
+              <Plus className="mr-2 h-4 w-4" /> {t.addAdjustment}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent className="w-64">
+            <DropdownMenuItem onSelect={() => onAddLayer('noise')}>
+              <Sparkles className="mr-2 h-4 w-4" />
+              <span>{t.addNoise}</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => onAddLayer('levels')}>
+              <SlidersHorizontal className="mr-2 h-4 w-4" />
+              <span>{t.addLevels}</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => onAddLayer('curves')}>
+              <Spline className="mr-2 h-4 w-4" />
+              <span>{t.addCurves}</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => onAddLayer('hue-saturation')}>
+              <Droplets className="mr-2 h-4 w-4" />
+              <span>{t.addSaturation}</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        
         <div className="mt-4 space-y-1">
           {layers.map((layer, index) => (
             <div 

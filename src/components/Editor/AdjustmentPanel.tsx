@@ -176,35 +176,36 @@ const CurvesControls = ({ settings, onUpdate }: { settings: CurvesSettings, onUp
 };
 
 const NoiseControls = ({ settings, onUpdate }: { settings: NoiseSettings, onUpdate: (newSettings: Partial<NoiseSettings>) => void }) => {
+  const { t } = useLanguage();
   return (
     <div className="space-y-4">
       <div>
-        <Label>Scale</Label>
+        <Label>{t.scale}</Label>
         <Slider value={[settings.scale]} onValueChange={(v) => onUpdate({ scale: v[0] })} min={1} max={500} step={1} />
         <p className="text-xs text-center text-muted-foreground">{settings.scale}</p>
       </div>
       <div>
-        <Label>Octaves</Label>
+        <Label>{t.octaves}</Label>
         <Slider value={[settings.octaves]} onValueChange={(v) => onUpdate({ octaves: v[0] })} min={1} max={8} step={1} />
         <p className="text-xs text-center text-muted-foreground">{settings.octaves}</p>
       </div>
       <div>
-        <Label>Persistence</Label>
+        <Label>{t.persistence}</Label>
         <Slider value={[settings.persistence]} onValueChange={(v) => onUpdate({ persistence: v[0] })} min={0.1} max={1} step={0.05} />
         <p className="text-xs text-center text-muted-foreground">{settings.persistence.toFixed(2)}</p>
       </div>
       <div>
-        <Label>Lacunarity</Label>
+        <Label>{t.lacunarity}</Label>
         <Slider value={[settings.lacunarity]} onValueChange={(v) => onUpdate({ lacunarity: v[0] })} min={1.0} max={4.0} step={0.1} />
         <p className="text-xs text-center text-muted-foreground">{settings.lacunarity.toFixed(1)}</p>
       </div>
       <div className="flex items-center justify-between">
-        <Label>Monochromatic</Label>
+        <Label>{t.monochromatic}</Label>
         <Switch checked={settings.monochromatic} onCheckedChange={(checked) => onUpdate({ monochromatic: checked })} />
       </div>
       <Button variant="outline" size="sm" className="w-full" onClick={() => onUpdate({ seed: Math.random() })}>
         <RefreshCw className="mr-2 h-4 w-4" />
-        New Seed
+        {t.newSeed}
       </Button>
     </div>
   );
