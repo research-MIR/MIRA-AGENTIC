@@ -103,7 +103,6 @@ serve(async (req) => {
         }
     });
 
-    console.log("[SegmentAI] Raw Gemini API response:", JSON.stringify(result, null, 2));
     console.log("[SegmentAI] Received response from Gemini API.");
     const responseJson = extractJson(result.text);
     console.log(`[SegmentAI] Successfully parsed JSON response. Found ${responseJson.masks?.length || 0} masks.`);
