@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from 'react';
-import { Layer, HueSaturationSettings, LevelsSettings, CurvesSettings } from '@/types/editor';
+import { Layer, HueSaturationSettings, LevelsSettings, CurvesSettings, NoiseSettings } from '@/types/editor';
+import { createNoise2D } from 'simplex-noise';
 
 // --- Color Conversion Helpers ---
 function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
@@ -101,6 +102,45 @@ const applyCurves = (imageData: ImageData, settings: CurvesSettings) => {
   }
 };
 
+const applyNoise = (imageData: ImageData, settings: NoiseSettings) => {
+  const { width, height, data } = imageData;
+  const noise2D = createNoise2D(() => settings.seed);
+  const noiseR = createNoise2D(() => settings.seed + 1);
+  const noiseG = createNoise2D(() => settings.seed + 2);
+  const noiseB = createNoise2D(() => settings.seed + 3);
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      let total = 0;
+      let frequency = 1;
+      let amplitude = 1;
+      let maxValue = 0;
+
+      for (let i = 0; i < settings.octaves; i++) {
+        total += noise2D(x * frequency / settings.scale, y * frequency / settings.scale) * amplitude;
+        maxValue += amplitude;
+        amplitude *= settings.persistence;
+        frequency *= settings.lacunarity;
+      }
+
+      const normalizedValue = (total / maxValue + 1) / 2; // Map from [-1, 1] to [0, 1]
+      const noiseValue = normalizedValue * 255;
+
+      const index = (y * width + x) * 4;
+      if (settings.monochromatic) {
+        data[index] = noiseValue;
+        data[index + 1] = noiseValue;
+        data[index + 2] = noiseValue;
+      } else {
+        data[index] = (noiseR(x / settings.scale, y / settings.scale) + 1) / 2 * 255;
+        data[index + 1] = (noiseG(x / settings.scale, y / settings.scale) + 1) / 2 * 255;
+        data[index + 2] = (noiseB(x / settings.scale, y / settings.scale) + 1) / 2 * 255;
+      }
+      data[index + 3] = 255; // Alpha
+    }
+  }
+};
+
 export const useImageProcessor = (
   baseImage: HTMLImageElement | null,
   layers: Layer[]
@@ -127,17 +167,33 @@ export const useImageProcessor = (
       const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
       if (!tempCtx) return;
 
-      tempCtx.drawImage(canvas, 0, 0);
-      const layerImageData = tempCtx.getImageData(0, 0, canvas.width, canvas.height);
+      const layerImageData = tempCtx.createImageData(canvas.width, canvas.height);
 
       switch (layer.type) {
-        case 'hue-saturation': applyHueSaturation(layerImageData, layer.settings as HueSaturationSettings); break;
-        case 'levels': applyLevels(layerImageData, layer.settings as LevelsSettings); break;
-        case 'curves': applyCurves(layerImageData, layer.settings as CurvesSettings); break;
+        case 'hue-saturation':
+          tempCtx.drawImage(canvas, 0, 0);
+          const hsData = tempCtx.getImageData(0, 0, canvas.width, canvas.height);
+          applyHueSaturation(hsData, layer.settings as HueSaturationSettings);
+          tempCtx.putImageData(hsData, 0, 0);
+          break;
+        case 'levels':
+          tempCtx.drawImage(canvas, 0, 0);
+          const levelsData = tempCtx.getImageData(0, 0, canvas.width, canvas.height);
+          applyLevels(levelsData, layer.settings as LevelsSettings);
+          tempCtx.putImageData(levelsData, 0, 0);
+          break;
+        case 'curves':
+          tempCtx.drawImage(canvas, 0, 0);
+          const curvesData = tempCtx.getImageData(0, 0, canvas.width, canvas.height);
+          applyCurves(curvesData, layer.settings as CurvesSettings);
+          tempCtx.putImageData(curvesData, 0, 0);
+          break;
+        case 'noise':
+          applyNoise(layerImageData, layer.settings as NoiseSettings);
+          tempCtx.putImageData(layerImageData, 0, 0);
+          break;
       }
       
-      tempCtx.putImageData(layerImageData, 0, 0);
-
       ctx.globalCompositeOperation = layer.blendMode;
       ctx.globalAlpha = layer.opacity;
       ctx.drawImage(tempCanvas, 0, 0);

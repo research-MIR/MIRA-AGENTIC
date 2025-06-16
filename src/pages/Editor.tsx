@@ -157,11 +157,12 @@ const Editor = () => {
   const addLayer = (type: AdjustmentLayer['type']) => {
     let newLayer: AdjustmentLayer;
     const defaultMask: Mask = { imageData: new ImageData(1, 1), enabled: true };
-    const commonProps = { id: `layer-${Date.now()}`, visible: true, opacity: 1, blendMode: 'normal' as BlendMode, mask: defaultMask };
+    const commonProps = { id: `layer-${Date.now()}`, visible: true, opacity: 1, blendMode: 'overlay' as BlendMode, mask: defaultMask };
     switch (type) {
       case 'hue-saturation': newLayer = { ...commonProps, name: t.hueSaturation, type, settings: { hue: 0, saturation: 1, lightness: 0 } }; break;
       case 'levels': newLayer = { ...commonProps, name: t.levels, type, settings: { inputShadow: 0, inputMidtone: 1, inputHighlight: 255, outputShadow: 0, outputHighlight: 255 } }; break;
       case 'curves': newLayer = { ...commonProps, name: t.curves, type, settings: { channel: 'rgb', points: [{ x: 0, y: 0 }, { x: 255, y: 255 }] } }; break;
+      case 'noise': newLayer = { ...commonProps, name: "Noise", type, opacity: 0.2, settings: { type: 'perlin', scale: 100, octaves: 3, persistence: 0.5, lacunarity: 2.0, seed: Math.random(), monochromatic: true } }; break;
     }
     setLayers(prev => [newLayer, ...prev]);
     setSelectedLayerId(newLayer.id);

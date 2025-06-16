@@ -2,13 +2,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { AdjustmentLayer, HueSaturationSettings, LevelsSettings, CurvesSettings } from "@/types/editor";
+import { AdjustmentLayer, HueSaturationSettings, LevelsSettings, CurvesSettings, NoiseSettings } from "@/types/editor";
 import { useLanguage } from "@/context/LanguageContext";
 import { useState, useRef, MouseEvent } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "../ui/button";
-import { RotateCcw } from "lucide-react";
+import { RotateCcw, RefreshCw } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
+import { Switch } from "../ui/switch";
 
 interface AdjustmentPanelProps {
   selectedLayer?: AdjustmentLayer;
@@ -174,6 +175,41 @@ const CurvesControls = ({ settings, onUpdate }: { settings: CurvesSettings, onUp
   );
 };
 
+const NoiseControls = ({ settings, onUpdate }: { settings: NoiseSettings, onUpdate: (newSettings: Partial<NoiseSettings>) => void }) => {
+  return (
+    <div className="space-y-4">
+      <div>
+        <Label>Scale</Label>
+        <Slider value={[settings.scale]} onValueChange={(v) => onUpdate({ scale: v[0] })} min={1} max={500} step={1} />
+        <p className="text-xs text-center text-muted-foreground">{settings.scale}</p>
+      </div>
+      <div>
+        <Label>Octaves</Label>
+        <Slider value={[settings.octaves]} onValueChange={(v) => onUpdate({ octaves: v[0] })} min={1} max={8} step={1} />
+        <p className="text-xs text-center text-muted-foreground">{settings.octaves}</p>
+      </div>
+      <div>
+        <Label>Persistence</Label>
+        <Slider value={[settings.persistence]} onValueChange={(v) => onUpdate({ persistence: v[0] })} min={0.1} max={1} step={0.05} />
+        <p className="text-xs text-center text-muted-foreground">{settings.persistence.toFixed(2)}</p>
+      </div>
+      <div>
+        <Label>Lacunarity</Label>
+        <Slider value={[settings.lacunarity]} onValueChange={(v) => onUpdate({ lacunarity: v[0] })} min={1.0} max={4.0} step={0.1} />
+        <p className="text-xs text-center text-muted-foreground">{settings.lacunarity.toFixed(1)}</p>
+      </div>
+      <div className="flex items-center justify-between">
+        <Label>Monochromatic</Label>
+        <Switch checked={settings.monochromatic} onCheckedChange={(checked) => onUpdate({ monochromatic: checked })} />
+      </div>
+      <Button variant="outline" size="sm" className="w-full" onClick={() => onUpdate({ seed: Math.random() })}>
+        <RefreshCw className="mr-2 h-4 w-4" />
+        New Seed
+      </Button>
+    </div>
+  );
+};
+
 export const AdjustmentPanel = ({ selectedLayer, onUpdateLayer }: AdjustmentPanelProps) => {
   const { t } = useLanguage();
 
@@ -189,6 +225,9 @@ export const AdjustmentPanel = ({ selectedLayer, onUpdateLayer }: AdjustmentPane
         break;
       case 'curves':
         defaultSettings = { channel: 'rgb', points: [{ x: 0, y: 0 }, { x: 255, y: 255 }] };
+        break;
+      case 'noise':
+        defaultSettings = { type: 'perlin', scale: 100, octaves: 3, persistence: 0.5, lacunarity: 2.0, seed: Math.random(), monochromatic: true };
         break;
       default:
         return;
@@ -219,6 +258,8 @@ export const AdjustmentPanel = ({ selectedLayer, onUpdateLayer }: AdjustmentPane
         return <LevelsControls settings={selectedLayer.settings as LevelsSettings} onUpdate={handleUpdate} />;
       case 'curves':
         return <CurvesControls settings={selectedLayer.settings as CurvesSettings} onUpdate={handleUpdate} />;
+      case 'noise':
+        return <NoiseControls settings={selectedLayer.settings as NoiseSettings} onUpdate={handleUpdate} />;
       default:
         return <p className="text-sm text-muted-foreground">{t.noControls}</p>;
     }

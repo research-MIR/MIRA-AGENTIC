@@ -22,6 +22,16 @@ export interface CurvesSettings {
   channel: 'rgb' | 'r' | 'g' | 'b';
 }
 
+export interface NoiseSettings {
+  type: 'perlin'; // For now, we'll start with one advanced type
+  scale: number;
+  octaves: number;
+  persistence: number;
+  lacunarity: number;
+  seed: number;
+  monochromatic: boolean;
+}
+
 export type BlendMode = 
   | 'normal' 
   | 'multiply' 
@@ -41,11 +51,11 @@ export type BlendMode =
 export interface AdjustmentLayer {
   id: string;
   name: string;
-  type: 'hue-saturation' | 'curves' | 'levels';
+  type: 'hue-saturation' | 'curves' | 'levels' | 'noise';
   visible: boolean;
   opacity: number;
   blendMode: BlendMode;
-  settings: HueSaturationSettings | CurvesSettings | LevelsSettings;
+  settings: HueSaturationSettings | CurvesSettings | LevelsSettings | NoiseSettings;
   mask: Mask;
 }
 
