@@ -11,24 +11,13 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const UPLOAD_BUCKET = 'mira-agent-user-uploads';
 
-async function downloadImageFromSupabase(supabase: SupabaseClient, imageUrl: string): Promise<Image> {
-    const url = new URL(imageUrl);
-    const pathParts = url.pathname.split(`/public/${UPLOAD_BUCKET}/`);
-    if (pathParts.length < 2) {
-        throw new Error(`Could not parse storage path from URL: ${imageUrl}`);
+async function downloadImage(imageUrl: string): Promise<Image> {
+    console.log(`[CompositeTool] Downloading image from URL: ${imageUrl}`);
+    const response = await fetch(imageUrl);
+    if (!response.ok) {
+        throw new Error(`Failed to download image from ${imageUrl}. Status: ${response.status}`);
     }
-    const storagePath = decodeURIComponent(pathParts[1]);
-    console.log(`[CompositeTool] Downloading image from storage path: ${storagePath}`);
-
-    const { data: blob, error: downloadError } = await supabase.storage
-        .from(UPLOAD_BUCKET)
-        .download(storagePath);
-
-    if (downloadError) {
-        throw new Error(`Supabase download failed for path ${storagePath}: ${downloadError.message}`);
-    }
-
-    const imageBuffer = await blob.arrayBuffer();
+    const imageBuffer = await response.arrayBuffer();
     return Image.decode(imageBuffer);
 }
 
@@ -45,8 +34,10 @@ serve(async (req) => {
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
 
-    const baseImage = await downloadImageFromSupabase(supabase, base_image_url);
-    const overlayImage = await downloadImageFromSupabase(supabase, overlay_image_url);
+    const [baseImage, overlayImage] = await Promise.all([
+        downloadImage(base_image_url),
+        downloadImage(overlay_image_url)
+    ]);
 
     const [y_min, x_min, y_max, x_max] = box;
     const pasteX = Math.floor((x_min / 1000) * baseImage.width);
