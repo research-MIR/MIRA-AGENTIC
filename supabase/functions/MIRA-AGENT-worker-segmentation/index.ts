@@ -11,7 +11,7 @@ const corsHeaders = {
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-const MODEL_NAME = "gemini-2.5-flash-preview-05-20";
+const MODEL_NAME = "gemini-1.5-flash-preview-05-20";
 const BUCKET_NAME = 'mira-agent-user-uploads';
 
 const systemPrompt = `You are a virtual stylist and expert image analyst. Your goal is to determine the precise placement of a new garment onto a person in an image. This is for a high-fidelity virtual try-on, so the bounding box you create will be used to crop the image for an AI garment swap. Accuracy and context are paramount.
@@ -186,7 +186,7 @@ serve(async (req) => {
         const new_x_max = Math.min(1000, centerX + newWidth / 2);
         const new_y_max = Math.min(1000, centerY + newHeight / 2);
 
-        responseJson.masks[0].box_2d = [new_y_min, new_x_min, new_y_max, new_y_max];
+        responseJson.masks[0].box_2d = [new_y_min, new_x_min, new_y_max, new_x_max];
         console.log(`[SegmentationWorker][${job_id}] Enlarged box:`, responseJson.masks[0].box_2d);
     }
 
