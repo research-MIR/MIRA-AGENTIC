@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
-import { UploadCloud, Wand2, Loader2, Image as ImageIcon, X, PlusCircle, CheckCircle } from "lucide-react";
+import { UploadCloud, Wand2, Loader2, Image as ImageIcon, X, PlusCircle, CheckCircle, AlertTriangle } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
 import { cn, sanitizeFilename } from "@/lib/utils";
 import { useDropzone } from "@/hooks/useDropzone";
@@ -74,6 +74,21 @@ const ImageUploader = ({ onFileSelect, title, t, imageUrl, onClear }: { onFileSe
     </div>
   );
 };
+
+const SelectedJobImage = ({ imageUrl, onClear, title }: { imageUrl: string, onClear: () => void, title: string }) => {
+    const { displayUrl, isLoading, error } = useSecureImage(imageUrl);
+
+    return (
+        <div className="relative aspect-square">
+            {isLoading && <div className="w-full h-full bg-muted rounded-md flex items-center justify-center"><Loader2 className="h-6 w-6 animate-spin" /></div>}
+            {error && <div className="w-full h-full bg-muted rounded-md flex items-center justify-center"><AlertTriangle className="h-6 w-6 text-destructive" /></div>}
+            {displayUrl && <img src={displayUrl} alt={title} className="w-full h-full object-cover rounded-md" />}
+            <Button variant="destructive" size="icon" className="absolute top-2 right-2 h-6 w-6 z-10" onClick={onClear}>
+                <X className="h-4 w-4" />
+            </Button>
+        </div>
+    );
+}
 
 const PipelineStepCard = ({ title, imageUrl, status, children }: { title: string, imageUrl?: string | null, status: 'complete' | 'pending' | 'failed', children?: React.ReactNode }) => {
   const { displayUrl, isLoading } = useSecureImage(imageUrl);
@@ -175,8 +190,8 @@ const VirtualTryOn = () => {
     };
   }, [supabase, session?.user?.id, queryClient]);
 
-  const displayPersonUrl = personImageFile ? URL.createObjectURL(personImageFile) : selectedJob?.source_person_image_url || null;
-  const displayGarmentUrl = garmentImageFile ? URL.createObjectURL(garmentImageFile) : selectedJob?.source_garment_image_url || null;
+  const personImageUrl = useMemo(() => personImageFile ? URL.createObjectURL(personImageFile) : null, [personImageFile]);
+  const garmentImageUrl = useMemo(() => garmentImageFile ? URL.createObjectURL(garmentImageFile) : null, [garmentImageFile]);
 
   const uploadFileAndGetUrl = async (file: File | null): Promise<string | null> => {
     if (!file) return null;
@@ -265,8 +280,16 @@ const VirtualTryOn = () => {
               </div>
             </CardHeader>
             <CardContent className="grid grid-cols-2 gap-4">
-              <ImageUploader onFileSelect={setPersonImageFile} title="Person Image" t={t} imageUrl={displayPersonUrl} onClear={() => { setPersonImageFile(null); if(selectedJobId) setSelectedJobId(null); }} />
-              <ImageUploader onFileSelect={setGarmentImageFile} title="Garment Image" t={t} imageUrl={displayGarmentUrl} onClear={() => { setGarmentImageFile(null); if(selectedJobId) setSelectedJobId(null); }} />
+              {selectedJob ? (
+                <SelectedJobImage imageUrl={selectedJob.source_person_image_url} onClear={resetForm} title="Person Image" />
+              ) : (
+                <ImageUploader onFileSelect={setPersonImageFile} title="Person Image" t={t} imageUrl={personImageUrl} onClear={() => setPersonImageFile(null)} />
+              )}
+              {selectedJob ? (
+                <SelectedJobImage imageUrl={selectedJob.source_garment_image_url} onClear={resetForm} title="Garment Image" />
+              ) : (
+                <ImageUploader onFileSelect={setGarmentImageFile} title="Garment Image" t={t} imageUrl={garmentImageUrl} onClear={() => setGarmentImageFile(null)} />
+              )}
             </CardContent>
           </Card>
           {!selectedJobId && (
