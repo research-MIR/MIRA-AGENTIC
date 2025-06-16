@@ -6,7 +6,7 @@ import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-const MODEL_NAME = "gemini-1.5-flash-latest";
+const MODEL_NAME = "gemini-2.5-flash-preview-05-20";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -50,12 +50,37 @@ async function downloadImageAsPart(supabase: SupabaseClient, imageUrl: string, l
 }
 
 function extractJson(text: string): any {
+    // First, try to find a JSON markdown block
     const match = text.match(/```json\s*([\s\S]*?)\s*```/);
-    if (match && match[1]) { return JSON.parse(match[1]); }
-    try { return JSON.parse(text); } catch (e) {
-        console.error("Failed to parse JSON from model response:", text);
-        throw new Error("The model returned a response that could not be parsed as JSON.");
+    if (match && match[1]) {
+        try {
+            return JSON.parse(match[1]);
+        } catch (e) {
+            console.error("Failed to parse JSON from markdown block, will try other methods. Error:", e.message);
+        }
     }
+
+    // If markdown block fails or doesn't exist, try to parse the whole text
+    try {
+        return JSON.parse(text);
+    } catch (e) {
+        // If that fails, find the first '{' and last '}' and try to parse that substring
+        const firstBrace = text.indexOf('{');
+        const lastBrace = text.lastIndexOf('}');
+        if (firstBrace !== -1 && lastBrace > firstBrace) {
+            const jsonSubstring = text.substring(firstBrace, lastBrace + 1);
+            try {
+                return JSON.parse(jsonSubstring);
+            } catch (subError) {
+                console.error("Failed to parse JSON substring. Substring was:", jsonSubstring);
+                // Fall through to the final error
+            }
+        }
+    }
+
+    // If all attempts fail, throw the final error
+    console.error("All JSON parsing attempts failed. Raw text was:", text);
+    throw new Error("The model returned a response that could not be parsed as JSON.");
 }
 
 serve(async (req) => {
