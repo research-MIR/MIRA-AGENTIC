@@ -107,7 +107,7 @@ serve(async (req) => {
     const responseJson = extractJson(result.text);
     console.log(`[SegmentAI] Successfully parsed JSON response. Found ${responseJson.masks?.length || 0} masks.`);
 
-    return new Response(JSON.stringify(responseJson), {
+    return new Response(JSON.stringify({ success: true, result: responseJson }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });

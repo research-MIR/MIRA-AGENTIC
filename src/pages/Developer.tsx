@@ -204,8 +204,9 @@ const Developer = () => {
             });
 
             if (error) throw error;
+            if (!data.success) throw new Error(data.error || "Segmentation failed without a specific error message.");
 
-            setSegmentationResult(data);
+            setSegmentationResult(data.result);
             dismissToast(toastId);
             showSuccess("Segmentation analysis complete.");
         };
