@@ -103,8 +103,13 @@ const Developer = () => {
 
       const masksArray = data.result.masks ? data.result.masks : data.result;
       setSegmentationResult(masksArray);
+      
       if (masksArray[0]?.mask_url) {
         setMaskImageUrl(masksArray[0].mask_url);
+      } else if (masksArray[0]?.mask) { // Fallback to base64
+        const base64Data = masksArray[0].mask;
+        const imageUrl = base64Data.startsWith('data:image') ? base64Data : `data:image/png;base64,${base64Data}`;
+        setMaskImageUrl(imageUrl);
       }
       
       dismissToast(toastId);

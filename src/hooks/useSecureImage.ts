@@ -19,7 +19,9 @@ export const useSecureImage = (imageUrl: string | null | undefined) => {
       setError(null);
 
       try {
-        if (imageUrl.includes('supabase.co')) {
+        if (imageUrl.startsWith('data:image')) {
+          setDisplayUrl(imageUrl);
+        } else if (imageUrl.includes('supabase.co')) {
           const url = new URL(imageUrl);
           const bucketIdentifier = '/public/mira-agent-user-uploads/';
           const pathStartIndex = url.pathname.indexOf(bucketIdentifier);
