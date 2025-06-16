@@ -80,31 +80,29 @@ serve(async (req) => {
         console.log(`[VTO Worker][${job_id}] Starting prompt generation in '${mode}' mode...`);
         if (!job.cropped_image_url) throw new Error("Cropped image URL is missing for prompt generation step.");
 
-        let promptWorkerName;
-        let promptWorkerPayload;
+        const { data: profile } = await supabase.from('profiles').select('vto_captioning_preferences').eq('id', job.user_id).single();
+        const captioningPref = profile?.vto_captioning_preferences?.[mode] || 'general_detailed';
+        
+        console.log(`[VTO Worker][${job_id}] User preference for captioning in '${mode}' mode is '${captioningPref}'.`);
 
-        if (mode === 'vton') {
-            promptWorkerName = 'MIRA-AGENT-worker-vto-advanced-prompt-generator';
-            promptWorkerPayload = {
-                person_image_url: job.cropped_image_url,
-                garment_image_url: job.source_garment_image_url,
-                optional_details: job.context?.optional_details
-            };
+        let generatedPrompt = "";
+
+        if (captioningPref === 'none') {
+            generatedPrompt = job.context?.optional_details || "A model wearing a new outfit.";
         } else {
-            promptWorkerName = 'MIRA-AGENT-worker-vto-prompt-generator';
-            promptWorkerPayload = {
-                person_image_url: job.cropped_image_url,
-                garment_image_url: job.source_garment_image_url
-            };
+            const promptWorkerName = mode === 'vton' ? 'MIRA-AGENT-worker-vto-advanced-prompt-generator' : 'MIRA-AGENT-worker-vto-prompt-generator';
+            const { data: promptResult, error: promptError } = await supabase.functions.invoke(promptWorkerName, {
+                body: {
+                    person_image_url: job.cropped_image_url,
+                    garment_image_url: job.source_garment_image_url,
+                    optional_details: job.context?.optional_details,
+                    captioning_mode: captioningPref
+                }
+            });
+            if (promptError) throw promptError;
+            if (!promptResult.result?.prompt) throw new Error("Prompt generation worker did not return a valid prompt.");
+            generatedPrompt = promptResult.result.prompt;
         }
-
-        const { data: promptResult, error: promptError } = await supabase.functions.invoke(promptWorkerName, {
-            body: promptWorkerPayload
-        });
-        if (promptError) throw promptError;
-
-        const generatedPrompt = promptResult.result?.prompt;
-        if (!generatedPrompt) throw new Error("Prompt generation worker did not return a valid prompt.");
 
         const newSegmentationResult = { ...job.segmentation_result, generated_prompt: generatedPrompt };
 

@@ -14,7 +14,22 @@ const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const MODEL_NAME = "gemini-2.5-pro-preview-06-05";
 const BUCKET_NAME = 'mira-agent-user-uploads';
 
-const systemPrompt = `You are a world-class fashion photographer's assistant, tasked with creating a "shot list" prompt for a virtual try-on. Your goal is to describe a scene as if the model is already wearing the new garment, focusing on creating a natural and compelling image. You must follow a complex set of rules based on the garments involved.
+const getSystemPrompt = (mode: 'general_detailed' | 'garment_only') => {
+    if (mode === 'garment_only') {
+        return `You are an expert fashion cataloger. Your only task is to describe the provided garment image in a single, detailed sentence. Focus on type, material, color, and cut. Output only a JSON object with a 'prompt' key.
+
+Example Input: [Image of a red silk blouse]
+Example Output:
+\`\`\`json
+{
+  "prompt": "A red silk blouse with a pussy-bow collar."
+}
+\`\`\`
+`;
+    }
+
+    // Default to general_detailed
+    return `You are a world-class fashion photographer's assistant, tasked with creating a "shot list" prompt for a virtual try-on. Your goal is to describe a scene as if the model is already wearing the new garment, focusing on creating a natural and compelling image. You must follow a complex set of rules based on the garments involved.
 
 ### Your Task
 You will be given two images and optional user details:
@@ -42,6 +57,7 @@ Your entire output MUST be a single, valid JSON object with one key: "prompt".
 }
 \`\`\`
 `;
+};
 
 async function downloadImageAsPart(supabase: SupabaseClient, imageUrl: string): Promise<Part> {
     const url = new URL(imageUrl);
@@ -79,20 +95,24 @@ serve(async (req) => {
   }
 
   try {
-    const { person_image_url, garment_image_url, optional_details } = await req.json();
+    const { person_image_url, garment_image_url, optional_details, captioning_mode } = await req.json();
     if (!person_image_url || !garment_image_url) {
       throw new Error("person_image_url and garment_image_url are required.");
     }
     
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
+    const systemPrompt = getSystemPrompt(captioning_mode || 'general_detailed');
 
-    const userParts: Part[] = [
-        { text: "Person Image:" },
-        await downloadImageAsPart(supabase, person_image_url),
-        { text: "Garment Image:" },
-        await downloadImageAsPart(supabase, garment_image_url),
-        { text: `Optional User Details: ${optional_details || 'None'}` }
-    ];
+    const userParts: Part[] = [];
+    if (captioning_mode === 'garment_only') {
+        userParts.push(await downloadImageAsPart(supabase, garment_image_url));
+    } else {
+        userParts.push({ text: "Person Image:" });
+        userParts.push(await downloadImageAsPart(supabase, person_image_url));
+        userParts.push({ text: "Garment Image:" });
+        userParts.push(await downloadImageAsPart(supabase, garment_image_url));
+        userParts.push({ text: `Optional User Details: ${optional_details || 'None'}` });
+    }
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
     const result = await ai.models.generateContent({

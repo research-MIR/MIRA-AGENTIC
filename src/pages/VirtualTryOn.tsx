@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
-import { UploadCloud, Wand2, Loader2, Image as ImageIcon, X, PlusCircle, CheckCircle, AlertTriangle } from "lucide-react";
+import { UploadCloud, Wand2, Loader2, Image as ImageIcon, X, PlusCircle, CheckCircle, AlertTriangle, Settings } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
 import { cn, sanitizeFilename } from "@/lib/utils";
 import { useDropzone } from "@/hooks/useDropzone";
@@ -19,6 +19,7 @@ import { useImagePreview } from "@/context/ImagePreviewContext";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 
 interface VtoPipelineJob {
   id: string;
@@ -130,6 +131,54 @@ const PipelineStepCard = ({ title, imageUrl, status, children }: { title: string
   );
 };
 
+const CaptioningSettingsModal = ({ isOpen, onClose, preferences, onSave }: { isOpen: boolean, onClose: () => void, preferences: any, onSave: (newPrefs: any) => void }) => {
+    const [localPrefs, setLocalPrefs] = useState(preferences);
+
+    useEffect(() => {
+        setLocalPrefs(preferences);
+    }, [preferences]);
+
+    const handleSave = () => {
+        onSave(localPrefs);
+        onClose();
+    };
+
+    return (
+        <Dialog open={isOpen} onOpenChange={onClose}>
+            <DialogContent>
+                <DialogHeader>
+                    <DialogTitle>Captioning Preferences</DialogTitle>
+                    <DialogDescription>
+                        Choose the default AI captioning method for each mode. This will determine how the final prompt is generated.
+                    </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-6 py-4">
+                    <div>
+                        <Label className="font-semibold">Creative Edit Mode</Label>
+                        <RadioGroup value={localPrefs.edit} onValueChange={(value) => setLocalPrefs({ ...localPrefs, edit: value })} className="mt-2 space-y-1">
+                            <div className="flex items-center space-x-2"><RadioGroupItem value="general_detailed" id="edit-detailed" /><Label htmlFor="edit-detailed">General Detailed</Label></div>
+                            <div className="flex items-center space-x-2"><RadioGroupItem value="garment_only" id="edit-garment" /><Label htmlFor="edit-garment">Garment Only</Label></div>
+                            <div className="flex items-center space-x-2"><RadioGroupItem value="none" id="edit-none" /><Label htmlFor="edit-none">None (Manual Prompt Only)</Label></div>
+                        </RadioGroup>
+                    </div>
+                    <div>
+                        <Label className="font-semibold">Virtual Try-On Mode</Label>
+                        <RadioGroup value={localPrefs.vton} onValueChange={(value) => setLocalPrefs({ ...localPrefs, vton: value })} className="mt-2 space-y-1">
+                            <div className="flex items-center space-x-2"><RadioGroupItem value="general_detailed" id="vton-detailed" /><Label htmlFor="vton-detailed">General Detailed</Label></div>
+                            <div className="flex items-center space-x-2"><RadioGroupItem value="garment_only" id="vton-garment" /><Label htmlFor="vton-garment">Garment Only</Label></div>
+                            <div className="flex items-center space-x-2"><RadioGroupItem value="none" id="vton-none" /><Label htmlFor="vton-none">None (Manual Prompt Only)</Label></div>
+                        </RadioGroup>
+                    </div>
+                </div>
+                <DialogFooter>
+                    <Button variant="ghost" onClick={onClose}>Cancel</Button>
+                    <Button onClick={handleSave}>Save Preferences</Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+};
+
 const VirtualTryOn = () => {
   const { supabase, session } = useSession();
   const { t } = useLanguage();
@@ -141,11 +190,24 @@ const VirtualTryOn = () => {
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [mode, setMode] = useState<'edit' | 'vton'>('edit');
   const [optionalDetails, setOptionalDetails] = useState("");
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const channelRef = useRef<RealtimeChannel | null>(null);
+
+  const { data: profileData } = useQuery({
+    queryKey: ['userProfile', session?.user?.id],
+    queryFn: async () => {
+        if (!session?.user) return null;
+        const { data, error } = await supabase.from('profiles').select('vto_captioning_preferences').eq('id', session.user.id).single();
+        if (error) throw error;
+        return data;
+    },
+    enabled: !!session?.user,
+  });
+
+  const captioningPreferences = useMemo(() => profileData?.vto_captioning_preferences || { edit: 'general_detailed', vton: 'general_detailed' }, [profileData]);
 
   const fetchVtoJobs = async () => {
     if (!session?.user) return [];
-    console.log('[VTO Fetch] Refetching recent jobs...');
     const { data, error } = await supabase
       .from('mira-agent-vto-pipeline-jobs')
       .select('*, bitstudio_job:bitstudio_job_id(final_image_url)')
@@ -153,7 +215,6 @@ const VirtualTryOn = () => {
       .order('created_at', { ascending: false })
       .limit(10);
     if (error) throw error;
-    console.log(`[VTO Fetch] Found ${data.length} jobs.`);
     return data;
   };
 
@@ -175,17 +236,10 @@ const VirtualTryOn = () => {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'mira-agent-vto-pipeline-jobs', filter: `user_id=eq.${session.user.id}` },
         (payload) => {
-          console.log('[VTO Realtime] Payload received:', payload);
           queryClient.invalidateQueries({ queryKey: ['vtoPipelineJobs'] });
         }
       )
-      .subscribe((status, err) => {
-        if (status === 'SUBSCRIBED') {
-          console.log(`[VTO Realtime] Successfully subscribed to VTO jobs channel.`);
-        } else if (status === 'CHANNEL_ERROR') {
-          console.error(`[VTO Realtime] Subscription failed:`, err);
-        }
-      });
+      .subscribe();
       
     channelRef.current = channel;
 
@@ -263,6 +317,21 @@ const VirtualTryOn = () => {
     setOptionalDetails(job.context?.optional_details || "");
   };
 
+  const handleSavePreferences = async (newPrefs: any) => {
+    if (!session?.user) return showError("You must be logged in to save preferences.");
+    const toastId = showLoading("Saving preferences...");
+    try {
+        const { error } = await supabase.from('profiles').update({ vto_captioning_preferences: newPrefs }).eq('id', session.user.id);
+        if (error) throw error;
+        dismissToast(toastId);
+        showSuccess("Preferences saved!");
+        queryClient.invalidateQueries({ queryKey: ['userProfile', session.user.id] });
+    } catch (err: any) {
+        dismissToast(toastId);
+        showError(`Failed to save: ${err.message}`);
+    }
+  };
+
   const renderJobResult = (job: VtoPipelineJob) => {
     const steps = [
       { name: 'Segmentation', status: job.status !== 'pending_segmentation', imageUrl: job.source_person_image_url, children: job.segmentation_result && <SegmentationMask masks={job.segmentation_result.masks} /> },
@@ -292,98 +361,111 @@ const VirtualTryOn = () => {
   };
 
   return (
-    <div className="p-4 md:p-8 h-screen overflow-y-auto">
-      <header className="pb-4 mb-8 border-b"><h1 className="text-3xl font-bold">{t.virtualTryOn}</h1><p className="text-muted-foreground">Combine a person and a garment image with AI.</p></header>
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-1 space-y-6">
-          <Card>
-            <CardHeader>
-              <div className="flex justify-between items-center">
-                <CardTitle>{selectedJobId ? "Selected Job" : "1. Upload Images"}</CardTitle>
-                {selectedJobId && <Button variant="outline" size="sm" onClick={resetForm}><PlusCircle className="h-4 w-4 mr-2" />New Try-On</Button>}
-              </div>
-            </CardHeader>
-            <CardContent className="grid grid-cols-2 gap-4">
-              {selectedJob ? (
-                <SelectedJobImage imageUrl={selectedJob.source_person_image_url} onClear={resetForm} title="Person Image" />
-              ) : (
-                <ImageUploader onFileSelect={setPersonImageFile} title="Person Image" t={t} imageUrl={personImageUrl} onClear={() => setPersonImageFile(null)} />
-              )}
-              {selectedJob ? (
-                <SelectedJobImage imageUrl={selectedJob.source_garment_image_url} onClear={resetForm} title="Garment Image" />
-              ) : (
-                <ImageUploader onFileSelect={setGarmentImageFile} title="Garment Image" t={t} imageUrl={garmentImageUrl} onClear={() => setGarmentImageFile(null)} />
-              )}
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader><CardTitle>2. Select Mode</CardTitle></CardHeader>
-            <CardContent>
-              <RadioGroup value={mode} onValueChange={(value) => setMode(value as 'edit' | 'vton')} className="space-y-2" disabled={!!selectedJobId}>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="edit" id="mode-edit" />
-                  <Label htmlFor="mode-edit" className="flex flex-col">
-                    <span>Creative Edit</span>
-                    <span className="font-normal text-xs text-muted-foreground">Swap the garment onto the existing pose.</span>
-                  </Label>
+    <>
+      <div className="p-4 md:p-8 h-screen overflow-y-auto">
+        <header className="pb-4 mb-8 border-b flex justify-between items-center">
+            <h1 className="text-3xl font-bold">{t.virtualTryOn}</h1>
+            <Button variant="outline" size="icon" onClick={() => setIsSettingsModalOpen(true)}>
+                <Settings className="h-4 w-4" />
+            </Button>
+        </header>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <div className="lg:col-span-1 space-y-6">
+            <Card>
+              <CardHeader>
+                <div className="flex justify-between items-center">
+                  <CardTitle>{selectedJobId ? "Selected Job" : "1. Upload Images"}</CardTitle>
+                  {selectedJobId && <Button variant="outline" size="sm" onClick={resetForm}><PlusCircle className="h-4 w-4 mr-2" />New Try-On</Button>}
                 </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="vton" id="mode-vton" />
-                  <Label htmlFor="mode-vton" className="flex flex-col">
-                    <span>Virtual Try-On</span>
-                    <span className="font-normal text-xs text-muted-foreground">Re-imagine the scene with a new pose and style.</span>
-                  </Label>
-                </div>
-              </RadioGroup>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader><CardTitle>3. Optional Details</CardTitle></CardHeader>
-            <CardContent>
-              <Textarea 
-                value={optionalDetails}
-                onChange={(e) => setOptionalDetails(e.target.value)}
-                placeholder="e.g., 'make the shirt buttoned up', 'add a black handbag', 'wear it with blue jeans'..."
-                rows={3}
-                disabled={!!selectedJobId}
-              />
-            </CardContent>
-          </Card>
-          {!selectedJobId && (
-            <Button onClick={handleTryOn} disabled={isLoading || !personImageFile || !garmentImageFile} className="w-full">{isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}Start Virtual Try-On</Button>
-          )}
-        </div>
-        <div className="lg:col-span-2">
-          <Card className="min-h-[60vh]">
-            <CardHeader><CardTitle>Result</CardTitle></CardHeader>
-            <CardContent className="flex items-center justify-center">
-              {selectedJob ? renderJobResult(selectedJob) : <div className="text-center text-muted-foreground"><ImageIcon className="h-16 w-16 mx-auto mb-4" /><p>Your result will appear here.</p></div>}
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-      <Card className="mt-8">
-        <CardHeader><CardTitle>Recent Try-Ons</CardTitle></CardHeader>
-        <CardContent>
-          {isLoadingRecentJobs ? (
-            <div className="flex gap-4"><Skeleton className="h-24 w-24" /><Skeleton className="h-24 w-24" /><Skeleton className="h-24 w-24" /></div>
-          ) : recentJobs && recentJobs.length > 0 ? (
-            <div className="flex gap-4 overflow-x-auto pb-2">
-              {recentJobs.map(job => (
-                <RecentJobThumbnail
-                  key={job.id}
-                  job={job}
-                  onClick={() => handleJobSelect(job)}
-                  isSelected={selectedJobId === job.id}
+              </CardHeader>
+              <CardContent className="grid grid-cols-2 gap-4">
+                {selectedJob ? (
+                  <SelectedJobImage imageUrl={selectedJob.source_person_image_url} onClear={resetForm} title="Person Image" />
+                ) : (
+                  <ImageUploader onFileSelect={setPersonImageFile} title="Person Image" t={t} imageUrl={personImageUrl} onClear={() => setPersonImageFile(null)} />
+                )}
+                {selectedJob ? (
+                  <SelectedJobImage imageUrl={selectedJob.source_garment_image_url} onClear={resetForm} title="Garment Image" />
+                ) : (
+                  <ImageUploader onFileSelect={setGarmentImageFile} title="Garment Image" t={t} imageUrl={garmentImageUrl} onClear={() => setGarmentImageFile(null)} />
+                )}
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader><CardTitle>2. Select Mode</CardTitle></CardHeader>
+              <CardContent>
+                <RadioGroup value={mode} onValueChange={(value) => setMode(value as 'edit' | 'vton')} className="space-y-2" disabled={!!selectedJobId}>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="edit" id="mode-edit" />
+                    <Label htmlFor="mode-edit" className="flex flex-col">
+                      <span>Creative Edit</span>
+                      <span className="font-normal text-xs text-muted-foreground">Swap the garment onto the existing pose.</span>
+                    </Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="vton" id="mode-vton" />
+                    <Label htmlFor="mode-vton" className="flex flex-col">
+                      <span>Virtual Try-On</span>
+                      <span className="font-normal text-xs text-muted-foreground">Re-imagine the scene with a new pose and style.</span>
+                    </Label>
+                  </div>
+                </RadioGroup>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader><CardTitle>3. Optional Details</CardTitle></CardHeader>
+              <CardContent>
+                <Textarea 
+                  value={optionalDetails}
+                  onChange={(e) => setOptionalDetails(e.target.value)}
+                  placeholder="e.g., 'make the shirt buttoned up', 'add a black handbag', 'wear it with blue jeans'..."
+                  rows={3}
+                  disabled={!!selectedJobId}
                 />
-              ))}
-            </div>
-          ) : (
-            <p className="text-muted-foreground text-sm">No recent jobs found.</p>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+              </CardContent>
+            </Card>
+            {!selectedJobId && (
+              <Button onClick={handleTryOn} disabled={isLoading || !personImageFile || !garmentImageFile} className="w-full">{isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}Start Virtual Try-On</Button>
+            )}
+          </div>
+          <div className="lg:col-span-2">
+            <Card className="min-h-[60vh]">
+              <CardHeader><CardTitle>Result</CardTitle></CardHeader>
+              <CardContent className="flex items-center justify-center">
+                {selectedJob ? renderJobResult(selectedJob) : <div className="text-center text-muted-foreground"><ImageIcon className="h-16 w-16 mx-auto mb-4" /><p>Your result will appear here.</p></div>}
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+        <Card className="mt-8">
+          <CardHeader><CardTitle>Recent Try-Ons</CardTitle></CardHeader>
+          <CardContent>
+            {isLoadingRecentJobs ? (
+              <div className="flex gap-4"><Skeleton className="h-24 w-24" /><Skeleton className="h-24 w-24" /><Skeleton className="h-24 w-24" /></div>
+            ) : recentJobs && recentJobs.length > 0 ? (
+              <div className="flex gap-4 overflow-x-auto pb-2">
+                {recentJobs.map(job => (
+                  <RecentJobThumbnail
+                    key={job.id}
+                    job={job}
+                    onClick={() => handleJobSelect(job)}
+                    isSelected={selectedJobId === job.id}
+                  />
+                ))}
+              </div>
+            ) : (
+              <p className="text-muted-foreground text-sm">No recent jobs found.</p>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+      <CaptioningSettingsModal 
+        isOpen={isSettingsModalOpen} 
+        onClose={() => setIsSettingsModalOpen(false)}
+        preferences={captioningPreferences}
+        onSave={handleSavePreferences}
+      />
+    </>
   );
 };
 
