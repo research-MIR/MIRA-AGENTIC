@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Plus, Trash2, Eye, EyeOff } from "lucide-react";
+import { Plus, Trash2, Eye, EyeOff, Droplets, BarChartHorizontal } from "lucide-react";
 import { Layer, AdjustmentLayer } from "@/types/editor";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/context/LanguageContext";
@@ -24,12 +24,14 @@ export const LayerPanel = ({ layers, selectedLayerId, onSelectLayer, onAddLayer,
       </CardHeader>
       <CardContent>
         <div className="space-y-2">
-          <Button onClick={() => onAddLayer('saturation')} className="w-full">
-            <Plus className="mr-2 h-4 w-4" /> {t.addSaturation}
+          <Button onClick={() => onAddLayer('hsl')} className="w-full">
+            <Droplets className="mr-2 h-4 w-4" /> {t.addHsl}
           </Button>
-          {/* Add buttons for other layer types here in the future */}
+          <Button onClick={() => onAddLayer('levels')} className="w-full">
+            <BarChartHorizontal className="mr-2 h-4 w-4" /> {t.addLevels}
+          </Button>
         </div>
-        <div className="mt-4 space-y-2">
+        <div className="mt-4 space-y-2 max-h-60 overflow-y-auto">
           {layers.map(layer => (
             <div 
               key={layer.id}

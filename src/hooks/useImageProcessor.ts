@@ -1,43 +1,58 @@
 import { useEffect } from 'react';
-import { Layer } from '@/types/editor';
+import { Layer, HSLAdjustment, LevelsAdjustment } from '@/types/editor';
+import { rgbToHsl, hslToRgb } from '@/lib/colorUtils';
 
-const applySaturation = (imageData: ImageData, level: number) => {
+const applyHsl = (imageData: ImageData, settings: HSLAdjustment[]) => {
   const d = imageData.data;
   for (let i = 0; i < d.length; i += 4) {
-    const r = d[i];
-    const g = d[i + 1];
-    const b = d[i + 2];
+    let [h, s, l] = rgbToHsl(d[i], d[i + 1], d[i + 2]);
 
-    const max = Math.max(r, g, b);
-    const min = Math.min(r, g, b);
-    let h = 0, s = 0, l = (max + min) / 2;
+    const master = settings.find(s => s.range === 'master')!;
+    let adjustments: HSLAdjustment[] = [master];
 
-    if (max !== min) {
-      const diff = max - min;
-      s = l > 127.5 ? diff / (510 - max - min) : diff / (max + min);
-      // Hue calculation is complex and not needed for saturation adjustment
-    }
-    
-    s *= level;
-    s = Math.max(0, Math.min(1, s));
+    if (h >= 330 || h < 30) adjustments.push(settings.find(s => s.range === 'reds')!);
+    if (h >= 30 && h < 90) adjustments.push(settings.find(s => s.range === 'yellows')!);
+    if (h >= 90 && h < 150) adjustments.push(settings.find(s => s.range === 'greens')!);
+    if (h >= 150 && h < 210) adjustments.push(settings.find(s => s.range === 'cyans')!);
+    if (h >= 210 && h < 270) adjustments.push(settings.find(s => s.range === 'blues')!);
+    if (h >= 270 && h < 330) adjustments.push(settings.find(s => s.range === 'magentas')!);
 
-    if (s === 0) {
-      d[i] = d[i + 1] = d[i + 2] = l;
+    adjustments.forEach(adj => {
+      if (!adj) return;
+      h = (h + adj.hue + 360) % 360;
+      s = Math.max(0, Math.min(1, s + adj.saturation / 100));
+      l = Math.max(0, Math.min(1, l + adj.lightness / 100));
+    });
+
+    const [r, g, b] = hslToRgb(h, s, l);
+    d[i] = r;
+    d[i + 1] = g;
+    d[i + 2] = b;
+  }
+};
+
+const applyLevels = (imageData: ImageData, settings: LevelsAdjustment) => {
+  const d = imageData.data;
+  const inRange = settings.inWhite - settings.inBlack;
+  const outRange = settings.outWhite - settings.outBlack;
+  
+  const levels = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) {
+    if (i <= settings.inBlack) {
+      levels[i] = settings.outBlack;
+    } else if (i >= settings.inWhite) {
+      levels[i] = settings.outWhite;
     } else {
-      const temp2 = l < 127.5 ? l * (1 + s) : l + s - l * s;
-      const temp1 = 2 * l - temp2;
-      // Simplified RGB conversion from HSL, as hue is constant
-      const tR = max / 255;
-      const tG = g / 255;
-      const tB = b / 255;
-      
-      // This is a simplification. A full HSL->RGB conversion is needed for perfect accuracy.
-      // For now, we'll use a simpler method: lerp towards grayscale
-      const gray = r * 0.3 + g * 0.59 + b * 0.11;
-      d[i] = gray + (r - gray) * level;
-      d[i+1] = gray + (g - gray) * level;
-      d[i+2] = gray + (b - gray) * level;
+      const val = (i - settings.inBlack) / inRange;
+      const corrected = Math.pow(val, settings.inGamma);
+      levels[i] = Math.round(corrected * outRange + settings.outBlack);
     }
+  }
+
+  for (let i = 0; i < d.length; i += 4) {
+    d[i] = levels[d[i]];
+    d[i + 1] = levels[d[i + 1]];
+    d[i + 2] = levels[d[i + 2]];
   }
 };
 
@@ -66,10 +81,12 @@ export const useImageProcessor = (
       if (!layer.visible) return;
 
       switch (layer.type) {
-        case 'saturation':
-          applySaturation(imageData, layer.settings.saturation);
+        case 'hsl':
+          applyHsl(imageData, layer.settings as HSLAdjustment[]);
           break;
-        // other cases for curves, luts etc.
+        case 'levels':
+          applyLevels(imageData, layer.settings as LevelsAdjustment);
+          break;
       }
     });
 

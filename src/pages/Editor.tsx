@@ -1,10 +1,9 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { UploadCloud, Image as ImageIcon } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
-import { Layer, AdjustmentLayer } from "@/types/editor";
+import { Layer, AdjustmentLayer, HSLAdjustment, LevelsAdjustment } from "@/types/editor";
 import { LayerPanel } from "@/components/Editor/LayerPanel";
 import { AdjustmentPanel } from "@/components/Editor/AdjustmentPanel";
 import { useImageProcessor } from "@/hooks/useImageProcessor";
@@ -42,23 +41,39 @@ const Editor = () => {
   });
 
   const addLayer = (type: AdjustmentLayer['type']) => {
-    const newLayer: AdjustmentLayer = {
-      id: `layer-${Date.now()}`,
-      name: `${type.charAt(0).toUpperCase() + type.slice(1)}`,
-      type: type,
-      visible: true,
-      settings: {
-        saturation: 1,
-        // Default settings for other types would go here
-      },
-    };
+    let newLayer: AdjustmentLayer;
+    if (type === 'hsl') {
+      newLayer = {
+        id: `layer-${Date.now()}`,
+        name: `HSL`,
+        type: 'hsl',
+        visible: true,
+        settings: [
+          { range: 'master', hue: 0, saturation: 0, lightness: 0 },
+          { range: 'reds', hue: 0, saturation: 0, lightness: 0 },
+          { range: 'yellows', hue: 0, saturation: 0, lightness: 0 },
+          { range: 'greens', hue: 0, saturation: 0, lightness: 0 },
+          { range: 'cyans', hue: 0, saturation: 0, lightness: 0 },
+          { range: 'blues', hue: 0, saturation: 0, lightness: 0 },
+          { range: 'magentas', hue: 0, saturation: 0, lightness: 0 },
+        ],
+      };
+    } else { // levels
+      newLayer = {
+        id: `layer-${Date.now()}`,
+        name: `Levels`,
+        type: 'levels',
+        visible: true,
+        settings: { inBlack: 0, inWhite: 255, inGamma: 1.0, outBlack: 0, outWhite: 255 },
+      };
+    }
     setLayers(prev => [...prev, newLayer]);
     setSelectedLayerId(newLayer.id);
   };
 
   const updateLayer = (layerId: string, newSettings: any) => {
     setLayers(layers => layers.map(l => 
-      l.id === layerId ? { ...l, settings: { ...l.settings, ...newSettings } } : l
+      l.id === layerId ? { ...l, settings: newSettings } : l
     ));
   };
 
