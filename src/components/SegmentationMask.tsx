@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import pako from 'pako';
+import pako from 'https://esm.sh/pako@2.1.0';
 
 interface SegmentationMaskProps {
   maskData: string; // The base64 encoded, zlib compressed mask
