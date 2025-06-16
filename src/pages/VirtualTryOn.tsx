@@ -55,7 +55,7 @@ const VirtualTryOn = () => {
   const [garmentImageFile, setGarmentImageFile] = useState<File | null>(null);
   const [prompt, setPrompt] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [segmentationResult, setSegmentationResult] = useState<any | null>(null);
+  const [segmentationResult, setSegmentationResult] = useState<any[] | null>(null);
   const [isPersonDragging, setIsPersonDragging] = useState(false);
   const [isGarmentDragging, setIsGarmentDragging] = useState(false);
   const [personImageDimensions, setPersonImageDimensions] = useState<{width: number, height: number} | null>(null);
@@ -78,7 +78,7 @@ const VirtualTryOn = () => {
           (payload) => {
             const job = payload.new;
             if (job.status === 'complete') {
-              setSegmentationResult(job.result);
+              setSegmentationResult(job.result?.segmentation_masks || []);
               setIsLoading(false);
               showSuccess("Segmentation complete!");
               setActiveJobId(null);
@@ -205,8 +205,7 @@ const VirtualTryOn = () => {
                   {personImageUrl ? <img src={personImageUrl} alt="Person" className="w-full rounded-md" /> : <div className="aspect-square bg-muted rounded-md flex items-center justify-center"><ImageIcon className="h-12 w-12 text-muted-foreground" /></div>}
                   {segmentationResult && personImageDimensions && (
                     <SegmentationMask 
-                      maskData={segmentationResult.mask} 
-                      box2d={segmentationResult.box_2d}
+                      masks={segmentationResult} 
                       width={personImageDimensions.width} 
                       height={personImageDimensions.height} 
                     />
