@@ -11,6 +11,7 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const BITSTUDIO_API_KEY = Deno.env.get('BITSTUDIO_API_KEY');
 const BITSTUDIO_BASE_URL = 'https://api.bitstudio.ai';
 const POLLING_INTERVAL_MS = 5000; // 5 seconds
+const UPLOAD_BUCKET = 'mira-agent-user-uploads';
 
 async function handlePipelineContinuation(supabase: SupabaseClient, bitstudioJobId: string) {
     console.log(`[BitStudioPoller] Checking if job ${bitstudioJobId} is part of a VTO pipeline.`);
@@ -64,9 +65,28 @@ serve(async (req) => {
     const statusData = await statusResponse.json();
 
     if (statusData.status === 'completed') {
+        const externalImageUrl = statusData.path;
+        console.log(`[BitStudioPoller][${job_id}] Job complete. Downloading from external URL: ${externalImageUrl}`);
+        
+        const imageResponse = await fetch(externalImageUrl);
+        if (!imageResponse.ok) throw new Error(`Failed to download final image from BitStudio: ${imageResponse.statusText}`);
+        const imageBuffer = await imageResponse.arrayBuffer();
+
+        const finalFilename = `bitstudio_vto_${Date.now()}.png`;
+        const finalStoragePath = `${job.user_id}/${finalFilename}`;
+
+        const { error: uploadError } = await supabase.storage
+            .from(UPLOAD_BUCKET)
+            .upload(finalStoragePath, imageBuffer, { contentType: 'image/png', upsert: true });
+        
+        if (uploadError) throw new Error(`Failed to re-upload final image to Supabase Storage: ${uploadError.message}`);
+
+        const { data: { publicUrl } } = supabase.storage.from(UPLOAD_BUCKET).getPublicUrl(finalStoragePath);
+        console.log(`[BitStudioPoller][${job_id}] Successfully re-uploaded to Supabase Storage. New URL: ${publicUrl}`);
+
         await supabase.from('mira-agent-bitstudio-jobs').update({
             status: 'complete',
-            final_image_url: statusData.path
+            final_image_url: publicUrl // <-- Save our internal URL
         }).eq('id', job_id);
         
         await handlePipelineContinuation(supabase, job_id);
