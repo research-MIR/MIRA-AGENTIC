@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { GoogleGenAI, Type, Part } from 'https://esm.sh/@google/genai@0.15.0';
+import { GoogleGenAI, Type, Part, Content, createPartFromUri } from 'https://esm.sh/@google/genai@0.15.0';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
@@ -61,23 +61,10 @@ const responseSchema = {
   required: ['description', 'masks'],
 };
 
-
 function extractJson(text: string): any {
-    console.log("[SegmentAI Log] Attempting to parse JSON from text.");
     const match = text.match(/```json\s*([\s\S]*?)\s*```/);
-    if (match && match[1]) {
-        console.log("[SegmentAI Log] Found JSON in markdown block. Parsing...");
-        const parsed = JSON.parse(match[1]);
-        console.log("[SegmentAI Log] Successfully parsed JSON from markdown block.");
-        return parsed;
-    }
-    try {
-        console.log("[SegmentAI Log] No markdown block found. Attempting to parse raw text.");
-        const parsed = JSON.parse(text);
-        console.log("[SegmentAI Log] Successfully parsed raw text as JSON.");
-        return parsed;
-    } catch (e) {
-        console.error("[SegmentAI Log] JSON PARSING FAILED. Raw text was:", text);
+    if (match && match[1]) { return JSON.parse(match[1]); }
+    try { return JSON.parse(text); } catch (e) {
         throw new Error("The model returned a response that could not be parsed as JSON.");
     }
 }
@@ -96,17 +83,36 @@ serve(async (req) => {
     if (!base64_image_data || !mime_type || !user_id) {
       throw new Error("base64_image_data, mime_type, and user_id are required.");
     }
-    console.log(`[SegmentAI Log][${reqId}] Input validated. Mime type: ${mime_type}. Base64 data length: ${base64_image_data.length}`);
+    console.log(`[SegmentAI Log][${reqId}] Input validated. Mime type: ${mime_type}.`);
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
-    const imagePart: Part = {
-      inlineData: {
-        mimeType: mime_type,
-        data: base64_image_data,
-      },
-    };
+    // --- New Files API Logic ---
+    console.log(`[SegmentAI Log][${reqId}] Uploading file to Google Files API...`);
+    const imageBuffer = decodeBase64(base64_image_data);
+    const imageBlob = new Blob([imageBuffer], { type: mime_type });
     
+    const uploadResult = await ai.files.upload({
+        file: imageBlob,
+        config: { displayName: `segmentation_upload_${reqId}` }
+    });
+    console.log(`[SegmentAI Log][${reqId}] File upload initiated. File name: ${uploadResult.name}`);
+
+    let file = await ai.files.get({ name: uploadResult.name as string });
+    while (file.state === 'PROCESSING') {
+        console.log(`[SegmentAI Log][${reqId}] File is still processing. Retrying in 3 seconds...`);
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        file = await ai.files.get({ name: uploadResult.name as string });
+    }
+
+    if (file.state === 'FAILED') {
+        throw new Error('File processing failed on Google\'s side.');
+    }
+    console.log(`[SegmentAI Log][${reqId}] File is now ACTIVE. URI: ${file.uri}`);
+    
+    const imagePart = createPartFromUri(file.uri, file.mimeType);
+    // --- End of New Files API Logic ---
+
     const requestPayload = {
         model: MODEL_NAME,
         contents: [{ role: 'user', parts: [imagePart] }],
@@ -119,12 +125,11 @@ serve(async (req) => {
         }
     };
 
-    console.log(`[SegmentAI Log][${reqId}] Calling Gemini API with payload (image data omitted for brevity):`, JSON.stringify({ ...requestPayload, contents: [{ role: 'user', parts: [{ inlineData: { mimeType: mime_type, data: `...length:${base64_image_data.length}` } }] }] }, null, 2));
+    console.log(`[SegmentAI Log][${reqId}] Calling Gemini API with file reference...`);
     const result = await ai.models.generateContent(requestPayload);
 
-    console.log(`[SegmentAI Log][${reqId}] Received raw response from Gemini API:`, JSON.stringify(result, null, 2));
+    console.log(`[SegmentAI Log][${reqId}] Received raw response from Gemini API.`);
     const rawTextResponse = result.text;
-    console.log(`[SegmentAI Log][${reqId}] Extracted raw text from Gemini response. Length: ${rawTextResponse?.length || 0}`);
     
     const responseJson = extractJson(rawTextResponse);
     console.log(`[SegmentAI Log][${reqId}] Successfully parsed JSON. Found ${responseJson.masks?.length || 0} masks.`);
@@ -134,11 +139,9 @@ serve(async (req) => {
 
     for (const maskItem of responseJson.masks) {
         if (maskItem.mask) {
-            console.log(`[SegmentAI Log][${reqId}] Processing mask for label: ${maskItem.label}`);
             const maskBuffer = decodeBase64(maskItem.mask);
             const filePath = `${user_id}/masks/${Date.now()}_${maskItem.label.replace(/[^a-zA-Z0-9]/g, '_')}.png`;
             
-            console.log(`[SegmentAI Log][${reqId}] Uploading mask to Supabase Storage at path: ${filePath}`);
             const { error: uploadError } = await supabase.storage
                 .from('mira-agent-user-uploads')
                 .upload(filePath, maskBuffer, { contentType: 'image/png', upsert: true });
@@ -154,11 +157,9 @@ serve(async (req) => {
             
             maskItem.mask_url = publicUrl;
             delete maskItem.mask;
-            console.log(`[SegmentAI Log][${reqId}] Successfully converted mask for '${maskItem.label}' to URL: ${publicUrl}`);
         }
     }
     console.log(`[SegmentAI Log][${reqId}] Finished post-processing.`);
-    console.log(`[SegmentAI Log][${reqId}] Final JSON response being sent to client:`, JSON.stringify(responseJson, null, 2));
 
     return new Response(JSON.stringify(responseJson), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
