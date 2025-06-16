@@ -15,9 +15,9 @@ const corsHeaders = {
 
 const systemPrompt = `You are a "Virtual Try-On Analyst" AI. Your task is to analyze two images: a "Person Image" and a "Garment Image".
 
-Your goal is to identify the garment in the "Garment Image" and determine where it should be placed on the person in the "Person Image".
+Your goal is to identify the single, primary garment in the "Garment Image" and determine where it should be placed on the person in the "Person Image".
 
-You MUST return a single, valid JSON object containing a list named "segmentation_masks". Each item in the list should have the following structure:
+You MUST return a single, valid JSON object with the following structure:
 {
   "label": "A brief description of the item in the Garment Image.",
   "box_2d": [Y_MIN, X_MIN, Y_MAX, X_MAX],
@@ -27,7 +27,7 @@ You MUST return a single, valid JSON object containing a list named "segmentatio
 - "box_2d": An array of four numbers representing the bounding box of the garment on the PERSON, normalized to 1000x1000.
 - "mask": A base64 encoded string of a PNG image representing the segmentation mask of the garment.
 
-Analyze the images and provide the JSON output.`;
+Analyze the images and provide the single JSON object as your output.`;
 
 async function downloadImageAsPart(supabase: SupabaseClient, imageUrl: string, label: string): Promise<Part[]> {
     const url = new URL(imageUrl);

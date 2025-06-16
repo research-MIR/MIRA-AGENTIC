@@ -79,13 +79,14 @@ const VirtualTryOn = () => {
             const job = payload.new;
             if (job.status === 'complete') {
               const resultData = job.result;
-              if (Array.isArray(resultData)) {
-                setSegmentationResult(resultData);
-              } else if (resultData && Array.isArray(resultData.segmentation_masks)) {
-                setSegmentationResult(resultData.segmentation_masks);
+              // Handle the case where the result is a single object
+              if (resultData && typeof resultData === 'object' && !Array.isArray(resultData)) {
+                setSegmentationResult([resultData]); // Wrap the single object in an array
               } else {
-                setSegmentationResult([]);
-                console.warn("Received segmentation result in an unknown format:", resultData);
+                setSegmentationResult([]); // Default to empty array if format is unexpected
+                if (resultData) {
+                  console.warn("Received segmentation result in an unexpected format:", resultData);
+                }
               }
               setIsLoading(false);
               showSuccess("Segmentation complete!");
