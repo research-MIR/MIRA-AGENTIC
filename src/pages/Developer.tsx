@@ -57,6 +57,11 @@ const Developer = () => {
   const [optimizedImage, setOptimizedImage] = useState<File | null>(null);
   const [quality, setQuality] = useState(80);
 
+  // Segmentation State
+  const [segmentationImage, setSegmentationImage] = useState<File | null>(null);
+  const [segmentationResult, setSegmentationResult] = useState<string | null>(null);
+  const [isSegmenting, setIsSegmenting] = useState(false);
+
   const originalImageUrl = originalImage ? URL.createObjectURL(originalImage) : null;
   const optimizedImageUrl = optimizedImage ? URL.createObjectURL(optimizedImage) : null;
 
@@ -171,6 +176,43 @@ const Developer = () => {
     }
   };
 
+  const handleSegmentation = async () => {
+    if (!segmentationImage) return showError("Please select an image for segmentation.");
+    setIsSegmenting(true);
+    setSegmentationResult(null);
+    const toastId = showLoading("Sending image to segmentation AI...");
+
+    try {
+        const reader = new FileReader();
+        reader.readAsDataURL(segmentationImage);
+        reader.onloadend = async () => {
+            const base64String = reader.result as string;
+            const base64Data = base64String.split(',')[1];
+
+            const { data, error } = await supabase.functions.invoke('MIRA-AGENT-segment-ai', {
+                body: {
+                    base64_image_data: base64Data,
+                    mime_type: segmentationImage.type
+                }
+            });
+
+            if (error) throw error;
+
+            setSegmentationResult(JSON.stringify(data, null, 2));
+            dismissToast(toastId);
+            showSuccess("Segmentation analysis complete.");
+        };
+        reader.onerror = (error) => {
+            throw error;
+        };
+    } catch (err: any) {
+        showError(`Segmentation failed: ${err.message}`);
+        dismissToast(toastId);
+    } finally {
+        setIsSegmenting(false);
+    }
+  };
+
   const renderJobStatus = () => {
     if (!activeJob) return <p className="text-center text-muted-foreground">{t.resultsPlaceholder}</p>;
 
@@ -199,6 +241,33 @@ const Developer = () => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         <div className="space-y-4">
           <Card>
+            <CardHeader><CardTitle>AI Segmentation Tester</CardTitle></CardHeader>
+            <CardContent className="space-y-4">
+                <p className="text-sm text-muted-foreground">Upload an image to get a JSON description from the AI.</p>
+                <Input
+                    id="segmentation-upload"
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => setSegmentationImage(e.target.files?.[0] || null)}
+                />
+                <Button onClick={handleSegmentation} disabled={isSegmenting || !segmentationImage}>
+                    {isSegmenting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Analyze Image
+                </Button>
+                {segmentationResult && (
+                    <div>
+                        <Label>JSON Response</Label>
+                        <Textarea
+                            readOnly
+                            value={segmentationResult}
+                            className="mt-1 h-48 font-mono text-xs"
+                        />
+                    </div>
+                )}
+            </CardContent>
+          </Card>
+
+          <Card>
             <CardHeader><CardTitle>Image Optimization Tester</CardTitle></CardHeader>
             <CardContent className="space-y-4">
               <Input id="image-test-upload" type="file" accept="image/*" onChange={handleImageTestChange} />
@@ -222,17 +291,6 @@ const Developer = () => {
                   </div>
                 </div>
               )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader><CardTitle>{t.comfyUIWorkflowTester}</CardTitle></CardHeader>
-            <CardContent className="space-y-4">
-              <p className="text-sm text-muted-foreground">The ComfyUI server address is now configured securely on the backend.</p>
-              <Button onClick={handleQueuePrompt} disabled={!!activeJob && activeJob.status !== 'complete' && activeJob.status !== 'failed'}>
-                {(activeJob && (activeJob.status === 'queued' || activeJob.status === 'processing')) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                {t.queuePrompt}
-              </Button>
             </CardContent>
           </Card>
 
