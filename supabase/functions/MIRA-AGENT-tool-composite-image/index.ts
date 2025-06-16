@@ -15,17 +15,20 @@ async function downloadImage(supabase: SupabaseClient, imageUrl: string): Promis
     console.log(`[CompositeTool] Downloading image from URL: ${imageUrl}`);
     let imageBuffer: ArrayBuffer;
 
+    // Use a regex to more robustly find the bucket name in the URL
+    const bucketMatch = imageUrl.match(/\/storage\/v1\/object\/public\/([a-zA-Z0-9_-]+)\//);
+    const bucketName = bucketMatch ? bucketMatch[1] : UPLOAD_BUCKET; // Fallback to default
+
     if (imageUrl.includes('supabase.co')) {
-        // It's a Supabase URL, use the robust download method via the client
         const url = new URL(imageUrl);
-        const pathParts = url.pathname.split(`/public/${UPLOAD_BUCKET}/`);
+        const pathParts = url.pathname.split(`/public/${bucketName}/`);
         if (pathParts.length < 2) {
             throw new Error(`Could not parse Supabase storage path from URL: ${imageUrl}`);
         }
         const storagePath = decodeURIComponent(pathParts[1]);
         
         const { data: blob, error: downloadError } = await supabase.storage
-            .from(UPLOAD_BUCKET)
+            .from(bucketName)
             .download(storagePath);
 
         if (downloadError) {
@@ -33,7 +36,6 @@ async function downloadImage(supabase: SupabaseClient, imageUrl: string): Promis
         }
         imageBuffer = await blob.arrayBuffer();
     } else {
-        // It's an external URL, use a standard fetch
         const response = await fetch(imageUrl);
         if (!response.ok) {
             throw new Error(`Failed to download image from ${imageUrl}. Status: ${response.status}`);
@@ -62,13 +64,39 @@ serve(async (req) => {
         downloadImage(supabase, overlay_image_url)
     ]);
 
-    const [y_min, x_min, y_max, x_max] = box;
-    const pasteX = Math.floor((x_min / 1000) * baseImage.width);
-    const pasteY = Math.floor((y_min / 1000) * baseImage.height);
-    const pasteWidth = Math.floor(((x_max - x_min) / 1000) * baseImage.width);
-    const pasteHeight = Math.floor(((y_max - y_min) / 1000) * baseImage.height);
+    const { width: baseW, height: baseH } = baseImage;
+    const [y_min_norm, x_min_norm, y_max_norm, x_max_norm] = box;
 
-    overlayImage.resize(pasteWidth, pasteHeight);
+    let pasteX, pasteY, pasteWidth, pasteHeight;
+
+    // This is the corrected logic, matching the crop tool.
+    if (baseW >= baseH) {
+      const scale = baseW / 1000;
+      const y_offset = (baseW - baseH) / 2;
+      pasteX = x_min_norm * scale;
+      pasteY = y_min_norm * scale - y_offset;
+      pasteWidth = (x_max_norm - x_min_norm) * scale;
+      pasteHeight = (y_max_norm - y_min_norm) * scale;
+    } else {
+      const scale = baseH / 1000;
+      const x_offset = (baseH - baseW) / 2;
+      pasteX = x_min_norm * scale - x_offset;
+      pasteY = y_min_norm * scale;
+      pasteWidth = (x_max_norm - x_min_norm) * scale;
+      pasteHeight = (y_max_norm - y_min_norm) * scale;
+    }
+
+    // Ensure dimensions are integers
+    pasteX = Math.floor(pasteX);
+    pasteY = Math.floor(pasteY);
+    pasteWidth = Math.floor(pasteWidth);
+    pasteHeight = Math.floor(pasteHeight);
+
+    // Resize the overlay image to fit the calculated paste dimensions,
+    // while maintaining its aspect ratio to prevent distortion.
+    overlayImage.contain(pasteWidth, pasteHeight);
+
+    // Composite the correctly sized overlay onto the base image at the correct position.
     baseImage.composite(overlayImage, pasteX, pasteY);
 
     const finalImageBuffer = await baseImage.encode(0); // PNG
