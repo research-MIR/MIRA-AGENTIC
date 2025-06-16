@@ -7,6 +7,7 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const MODEL_NAME = "gemini-2.5-pro-preview-06-05";
+const BUCKET_NAME = 'mira-agent-user-uploads';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -46,11 +47,13 @@ The value of this key must be an object with the following structure:
 
 async function downloadImageAsPart(supabase: SupabaseClient, imageUrl: string, label: string): Promise<Part[]> {
     const url = new URL(imageUrl);
-    const bucketName = url.pathname.split('/')[3]; // Assumes URL format like /storage/v1/object/public/bucket-name/...
-    const filePath = url.pathname.split(`/${bucketName}/`)[1];
-    if (!filePath) throw new Error(`Could not parse file path from URL: ${imageUrl}`);
+    const pathParts = url.pathname.split(`/${BUCKET_NAME}/`);
+    if (pathParts.length < 2) {
+        throw new Error(`Could not parse file path from URL: ${imageUrl}`);
+    }
+    const filePath = pathParts[1];
 
-    const { data: fileBlob, error: downloadError } = await supabase.storage.from(bucketName).download(filePath);
+    const { data: fileBlob, error: downloadError } = await supabase.storage.from(BUCKET_NAME).download(filePath);
     if (downloadError) throw new Error(`Supabase download failed for ${filePath}: ${downloadError.message}`);
 
     const mimeType = fileBlob.type;
