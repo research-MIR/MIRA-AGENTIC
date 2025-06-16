@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { GoogleGenAI, Content, Part } from 'https://esm.sh/@google/genai@0.15.0';
+import { GoogleGenAI, Content, Part, GenerationResult } from 'https://esm.sh/@google/genai@0.15.0';
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
@@ -8,6 +8,8 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const MODEL_NAME = "gemini-2.5-flash-preview-05-20";
 const BUCKET_NAME = 'mira-agent-user-uploads';
+const MAX_RETRIES = 3;
+const INITIAL_RETRY_DELAY_MS = 2000; // Start with a 2-second delay
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -86,7 +88,6 @@ function extractJson(text: string, requestId: string): any {
 }
 
 serve(async (req) => {
-  console.log(`[SegmentWorker] Function triggered.`);
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
@@ -95,26 +96,20 @@ serve(async (req) => {
   if (!job_id) {
     return new Response(JSON.stringify({ error: "job_id is required." }), { status: 400, headers: corsHeaders });
   }
-  console.log(`[SegmentWorker][${job_id}] Processing job.`);
 
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
 
   try {
-    console.log(`[SegmentWorker][${job_id}] STEP 1: Updating job status to 'processing'.`);
     await supabase.from('mira-agent-segmentation-jobs').update({ status: 'processing' }).eq('id', job_id);
 
-    console.log(`[SegmentWorker][${job_id}] STEP 2: Fetching job details.`);
     const { data: job, error: fetchError } = await supabase.from('mira-agent-segmentation-jobs').select('*').eq('id', job_id).single();
     if (fetchError) throw fetchError;
-    console.log(`[SegmentWorker][${job_id}] Job details fetched successfully.`);
 
     const { person_image_url, garment_image_url, user_prompt } = job;
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
-    console.log(`[SegmentWorker][${job_id}] STEP 3: Downloading images.`);
     const personParts = await downloadImageAsPart(supabase, person_image_url, "PERSON IMAGE", job_id);
     const garmentParts = await downloadImageAsPart(supabase, garment_image_url, "GARMENT IMAGE", job_id);
-    console.log(`[SegmentWorker][${job_id}] Images downloaded.`);
 
     const userParts: Part[] = [...personParts, ...garmentParts];
     if (user_prompt) {
@@ -129,11 +124,34 @@ serve(async (req) => {
         config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
     };
 
-    console.log(`[SegmentWorker][${job_id}] STEP 4: Sending request to Gemini...`);
-    const result = await ai.models.generateContent(requestPayload);
-    console.log(`[SegmentWorker][${job_id}] STEP 5: Received response from Gemini.`);
+    let result: GenerationResult | null = null;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+            console.log(`[SegmentWorker][${job_id}] Sending request to Gemini (Attempt ${attempt}/${MAX_RETRIES})...`);
+            result = await ai.models.generateContent(requestPayload);
+            console.log(`[SegmentWorker][${job_id}] Gemini API call successful on attempt ${attempt}.`);
+            break; // Success, exit loop
+        } catch (error) {
+            console.warn(`[SegmentWorker][${job_id}] Attempt ${attempt} failed:`, error.message);
+            if (attempt === MAX_RETRIES) {
+                console.error(`[SegmentWorker][${job_id}] All retry attempts failed. Rethrowing final error.`);
+                throw error; // Rethrow the last error if all retries fail
+            }
+            // Check if it's a server error (like 503) that is worth retrying
+            if (error.name === 'ServerError') {
+                const delay = INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt - 1); // Exponential backoff
+                console.log(`[SegmentWorker][${job_id}] Model is overloaded. Retrying in ${delay}ms...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            } else {
+                // Don't retry on non-server errors (e.g., bad request)
+                throw error;
+            }
+        }
+    }
 
-    console.log(`[SegmentWorker][${job_id}] Full Gemini response object:`, JSON.stringify(result, null, 2));
+    if (!result) {
+        throw new Error("AI model call failed to produce a result after all retries.");
+    }
 
     if (!result.text) {
         console.error(`[SegmentWorker][${job_id}] Gemini response was empty. Full response object:`, JSON.stringify(result, null, 2));
@@ -145,22 +163,19 @@ serve(async (req) => {
         throw new Error(errorMessage);
     }
     
-    console.log(`[SegmentWorker][${job_id}] STEP 6: Raw text response from Gemini:`, result.text);
-
     const responseJson = extractJson(result.text, job_id);
-    console.log(`[SegmentWorker][${job_id}] STEP 7: Parsed JSON successfully.`);
-    
     const segmentationResult = responseJson.segmentation_result;
+
     if (!segmentationResult || !segmentationResult.mask) {
       throw new Error("AI did not return a valid segmentation result in the JSON payload.");
     }
 
-    console.log(`[SegmentWorker][${job_id}] STEP 8: Updating job status to 'complete'.`);
     await supabase.from('mira-agent-segmentation-jobs').update({
       status: 'complete',
       result: segmentationResult
     }).eq('id', job_id);
-    console.log(`[SegmentWorker][${job_id}] Job complete.`);
+
+    console.log(`[SegmentWorker][${job_id}] Job complete. Result stored in database.`);
 
     return new Response(JSON.stringify({ success: true }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -168,7 +183,7 @@ serve(async (req) => {
     });
 
   } catch (error) {
-    console.error(`[SegmentWorker][${job_id}] CATCH BLOCK TRIGGERED. Error:`, error);
+    console.error(`[SegmentWorker][${job_id}] Error:`, error);
     await supabase.from('mira-agent-segmentation-jobs').update({
       status: 'failed',
       error_message: error.message
