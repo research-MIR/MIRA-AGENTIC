@@ -100,21 +100,32 @@ const VirtualTryOn = () => {
   });
 
   useEffect(() => {
-    if (!session?.user) return;
+    if (!session?.user || channelRef.current) return;
+
     const channel = supabase.channel('vto-pipeline-jobs-tracker')
       .on<VtoPipelineJob>(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'mira-agent-vto-pipeline-jobs', filter: `user_id=eq.${session.user.id}` },
         (payload) => {
           queryClient.invalidateQueries({ queryKey: ['vtoPipelineJobs', session.user.id] });
-          if (selectedJob && payload.new.id === selectedJob.id) {
-            setSelectedJob(payload.new as VtoPipelineJob);
-          }
+          setSelectedJob(currentSelectedJob => {
+            if (currentSelectedJob && payload.new.id === currentSelectedJob.id) {
+              return payload.new as VtoPipelineJob;
+            }
+            return currentSelectedJob;
+          });
         }
       ).subscribe();
+      
     channelRef.current = channel;
-    return () => { if (channelRef.current) supabase.removeChannel(channelRef.current); };
-  }, [supabase, session?.user?.id, queryClient, selectedJob]);
+
+    return () => {
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+    };
+  }, [supabase, session?.user?.id, queryClient]);
 
   const uploadFileAndGetUrl = async (file: File | null): Promise<string | null> => {
     if (!file) return null;
