@@ -90,14 +90,19 @@ const Refine = () => {
   // Effect to securely fetch and display the source image for a selected job
   useEffect(() => {
     let objectUrl: string | null = null;
+    
     const cleanup = () => {
       if (objectUrl) {
         URL.revokeObjectURL(objectUrl);
-        console.log(`[RefinePage] Revoked object URL: ${objectUrl}`);
+        console.log(`[RefinePage] Cleanup: Revoked object URL: ${objectUrl}`);
       }
     };
 
     const fetchSourceImage = async () => {
+      // Clear the previous image URL immediately to prevent rendering a revoked blob
+      setDisplaySourceImageUrl(null);
+      console.log('[RefinePage] Effect run: Cleared display source image URL.');
+
       if (selectedJob?.metadata?.source_image_url) {
         const sourceUrl = selectedJob.metadata.source_image_url;
         console.log(`[RefinePage] Attempting to load source image from URL: ${sourceUrl}`);
@@ -105,9 +110,8 @@ const Refine = () => {
         try {
           const url = new URL(sourceUrl);
           const pathParts = url.pathname.split('/mira-agent-user-uploads/');
-          if (pathParts.length < 2) {
-            throw new Error("Could not parse storage path from URL.");
-          }
+          if (pathParts.length < 2) throw new Error("Could not parse storage path from URL.");
+          
           const storagePath = pathParts[1];
           console.log(`[RefinePage] Parsed storage path: ${storagePath}`);
 
@@ -115,23 +119,18 @@ const Refine = () => {
             .from('mira-agent-user-uploads')
             .download(storagePath);
 
-          if (error) {
-            console.error("[RefinePage] Error downloading source image:", error);
-            throw error;
-          }
+          if (error) throw error;
           
           console.log(`[RefinePage] Successfully downloaded image blob. Size: ${blob.size} bytes.`);
           objectUrl = URL.createObjectURL(blob);
           setDisplaySourceImageUrl(objectUrl);
-          console.log(`[RefinePage] Created object URL for display: ${objectUrl}`);
+          console.log(`[RefinePage] Created and set new object URL for display: ${objectUrl}`);
 
         } catch (err) {
           console.error(`[RefinePage] Failed to load source image for job ${selectedJob.id}:`, err);
           showError("Failed to load source image. Check console for details.");
           setDisplaySourceImageUrl(null);
         }
-      } else {
-        setDisplaySourceImageUrl(null);
       }
     };
 
