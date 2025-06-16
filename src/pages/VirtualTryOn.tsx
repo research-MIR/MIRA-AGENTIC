@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -108,6 +108,11 @@ const VirtualTryOn = () => {
 
   const [displayPersonUrl, setDisplayPersonUrl] = useState<string | null>(null);
   const [displayGarmentUrl, setDisplayGarmentUrl] = useState<string | null>(null);
+  
+  const selectedJobIdRef = useRef(selectedJobId);
+  useEffect(() => {
+    selectedJobIdRef.current = selectedJobId;
+  }, [selectedJobId]);
 
   const { data: recentJobs, isLoading: isLoadingRecentJobs } = useQuery<VtoPipelineJob[]>({
     queryKey: ['vtoPipelineJobs', session?.user?.id],
@@ -142,81 +147,104 @@ const VirtualTryOn = () => {
 
   useEffect(() => {
     if (!session?.user) return;
-    const channel = supabase.channel('vto-pipeline-jobs-tracker')
+    const channelName = `vto-pipeline-jobs-tracker-${session.user.id}`;
+    
+    const existingChannel = supabase.channel(channelName);
+    if (existingChannel && (existingChannel.state === 'joined' || existingChannel.state === 'joining')) {
+        console.log('[VTO Realtime] Already subscribed or joining. Skipping setup.');
+        return;
+    }
+
+    console.log(`[VTO Realtime] Setting up new subscription to ${channelName}...`);
+    const channel = supabase.channel(channelName)
       .on<VtoPipelineJob>(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'mira-agent-vto-pipeline-jobs', filter: `user_id=eq.${session.user.id}` },
         (payload) => {
           console.log('[VTO Realtime] DB change detected. Invalidating queries.');
           queryClient.invalidateQueries({ queryKey: ['vtoPipelineJobs'] });
-          if (payload.new.id === selectedJobId) {
-            console.log(`[VTO Realtime] Change is for selected job ${selectedJobId}. Invalidating its query.`);
-            queryClient.invalidateQueries({ queryKey: ['vtoPipelineJob', selectedJobId] });
+          if (payload.new.id === selectedJobIdRef.current) {
+            console.log(`[VTO Realtime] Change is for selected job ${selectedJobIdRef.current}. Invalidating its query.`);
+            queryClient.invalidateQueries({ queryKey: ['vtoPipelineJob', selectedJobIdRef.current] });
           }
         }
       )
       .subscribe((status, err) => {
           if (status === 'SUBSCRIBED') {
-              console.log('[VTO Realtime] Successfully subscribed to VTO pipeline job updates.');
+              console.log(`[VTO Realtime] Successfully subscribed to ${channelName}.`);
           }
           if (status === 'CHANNEL_ERROR') {
-              console.error('[VTO Realtime] Channel subscription error:', err);
+              console.error(`[VTO Realtime] Channel subscription error on ${channelName}:`, err);
               showError("Realtime connection failed. Updates may not appear automatically.");
           }
       });
     channelRef.current = channel;
-    return () => { if (channelRef.current) supabase.removeChannel(channelRef.current); };
-  }, [supabase, session?.user?.id, queryClient, selectedJobId]);
+
+    return () => {
+      if (channelRef.current) {
+        console.log(`[VTO Realtime] Cleaning up subscription to ${channelName}.`);
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+    };
+  }, [supabase, session?.user?.id, queryClient]);
 
   useEffect(() => {
     let personObjUrl: string | null = null;
-    let garmentObjUrl: string | null = null;
-
-    const cleanup = () => {
-      if (personObjUrl) URL.revokeObjectURL(personObjUrl);
-      if (garmentObjUrl) URL.revokeObjectURL(garmentObjUrl);
-    };
-
     if (personImageFile) {
       personObjUrl = URL.createObjectURL(personImageFile);
       setDisplayPersonUrl(personObjUrl);
-    } else {
+    } else if (!selectedJob) {
       setDisplayPersonUrl(null);
     }
+    return () => { if (personObjUrl) URL.revokeObjectURL(personObjUrl); };
+  }, [personImageFile, selectedJob]);
+
+  useEffect(() => {
+    let garmentObjUrl: string | null = null;
     if (garmentImageFile) {
       garmentObjUrl = URL.createObjectURL(garmentImageFile);
       setDisplayGarmentUrl(garmentObjUrl);
-    } else {
+    } else if (!selectedJob) {
       setDisplayGarmentUrl(null);
     }
+    return () => { if (garmentObjUrl) URL.revokeObjectURL(garmentObjUrl); };
+  }, [garmentImageFile, selectedJob]);
+
+  useEffect(() => {
+    let personStorageUrl: string | null = null;
+    let garmentStorageUrl: string | null = null;
+
+    const downloadAndSet = async (storageUrl: string, setDisplayUrl: React.Dispatch<React.SetStateAction<string | null>>, type: 'person' | 'garment') => {
+      try {
+        const url = new URL(storageUrl);
+        const pathParts = url.pathname.split('/public/mira-agent-user-uploads/');
+        if (pathParts.length < 2) throw new Error("Invalid storage URL");
+        const storagePath = decodeURIComponent(pathParts[1]);
+        
+        const { data: blob, error } = await supabase.storage.from('mira-agent-user-uploads').download(storagePath);
+        if (error) throw error;
+
+        const newObjUrl = URL.createObjectURL(blob);
+        if (type === 'person') personStorageUrl = newObjUrl;
+        if (type === 'garment') garmentStorageUrl = newObjUrl;
+        setDisplayUrl(newObjUrl);
+      } catch (err) {
+        console.error(`Failed to download ${type} source image:`, err);
+        setDisplayUrl(null);
+      }
+    };
 
     if (selectedJob) {
-      const downloadAndSet = async (storageUrl: string, setDisplayUrl: (url: string | null) => void) => {
-        try {
-          const url = new URL(storageUrl);
-          const pathParts = url.pathname.split('/public/mira-agent-user-uploads/');
-          if (pathParts.length < 2) throw new Error("Invalid storage URL");
-          const storagePath = decodeURIComponent(pathParts[1]);
-          
-          const { data: blob, error } = await supabase.storage.from('mira-agent-user-uploads').download(storagePath);
-          if (error) throw error;
-
-          const newObjUrl = URL.createObjectURL(blob);
-          if (setDisplayUrl === setDisplayPersonUrl) personObjUrl = newObjUrl;
-          if (setDisplayUrl === setDisplayGarmentUrl) garmentObjUrl = newObjUrl;
-          setDisplayUrl(newObjUrl);
-        } catch (err) {
-          console.error("Failed to download source image:", err);
-          setDisplayUrl(null);
-        }
-      };
-
-      if (selectedJob.source_person_image_url) downloadAndSet(selectedJob.source_person_image_url, setDisplayPersonUrl);
-      if (selectedJob.source_garment_image_url) downloadAndSet(selectedJob.source_garment_image_url, setDisplayGarmentUrl);
+      if (selectedJob.source_person_image_url) downloadAndSet(selectedJob.source_person_image_url, setDisplayPersonUrl, 'person');
+      if (selectedJob.source_garment_image_url) downloadAndSet(selectedJob.source_garment_image_url, setDisplayGarmentUrl, 'garment');
     }
 
-    return cleanup;
-  }, [personImageFile, garmentImageFile, selectedJob, supabase.storage]);
+    return () => {
+      if (personStorageUrl) URL.revokeObjectURL(personStorageUrl);
+      if (garmentStorageUrl) URL.revokeObjectURL(garmentStorageUrl);
+    };
+  }, [selectedJob, supabase.storage]);
 
   const uploadFileAndGetUrl = async (file: File | null): Promise<string | null> => {
     if (!file) return null;
