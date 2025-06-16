@@ -1,11 +1,33 @@
 import { useEffect, useState } from 'react';
-import pako from 'https://esm.sh/pako@2.1.0';
 
 interface SegmentationMaskProps {
-  maskData: string; // The base64 encoded, zlib compressed mask
+  maskData: string; // The base64 encoded RLE mask
   width: number;
   height: number;
 }
+
+// Decodes a simple Run-Length Encoded byte array.
+// Assumes format is [value, count, value, count, ...]
+const decodeRLE = (rle: Uint8Array, width: number, height: number): Uint8ClampedArray => {
+  const output = new Uint8ClampedArray(width * height);
+  let outputIndex = 0;
+  for (let i = 0; i < rle.length; i += 2) {
+    const value = rle[i];
+    const count = rle[i + 1];
+    for (let j = 0; j < count; j++) {
+      if (outputIndex < output.length) {
+        output[outputIndex++] = value;
+      } else {
+        // Stop if we've filled the expected output array to prevent overflow
+        // from potentially malformed RLE data.
+        console.warn("RLE data exceeds image dimensions.");
+        return output;
+      }
+    }
+  }
+  return output;
+};
+
 
 export const SegmentationMask = ({ maskData, width, height }: SegmentationMaskProps) => {
   const [maskUrl, setMaskUrl] = useState<string | null>(null);
@@ -19,13 +41,9 @@ export const SegmentationMask = ({ maskData, width, height }: SegmentationMaskPr
       const charData = decodedData.split('').map(x => x.charCodeAt(0));
       const byteArray = new Uint8Array(charData);
 
-      // 2. Zlib inflate to get the raw pixel data
-      const pixelData = pako.inflate(byteArray);
+      // 2. RLE decode the byte array
+      const pixelData = decodeRLE(byteArray, width, height);
       
-      if (pixelData.length !== width * height) {
-          console.error(`Mask data size (${pixelData.length}) does not match image dimensions (${width}x${height} = ${width*height}). This may result in a distorted mask.`);
-      }
-
       // 3. Create ImageData and draw to a temporary canvas
       const canvas = document.createElement('canvas');
       canvas.width = width;
