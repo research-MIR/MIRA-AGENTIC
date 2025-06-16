@@ -121,13 +121,16 @@ serve(async (req) => {
         userParts.push({ text: user_prompt });
     }
 
-    console.log(`[SegmentWorker][${job_id}] Calling Gemini for segmentation with model ${MODEL_NAME}.`);
-    const result = await ai.models.generateContent({
+    const requestPayload = {
         model: MODEL_NAME,
         contents: [{ role: 'user', parts: userParts }],
         generationConfig: { responseMimeType: "application/json" },
         config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
-    });
+    };
+
+    console.log(`[SegmentWorker][${job_id}] Sending request to Gemini:`, JSON.stringify(requestPayload, null, 2));
+    
+    const result = await ai.models.generateContent(requestPayload);
 
     if (!result.text) {
         console.error(`[SegmentWorker][${job_id}] Gemini response was empty. Full response object:`, JSON.stringify(result, null, 2));
