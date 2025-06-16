@@ -137,7 +137,7 @@ const Refine = () => {
     fetchSourceImage();
 
     return cleanup;
-  }, [selectedJob, supabase.storage]);
+  }, [selectedJob]);
 
   const newJobSourceImageUrl = useMemo(() => {
     if (sourceImageFile) return URL.createObjectURL(sourceImageFile);
