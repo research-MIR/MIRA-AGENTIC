@@ -23,6 +23,7 @@ import { optimizeImage } from "@/lib/utils";
 import { Slider } from "@/components/ui/slider";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SegmentationMask } from "@/components/SegmentationMask";
 
 interface ComfyJob {
   id: string;
@@ -59,11 +60,12 @@ const Developer = () => {
 
   // Segmentation State
   const [segmentationImage, setSegmentationImage] = useState<File | null>(null);
-  const [segmentationResult, setSegmentationResult] = useState<string | null>(null);
+  const [segmentationResult, setSegmentationResult] = useState<any | null>(null);
   const [isSegmenting, setIsSegmenting] = useState(false);
 
   const originalImageUrl = originalImage ? URL.createObjectURL(originalImage) : null;
   const optimizedImageUrl = optimizedImage ? URL.createObjectURL(optimizedImage) : null;
+  const segmentationImageUrl = segmentationImage ? URL.createObjectURL(segmentationImage) : null;
 
   useEffect(() => {
     return () => {
@@ -73,8 +75,9 @@ const Developer = () => {
       }
       if (originalImageUrl) URL.revokeObjectURL(originalImageUrl);
       if (optimizedImageUrl) URL.revokeObjectURL(optimizedImageUrl);
+      if (segmentationImageUrl) URL.revokeObjectURL(segmentationImageUrl);
     };
-  }, [supabase, originalImageUrl, optimizedImageUrl]);
+  }, [supabase, originalImageUrl, optimizedImageUrl, segmentationImageUrl]);
 
   const handleImageTestChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -198,7 +201,7 @@ const Developer = () => {
 
             if (error) throw error;
 
-            setSegmentationResult(JSON.stringify(data, null, 2));
+            setSegmentationResult(data);
             dismissToast(toastId);
             showSuccess("Segmentation analysis complete.");
         };
@@ -248,8 +251,17 @@ const Developer = () => {
                     id="segmentation-upload"
                     type="file"
                     accept="image/*"
-                    onChange={(e) => setSegmentationImage(e.target.files?.[0] || null)}
+                    onChange={(e) => {
+                      setSegmentationImage(e.target.files?.[0] || null);
+                      setSegmentationResult(null);
+                    }}
                 />
+                {segmentationImageUrl && (
+                  <div className="relative w-full max-w-md mx-auto">
+                    <img src={segmentationImageUrl} alt="Segmentation Source" className="w-full h-auto rounded-md" />
+                    {segmentationResult && <SegmentationMask masks={segmentationResult.masks} />}
+                  </div>
+                )}
                 <Button onClick={handleSegmentation} disabled={isSegmenting || !segmentationImage}>
                     {isSegmenting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                     Analyze Image
@@ -259,7 +271,7 @@ const Developer = () => {
                         <Label>JSON Response</Label>
                         <Textarea
                             readOnly
-                            value={segmentationResult}
+                            value={JSON.stringify(segmentationResult, null, 2)}
                             className="mt-1 h-48 font-mono text-xs"
                         />
                     </div>
