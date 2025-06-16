@@ -345,7 +345,7 @@ const VirtualTryOn = () => {
     }
 
     return (
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-4 gap-4">
         {steps.map((step, index) => (
           <PipelineStepCard 
             key={index} 
