@@ -13,12 +13,13 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Skeleton } from "@/components/ui/skeleton";
 import { RealtimeChannel } from "@supabase/supabase-js";
 
-interface BitStudioJob {
+// This will now point to the new pipeline job table
+interface VtoPipelineJob {
   id: string;
-  status: 'queued' | 'uploading' | 'processing' | 'complete' | 'failed';
+  status: 'pending_segmentation' | 'pending_crop' | 'pending_tryon' | 'pending_composite' | 'complete' | 'failed';
   source_person_image_url: string;
   source_garment_image_url: string;
-  final_image_url?: string;
+  final_composite_url?: string;
   error_message?: string;
 }
 
@@ -73,18 +74,18 @@ const VirtualTryOn = () => {
   const [personImageFile, setPersonImageFile] = useState<File | null>(null);
   const [garmentImageFile, setGarmentImageFile] = useState<File | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [selectedJob, setSelectedJob] = useState<BitStudioJob | null>(null);
+  const [selectedJob, setSelectedJob] = useState<VtoPipelineJob | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
 
   const personImageUrl = useMemo(() => personImageFile ? URL.createObjectURL(personImageFile) : null, [personImageFile]);
   const garmentImageUrl = useMemo(() => garmentImageFile ? URL.createObjectURL(garmentImageFile) : null, [garmentImageFile]);
 
-  const { data: recentJobs, isLoading: isLoadingRecentJobs } = useQuery<BitStudioJob[]>({
-    queryKey: ['bitstudioJobs', session?.user?.id],
+  const { data: recentJobs, isLoading: isLoadingRecentJobs } = useQuery<VtoPipelineJob[]>({
+    queryKey: ['vtoPipelineJobs', session?.user?.id],
     queryFn: async () => {
       if (!session?.user) return [];
       const { data, error } = await supabase
-        .from('mira-agent-bitstudio-jobs')
+        .from('mira-agent-vto-pipeline-jobs')
         .select('*')
         .eq('user_id', session.user.id)
         .order('created_at', { ascending: false })
@@ -97,14 +98,14 @@ const VirtualTryOn = () => {
 
   useEffect(() => {
     if (!session?.user) return;
-    const channel = supabase.channel('bitstudio-jobs-tracker')
-      .on<BitStudioJob>(
+    const channel = supabase.channel('vto-pipeline-jobs-tracker')
+      .on<VtoPipelineJob>(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'mira-agent-bitstudio-jobs', filter: `user_id=eq.${session.user.id}` },
+        { event: '*', schema: 'public', table: 'mira-agent-vto-pipeline-jobs', filter: `user_id=eq.${session.user.id}` },
         (payload) => {
-          queryClient.invalidateQueries({ queryKey: ['bitstudioJobs', session.user.id] });
+          queryClient.invalidateQueries({ queryKey: ['vtoPipelineJobs', session.user.id] });
           if (selectedJob && payload.new.id === selectedJob.id) {
-            setSelectedJob(payload.new as BitStudioJob);
+            setSelectedJob(payload.new as VtoPipelineJob);
           }
         }
       ).subscribe();
@@ -126,17 +127,17 @@ const VirtualTryOn = () => {
   const handleTryOn = async () => {
     if (!personImageFile || !garmentImageFile) return showError("Please upload both a person and a garment image.");
     setIsLoading(true);
-    const toastId = showLoading("Uploading images and queueing job...");
+    const toastId = showLoading("Uploading images and starting pipeline...");
     try {
       const person_image_url = await uploadFileAndGetUrl(personImageFile);
       const garment_image_url = await uploadFileAndGetUrl(garmentImageFile);
       if (!person_image_url || !garment_image_url) throw new Error("Failed to upload one or both images.");
       
-      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio-vto', { body: { person_image_url, garment_image_url, user_id: session?.user.id } });
+      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-vto-pipeline', { body: { person_image_url, garment_image_url, user_id: session?.user.id } });
       if (error) throw error;
       
       dismissToast(toastId);
-      showSuccess("Virtual Try-On job queued! It will appear in your history shortly.");
+      showSuccess("VTO Pipeline job started! It will appear in your history shortly.");
       resetForm();
     } catch (err: any) {
       showError(err.message);
@@ -152,14 +153,15 @@ const VirtualTryOn = () => {
     setSelectedJob(null);
   };
 
-  const renderJobResult = (job: BitStudioJob) => {
+  const renderJobResult = (job: VtoPipelineJob) => {
     switch (job.status) {
-      case 'queued':
-      case 'uploading':
-      case 'processing':
-        return <div className="flex flex-col items-center justify-center h-full text-muted-foreground"><Loader2 className="mr-2 h-8 w-8 animate-spin" /> <p className="mt-2 text-sm capitalize">{job.status}...</p></div>;
+      case 'pending_segmentation':
+      case 'pending_crop':
+      case 'pending_tryon':
+      case 'pending_composite':
+        return <div className="flex flex-col items-center justify-center h-full text-muted-foreground"><Loader2 className="mr-2 h-8 w-8 animate-spin" /> <p className="mt-2 text-sm capitalize">{job.status.replace('_', ' ')}...</p></div>;
       case 'complete':
-        return job.final_image_url ? <img src={job.final_image_url} alt="Virtual Try-On Result" className="w-full h-full object-contain rounded-md" /> : <p>Job complete, but no image URL found.</p>;
+        return job.final_composite_url ? <img src={job.final_composite_url} alt="Virtual Try-On Result" className="w-full h-full object-contain rounded-md" /> : <p>Job complete, but no image URL found.</p>;
       case 'failed':
         return <p className="text-destructive text-sm p-2">Job failed: {job.error_message}</p>;
       default:
@@ -175,8 +177,8 @@ const VirtualTryOn = () => {
           <Card>
             <CardHeader><CardTitle>1. Upload Images</CardTitle></CardHeader>
             <CardContent className="space-y-4">
-              <ImageUploader onFileSelect={setPersonImageFile} title="Person Image" isDraggingOver={isPersonDragging} t={t} imageUrl={personImageUrl} onClear={() => setPersonImageFile(null)} />
-              <ImageUploader onFileSelect={setGarmentImageFile} title="Garment Image" isDraggingOver={isGarmentDragging} t={t} imageUrl={garmentImageUrl} onClear={() => setGarmentImageFile(null)} />
+              <ImageUploader onFileSelect={setPersonImageFile} title="Person Image" isDraggingOver={false} t={t} imageUrl={personImageUrl} onClear={() => setPersonImageFile(null)} />
+              <ImageUploader onFileSelect={setGarmentImageFile} title="Garment Image" isDraggingOver={false} t={t} imageUrl={garmentImageUrl} onClear={() => setGarmentImageFile(null)} />
             </CardContent>
           </Card>
           <Button onClick={handleTryOn} disabled={isLoading || !personImageFile || !garmentImageFile} className="w-full">{isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}Start Virtual Try-On</Button>
