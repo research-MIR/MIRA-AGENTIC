@@ -45,6 +45,22 @@ async function downloadImageAsPart(supabase: SupabaseClient, imageUrl: string, l
     ];
 }
 
+function extractJson(text: string, requestId: string): any {
+    console.log(`[SegmentWorker][${requestId}] Attempting to extract JSON from model response.`);
+    const match = text.match(/```json\s*([\s\S]*?)\s*```/);
+    if (match && match[1]) {
+        console.log(`[SegmentWorker][${requestId}] Found JSON in markdown block.`);
+        return JSON.parse(match[1]);
+    }
+    try {
+        console.log(`[SegmentWorker][${requestId}] Attempting to parse raw text as JSON.`);
+        return JSON.parse(text);
+    } catch (e) {
+        console.error(`[SegmentWorker][${requestId}] Failed to parse JSON from model response. Raw text:`, text);
+        throw new Error("The model returned a response that could not be parsed as JSON.");
+    }
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -111,14 +127,19 @@ serve(async (req) => {
         throw new Error("AI model call failed to produce a text response after all retries.");
     }
     
-    const description = result.text;
+    const responseJson = extractJson(result.text, job_id);
+    const segmentationResult = Array.isArray(responseJson) ? responseJson[0] : responseJson;
+
+    if (!segmentationResult || !segmentationResult.mask) {
+      throw new Error("AI did not return a valid segmentation result in the JSON payload.");
+    }
 
     await supabase.from('mira-agent-segmentation-jobs').update({
       status: 'complete',
-      result: { description: description }
+      result: segmentationResult
     }).eq('id', job_id);
 
-    console.log(`[SegmentWorker][${job_id}] Job complete. Stored text description in database.`);
+    console.log(`[SegmentWorker][${job_id}] Job complete. Stored structured result in database.`);
 
     return new Response(JSON.stringify({ success: true }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
