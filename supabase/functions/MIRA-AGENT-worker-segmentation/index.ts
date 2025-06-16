@@ -6,7 +6,7 @@ import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-const MODEL_NAME = "gemini-1.5-pro-latest";
+const MODEL_NAME = "gemini-2.5-flash-preview-05-20";
 const BUCKET_NAME = 'mira-agent-user-uploads';
 
 const corsHeaders = {
@@ -138,6 +138,8 @@ serve(async (req) => {
         if (blockMessage) errorMessage += ` Details: ${blockMessage}`;
         throw new Error(errorMessage);
     }
+    
+    console.log(`[SegmentWorker][${job_id}] Raw response from Gemini:`, result.text);
 
     const responseJson = extractJson(result.text, job_id);
     const segmentationResult = responseJson.segmentation_result;
