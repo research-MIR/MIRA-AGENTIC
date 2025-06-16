@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
 import { Skeleton } from './ui/skeleton';
 import { cn } from '@/lib/utils';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, Loader2 } from 'lucide-react';
 
 interface Job {
   id: string;
+  status: 'queued' | 'processing' | 'complete' | 'failed';
   final_result?: {
     images?: { publicUrl: string }[];
   };
@@ -17,27 +18,19 @@ interface Props {
 }
 
 export const GeneratorJobThumbnail = ({ job, onClick, isSelected }: Props) => {
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [hasError, setHasError] = useState(false);
+  const imageUrl = job.final_result?.images?.[0]?.publicUrl;
 
-  useEffect(() => {
-    const firstImage = job.final_result?.images?.[0]?.publicUrl;
-    if (firstImage) {
-      setImageUrl(firstImage);
-      setIsLoading(false);
-    } else {
-      // This can happen if the job is still processing or failed
-      setIsLoading(false);
-      setHasError(true);
-    }
-  }, [job]);
-
-  if (isLoading) {
-    return <Skeleton className="w-24 h-24 flex-shrink-0" />;
+  if (job.status === 'processing' || job.status === 'queued') {
+    return (
+      <div className={cn("border-2 rounded-lg p-1 flex-shrink-0 w-24 h-24", isSelected ? "border-primary" : "border-transparent")}>
+        <div className="w-full h-full bg-muted rounded-md flex items-center justify-center text-xs text-muted-foreground text-center p-1">
+          <Loader2 className="h-6 w-6 animate-spin" />
+        </div>
+      </div>
+    );
   }
 
-  if (hasError || !imageUrl) {
+  if (job.status === 'failed' || !imageUrl) {
     return (
       <div className={cn("border-2 rounded-lg p-1 flex-shrink-0 w-24 h-24", isSelected ? "border-primary" : "border-transparent")}>
         <div className="w-full h-full bg-muted rounded-md flex items-center justify-center text-xs text-muted-foreground text-center p-1">

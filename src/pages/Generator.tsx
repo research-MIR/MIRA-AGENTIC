@@ -20,9 +20,11 @@ import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { GeneratorJobThumbnail } from "@/components/GeneratorJobThumbnail";
 import { Skeleton } from "@/components/ui/skeleton";
+import { RealtimeChannel } from "@supabase/supabase-js";
 
 interface Job {
   id: string;
+  status: 'queued' | 'processing' | 'complete' | 'failed';
   context: {
     prompt: string;
     negative_prompt?: string;
@@ -54,6 +56,7 @@ const Generator = () => {
   const { t } = useLanguage();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const channelRef = useRef<RealtimeChannel | null>(null);
 
   const [prompt, setPrompt] = useState("");
   const [negativePrompt, setNegativePrompt] = useState("");
@@ -80,7 +83,7 @@ const Generator = () => {
       if (!session?.user) return [];
       const { data, error } = await supabase
         .from('mira-agent-jobs')
-        .select('id, context, final_result')
+        .select('id, status, context, final_result')
         .eq('context->>source', 'direct_generator')
         .eq('user_id', session.user.id)
         .order('created_at', { ascending: false })
@@ -90,6 +93,32 @@ const Generator = () => {
     },
     enabled: !!session?.user,
   });
+
+  useEffect(() => {
+    if (!session?.user) return;
+
+    const channel = supabase.channel('direct-generator-jobs-tracker')
+      .on<Job>(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'mira-agent-jobs', filter: `user_id=eq.${session.user.id}` },
+        (payload) => {
+          const job = payload.new as Job;
+          if (job?.context?.source === 'direct_generator') {
+            console.log('[GeneratorRealtime] Direct generator job updated, invalidating query.');
+            queryClient.invalidateQueries({ queryKey: ['directGeneratorJobs', session.user.id] });
+          }
+        }
+      )
+      .subscribe();
+    
+    channelRef.current = channel;
+
+    return () => {
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+      }
+    };
+  }, [supabase, session?.user?.id, queryClient]);
 
   const resetForm = useCallback(() => {
     setPrompt("");
