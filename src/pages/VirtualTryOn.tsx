@@ -12,6 +12,18 @@ import { cn } from "@/lib/utils";
 import { useDropzone } from "@/hooks/useDropzone";
 import { optimizeImage } from "@/lib/utils";
 import { RealtimeChannel } from "@supabase/supabase-js";
+import { SegmentationMask } from "@/components/SegmentationMask";
+
+interface MaskItem {
+  mask: string;
+  box_2d: [number, number, number, number];
+  label: string;
+}
+
+interface SegmentationResult {
+  description: string;
+  masks: MaskItem[];
+}
 
 const ImageUploader = ({ onFileSelect, title, isDraggingOver, t }: { onFileSelect: (file: File) => void, title: string, isDraggingOver: boolean, t: any }) => {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -54,17 +66,17 @@ const VirtualTryOn = () => {
   const [garmentImageFile, setGarmentImageFile] = useState<File | null>(null);
   const [prompt, setPrompt] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [segmentationResult, setSegmentationResult] = useState<{ description: string } | null>(null);
+  const [segmentationResult, setSegmentationResult] = useState<SegmentationResult | null>(null);
   const [isPersonDragging, setIsPersonDragging] = useState(false);
   const [isGarmentDragging, setIsGarmentDragging] = useState(false);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [personImageDimensions, setPersonImageDimensions] = useState<{ width: number; height: number } | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
 
   const personImageUrl = useMemo(() => personImageFile ? URL.createObjectURL(personImageFile) : null, [personImageFile]);
   const garmentImageUrl = useMemo(() => garmentImageFile ? URL.createObjectURL(garmentImageFile) : null, [garmentImageFile]);
 
   useEffect(() => {
-    // If there's no active job, ensure any existing channel is removed.
     if (!activeJobId) {
       if (channelRef.current) {
         supabase.removeChannel(channelRef.current);
@@ -73,12 +85,10 @@ const VirtualTryOn = () => {
       return;
     }
 
-    // If there's already a channel for this job, do nothing.
     if (channelRef.current?.topic === `realtime:public:mira-agent-segmentation-jobs:id=eq.${activeJobId}`) {
       return;
     }
 
-    // If there's a channel for a *different* job, remove it before creating a new one.
     if (channelRef.current) {
       supabase.removeChannel(channelRef.current);
     }
@@ -93,11 +103,11 @@ const VirtualTryOn = () => {
             setSegmentationResult(job.result);
             setIsLoading(false);
             showSuccess("Analysis complete!");
-            setActiveJobId(null); // This will trigger the cleanup
+            setActiveJobId(null);
           } else if (job.status === 'failed') {
             showError(`Analysis failed: ${job.error_message}`);
             setIsLoading(false);
-            setActiveJobId(null); // This will trigger the cleanup
+            setActiveJobId(null);
           }
         }
       )
@@ -105,7 +115,6 @@ const VirtualTryOn = () => {
     
     channelRef.current = channel;
 
-    // The cleanup function will be called when the component unmounts or when activeJobId changes.
     return () => {
       if (channelRef.current) {
         supabase.removeChannel(channelRef.current);
@@ -200,9 +209,23 @@ const VirtualTryOn = () => {
             <CardHeader><CardTitle>Results</CardTitle></CardHeader>
             <CardContent>
               <div className="grid grid-cols-2 gap-4 mb-4">
-                <div>
+                <div className="relative">
                   <h3 className="font-semibold text-center mb-2">Person</h3>
-                  {personImageUrl ? <img src={personImageUrl} alt="Person" className="w-full rounded-md" /> : <div className="aspect-square bg-muted rounded-md flex items-center justify-center"><ImageIcon className="h-12 w-12 text-muted-foreground" /></div>}
+                  {personImageUrl ? (
+                    <img 
+                      src={personImageUrl} 
+                      alt="Person" 
+                      className="w-full rounded-md" 
+                      onLoad={(e) => setPersonImageDimensions({ width: e.currentTarget.naturalWidth, height: e.currentTarget.naturalHeight })}
+                    />
+                  ) : <div className="aspect-square bg-muted rounded-md flex items-center justify-center"><ImageIcon className="h-12 w-12 text-muted-foreground" /></div>}
+                  {segmentationResult && personImageDimensions && (
+                    <SegmentationMask 
+                      masks={segmentationResult.masks} 
+                      width={personImageDimensions.width} 
+                      height={personImageDimensions.height} 
+                    />
+                  )}
                 </div>
                 <div>
                   <h3 className="font-semibold text-center mb-2">Garment</h3>

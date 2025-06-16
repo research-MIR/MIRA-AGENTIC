@@ -14,7 +14,9 @@ const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const MODEL_NAME = "gemini-2.5-pro-preview-06-05";
 const BUCKET_NAME = 'mira-agent-user-uploads';
 
-const systemPrompt = `You are a virtual stylist. You will be given two images: one of a person and one of a garment. Your task is to describe exactly where the garment would be placed on the person's body if they were to wear it. Be descriptive and clear. If the user provides additional instructions, take them into account.`;
+const systemPrompt = `You are a virtual stylist. You will be given two images: one of a person and one of a garment. Your task is to describe exactly where the garment would be placed on the person's body if they were to wear it. Be descriptive and clear. If the user provides additional instructions, take them into account.
+
+In addition to the description, you MUST provide segmentation masks for the garment on the person. Output a JSON object containing both the textual description and a list of segmentation masks. Each mask entry in the list should contain the 2D bounding box in the key "box_2d", the segmentation mask in key "mask", and the text label in the key "label". Use descriptive labels.`;
 
 const responseSchema = {
   type: Type.OBJECT,
@@ -23,8 +25,31 @@ const responseSchema = {
       type: Type.STRING,
       description: 'A textual description of where the garment would be placed on the person.',
     },
+    'masks': {
+        type: Type.ARRAY,
+        description: "A list of segmentation masks for the garment.",
+        items: {
+            type: Type.OBJECT,
+            properties: {
+                'box_2d': {
+                    type: Type.ARRAY,
+                    items: { type: Type.NUMBER },
+                    description: "The bounding box of the mask [y_min, x_min, y_max, x_max] normalized to 1000."
+                },
+                'mask': {
+                    type: Type.STRING,
+                    description: "The segmentation mask as a base64 encoded PNG string."
+                },
+                'label': {
+                    type: Type.STRING,
+                    description: "A descriptive label for the segmented object."
+                }
+            },
+            required: ['box_2d', 'mask', 'label']
+        }
+    }
   },
-  required: ['description'],
+  required: ['description', 'masks'],
 };
 
 async function downloadImageAsPart(supabase: SupabaseClient, imageUrl: string): Promise<Part> {
