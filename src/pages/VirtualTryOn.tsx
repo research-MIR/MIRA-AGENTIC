@@ -154,21 +154,9 @@ const VirtualTryOn = () => {
     enabled: !!session?.user,
   });
 
-  const { data: selectedJob, isLoading: isLoadingSelectedJob } = useQuery<VtoPipelineJob | null>({
-    queryKey: ['vtoPipelineJob', selectedJobId],
-    queryFn: async () => {
-      if (!selectedJobId) return null;
-      console.log(`[VTO Fetch] Fetching selected job: ${selectedJobId}`);
-      const { data, error } = await supabase
-        .from('mira-agent-vto-pipeline-jobs')
-        .select('*, bitstudio_job:bitstudio_job_id(final_image_url)')
-        .eq('id', selectedJobId)
-        .single();
-      if (error) throw error;
-      return data;
-    },
-    enabled: !!selectedJobId,
-  });
+  const selectedJob = useMemo(() => {
+    return recentJobs?.find(job => job.id === selectedJobId);
+  }, [recentJobs, selectedJobId]);
 
   useEffect(() => {
     if (!session?.user?.id) return;
@@ -180,10 +168,6 @@ const VirtualTryOn = () => {
         (payload) => {
           console.log('[VTO Realtime] Payload received:', payload);
           queryClient.invalidateQueries({ queryKey: ['vtoPipelineJobs'] });
-          if (payload.new.id === selectedJobId) {
-            console.log(`[VTO Realtime] Invalidating selected job query for ${selectedJobId}`);
-            queryClient.invalidateQueries({ queryKey: ['vtoPipelineJob', selectedJobId] });
-          }
         }
       )
       .subscribe((status, err) => {
@@ -201,7 +185,7 @@ const VirtualTryOn = () => {
         supabase.removeChannel(channelRef.current);
       }
     };
-  }, [supabase, session?.user?.id, queryClient, selectedJobId]);
+  }, [supabase, session?.user?.id, queryClient]);
 
   const personImageUrl = useMemo(() => personImageFile ? URL.createObjectURL(personImageFile) : null, [personImageFile]);
   const garmentImageUrl = useMemo(() => garmentImageFile ? URL.createObjectURL(garmentImageFile) : null, [garmentImageFile]);
@@ -327,7 +311,7 @@ const VirtualTryOn = () => {
           <Card className="min-h-[60vh]">
             <CardHeader><CardTitle>Result</CardTitle></CardHeader>
             <CardContent className="flex items-center justify-center">
-              {isLoadingSelectedJob ? <Loader2 className="h-8 w-8 animate-spin" /> : selectedJob ? renderJobResult(selectedJob) : <div className="text-center text-muted-foreground"><ImageIcon className="h-16 w-16 mx-auto mb-4" /><p>Your result will appear here.</p></div>}
+              {selectedJob ? renderJobResult(selectedJob) : <div className="text-center text-muted-foreground"><ImageIcon className="h-16 w-16 mx-auto mb-4" /><p>Your result will appear here.</p></div>}
             </CardContent>
           </Card>
         </div>
