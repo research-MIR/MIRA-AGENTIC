@@ -46,6 +46,7 @@ const Refine = () => {
   const [isLoadingAutoPrompt, setIsLoadingAutoPrompt] = useState(false);
   const [isCompareModalOpen, setIsCompareModalOpen] = useState(false);
   const [originalDimensions, setOriginalDimensions] = useState<{ width: number; height: number } | null>(null);
+  const [displaySourceImageUrl, setDisplaySourceImageUrl] = useState<string | null>(null);
 
   const { data: recentJobs, isLoading: isLoadingRecentJobs } = useQuery<ComfyJob[]>({
     queryKey: ['recentRefinementJobs', session?.user?.id],
@@ -86,11 +87,65 @@ const Refine = () => {
     };
   }, [selectedJob, supabase]);
 
-  const sourceImageUrl = useMemo(() => {
-    if (selectedJob) return selectedJob.metadata?.source_image_url;
+  // Effect to securely fetch and display the source image for a selected job
+  useEffect(() => {
+    let objectUrl: string | null = null;
+    const cleanup = () => {
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+        console.log(`[RefinePage] Revoked object URL: ${objectUrl}`);
+      }
+    };
+
+    const fetchSourceImage = async () => {
+      if (selectedJob?.metadata?.source_image_url) {
+        const sourceUrl = selectedJob.metadata.source_image_url;
+        console.log(`[RefinePage] Attempting to load source image from URL: ${sourceUrl}`);
+        
+        try {
+          const url = new URL(sourceUrl);
+          const pathParts = url.pathname.split('/mira-agent-user-uploads/');
+          if (pathParts.length < 2) {
+            throw new Error("Could not parse storage path from URL.");
+          }
+          const storagePath = pathParts[1];
+          console.log(`[RefinePage] Parsed storage path: ${storagePath}`);
+
+          const { data: blob, error } = await supabase.storage
+            .from('mira-agent-user-uploads')
+            .download(storagePath);
+
+          if (error) {
+            console.error("[RefinePage] Error downloading source image:", error);
+            throw error;
+          }
+          
+          console.log(`[RefinePage] Successfully downloaded image blob. Size: ${blob.size} bytes.`);
+          objectUrl = URL.createObjectURL(blob);
+          setDisplaySourceImageUrl(objectUrl);
+          console.log(`[RefinePage] Created object URL for display: ${objectUrl}`);
+
+        } catch (err) {
+          console.error(`[RefinePage] Failed to load source image for job ${selectedJob.id}:`, err);
+          showError("Failed to load source image. Check console for details.");
+          setDisplaySourceImageUrl(null);
+        }
+      } else {
+        setDisplaySourceImageUrl(null);
+      }
+    };
+
+    fetchSourceImage();
+
+    return cleanup;
+  }, [selectedJob, supabase.storage]);
+
+  const newJobSourceImageUrl = useMemo(() => {
     if (sourceImageFile) return URL.createObjectURL(sourceImageFile);
     return null;
-  }, [selectedJob, sourceImageFile]);
+  }, [sourceImageFile]);
+
+  const finalSourceImageUrl = selectedJob ? displaySourceImageUrl : newJobSourceImageUrl;
 
   const resetToNewJobState = () => {
     setSelectedJob(null);
@@ -230,9 +285,9 @@ const Refine = () => {
                   <div>
                       <h3 className="font-semibold mb-2 text-center">{t.originalImage}</h3>
                       <div className="aspect-square bg-muted rounded-lg flex items-center justify-center">
-                        {sourceImageUrl ? (
-                            <button onClick={() => showImage({ images: [{ url: sourceImageUrl }], currentIndex: 0 })} className="block w-full h-full">
-                                <img src={sourceImageUrl} alt="Original" className="rounded-lg aspect-square object-contain w-full hover:opacity-80 transition-opacity" />
+                        {finalSourceImageUrl ? (
+                            <button onClick={() => showImage({ images: [{ url: finalSourceImageUrl }], currentIndex: 0 })} className="block w-full h-full">
+                                <img src={finalSourceImageUrl} alt="Original" className="rounded-lg aspect-square object-contain w-full hover:opacity-80 transition-opacity" />
                             </button>
                         ) : (
                             <div className="text-center text-muted-foreground p-4">
