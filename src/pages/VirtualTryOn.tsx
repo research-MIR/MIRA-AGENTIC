@@ -9,6 +9,8 @@ import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast
 import { UploadCloud, Wand2, Loader2, Image as ImageIcon } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
 import { cn } from "@/lib/utils";
+import { useDropzone } from "@/hooks/useDropzone";
+import { optimizeImage } from "@/lib/utils";
 
 const ImageUploader = ({ onFileSelect, title, isDraggingOver, t }: { onFileSelect: (file: File) => void, title: string, isDraggingOver: boolean, t: any }) => {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -19,8 +21,17 @@ const ImageUploader = ({ onFileSelect, title, isDraggingOver, t }: { onFileSelec
     }
   };
 
+  const { dropzoneProps } = useDropzone({
+    onDrop: (files) => {
+      if (files && files[0]) {
+        onFileSelect(files[0]);
+      }
+    }
+  });
+
   return (
     <div 
+      {...dropzoneProps}
       className={cn("flex justify-center rounded-lg border border-dashed border-border p-6 transition-colors cursor-pointer", isDraggingOver && "border-primary bg-primary/10")}
       onClick={() => inputRef.current?.click()}
     >
@@ -53,8 +64,11 @@ const VirtualTryOn = () => {
   const uploadFileAndGetUrl = async (file: File | null, bucket: string): Promise<string | null> => {
     if (!file) return null;
     if (!session?.user) throw new Error("User session not found.");
-    const filePath = `${session.user.id}/${Date.now()}-${file.name}`;
-    const { error: uploadError } = await supabase.storage.from(bucket).upload(filePath, file);
+    
+    const optimizedFile = await optimizeImage(file);
+
+    const filePath = `${session.user.id}/${Date.now()}-${optimizedFile.name}`;
+    const { error: uploadError } = await supabase.storage.from(bucket).upload(filePath, optimizedFile);
     if (uploadError) throw new Error(`Failed to upload file: ${uploadError.message}`);
     const { data: { publicUrl } } = supabase.storage.from(bucket).getPublicUrl(filePath);
     return publicUrl;
