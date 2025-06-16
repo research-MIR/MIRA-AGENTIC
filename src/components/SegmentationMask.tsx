@@ -1,84 +1,103 @@
 import { useEffect, useState } from 'react';
 
 interface SegmentationMaskProps {
-  maskData: string; // The base64 encoded RLE mask
-  width: number;
-  height: number;
+  maskData: string; // Base64 encoded PNG string
+  box2d: [number, number, number, number]; // [y_min, x_min, y_max, x_max] normalized to 1000
+  width: number; // width of the container image
+  height: number; // height of the container image
 }
 
-// Decodes a simple Run-Length Encoded byte array.
-// Assumes format is [value, count, value, count, ...]
-const decodeRLE = (rle: Uint8Array, width: number, height: number): Uint8ClampedArray => {
-  const output = new Uint8ClampedArray(width * height);
-  let outputIndex = 0;
-  for (let i = 0; i < rle.length; i += 2) {
-    const value = rle[i];
-    const count = rle[i + 1];
-    for (let j = 0; j < count; j++) {
-      if (outputIndex < output.length) {
-        output[outputIndex++] = value;
-      } else {
-        // Stop if we've filled the expected output array to prevent overflow
-        // from potentially malformed RLE data.
-        console.warn("RLE data exceeds image dimensions.");
-        return output;
-      }
+// This function attempts to clean up the python bytes literal string `b'...'`
+// into a raw string that can be base64 decoded.
+const cleanupPythonBytesString = (raw: string): string => {
+    if (raw.startsWith("b'") && raw.endsWith("'")) {
+        const inner = raw.slice(2, -1);
+        // This is a simplified parser and may not handle all edge cases,
+        // but it should work for the common escapes found in the PNG data.
+        return inner
+            .replace(/\\'/g, "'")
+            .replace(/\\"/g, '"')
+            .replace(/\\n/g, '\n')
+            .replace(/\\r/g, '\r')
+            .replace(/\\t/g, '\t')
+            .replace(/\\\\/g, '\\');
     }
-  }
-  return output;
-};
+    return raw;
+}
 
-
-export const SegmentationMask = ({ maskData, width, height }: SegmentationMaskProps) => {
+export const SegmentationMask = ({ maskData, box2d, width, height }: SegmentationMaskProps) => {
   const [maskUrl, setMaskUrl] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!maskData || !width || !height) return;
+    if (!maskData || !box2d || !width || !height) return;
 
     try {
-      let decodedData;
-      // The AI model doesn't always follow the Base64 encoding instruction.
-      // We'll try to decode it, but if it fails, we'll assume the data is raw.
-      try {
-        decodedData = atob(maskData);
-      } catch (e) {
-        console.warn("atob() failed, assuming mask data is not Base64 encoded.", e);
-        decodedData = maskData; // Use the raw string
-      }
+      const [yMin, xMin, yMax, xMax] = box2d;
 
-      const charData = decodedData.split('').map(x => x.charCodeAt(0));
-      const byteArray = new Uint8Array(charData);
+      // 1. Calculate absolute coordinates for the bounding box
+      const absX = (xMin / 1000) * width;
+      const absY = (yMin / 1000) * height;
+      const boxWidth = ((xMax - xMin) / 1000) * width;
+      const boxHeight = ((yMax - yMin) / 1000) * height;
 
-      // RLE decode the byte array
-      const pixelData = decodeRLE(byteArray, width, height);
-      
-      // Create ImageData and draw to a temporary canvas
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
+      if (boxWidth <= 0 || boxHeight <= 0) return;
 
-      const imageData = ctx.createImageData(width, height);
-      for (let i = 0; i < pixelData.length; i++) {
-        if (pixelData[i] > 0) { // If it's part of the mask
-          imageData.data[i * 4] = 255;     // R
-          imageData.data[i * 4 + 1] = 0;   // G
-          imageData.data[i * 4 + 2] = 0;   // B
-          imageData.data[i * 4 + 3] = 128; // A (50% transparent red)
+      // 2. Create an image from the mask data
+      const maskImage = new Image();
+      maskImage.onload = () => {
+        // 3. Create a canvas to draw the final, positioned and colored mask
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        // 4. Create a temporary canvas to colorize the mask
+        const tempMaskCanvas = document.createElement('canvas');
+        tempMaskCanvas.width = maskImage.width;
+        tempMaskCanvas.height = maskImage.height;
+        const tempMaskCtx = tempMaskCanvas.getContext('2d', { willReadFrequently: true });
+        if (!tempMaskCtx) return;
+
+        // Draw the grayscale mask from the model
+        tempMaskCtx.drawImage(maskImage, 0, 0);
+        const maskImageData = tempMaskCtx.getImageData(0, 0, maskImage.width, maskImage.height);
+        const pixelData = maskImageData.data;
+
+        // Colorize the mask: turn pixels > threshold into semi-transparent red
+        for (let i = 0; i < pixelData.length; i += 4) {
+          const intensity = pixelData[i]; // Grayscale, so R=G=B
+          if (intensity > 127) { // Confidence threshold
+            pixelData[i] = 255;     // R
+            pixelData[i + 1] = 0;   // G
+            pixelData[i + 2] = 0;   // B
+            pixelData[i + 3] = 128; // A (50% transparent)
+          } else {
+            pixelData[i + 3] = 0; // Make other pixels fully transparent
+          }
         }
-      }
-      ctx.putImageData(imageData, 0, 0);
+        tempMaskCtx.putImageData(maskImageData, 0, 0);
 
-      // Create a data URL from the canvas to use in an <img> tag
-      const objectUrl = canvas.toDataURL();
-      setMaskUrl(objectUrl);
+        // 5. Draw the colorized and resized mask onto the main canvas at the correct position
+        ctx.drawImage(tempMaskCanvas, absX, absY, boxWidth, boxHeight);
+
+        // 6. Set the data URL for the final image
+        setMaskUrl(canvas.toDataURL());
+      };
+      maskImage.onerror = (err) => {
+          console.error("Failed to load mask image from data URL.", err);
+      };
+      
+      // The model sometimes returns a python bytes literal string.
+      // We'll try to clean it and then assume it's a base64 encoded PNG.
+      const cleanedData = cleanupPythonBytesString(maskData);
+      maskImage.src = `data:image/png;base64,${cleanedData}`;
 
     } catch (error) {
-      console.error("Failed to decode and render mask:", error);
+      console.error("Error processing segmentation mask:", error);
     }
 
-  }, [maskData, width, height]);
+  }, [maskData, box2d, width, height]);
 
   if (!maskUrl) return null;
 

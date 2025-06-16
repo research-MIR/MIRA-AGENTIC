@@ -165,26 +165,6 @@ const VirtualTryOn = () => {
     }
   };
 
-  const BoundingBox = () => {
-    if (!segmentationResult?.box_2d) return null;
-    const [x_min, y_min, x_max, y_max] = segmentationResult.box_2d;
-    return (
-      <div
-        className="absolute border-2 border-primary pointer-events-none"
-        style={{
-          left: `${x_min * 100}%`,
-          top: `${y_min * 100}%`,
-          width: `${(x_max - x_min) * 100}%`,
-          height: `${(y_max - y_min) * 100}%`,
-        }}
-      >
-        <div className="absolute -top-5 left-0 bg-primary text-primary-foreground text-xs px-1 rounded-sm">
-          {segmentationResult.label}
-        </div>
-      </div>
-    );
-  };
-
   return (
     <div className="p-4 md:p-8 h-screen overflow-y-auto">
       <header className="pb-4 mb-8 border-b">
@@ -224,14 +204,12 @@ const VirtualTryOn = () => {
                   <h3 className="font-semibold text-center mb-2">Person</h3>
                   {personImageUrl ? <img src={personImageUrl} alt="Person" className="w-full rounded-md" /> : <div className="aspect-square bg-muted rounded-md flex items-center justify-center"><ImageIcon className="h-12 w-12 text-muted-foreground" /></div>}
                   {segmentationResult && personImageDimensions && (
-                    <>
-                      <BoundingBox />
-                      <SegmentationMask 
-                        maskData={segmentationResult.mask} 
-                        width={personImageDimensions.width} 
-                        height={personImageDimensions.height} 
-                      />
-                    </>
+                    <SegmentationMask 
+                      maskData={segmentationResult.mask} 
+                      box2d={segmentationResult.box_2d}
+                      width={personImageDimensions.width} 
+                      height={personImageDimensions.height} 
+                    />
                   )}
                 </div>
                 <div>

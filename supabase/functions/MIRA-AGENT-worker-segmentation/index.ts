@@ -16,10 +16,11 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const systemPrompt = `Give the segmentation masks for whetever space the garment from the image reference of the garment would occupy onto the person image, we will do a garment swap, so we need to segmenta the part that will need to be changed
+const systemPrompt = `Give the segmentation masks for whetever space the garment from the image reference of the garment would occupy onto the person image, we will do a garment swap, so we need to segmenta the part that will need to be changed.
 Output a JSON list of segmentation masks where each entry contains the 2D
 bounding box in the key "box_2d", the segmentation mask in key "mask", and
-the text label in the key "label". Use descriptive labels.`;
+the text label in the key "label". Use descriptive labels.
+IMPORTANT: The value for the "mask" key MUST be a valid Base64 encoded string of the PNG mask. Do NOT wrap it in b'' or any other quotes. It must be a raw base64 string.`;
 
 async function downloadImageAsPart(supabase: SupabaseClient, imageUrl: string, label: string, requestId: string): Promise<Part[]> {
     console.log(`[SegmentWorker][${requestId}] Downloading image for '${label}' from URL: ${imageUrl}`);
