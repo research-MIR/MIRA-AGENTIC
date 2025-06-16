@@ -5,10 +5,21 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { useLanguage } from "@/context/LanguageContext";
-import { Loader2 } from "lucide-react";
+import { Loader2, AlertTriangle } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SegmentationMask } from "@/components/SegmentationMask";
+import { useSecureImage } from "@/hooks/useSecureImage";
+
+const SecureImageDisplay = ({ imageUrl, alt }: { imageUrl: string | null, alt: string }) => {
+  const { displayUrl, isLoading, error } = useSecureImage(imageUrl);
+
+  if (isLoading) return <div className="w-full h-32 bg-muted rounded-md flex items-center justify-center"><Loader2 className="h-6 w-6 animate-spin" /></div>;
+  if (error) return <div className="w-full h-32 bg-destructive/10 rounded-md flex items-center justify-center text-destructive text-sm p-2">Error loading image: {error}</div>;
+  if (!displayUrl) return null;
+
+  return <img src={displayUrl} alt={alt} className="mt-2 rounded-md border" />;
+};
 
 const Developer = () => {
   const { supabase, session } = useSession();
@@ -190,7 +201,7 @@ const Developer = () => {
                         {croppedImageUrl && (
                             <div>
                                 <Label>Cropped Image Result</Label>
-                                <img src={croppedImageUrl} alt="Cropped Result" className="mt-2 rounded-md border" />
+                                <SecureImageDisplay imageUrl={croppedImageUrl} alt="Cropped Result" />
                             </div>
                         )}
                     </div>
