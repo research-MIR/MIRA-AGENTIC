@@ -11,6 +11,7 @@ import { useLanguage } from "@/context/LanguageContext";
 import { cn } from "@/lib/utils";
 import { useDropzone } from "@/hooks/useDropzone";
 import { optimizeImage } from "@/lib/utils";
+import { SegmentationMask } from "@/components/SegmentationMask";
 
 const ImageUploader = ({ onFileSelect, title, isDraggingOver, t }: { onFileSelect: (file: File) => void, title: string, isDraggingOver: boolean, t: any }) => {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -57,9 +58,23 @@ const VirtualTryOn = () => {
   const [segmentationResult, setSegmentationResult] = useState<any | null>(null);
   const [isPersonDragging, setIsPersonDragging] = useState(false);
   const [isGarmentDragging, setIsGarmentDragging] = useState(false);
+  const [personImageDimensions, setPersonImageDimensions] = useState<{width: number, height: number} | null>(null);
 
   const personImageUrl = useMemo(() => personImageFile ? URL.createObjectURL(personImageFile) : null, [personImageFile]);
   const garmentImageUrl = useMemo(() => garmentImageFile ? URL.createObjectURL(garmentImageFile) : null, [garmentImageFile]);
+
+  const handlePersonFileSelect = (file: File) => {
+    setPersonImageFile(file);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+            setPersonImageDimensions({ width: img.width, height: img.height });
+        };
+        img.src = e.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  };
 
   const uploadFileAndGetUrl = async (file: File | null, bucket: string): Promise<string | null> => {
     if (!file) return null;
@@ -143,7 +158,7 @@ const VirtualTryOn = () => {
           <Card>
             <CardHeader><CardTitle>1. Upload Images</CardTitle></CardHeader>
             <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <ImageUploader onFileSelect={setPersonImageFile} title="Person Image" isDraggingOver={isPersonDragging} t={t} />
+              <ImageUploader onFileSelect={handlePersonFileSelect} title="Person Image" isDraggingOver={isPersonDragging} t={t} />
               <ImageUploader onFileSelect={setGarmentImageFile} title="Garment Image" isDraggingOver={isGarmentDragging} t={t} />
             </CardContent>
           </Card>
@@ -168,7 +183,16 @@ const VirtualTryOn = () => {
                 <div className="relative">
                   <h3 className="font-semibold text-center mb-2">Person</h3>
                   {personImageUrl ? <img src={personImageUrl} alt="Person" className="w-full rounded-md" /> : <div className="aspect-square bg-muted rounded-md flex items-center justify-center"><ImageIcon className="h-12 w-12 text-muted-foreground" /></div>}
-                  {segmentationResult && <BoundingBox />}
+                  {segmentationResult && personImageDimensions && (
+                    <>
+                      <BoundingBox />
+                      <SegmentationMask 
+                        maskData={segmentationResult.mask} 
+                        width={personImageDimensions.width} 
+                        height={personImageDimensions.height} 
+                      />
+                    </>
+                  )}
                 </div>
                 <div>
                   <h3 className="font-semibold text-center mb-2">Garment</h3>
