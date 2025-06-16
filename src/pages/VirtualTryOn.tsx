@@ -204,19 +204,30 @@ const VirtualTryOn = () => {
     const objectUrls: string[] = [];
     const downloadAndSet = async (storageUrl: string, setDisplayUrl: React.Dispatch<React.SetStateAction<string | null>>) => {
       try {
-        const url = new URL(storageUrl);
-        const pathParts = url.pathname.split('/public/mira-agent-user-uploads/');
-        if (pathParts.length < 2) throw new Error("Invalid storage URL");
-        const storagePath = decodeURIComponent(pathParts[1]);
-        
-        const { data: blob, error } = await supabase.storage.from('mira-agent-user-uploads').download(storagePath);
-        if (error) throw error;
+        let imageBlob: Blob;
+        const isSupabaseUrl = storageUrl.includes('supabase.co');
+        console.log(`[ImageDownloader] Processing URL: ${storageUrl}. Is Supabase URL: ${isSupabaseUrl}`);
 
-        const newObjUrl = URL.createObjectURL(blob);
+        if (isSupabaseUrl) {
+          const url = new URL(storageUrl);
+          const pathParts = url.pathname.split('/public/mira-agent-user-uploads/');
+          if (pathParts.length < 2) throw new Error(`Could not parse Supabase storage path from URL: ${storageUrl}`);
+          const storagePath = decodeURIComponent(pathParts[1]);
+          
+          const { data: blob, error } = await supabase.storage.from('mira-agent-user-uploads').download(storagePath);
+          if (error) throw error;
+          imageBlob = blob;
+        } else {
+          const response = await fetch(storageUrl);
+          if (!response.ok) throw new Error(`Failed to fetch external image: ${response.statusText}`);
+          imageBlob = await response.blob();
+        }
+
+        const newObjUrl = URL.createObjectURL(imageBlob);
         objectUrls.push(newObjUrl);
         setDisplayUrl(newObjUrl);
       } catch (err) {
-        console.error(`Failed to download source image:`, err);
+        console.error(`Failed to download and display image from ${storageUrl}:`, err);
         setDisplayUrl(null);
       }
     };
