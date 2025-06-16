@@ -86,6 +86,7 @@ function extractJson(text: string, requestId: string): any {
 }
 
 serve(async (req) => {
+  console.log(`[SegmentWorker] Function triggered.`);
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
@@ -94,26 +95,26 @@ serve(async (req) => {
   if (!job_id) {
     return new Response(JSON.stringify({ error: "job_id is required." }), { status: 400, headers: corsHeaders });
   }
+  console.log(`[SegmentWorker][${job_id}] Processing job.`);
 
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
 
   try {
+    console.log(`[SegmentWorker][${job_id}] STEP 1: Updating job status to 'processing'.`);
     await supabase.from('mira-agent-segmentation-jobs').update({ status: 'processing' }).eq('id', job_id);
 
-    const { data: job, error: fetchError } = await supabase
-      .from('mira-agent-segmentation-jobs')
-      .select('*')
-      .eq('id', job_id)
-      .single();
-
+    console.log(`[SegmentWorker][${job_id}] STEP 2: Fetching job details.`);
+    const { data: job, error: fetchError } = await supabase.from('mira-agent-segmentation-jobs').select('*').eq('id', job_id).single();
     if (fetchError) throw fetchError;
+    console.log(`[SegmentWorker][${job_id}] Job details fetched successfully.`);
 
     const { person_image_url, garment_image_url, user_prompt } = job;
-
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
+    console.log(`[SegmentWorker][${job_id}] STEP 3: Downloading images.`);
     const personParts = await downloadImageAsPart(supabase, person_image_url, "PERSON IMAGE", job_id);
     const garmentParts = await downloadImageAsPart(supabase, garment_image_url, "GARMENT IMAGE", job_id);
+    console.log(`[SegmentWorker][${job_id}] Images downloaded.`);
 
     const userParts: Part[] = [...personParts, ...garmentParts];
     if (user_prompt) {
@@ -128,9 +129,11 @@ serve(async (req) => {
         config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
     };
 
-    console.log(`[SegmentWorker][${job_id}] Sending request to Gemini:`, JSON.stringify(requestPayload, null, 2));
-    
+    console.log(`[SegmentWorker][${job_id}] STEP 4: Sending request to Gemini...`);
     const result = await ai.models.generateContent(requestPayload);
+    console.log(`[SegmentWorker][${job_id}] STEP 5: Received response from Gemini.`);
+
+    console.log(`[SegmentWorker][${job_id}] Full Gemini response object:`, JSON.stringify(result, null, 2));
 
     if (!result.text) {
         console.error(`[SegmentWorker][${job_id}] Gemini response was empty. Full response object:`, JSON.stringify(result, null, 2));
@@ -142,21 +145,22 @@ serve(async (req) => {
         throw new Error(errorMessage);
     }
     
-    console.log(`[SegmentWorker][${job_id}] Raw response from Gemini:`, result.text);
+    console.log(`[SegmentWorker][${job_id}] STEP 6: Raw text response from Gemini:`, result.text);
 
     const responseJson = extractJson(result.text, job_id);
+    console.log(`[SegmentWorker][${job_id}] STEP 7: Parsed JSON successfully.`);
+    
     const segmentationResult = responseJson.segmentation_result;
-
     if (!segmentationResult || !segmentationResult.mask) {
       throw new Error("AI did not return a valid segmentation result in the JSON payload.");
     }
 
+    console.log(`[SegmentWorker][${job_id}] STEP 8: Updating job status to 'complete'.`);
     await supabase.from('mira-agent-segmentation-jobs').update({
       status: 'complete',
       result: segmentationResult
     }).eq('id', job_id);
-
-    console.log(`[SegmentWorker][${job_id}] Job complete. Result stored in database.`);
+    console.log(`[SegmentWorker][${job_id}] Job complete.`);
 
     return new Response(JSON.stringify({ success: true }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -164,7 +168,7 @@ serve(async (req) => {
     });
 
   } catch (error) {
-    console.error(`[SegmentWorker][${job_id}] Error:`, error);
+    console.error(`[SegmentWorker][${job_id}] CATCH BLOCK TRIGGERED. Error:`, error);
     await supabase.from('mira-agent-segmentation-jobs').update({
       status: 'failed',
       error_message: error.message
