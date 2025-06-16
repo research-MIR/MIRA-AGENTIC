@@ -67,15 +67,19 @@ function extractJson(text: string): any {
 }
 
 serve(async (req) => {
+  console.log("[SegmentAI] Function invoked.");
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
     const { base64_image_data, mime_type } = await req.json();
+    console.log("[SegmentAI] Received request payload.");
+
     if (!base64_image_data || !mime_type) {
       throw new Error("base64_image_data and mime_type are required.");
     }
+    console.log(`[SegmentAI] Input validated. Mime type: ${mime_type}.`);
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
@@ -86,6 +90,7 @@ serve(async (req) => {
       },
     };
 
+    console.log("[SegmentAI] Calling Gemini API to generate content...");
     const result = await ai.models.generateContent({
         model: MODEL_NAME,
         contents: [{ role: 'user', parts: [imagePart] }],
@@ -98,7 +103,9 @@ serve(async (req) => {
         }
     });
 
+    console.log("[SegmentAI] Received response from Gemini API.");
     const responseJson = extractJson(result.text);
+    console.log(`[SegmentAI] Successfully parsed JSON response. Found ${responseJson.masks?.length || 0} masks.`);
 
     return new Response(JSON.stringify(responseJson), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
