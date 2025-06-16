@@ -6,6 +6,9 @@ import { AdjustmentLayer, HueSaturationSettings, LevelsSettings, CurvesSettings 
 import { useLanguage } from "@/context/LanguageContext";
 import { useState, useRef, MouseEvent } from "react";
 import { cn } from "@/lib/utils";
+import { Button } from "../ui/button";
+import { RotateCcw } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 
 interface AdjustmentPanelProps {
   selectedLayer?: AdjustmentLayer;
@@ -101,7 +104,6 @@ const CurvesControls = ({ settings, onUpdate }: { settings: CurvesSettings, onUp
   };
   
   const handleGraphDoubleClick = (e: MouseEvent) => {
-      if (e.target !== graphRef.current) return;
       const { x, y } = getCoords(e);
       const newPoints = [...settings.points, { x, y }].sort((a, b) => a.x - b.x);
       onUpdate({ points: newPoints });
@@ -175,6 +177,25 @@ const CurvesControls = ({ settings, onUpdate }: { settings: CurvesSettings, onUp
 export const AdjustmentPanel = ({ selectedLayer, onUpdateLayer }: AdjustmentPanelProps) => {
   const { t } = useLanguage();
 
+  const handleReset = () => {
+    if (!selectedLayer) return;
+    let defaultSettings;
+    switch (selectedLayer.type) {
+      case 'hue-saturation':
+        defaultSettings = { hue: 0, saturation: 1, lightness: 0 };
+        break;
+      case 'levels':
+        defaultSettings = { inputShadow: 0, inputMidtone: 1, inputHighlight: 255, outputShadow: 0, outputHighlight: 255 };
+        break;
+      case 'curves':
+        defaultSettings = { channel: 'rgb', points: [{ x: 0, y: 0 }, { x: 255, y: 255 }] };
+        break;
+      default:
+        return;
+    }
+    onUpdateLayer(selectedLayer.id, defaultSettings);
+  };
+
   if (!selectedLayer) {
     return (
       <Card>
@@ -205,7 +226,21 @@ export const AdjustmentPanel = ({ selectedLayer, onUpdateLayer }: AdjustmentPane
 
   return (
     <Card>
-      <CardHeader><CardTitle>{selectedLayer.name}</CardTitle></CardHeader>
+      <CardHeader className="flex flex-row items-center justify-between">
+        <CardTitle>{selectedLayer.name}</CardTitle>
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon" onClick={handleReset}>
+                <RotateCcw className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Reset to Default</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      </CardHeader>
       <CardContent>
         {renderControls()}
       </CardContent>
