@@ -11,7 +11,7 @@ const corsHeaders = {
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-const MODEL_NAME = "gemini-1.5-flash-preview-05-20";
+const MODEL_NAME = "gemini-2.5-pro-preview-06-05";
 const BUCKET_NAME = 'mira-agent-user-uploads';
 
 const systemPrompt = `You are a virtual stylist and expert image analyst. Your goal is to determine the precise placement of a new garment onto a person in an image. This is for a high-fidelity virtual try-on, so the bounding box you create will be used to crop the image for an AI garment swap. Accuracy and context are paramount.
