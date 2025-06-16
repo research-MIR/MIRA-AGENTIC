@@ -6,10 +6,8 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { ModelSelector } from "@/components/ModelSelector";
 import { useSession } from "@/components/Auth/SessionContextProvider";
-import { showError, showLoading, dismissToast } from "@/utils/toast";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Sparkles, Wand2, UploadCloud, X } from "lucide-react";
-import { useImagePreview } from "@/context/ImagePreviewContext";
+import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
+import { Sparkles, Wand2, UploadCloud, X, GalleryHorizontal } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useLanguage } from "@/context/LanguageContext";
@@ -18,11 +16,8 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { Switch } from "@/components/ui/switch";
 import { useDropzone } from "@/hooks/useDropzone";
 import { cn } from "@/lib/utils";
-
-interface ImageResult {
-  publicUrl: string;
-  storagePath: string;
-}
+import { useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 
 interface AspectRatioOption {
     label: string;
@@ -39,8 +34,10 @@ const aspectRatioOptions: Record<string, AspectRatioOption> = {
 
 const Generator = () => {
   const { supabase, session } = useSession();
-  const { showImage } = useImagePreview();
   const { t } = useLanguage();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+
   const [prompt, setPrompt] = useState("");
   const [negativePrompt, setNegativePrompt] = useState("");
   const [numImages, setNumImages] = useState(1);
@@ -48,7 +45,6 @@ const Generator = () => {
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [aspectRatio, setAspectRatio] = useState("1024x1024");
   const [isLoading, setIsLoading] = useState(false);
-  const [results, setResults] = useState<ImageResult[]>([]);
   const [finalPromptUsed, setFinalPromptUsed] = useState<string | null>(null);
   
   const [styleReferenceImageFile, setStyleReferenceImageFile] = useState<File | null>(null);
@@ -134,7 +130,6 @@ const Generator = () => {
     if (!session?.user) return showError("You must be logged in to generate images.");
 
     setIsLoading(true);
-    setResults([]);
     setFinalPromptUsed(null);
     let toastId = showLoading("Warming up the engines...");
     let promptToUse = prompt;
@@ -160,12 +155,13 @@ const Generator = () => {
       }
 
       dismissToast(toastId);
-      toastId = showLoading(`Generating images...`);
+      toastId = showLoading(`Queueing generation job...`);
       if (!selectedModelId) throw new Error("Please select a model.");
       
-      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-generate-image-google', { 
+      const { error } = await supabase.functions.invoke('MIRA-AGENT-proxy-direct-generator', { 
           body: { 
-              prompt: promptToUse, 
+              prompt: prompt,
+              final_prompt_used: promptToUse,
               negative_prompt: negativePrompt, 
               number_of_images: numImages, 
               seed, 
@@ -175,22 +171,10 @@ const Generator = () => {
           } 
       });
       if (error) throw error;
-      if (!data.images) throw new Error("The generator did not return any images.");
       
-      const finalImages = data.images;
-      setResults(finalImages);
-
-      if (finalImages.length > 0) {
-        const jobPayload = {
-            user_id: session.user.id,
-            original_prompt: `Direct: ${promptToUse.slice(0, 40)}...`,
-            status: 'complete',
-            final_result: { isImageGeneration: true, images: finalImages },
-            context: { source: 'direct_generator' }
-        };
-        const { error: insertError } = await supabase.from('mira-agent-jobs').insert(jobPayload);
-        if (insertError) showError(`Images generated, but failed to save to gallery: ${insertError.message}`);
-      }
+      dismissToast(toastId);
+      showSuccess("Job queued! Your images will appear in the gallery shortly.");
+      queryClient.invalidateQueries({ queryKey: ["jobHistory"] });
 
     } catch (err: any) {
       showError(err.message || "An unknown error occurred.");
@@ -290,7 +274,7 @@ const Generator = () => {
         </div>
       </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         <div className="lg:col-span-1 space-y-6">
           <Card id="generator-prompt-card">
             <CardHeader>
@@ -376,7 +360,7 @@ const Generator = () => {
           </Button>
         </div>
 
-        <div className="lg:col-span-2">
+        <div className="lg:col-span-1">
           <Card className="min-h-[60vh]">
             <CardHeader>
               <CardTitle>{t.results}</CardTitle>
@@ -388,37 +372,14 @@ const Generator = () => {
                   <Textarea readOnly value={finalPromptUsed} className="mt-1 h-24 font-mono text-xs" />
                 </div>
               )}
-              {isLoading ? (
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  {[...Array(numImages)].map((_, i) => (
-                    <Skeleton key={i} className="aspect-square w-full" />
-                  ))}
-                </div>
-              ) : results.length > 0 ? (
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  {results.map((image, index) => (
-                    <button 
-                      onClick={() => showImage({ 
-                        images: results.map(img => ({ url: img.publicUrl })), 
-                        currentIndex: index 
-                      })} 
-                      key={index} 
-                      className="block w-full h-full"
-                    >
-                      <img
-                        src={image.publicUrl}
-                        alt={`Generated image ${index + 1}`}
-                        className="rounded-lg aspect-square object-cover w-full h-full hover:opacity-80 transition-opacity"
-                      />
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center text-center text-muted-foreground h-64">
-                  <Sparkles className="h-12 w-12 mb-4" />
-                  <p>{t.resultsPlaceholder}</p>
-                </div>
-              )}
+              <div className="flex flex-col items-center justify-center text-center text-muted-foreground h-64">
+                <Sparkles className="h-12 w-12 mb-4" />
+                <p>Your generated images will appear in the gallery.</p>
+                <Button variant="outline" className="mt-4" onClick={() => navigate('/gallery')}>
+                  <GalleryHorizontal className="mr-2 h-4 w-4" />
+                  Go to Gallery
+                </Button>
+              </div>
             </CardContent>
           </Card>
         </div>

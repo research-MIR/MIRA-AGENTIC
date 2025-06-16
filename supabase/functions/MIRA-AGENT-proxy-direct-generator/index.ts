@@ -36,36 +36,37 @@ serve(async (req) => {
       throw new Error("Missing required parameters: invoker_user_id, prompt, or model_id.");
     }
 
-    console.log(`[DirectGeneratorProxy][${requestId}] Creating job ticket in 'mira-agent-comfyui-jobs'.`);
+    const jobContext = {
+        source: 'direct_generator',
+        prompt,
+        negative_prompt,
+        number_of_images,
+        seed,
+        model_id,
+        size,
+        final_prompt_used
+    };
+
+    console.log(`[DirectGeneratorProxy][${requestId}] Creating job ticket in 'mira-agent-jobs'.`);
     
     const { data: newJob, error: insertError } = await supabase
-      .from('mira-agent-comfyui-jobs')
+      .from('mira-agent-jobs')
       .insert({
         user_id: invoker_user_id,
-        status: 'queued',
-        metadata: {
-          source: 'direct_generator',
-          prompt: prompt,
-          negative_prompt: negative_prompt,
-          number_of_images: number_of_images,
-          seed: seed,
-          model_id: model_id,
-          size: size,
-          final_prompt_used: final_prompt_used,
-          invoker_user_id: invoker_user_id,
-          original_prompt_for_gallery: `Direct: ${final_prompt_used?.slice(0, 40) || prompt.slice(0, 40)}...`
-        }
+        original_prompt: `Direct: ${final_prompt_used?.slice(0, 40) || prompt.slice(0, 40)}...`,
+        status: 'processing',
+        context: jobContext
       })
       .select('id')
       .single();
 
     if (insertError) throw insertError;
     const jobId = newJob.id;
-    console.log(`[DirectGeneratorProxy][${requestId}] Job ticket ${jobId} created. Invoking poller.`);
+    console.log(`[DirectGeneratorProxy][${requestId}] Job ticket ${jobId} created. Invoking worker.`);
 
-    // Asynchronously invoke the poller to start processing the job.
+    // Asynchronously invoke the worker to start processing the job.
     // Don't await this, so the response to the client is immediate.
-    supabase.functions.invoke('MIRA-AGENT-poller-direct-generator', {
+    supabase.functions.invoke('MIRA-AGENT-worker-direct-generator', {
       body: { job_id: jobId }
     }).catch(console.error);
 
