@@ -169,7 +169,7 @@ serve(async (req) => {
     const responseJson = extractJson(result.text);
     console.log(`[SegmentationWorker][${job_id}] JSON parsed successfully. Description: "${responseJson.description.substring(0, 50)}...", Bounding boxes found: ${responseJson.masks.length}`);
 
-    // Enlarge the bounding box by 1.25x
+    // Enlarge the bounding box by 1.10x
     if (responseJson.masks && responseJson.masks.length > 0) {
         console.log(`[SegmentationWorker][${job_id}] Original box:`, responseJson.masks[0].box_2d);
         const [y_min, x_min, y_max, x_max] = responseJson.masks[0].box_2d;
@@ -178,8 +178,8 @@ serve(async (req) => {
         const centerX = x_min + width / 2;
         const centerY = y_min + height / 2;
 
-        const newWidth = width * 1.25;
-        const newHeight = height * 1.25;
+        const newWidth = width * 1.10;
+        const newHeight = height * 1.10;
 
         const new_x_min = Math.max(0, centerX - newWidth / 2);
         const new_y_min = Math.max(0, centerY - newHeight / 2);
