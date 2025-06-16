@@ -109,14 +109,18 @@ serve(async (req) => {
     const { person_image_url, garment_image_url, user_prompt } = job;
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
-    const personParts = await downloadImageAsPart(supabase, person_image_url, "PERSON IMAGE", job_id);
-    const garmentParts = await downloadImageAsPart(supabase, garment_image_url, "GARMENT IMAGE", job_id);
-
-    const userParts: Part[] = [...personParts, ...garmentParts];
+    const userParts: Part[] = [];
+    
+    // Add text prompt first to provide context
     if (user_prompt) {
         userParts.push({ text: `--- USER PROMPT ---` });
         userParts.push({ text: user_prompt });
     }
+
+    // Then, add the images
+    const personParts = await downloadImageAsPart(supabase, person_image_url, "PERSON IMAGE", job_id);
+    const garmentParts = await downloadImageAsPart(supabase, garment_image_url, "GARMENT IMAGE", job_id);
+    userParts.push(...personParts, ...garmentParts);
 
     const requestPayload = {
         model: MODEL_NAME,
