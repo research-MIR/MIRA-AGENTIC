@@ -12,13 +12,16 @@ import { optimizeImage } from "@/lib/utils";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Skeleton } from "@/components/ui/skeleton";
 import { RealtimeChannel } from "@supabase/supabase-js";
+import { SegmentationMask } from "@/components/SegmentationMask";
 
-// This will now point to the new pipeline job table
 interface VtoPipelineJob {
   id: string;
   status: 'pending_segmentation' | 'pending_crop' | 'pending_tryon' | 'pending_composite' | 'complete' | 'failed';
   source_person_image_url: string;
   source_garment_image_url: string;
+  segmentation_result?: {
+    masks: { box_2d: [number, number, number, number], label: string }[];
+  };
   final_composite_url?: string;
   error_message?: string;
 }
@@ -42,8 +45,8 @@ const ImageUploader = ({ onFileSelect, title, isDraggingOver, t, imageUrl, onCle
 
   if (imageUrl) {
     return (
-      <div className="relative">
-        <img src={imageUrl} alt={title} className="w-full h-48 object-cover rounded-md" />
+      <div className="relative aspect-square">
+        <img src={imageUrl} alt={title} className="w-full h-full object-cover rounded-md" />
         <Button variant="destructive" size="icon" className="absolute top-2 right-2 h-6 w-6" onClick={onClear}>
           <X className="h-4 w-4" />
         </Button>
@@ -54,7 +57,7 @@ const ImageUploader = ({ onFileSelect, title, isDraggingOver, t, imageUrl, onCle
   return (
     <div 
       {...dropzoneProps}
-      className={cn("flex h-48 justify-center items-center rounded-lg border border-dashed border-border p-6 transition-colors cursor-pointer", isDraggingOver && "border-primary bg-primary/10")}
+      className={cn("flex aspect-square justify-center items-center rounded-lg border border-dashed border-border p-6 transition-colors cursor-pointer", isDraggingOver && "border-primary bg-primary/10")}
       onClick={() => inputRef.current?.click()}
     >
       <div className="text-center pointer-events-none">
@@ -154,12 +157,22 @@ const VirtualTryOn = () => {
   };
 
   const renderJobResult = (job: VtoPipelineJob) => {
+    const isProcessing = ['pending_segmentation', 'pending_crop', 'pending_tryon', 'pending_composite'].includes(job.status);
+
+    if (isProcessing) {
+      return (
+        <div className="relative w-full h-full">
+          <img src={job.source_person_image_url} alt="Processing" className="w-full h-full object-contain rounded-md" />
+          <div className="absolute inset-0 bg-black/50 flex flex-col items-center justify-center text-white">
+            <Loader2 className="h-8 w-8 animate-spin" />
+            <p className="mt-2 text-sm capitalize">{job.status.replace('_', ' ')}...</p>
+          </div>
+          {job.segmentation_result && <SegmentationMask masks={job.segmentation_result.masks} />}
+        </div>
+      );
+    }
+
     switch (job.status) {
-      case 'pending_segmentation':
-      case 'pending_crop':
-      case 'pending_tryon':
-      case 'pending_composite':
-        return <div className="flex flex-col items-center justify-center h-full text-muted-foreground"><Loader2 className="mr-2 h-8 w-8 animate-spin" /> <p className="mt-2 text-sm capitalize">{job.status.replace('_', ' ')}...</p></div>;
       case 'complete':
         return job.final_composite_url ? <img src={job.final_composite_url} alt="Virtual Try-On Result" className="w-full h-full object-contain rounded-md" /> : <p>Job complete, but no image URL found.</p>;
       case 'failed':
@@ -176,7 +189,7 @@ const VirtualTryOn = () => {
         <div className="lg:col-span-1 space-y-6">
           <Card>
             <CardHeader><CardTitle>1. Upload Images</CardTitle></CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="grid grid-cols-2 gap-4">
               <ImageUploader onFileSelect={setPersonImageFile} title="Person Image" isDraggingOver={false} t={t} imageUrl={personImageUrl} onClear={() => setPersonImageFile(null)} />
               <ImageUploader onFileSelect={setGarmentImageFile} title="Garment Image" isDraggingOver={false} t={t} imageUrl={garmentImageUrl} onClear={() => setGarmentImageFile(null)} />
             </CardContent>
@@ -206,7 +219,7 @@ const VirtualTryOn = () => {
             <div className="flex gap-4 overflow-x-auto pb-2">
               {recentJobs.map(job => (
                 <button key={job.id} onClick={() => setSelectedJob(job)} className={cn("border-2 rounded-lg p-1 flex-shrink-0", selectedJob?.id === job.id ? "border-primary" : "border-transparent")}>
-                  <img src={job.source_person_image_url} alt="Job source" className="w-24 h-24 object-cover rounded-md" />
+                  <img src={job.source_garment_image_url} alt="Job source garment" className="w-24 h-24 object-cover rounded-md" />
                 </button>
               ))}
             </div>
