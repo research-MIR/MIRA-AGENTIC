@@ -34,6 +34,7 @@ const Developer = () => {
   const [sourceImageDimensions, setSourceImageDimensions] = useState<{ width: number; height: number } | null>(null);
   const [sourceImagePublicUrl, setSourceImagePublicUrl] = useState<string | null>(null);
   const [croppedImageUrl, setCroppedImageUrl] = useState<string | null>(null);
+  const [maskImageUrl, setMaskImageUrl] = useState<string | null>(null);
 
   const segPersonImageUrl = segPersonImage ? URL.createObjectURL(segPersonImage) : null;
 
@@ -51,6 +52,7 @@ const Developer = () => {
     setSegmentationResult(null);
     setCroppedImageUrl(null);
     setSourceImagePublicUrl(null);
+    setMaskImageUrl(null);
 
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -78,6 +80,7 @@ const Developer = () => {
     setIsSegmenting(true);
     setSegmentationResult(null);
     setCroppedImageUrl(null);
+    setMaskImageUrl(null);
     const toastId = showLoading("Running segmentation test...");
 
     try {
@@ -91,7 +94,8 @@ const Developer = () => {
         body: {
           person_image_url,
           garment_image_url,
-          user_prompt: segPrompt
+          user_prompt: segPrompt,
+          user_id: session?.user.id
         }
       });
 
@@ -99,6 +103,9 @@ const Developer = () => {
 
       const masksArray = data.result.masks ? data.result.masks : data.result;
       setSegmentationResult(masksArray);
+      if (masksArray[0]?.mask_url) {
+        setMaskImageUrl(masksArray[0].mask_url);
+      }
       
       dismissToast(toastId);
       showSuccess("Segmentation analysis complete.");
@@ -194,6 +201,12 @@ const Developer = () => {
                             value={JSON.stringify(segmentationResult, null, 2)}
                             className="mt-1 h-48 font-mono text-xs"
                         />
+                        {maskImageUrl && (
+                          <div>
+                            <Label>Generated Mask</Label>
+                            <SecureImageDisplay imageUrl={maskImageUrl} alt="Segmentation Mask" />
+                          </div>
+                        )}
                         <Button onClick={handleCropTest} disabled={isCropping}>
                             {isCropping && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             Test Crop with BBox

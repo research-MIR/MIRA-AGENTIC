@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { GoogleGenAI, Type, Part } from 'https://esm.sh/@google/genai@0.15.0';
-import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
+import { encodeBase64, decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -104,9 +104,9 @@ serve(async (req) => {
   }
 
   try {
-    const { person_image_url, garment_image_url, user_prompt } = await req.json();
-    if (!person_image_url) {
-      throw new Error("person_image_url is required.");
+    const { person_image_url, garment_image_url, user_prompt, user_id } = await req.json();
+    if (!person_image_url || !user_id) {
+      throw new Error("person_image_url and user_id are required.");
     }
     
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
@@ -134,6 +134,23 @@ serve(async (req) => {
     });
 
     const responseJson = extractJson(result.text);
+
+    if (responseJson.masks && responseJson.masks.length > 0 && responseJson.masks[0].mask) {
+        const maskBase64 = responseJson.masks[0].mask;
+        const maskBuffer = decodeBase64(maskBase64);
+        const filePath = `${user_id}/masks/mask_${Date.now()}.png`;
+        
+        await supabase.storage
+            .from('mira-agent-user-uploads')
+            .upload(filePath, maskBuffer, { contentType: 'image/png', upsert: true });
+            
+        const { data: { publicUrl } } = supabase.storage
+            .from('mira-agent-user-uploads')
+            .getPublicUrl(filePath);
+            
+        responseJson.masks[0].mask_url = publicUrl;
+        delete responseJson.masks[0].mask;
+    }
     
     return new Response(JSON.stringify({ success: true, result: responseJson }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
