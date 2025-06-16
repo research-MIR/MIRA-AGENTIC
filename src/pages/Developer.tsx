@@ -1,9 +1,7 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { useLanguage } from "@/context/LanguageContext";
@@ -23,6 +21,8 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { optimizeImage } from "@/lib/utils";
 import { Slider } from "@/components/ui/slider";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 interface ComfyJob {
   id: string;
@@ -43,9 +43,6 @@ const formatBytes = (bytes: number, decimals = 2) => {
 const Developer = () => {
   const { supabase, session } = useSession();
   const { t } = useLanguage();
-  const [isDevAuthenticated, setIsDevAuthenticated] = useState(false);
-  const [password, setPassword] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
   const channelRef = useRef<RealtimeChannel | null>(null);
   const queryClient = useQueryClient();
   const [isCancelling, setIsCancelling] = useState(false);
@@ -64,9 +61,6 @@ const Developer = () => {
   const optimizedImageUrl = optimizedImage ? URL.createObjectURL(optimizedImage) : null;
 
   useEffect(() => {
-    const devAuthStatus = sessionStorage.getItem('dev_authenticated') === 'true';
-    if (devAuthStatus) setIsDevAuthenticated(true);
-
     return () => {
       if (channelRef.current) {
         console.log("[DevPage] Cleaning up Realtime channel.");
@@ -89,28 +83,6 @@ const Developer = () => {
       optimizeImage(originalImage, quality / 100).then(setOptimizedImage);
     }
   }, [originalImage, quality]);
-
-  const handlePasswordSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
-    const toastId = showLoading("Verifying password...");
-    try {
-      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-verify-dev-pass', { body: { password } });
-      if (error) throw error;
-      if (data.success) {
-        sessionStorage.setItem('dev_authenticated', 'true');
-        setIsDevAuthenticated(true);
-        showSuccess("Access granted.");
-      } else {
-        showError("Incorrect password.");
-      }
-    } catch (err: any) {
-      showError(err.message);
-    } finally {
-      dismissToast(toastId);
-      setIsLoading(false);
-    }
-  };
 
   const handleQueuePrompt = async () => {
     if (!session?.user) return showError("You must be logged in to queue a job.");
@@ -217,28 +189,6 @@ const Developer = () => {
         return null;
     }
   };
-
-  if (!isDevAuthenticated) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <Card className="w-full max-w-sm">
-          <CardHeader><CardTitle>{t.enterDeveloperPassword}</CardTitle></CardHeader>
-          <CardContent>
-            <form onSubmit={handlePasswordSubmit} className="space-y-4">
-              <div>
-                <Label htmlFor="dev-password">Password</Label>
-                <Input id="dev-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-              </div>
-              <Button type="submit" className="w-full" disabled={isLoading}>
-                {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                {t.submit}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
 
   return (
     <div className="p-4 md:p-8 h-screen overflow-y-auto">
