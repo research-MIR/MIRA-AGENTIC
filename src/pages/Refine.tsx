@@ -277,46 +277,7 @@ const Refine = () => {
         </header>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Left Column: Workbench */}
-          <div className="lg:col-span-2">
-            <Card className="min-h-[60vh]">
-              <CardHeader>
-                <CardTitle>{t.workbench}</CardTitle>
-                <p className="text-sm text-muted-foreground pt-1">{t.refineWorkbenchTooltip}</p>
-              </CardHeader>
-              <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                      <h3 className="font-semibold mb-2 text-center">{t.originalImage}</h3>
-                      <div className="aspect-square bg-muted rounded-lg flex items-center justify-center">
-                        {finalSourceImageUrl ? (
-                            <button onClick={() => showImage({ images: [{ url: finalSourceImageUrl }], currentIndex: 0 })} className="block w-full h-full">
-                                <img src={finalSourceImageUrl} alt="Original" className="rounded-lg aspect-square object-contain w-full hover:opacity-80 transition-opacity" />
-                            </button>
-                        ) : (
-                            <div className="text-center text-muted-foreground p-4">
-                                <UploadCloud className="h-12 w-12 mb-4 mx-auto" />
-                                <p>{t.uploadOrSelect}</p>
-                            </div>
-                        )}
-                      </div>
-                  </div>
-                  <div>
-                      <h3 className="font-semibold mb-2 text-center">{t.refinedImage}</h3>
-                      <div className="aspect-square bg-muted rounded-lg flex items-center justify-center">
-                          {selectedJob ? renderJobResult(selectedJob) : <p className="text-muted-foreground text-center p-4">{t.resultWillAppear}</p>}
-                      </div>
-                  </div>
-              </CardContent>
-            </Card>
-            {selectedJob?.status === 'complete' && selectedJob?.final_result?.publicUrl && (
-              <Button onClick={() => setIsCompareModalOpen(true)} className="mt-4 w-full">
-                <GitCompareArrows className="mr-2 h-4 w-4" />
-                {t.compareResults}
-              </Button>
-            )}
-          </div>
-
-          {/* Right Column: Controls */}
+          {/* Left Column: Controls */}
           <div className="lg:col-span-1 space-y-6">
             <Card>
               <CardHeader>
@@ -373,6 +334,45 @@ const Refine = () => {
               {isQueueing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
               {t.queueRefinementJob}
             </Button>
+          </div>
+
+          {/* Right Column: Workbench */}
+          <div className="lg:col-span-2">
+            <Card className="min-h-[60vh]">
+              <CardHeader>
+                <CardTitle>{t.workbench}</CardTitle>
+                <p className="text-sm text-muted-foreground pt-1">{t.refineWorkbenchTooltip}</p>
+              </CardHeader>
+              <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                      <h3 className="font-semibold mb-2 text-center">{t.originalImage}</h3>
+                      <div className="aspect-square bg-muted rounded-lg flex items-center justify-center">
+                        {finalSourceImageUrl ? (
+                            <button onClick={() => showImage({ images: [{ url: finalSourceImageUrl }], currentIndex: 0 })} className="block w-full h-full">
+                                <img src={finalSourceImageUrl} alt="Original" className="rounded-lg aspect-square object-contain w-full hover:opacity-80 transition-opacity" />
+                            </button>
+                        ) : (
+                            <div className="text-center text-muted-foreground p-4">
+                                <UploadCloud className="h-12 w-12 mb-4 mx-auto" />
+                                <p>{t.uploadOrSelect}</p>
+                            </div>
+                        )}
+                      </div>
+                  </div>
+                  <div>
+                      <h3 className="font-semibold mb-2 text-center">{t.refinedImage}</h3>
+                      <div className="aspect-square bg-muted rounded-lg flex items-center justify-center">
+                          {selectedJob ? renderJobResult(selectedJob) : <p className="text-muted-foreground text-center p-4">{t.resultWillAppear}</p>}
+                      </div>
+                  </div>
+              </CardContent>
+            </Card>
+            {selectedJob?.status === 'complete' && selectedJob?.final_result?.publicUrl && (
+              <Button onClick={() => setIsCompareModalOpen(true)} className="mt-4 w-full">
+                <GitCompareArrows className="mr-2 h-4 w-4" />
+                {t.compareResults}
+              </Button>
+            )}
           </div>
         </div>
 
