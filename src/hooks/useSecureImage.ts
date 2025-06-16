@@ -20,13 +20,12 @@ export const useSecureImage = (imageUrl: string | null | undefined) => {
 
       try {
         if (imageUrl.includes('supabase.co')) {
-          const url = new URL(imageUrl);
-          const bucketIdentifier = '/public/mira-agent-user-uploads/';
-          const pathStartIndex = url.pathname.indexOf(bucketIdentifier);
-          if (pathStartIndex === -1) throw new Error("Invalid Supabase URL path.");
-          const storagePath = decodeURIComponent(url.pathname.substring(pathStartIndex + bucketIdentifier.length));
-          const { data, error } = await supabase.storage.from('mira-agent-user-uploads').download(storagePath);
-          if (error) throw error;
+          // Use fetch directly with 'no-store' to bypass browser cache issues
+          const response = await fetch(imageUrl, { cache: 'no-store' });
+          if (!response.ok) {
+            throw new Error(`Failed to fetch image from Supabase storage: ${response.statusText}`);
+          }
+          const data = await response.blob();
           objectUrl = URL.createObjectURL(data);
           setDisplayUrl(objectUrl);
         } else {
