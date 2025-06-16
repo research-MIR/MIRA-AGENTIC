@@ -22,7 +22,10 @@ const MaskItem = ({ maskItem, imageDimensions }: { maskItem: MaskItemData, image
       return;
     }
     
-    const imageUrl = `data:image/png;base64,${base64Data}`;
+    // FIX: Check if the data already has the prefix to prevent duplication.
+    const imageUrl = base64Data.startsWith('data:image')
+      ? base64Data
+      : `data:image/png;base64,${base64Data}`;
 
     const maskImg = new Image();
     maskImg.crossOrigin = "anonymous";
