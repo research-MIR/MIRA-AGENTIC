@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { Layer, HueSaturationSettings, LevelsSettings, CurvesSettings } from '@/types/editor';
 
 // --- Color Conversion Helpers ---
@@ -93,43 +93,30 @@ const applyCurves = (imageData: ImageData, settings: CurvesSettings) => {
 
   for (let i = 0; i < d.length; i += 4) {
     switch(settings.channel) {
-        case 'r':
-            d[i] = lut[d[i]];
-            break;
-        case 'g':
-            d[i+1] = lut[d[i+1]];
-            break;
-        case 'b':
-            d[i+2] = lut[d[i+2]];
-            break;
-        case 'rgb':
-        default:
-            d[i] = lut[d[i]];
-            d[i + 1] = lut[d[i + 1]];
-            d[i + 2] = lut[d[i + 2]];
-            break;
+        case 'r': d[i] = lut[d[i]]; break;
+        case 'g': d[i+1] = lut[d[i+1]]; break;
+        case 'b': d[i+2] = lut[d[i+2]]; break;
+        case 'rgb': default: d[i] = lut[d[i]]; d[i + 1] = lut[d[i + 1]]; d[i + 2] = lut[d[i + 2]]; break;
     }
   }
 };
 
 export const useImageProcessor = (
   baseImage: HTMLImageElement | null,
-  layers: Layer[],
-  canvasRef: React.RefObject<HTMLCanvasElement>
-) => {
-  useEffect(() => {
-    if (!baseImage || !canvasRef.current) return;
+  layers: Layer[]
+): HTMLCanvasElement | null => {
+  const processedCanvas = useMemo(() => {
+    if (!baseImage) return null;
 
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    if (!ctx) return;
-
+    const canvas = document.createElement('canvas');
     canvas.width = baseImage.naturalWidth;
     canvas.height = baseImage.naturalHeight;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return null;
 
     ctx.drawImage(baseImage, 0, 0);
 
-    if (layers.length === 0) return;
+    if (layers.length === 0) return canvas;
 
     layers.slice().reverse().forEach(layer => {
       if (!layer.visible) return;
@@ -140,36 +127,27 @@ export const useImageProcessor = (
       const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
       if (!tempCtx) return;
 
-      // Draw the *current* state of the main canvas onto the temp canvas
       tempCtx.drawImage(canvas, 0, 0);
-      
       const layerImageData = tempCtx.getImageData(0, 0, canvas.width, canvas.height);
 
       switch (layer.type) {
-        case 'hue-saturation':
-          applyHueSaturation(layerImageData, layer.settings as HueSaturationSettings);
-          break;
-        case 'levels':
-          applyLevels(layerImageData, layer.settings as LevelsSettings);
-          break;
-        case 'curves':
-          applyCurves(layerImageData, layer.settings as CurvesSettings);
-          break;
+        case 'hue-saturation': applyHueSaturation(layerImageData, layer.settings as HueSaturationSettings); break;
+        case 'levels': applyLevels(layerImageData, layer.settings as LevelsSettings); break;
+        case 'curves': applyCurves(layerImageData, layer.settings as CurvesSettings); break;
       }
       
-      // Put the modified data back onto the temp canvas
       tempCtx.putImageData(layerImageData, 0, 0);
 
-      // Now, draw the temp canvas (which contains the adjustment) onto the main canvas
-      // using the specified blend mode and opacity.
       ctx.globalCompositeOperation = layer.blendMode;
       ctx.globalAlpha = layer.opacity;
       ctx.drawImage(tempCanvas, 0, 0);
       
-      // Reset for the next layer
       ctx.globalCompositeOperation = 'source-over';
       ctx.globalAlpha = 1.0;
     });
 
-  }, [baseImage, layers, canvasRef]);
+    return canvas;
+  }, [baseImage, layers]);
+
+  return processedCanvas;
 };
