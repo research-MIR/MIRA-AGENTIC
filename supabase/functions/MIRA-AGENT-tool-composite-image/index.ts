@@ -15,9 +15,8 @@ async function downloadImage(supabase: SupabaseClient, imageUrl: string): Promis
     console.log(`[CompositeTool] Downloading image from URL: ${imageUrl}`);
     let imageBuffer: ArrayBuffer;
 
-    // Use a regex to more robustly find the bucket name in the URL
     const bucketMatch = imageUrl.match(/\/storage\/v1\/object\/public\/([a-zA-Z0-9_-]+)\//);
-    const bucketName = bucketMatch ? bucketMatch[1] : UPLOAD_BUCKET; // Fallback to default
+    const bucketName = bucketMatch ? bucketMatch[1] : UPLOAD_BUCKET;
 
     if (imageUrl.includes('supabase.co')) {
         const url = new URL(imageUrl);
@@ -67,37 +66,33 @@ serve(async (req) => {
     const { width: baseW, height: baseH } = baseImage;
     const [y_min_norm, x_min_norm, y_max_norm, x_max_norm] = box;
 
-    let pasteX, pasteY, pasteWidth, pasteHeight;
+    let targetPasteX, targetPasteY, targetPasteWidth, targetPasteHeight;
 
-    // This is the corrected logic, matching the crop tool.
     if (baseW >= baseH) {
       const scale = baseW / 1000;
       const y_offset = (baseW - baseH) / 2;
-      pasteX = x_min_norm * scale;
-      pasteY = y_min_norm * scale - y_offset;
-      pasteWidth = (x_max_norm - x_min_norm) * scale;
-      pasteHeight = (y_max_norm - y_min_norm) * scale;
+      targetPasteX = x_min_norm * scale;
+      targetPasteY = y_min_norm * scale - y_offset;
+      targetPasteWidth = (x_max_norm - x_min_norm) * scale;
+      targetPasteHeight = (y_max_norm - y_min_norm) * scale;
     } else {
       const scale = baseH / 1000;
       const x_offset = (baseH - baseW) / 2;
-      pasteX = x_min_norm * scale - x_offset;
-      pasteY = y_min_norm * scale;
-      pasteWidth = (x_max_norm - x_min_norm) * scale;
-      pasteHeight = (y_max_norm - y_min_norm) * scale;
+      targetPasteX = x_min_norm * scale - x_offset;
+      targetPasteY = y_min_norm * scale;
+      targetPasteWidth = (x_max_norm - x_min_norm) * scale;
+      targetPasteHeight = (y_max_norm - y_min_norm) * scale;
     }
 
-    // Ensure dimensions are integers
-    pasteX = Math.floor(pasteX);
-    pasteY = Math.floor(pasteY);
-    pasteWidth = Math.floor(pasteWidth);
-    pasteHeight = Math.floor(pasteHeight);
+    // Resize the overlay to fit within the target dimensions while preserving aspect ratio
+    overlayImage.contain(targetPasteWidth, targetPasteHeight);
 
-    // Resize the overlay image to fit the calculated paste dimensions,
-    // while maintaining its aspect ratio to prevent distortion.
-    overlayImage.contain(pasteWidth, pasteHeight);
+    // Calculate the offset to center the (potentially letterboxed) overlay within the target area
+    const offsetX = (targetPasteWidth - overlayImage.width) / 2;
+    const offsetY = (targetPasteHeight - overlayImage.height) / 2;
 
-    // Composite the correctly sized overlay onto the base image at the correct position.
-    baseImage.composite(overlayImage, pasteX, pasteY);
+    // Composite the correctly sized and positioned overlay
+    baseImage.composite(overlayImage, Math.floor(targetPasteX + offsetX), Math.floor(targetPasteY + offsetY));
 
     const finalImageBuffer = await baseImage.encode(0); // PNG
 
