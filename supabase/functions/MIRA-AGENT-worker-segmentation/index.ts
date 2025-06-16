@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { GoogleGenAI, Content, Part, GenerationResult } from 'https://esm.sh/@google/genai@0.15.0';
+import { GoogleGenAI, Content, Part, GenerationResult, Type } from 'https://esm.sh/@google/genai@0.15.0';
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
@@ -16,11 +16,9 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const systemPrompt = `Give the segmentation masks for whetever space the garment from the image reference of the garment would occupy onto the person image, we will do a garment swap, so we need to segmenta the part that will need to be changed.
-Output a JSON list of segmentation masks where each entry contains the 2D
-bounding box in the key "box_2d", the segmentation mask in key "mask", and
-the text label in the key "label". Use descriptive labels.
-IMPORTANT: The value for the "mask" key MUST be a valid Base64 encoded string of the PNG mask. Do NOT wrap it in b'' or any other quotes. It must be a raw base64 string.`;
+const systemPrompt = `You are an image segmentation expert. Your task is to analyze a 'PERSON IMAGE' and a 'GARMENT IMAGE'. 
+Your goal is to identify the area on the 'PERSON IMAGE' that the garment from the 'GARMENT IMAGE' would occupy.
+You MUST output a JSON object that conforms to the provided schema.`;
 
 async function downloadImageAsPart(supabase: SupabaseClient, imageUrl: string, label: string, requestId: string): Promise<Part[]> {
     console.log(`[SegmentWorker][${requestId}] Downloading image for '${label}' from URL: ${imageUrl}`);
@@ -94,9 +92,43 @@ serve(async (req) => {
     const garmentParts = await downloadImageAsPart(supabase, garment_image_url, "GARMENT IMAGE", job_id);
     userParts.push(...personParts, ...garmentParts);
 
+    const responseSchema = {
+      type: Type.OBJECT,
+      properties: {
+        segmentations: {
+          type: Type.ARRAY,
+          description: "A list of segmentation masks.",
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              box_2d: {
+                type: Type.ARRAY,
+                description: "The 2D bounding box [y_min, x_min, y_max, x_max] normalized to 1000.",
+                items: { type: Type.NUMBER }
+              },
+              mask: {
+                type: Type.STRING,
+                description: "A Base64 encoded string of the PNG segmentation mask."
+              },
+              label: {
+                type: Type.STRING,
+                description: "A descriptive text label for the mask."
+              }
+            },
+            required: ["box_2d", "mask", "label"]
+          }
+        }
+      },
+      required: ["segmentations"]
+    };
+
     const requestPayload = {
         model: MODEL_NAME,
         contents: [{ role: 'user', parts: userParts }],
+        generationConfig: {
+            responseMimeType: "application/json",
+            responseSchema: responseSchema,
+        },
         config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
     };
 
@@ -128,14 +160,12 @@ serve(async (req) => {
         throw new Error("AI model call failed to produce a text response after all retries.");
     }
     
-    // Step 1: Log the raw response immediately for debugging.
     await supabase.from('mira-agent-segmentation-jobs').update({
       raw_ai_response: result.text
     }).eq('id', job_id);
     
-    // Step 2: Try to parse and finalize the job.
     const responseJson = extractJson(result.text, job_id);
-    const segmentationResult = Array.isArray(responseJson) ? responseJson[0] : responseJson;
+    const segmentationResult = responseJson.segmentations && Array.isArray(responseJson.segmentations) ? responseJson.segmentations[0] : null;
 
     if (!segmentationResult || !segmentationResult.mask) {
       throw new Error("AI did not return a valid segmentation result in the JSON payload.");
