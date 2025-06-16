@@ -149,7 +149,6 @@ serve(async (req) => {
             .getPublicUrl(filePath);
             
         responseJson.masks[0].mask_url = publicUrl;
-        delete responseJson.masks[0].mask;
     }
     
     return new Response(JSON.stringify({ success: true, result: responseJson }), {
