@@ -78,19 +78,6 @@ const workflowTemplate = `
       "title": "CLIPTextEncodeFlux"
     }
   },
-  "389": {
-    "inputs": {
-      "filename_prefix": "Output",
-      "images": [
-        "407",
-        0
-      ]
-    },
-    "class_type": "SaveImage",
-    "_meta": {
-      "title": "Save Image"
-    }
-  },
   "404": {
     "inputs": {
       "image": "1749818990465_1.png"
@@ -103,15 +90,15 @@ const workflowTemplate = `
   "407": {
     "inputs": {
       "upscale_by": [
-        "410",
-        0
+        "437",
+        1
       ],
-      "seed": 323710341375553,
+      "seed": 726166149269589,
       "steps": 20,
       "cfg": 1,
       "sampler_name": "euler",
       "scheduler": "normal",
-      "denoise": 0.25000000000000006,
+      "denoise": 0.14,
       "mode_type": "Linear",
       "tile_width": 1024,
       "tile_height": 1024,
@@ -178,18 +165,6 @@ const workflowTemplate = `
     "class_type": "FloatConstant",
     "_meta": {
       "title": "Upscale_Scale"
-    }
-  },
-  "411": {
-    "inputs": {
-      "images": [
-        "407",
-        0
-      ]
-    },
-    "class_type": "PreviewImage",
-    "_meta": {
-      "title": "Preview Image"
     }
   },
   "412": {
@@ -358,6 +333,156 @@ const workflowTemplate = `
     "_meta": {
       "title": "BasicScheduler"
     }
+  },
+  "430": {
+    "inputs": {
+      "images": [
+        "442",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "431": {
+    "inputs": {
+      "filename_prefix": "Output",
+      "images": [
+        "442",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "432": {
+    "inputs": {
+      "upscale_by": [
+        "437",
+        1
+      ],
+      "seed": 519457467250056,
+      "steps": 20,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "normal",
+      "denoise": 0.17000000000000004,
+      "mode_type": "Linear",
+      "tile_width": 1024,
+      "tile_height": 1024,
+      "mask_blur": 64,
+      "tile_padding": 256,
+      "seam_fix_mode": "None",
+      "seam_fix_denoise": 1,
+      "seam_fix_width": 64,
+      "seam_fix_mask_blur": 8,
+      "seam_fix_padding": 16,
+      "force_uniform_tiles": true,
+      "tiled_decode": false,
+      "image": [
+        "407",
+        0
+      ],
+      "model": [
+        "418",
+        0
+      ],
+      "positive": [
+        "349",
+        0
+      ],
+      "negative": [
+        "361",
+        0
+      ],
+      "vae": [
+        "10",
+        0
+      ],
+      "upscale_model": [
+        "408",
+        0
+      ],
+      "custom_sampler": [
+        "423",
+        0
+      ],
+      "custom_sigmas": [
+        "424",
+        0
+      ]
+    },
+    "class_type": "UltimateSDUpscaleCustomSample",
+    "_meta": {
+      "title": "Ultimate SD Upscale (Custom Sample)"
+    }
+  },
+  "437": {
+    "inputs": {
+      "expression": "a**0.5",
+      "a": [
+        "410",
+        0
+      ]
+    },
+    "class_type": "MathExpression|pysssss",
+    "_meta": {
+      "title": "Math Expression 🐍"
+    }
+  },
+  "440": {
+    "inputs": {
+      "method": "hard",
+      "type": "median",
+      "intensity": 2,
+      "images": [
+        "432",
+        0
+      ]
+    },
+    "class_type": "Image Sharpen FS",
+    "_meta": {
+      "title": "Image Sharpen FS"
+    }
+  },
+  "441": {
+    "inputs": {
+      "density": 1,
+      "intensity": 1,
+      "highlights": 1,
+      "supersample_factor": 8,
+      "repeats": 1,
+      "image": [
+        "432",
+        0
+      ]
+    },
+    "class_type": "Film Grain",
+    "_meta": {
+      "title": "Film Grain"
+    }
+  },
+  "442": {
+    "inputs": {
+      "mode": "soft_light",
+      "blend_percentage": 0.05000000000000001,
+      "image_a": [
+        "440",
+        0
+      ],
+      "image_b": [
+        "441",
+        0
+      ]
+    },
+    "class_type": "Image Blending Mode",
+    "_meta": {
+      "title": "Image Blending Mode"
+    }
   }
 }
 `;
@@ -453,6 +578,7 @@ serve(async (req) => {
     finalWorkflow['307'].inputs.String = prompt_text;
     const randomSeed = Math.floor(Math.random() * 1000000000000000);
     finalWorkflow['407'].inputs.seed = randomSeed;
+    finalWorkflow['432'].inputs.seed = randomSeed; // Update seed in the second upscale node as well
     if (upscale_factor) {
       finalWorkflow['410'].inputs.value = parseFloat(upscale_factor);
     }
