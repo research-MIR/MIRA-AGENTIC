@@ -20,26 +20,17 @@ const MaskItem = ({ maskItem }: { maskItem: MaskItemData }) => {
     if (!imageUrl) return;
 
     const img = new Image();
-    img.crossOrigin = "anonymous"; // Important for canvas with external images
+    img.crossOrigin = "anonymous";
     img.onload = () => {
+      // Create canvas with the MASK's original dimensions to avoid distortion
       const canvas = document.createElement('canvas');
-      // The mask is small, we resize it to the bounding box dimensions
-      const [yMin, xMin, yMax, xMax] = box_2d;
-      const boxWidth = (xMax - xMin);
-      const boxHeight = (yMax - yMin);
-
-      // Use a reasonable max dimension to avoid creating huge canvases
-      const MAX_DIM = 1024;
-      const scale = Math.min(MAX_DIM / boxWidth, MAX_DIM / boxHeight, 1);
-      
-      canvas.width = boxWidth * scale;
-      canvas.height = boxHeight * scale;
-
+      canvas.width = img.width;
+      canvas.height = img.height;
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
-      // Draw the mask (resized to fit the canvas)
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      // Draw the mask at its original size
+      ctx.drawImage(img, 0, 0);
       
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const data = imageData.data;
@@ -66,7 +57,7 @@ const MaskItem = ({ maskItem }: { maskItem: MaskItemData }) => {
     };
     img.src = imageUrl;
 
-  }, [mask, mask_url, box_2d]);
+  }, [mask, mask_url]);
 
   if (!processedMaskUrl) {
     return null;
