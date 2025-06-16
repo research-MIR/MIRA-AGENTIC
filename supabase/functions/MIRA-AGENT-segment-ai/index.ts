@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { GoogleGenAI, Type, Part } from 'https://esm.sh/@google/genai@0.15.0';
+import { GoogleGenAI, Type, Part, GenerationResult } from 'https://esm.sh/@google/genai@0.15.0';
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const MODEL_NAME = "gemini-2.5-pro-preview-06-05";
@@ -90,20 +90,28 @@ serve(async (req) => {
       },
     };
 
-    console.log("[SegmentAI] Calling Gemini API to generate content...");
-    const result = await ai.models.generateContent({
-        model: MODEL_NAME,
-        contents: [{ role: 'user', parts: [imagePart] }],
-        generationConfig: {
-            responseMimeType: "application/json",
-            responseSchema: responseSchema,
-        },
-        config: {
-            systemInstruction: { role: "system", parts: [{ text: systemPrompt }] }
-        }
-    });
+    let result: GenerationResult;
+    try {
+      console.log("[SegmentAI] Calling Gemini API to generate content...");
+      result = await ai.models.generateContent({
+          model: MODEL_NAME,
+          contents: [{ role: 'user', parts: [imagePart] }],
+          generationConfig: {
+              responseMimeType: "application/json",
+              responseSchema: responseSchema,
+          },
+          config: {
+              systemInstruction: { role: "system", parts: [{ text: systemPrompt }] }
+          }
+      });
+    } catch (apiError) {
+      console.error("[SegmentAI] Gemini API call failed:", apiError);
+      throw new Error(`Gemini API Error: ${apiError.message}`);
+    }
 
     console.log("[SegmentAI] Received response from Gemini API.");
+    console.log("[SegmentAI] Raw response text from Gemini:", result.text);
+
     const responseJson = extractJson(result.text);
     console.log(`[SegmentAI] Successfully parsed JSON response. Found ${responseJson.masks?.length || 0} masks.`);
 
