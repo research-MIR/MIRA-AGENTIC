@@ -14,12 +14,12 @@ const Developer = () => {
   const { supabase, session } = useSession();
   const { t } = useLanguage();
 
-  // State for segmentation ONLY
   const [segPersonImage, setSegPersonImage] = useState<File | null>(null);
   const [segGarmentImage, setSegGarmentImage] = useState<File | null>(null);
   const [segPrompt, setSegPrompt] = useState("Segment the main garment on the person.");
   const [segmentationResult, setSegmentationResult] = useState<any | null>(null);
   const [isSegmenting, setIsSegmenting] = useState(false);
+  const [sourceImageDimensions, setSourceImageDimensions] = useState<{ width: number; height: number } | null>(null);
 
   const segPersonImageUrl = segPersonImage ? URL.createObjectURL(segPersonImage) : null;
 
@@ -28,6 +28,24 @@ const Developer = () => {
       if (segPersonImageUrl) URL.revokeObjectURL(segPersonImageUrl);
     };
   }, [segPersonImageUrl]);
+
+  const handlePersonImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setSegPersonImage(file);
+    setSegmentationResult(null); // Clear old results
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        setSourceImageDimensions({ width: img.naturalWidth, height: img.naturalHeight });
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  };
 
   const uploadFileAndGetUrl = async (file: File | null): Promise<string | null> => {
     if (!file) return null;
@@ -86,7 +104,7 @@ const Developer = () => {
                 <p className="text-sm text-muted-foreground">Upload images and a prompt to test the isolated segmentation function.</p>
                 <div>
                   <Label htmlFor="seg-person-upload">Person Image</Label>
-                  <Input id="seg-person-upload" type="file" accept="image/*" onChange={(e) => setSegPersonImage(e.target.files?.[0] || null)} />
+                  <Input id="seg-person-upload" type="file" accept="image/*" onChange={handlePersonImageChange} />
                 </div>
                 <div>
                   <Label htmlFor="seg-garment-upload">Garment Image (Optional)</Label>
@@ -99,13 +117,12 @@ const Developer = () => {
                 {segPersonImageUrl && (
                   <div className="relative w-full max-w-md mx-auto">
                     <img src={segPersonImageUrl} alt="Segmentation Source" className="w-full h-auto rounded-md" />
-                    {(() => {
-                      if (segmentationResult) {
-                        const masks = Array.isArray(segmentationResult) ? segmentationResult : segmentationResult.masks;
-                        return <SegmentationMask masks={masks} />;
-                      }
-                      return null;
-                    })()}
+                    {segmentationResult && sourceImageDimensions && (
+                        <SegmentationMask 
+                            masks={segmentationResult.masks} 
+                            imageDimensions={sourceImageDimensions} 
+                        />
+                    )}
                   </div>
                 )}
                 <Button onClick={handleSegmentationTest} disabled={isSegmenting || !segPersonImage}>
