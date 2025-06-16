@@ -166,29 +166,23 @@ const VirtualTryOn = () => {
   });
 
   useEffect(() => {
-    if (channelRef.current) {
-      supabase.removeChannel(channelRef.current);
-      channelRef.current = null;
-    }
-
-    if (!session?.user) return;
+    if (!session?.user?.id) return;
 
     const channel = supabase.channel(`vto-pipeline-jobs-tracker-${session.user.id}`)
       .on<VtoPipelineJob>(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'mira-agent-vto-pipeline-jobs', filter: `user_id=eq.${session.user.id}` },
         (payload) => {
-          console.log('[VTO Realtime] Update received:', payload.eventType, payload.new.id);
-          queryClient.invalidateQueries({ queryKey: ['vtoPipelineJobs', session.user?.id] });
-          queryClient.invalidateQueries({ queryKey: ['vtoPipelineJob', payload.new.id] });
+          console.log('[VTO Realtime] Change detected. Invalidating queries.');
+          queryClient.invalidateQueries({ queryKey: ['vtoPipelineJobs'] });
+          queryClient.invalidateQueries({ queryKey: ['vtoPipelineJob'] });
         }
       )
       .subscribe((status, err) => {
         if (status === 'SUBSCRIBED') {
-          console.log(`[VTO Realtime] Successfully subscribed to channel.`);
-        }
-        if (err) {
-          console.error('[VTO Realtime] Subscription error:', err);
+          console.log(`[VTO Realtime] Successfully subscribed to VTO jobs channel.`);
+        } else if (status === 'CHANNEL_ERROR') {
+          console.error(`[VTO Realtime] Subscription failed:`, err);
         }
       });
       
