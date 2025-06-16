@@ -8,6 +8,7 @@ export const useSecureImage = (imageUrl: string | null | undefined) => {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let objectUrl: string | null = null;
     const loadImage = async () => {
       if (!imageUrl) {
         setDisplayUrl(null);
@@ -18,26 +19,26 @@ export const useSecureImage = (imageUrl: string | null | undefined) => {
       setError(null);
 
       try {
-        // If it's already a data URL (e.g., from a file upload preview), just use it.
-        if (imageUrl.startsWith('data:')) {
-            setDisplayUrl(imageUrl);
-            return;
-        }
-
-        // For all other remote URLs (Supabase or external), use the secure proxy function.
-        // This function runs with service_role and can access any file.
-        const { data, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-image-download', { body: { url: imageUrl } });
-        
-        if (proxyError) {
-            throw new Error(`Image proxy failed: ${proxyError.message}`);
-        }
-
-        if (data.base64 && data.mimeType) {
-            setDisplayUrl(`data:${data.mimeType};base64,${data.base64}`);
+        if (imageUrl.includes('supabase.co')) {
+          const url = new URL(imageUrl);
+          const bucketIdentifier = '/public/mira-agent-user-uploads/';
+          const pathStartIndex = url.pathname.indexOf(bucketIdentifier);
+          if (pathStartIndex === -1) throw new Error("Invalid Supabase URL path.");
+          const storagePath = decodeURIComponent(url.pathname.substring(pathStartIndex + bucketIdentifier.length));
+          const { data, error } = await supabase.storage.from('mira-agent-user-uploads').download(storagePath);
+          if (error) throw error;
+          objectUrl = URL.createObjectURL(data);
+          setDisplayUrl(objectUrl);
         } else {
+          // Use the proxy for external URLs
+          const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-image-download', { body: { url: imageUrl } });
+          if (error) throw new Error(`Proxy failed: ${error.message}`);
+          if (data.base64 && data.mimeType) {
+            setDisplayUrl(`data:${data.mimeType};base64,${data.base64}`);
+          } else {
             throw new Error("Proxy did not return valid image data.");
+          }
         }
-
       } catch (err: any) {
         console.error(`Failed to load image from ${imageUrl}:`, err);
         setError(err.message);
@@ -49,6 +50,11 @@ export const useSecureImage = (imageUrl: string | null | undefined) => {
 
     loadImage();
 
+    return () => {
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
   }, [imageUrl, supabase]);
 
   return { displayUrl, isLoading, error };
