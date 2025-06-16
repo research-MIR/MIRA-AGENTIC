@@ -36,15 +36,23 @@ export const SegmentationMask = ({ maskData, width, height }: SegmentationMaskPr
     if (!maskData || !width || !height) return;
 
     try {
-      // 1. Base64 decode
-      const decodedData = atob(maskData);
+      let decodedData;
+      // The AI model doesn't always follow the Base64 encoding instruction.
+      // We'll try to decode it, but if it fails, we'll assume the data is raw.
+      try {
+        decodedData = atob(maskData);
+      } catch (e) {
+        console.warn("atob() failed, assuming mask data is not Base64 encoded.", e);
+        decodedData = maskData; // Use the raw string
+      }
+
       const charData = decodedData.split('').map(x => x.charCodeAt(0));
       const byteArray = new Uint8Array(charData);
 
-      // 2. RLE decode the byte array
+      // RLE decode the byte array
       const pixelData = decodeRLE(byteArray, width, height);
       
-      // 3. Create ImageData and draw to a temporary canvas
+      // Create ImageData and draw to a temporary canvas
       const canvas = document.createElement('canvas');
       canvas.width = width;
       canvas.height = height;
@@ -62,7 +70,7 @@ export const SegmentationMask = ({ maskData, width, height }: SegmentationMaskPr
       }
       ctx.putImageData(imageData, 0, 0);
 
-      // 4. Create a data URL from the canvas to use in an <img> tag
+      // Create a data URL from the canvas to use in an <img> tag
       const objectUrl = canvas.toDataURL();
       setMaskUrl(objectUrl);
 
