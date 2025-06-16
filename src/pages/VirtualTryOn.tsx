@@ -127,26 +127,30 @@ const VirtualTryOn = () => {
   const { supabase, session } = useSession();
   const { t } = useLanguage();
   const queryClient = useQueryClient();
-
+  
   const [personImageFile, setPersonImageFile] = useState<File | null>(null);
   const [garmentImageFile, setGarmentImageFile] = useState<File | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
 
+  const fetchVtoJobs = async () => {
+    if (!session?.user) return [];
+    console.log('[VTO Fetch] Refetching recent jobs...');
+    const { data, error } = await supabase
+      .from('mira-agent-vto-pipeline-jobs')
+      .select('*, bitstudio_job:bitstudio_job_id(final_image_url)')
+      .eq('user_id', session.user.id)
+      .order('created_at', { ascending: false })
+      .limit(10);
+    if (error) throw error;
+    console.log(`[VTO Fetch] Found ${data.length} jobs.`);
+    return data;
+  };
+
   const { data: recentJobs, isLoading: isLoadingRecentJobs } = useQuery<VtoPipelineJob[]>({
     queryKey: ['vtoPipelineJobs', session?.user?.id],
-    queryFn: async () => {
-      if (!session?.user) return [];
-      const { data, error } = await supabase
-        .from('mira-agent-vto-pipeline-jobs')
-        .select('*, bitstudio_job:bitstudio_job_id(final_image_url)')
-        .eq('user_id', session.user.id)
-        .order('created_at', { ascending: false })
-        .limit(10);
-      if (error) throw error;
-      return data;
-    },
+    queryFn: fetchVtoJobs,
     enabled: !!session?.user,
   });
 
@@ -154,6 +158,7 @@ const VirtualTryOn = () => {
     queryKey: ['vtoPipelineJob', selectedJobId],
     queryFn: async () => {
       if (!selectedJobId) return null;
+      console.log(`[VTO Fetch] Fetching selected job: ${selectedJobId}`);
       const { data, error } = await supabase
         .from('mira-agent-vto-pipeline-jobs')
         .select('*, bitstudio_job:bitstudio_job_id(final_image_url)')
@@ -173,9 +178,12 @@ const VirtualTryOn = () => {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'mira-agent-vto-pipeline-jobs', filter: `user_id=eq.${session.user.id}` },
         (payload) => {
-          console.log('[VTO Realtime] Change detected. Invalidating queries.');
+          console.log('[VTO Realtime] Payload received:', payload);
           queryClient.invalidateQueries({ queryKey: ['vtoPipelineJobs'] });
-          queryClient.invalidateQueries({ queryKey: ['vtoPipelineJob'] });
+          if (payload.new.id === selectedJobId) {
+            console.log(`[VTO Realtime] Invalidating selected job query for ${selectedJobId}`);
+            queryClient.invalidateQueries({ queryKey: ['vtoPipelineJob', selectedJobId] });
+          }
         }
       )
       .subscribe((status, err) => {
@@ -191,10 +199,9 @@ const VirtualTryOn = () => {
     return () => {
       if (channelRef.current) {
         supabase.removeChannel(channelRef.current);
-        channelRef.current = null;
       }
     };
-  }, [supabase, session?.user?.id, queryClient]);
+  }, [supabase, session?.user?.id, queryClient, selectedJobId]);
 
   const personImageUrl = useMemo(() => personImageFile ? URL.createObjectURL(personImageFile) : null, [personImageFile]);
   const garmentImageUrl = useMemo(() => garmentImageFile ? URL.createObjectURL(garmentImageFile) : null, [garmentImageFile]);
@@ -222,9 +229,23 @@ const VirtualTryOn = () => {
       const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-vto-pipeline', { body: { person_image_url, garment_image_url, user_id: session?.user.id } });
       if (error) throw error;
       
+      // Optimistic UI update
+      const newJobPlaceholder: VtoPipelineJob = {
+        id: data.jobId,
+        status: 'pending_segmentation',
+        source_person_image_url: person_image_url,
+        source_garment_image_url: garment_image_url,
+      };
+      queryClient.setQueryData(['vtoPipelineJobs', session?.user?.id], (oldData: VtoPipelineJob[] | undefined) => {
+        return oldData ? [newJobPlaceholder, ...oldData] : [newJobPlaceholder];
+      });
+      setSelectedJobId(data.jobId);
+      
       dismissToast(toastId);
       showSuccess("VTO Pipeline job started! It will appear in your history shortly.");
-      resetForm();
+      setPersonImageFile(null);
+      setGarmentImageFile(null);
+
     } catch (err: any) {
       showError(err.message);
       dismissToast(toastId);
