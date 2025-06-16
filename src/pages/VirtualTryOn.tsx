@@ -31,7 +31,7 @@ interface VtoPipelineJob {
   };
 }
 
-const ImageUploader = ({ onFileSelect, title, isDraggingOver, t, imageUrl, onClear }: { onFileSelect: (file: File) => void, title: string, isDraggingOver: boolean, t: any, imageUrl: string | null, onClear: () => void }) => {
+const ImageUploader = ({ onFileSelect, title, isDraggingOver, t, imageUrl, onClear, isLoading }: { onFileSelect: (file: File) => void, title: string, isDraggingOver: boolean, t: any, imageUrl: string | null, onClear: () => void, isLoading?: boolean }) => {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -47,6 +47,10 @@ const ImageUploader = ({ onFileSelect, title, isDraggingOver, t, imageUrl, onCle
       }
     }
   });
+
+  if (isLoading) {
+    return <Skeleton className="aspect-square w-full h-full" />;
+  }
 
   if (imageUrl) {
     return (
@@ -87,6 +91,7 @@ const VirtualTryOn = () => {
 
   const [personImageBlobUrl, setPersonImageBlobUrl] = useState<string | null>(null);
   const [garmentImageBlobUrl, setGarmentImageBlobUrl] = useState<string | null>(null);
+  const [isJobImageLoading, setIsJobImageLoading] = useState(false);
 
   const { data: recentJobs, isLoading: isLoadingRecentJobs } = useQuery<VtoPipelineJob[]>({
     queryKey: ['vtoPipelineJobs', session?.user?.id],
@@ -176,6 +181,7 @@ const VirtualTryOn = () => {
 
     const fetchAndSetUrls = async () => {
         if (selectedJob) {
+            setIsJobImageLoading(true);
             setPersonImageBlobUrl(null);
             setGarmentImageBlobUrl(null);
 
@@ -198,6 +204,8 @@ const VirtualTryOn = () => {
             } catch (error) {
                 console.error("Failed to load selected job images:", error);
                 showError("Could not load selected job images.");
+            } finally {
+                setIsJobImageLoading(false);
             }
         }
     };
@@ -266,8 +274,8 @@ const VirtualTryOn = () => {
               </div>
             </CardHeader>
             <CardContent className="grid grid-cols-2 gap-4">
-              <ImageUploader onFileSelect={setPersonImageFile} title="Person Image" isDraggingOver={false} t={t} imageUrl={personImageUrl} onClear={() => { setPersonImageFile(null); if(selectedJob) setSelectedJob(null); }} />
-              <ImageUploader onFileSelect={setGarmentImageFile} title="Garment Image" isDraggingOver={false} t={t} imageUrl={garmentImageUrl} onClear={() => { setGarmentImageFile(null); if(selectedJob) setSelectedJob(null); }} />
+              <ImageUploader onFileSelect={setPersonImageFile} title="Person Image" isDraggingOver={false} t={t} imageUrl={personImageUrl} onClear={() => { setPersonImageFile(null); if(selectedJob) setSelectedJob(null); }} isLoading={isJobImageLoading && !!selectedJob} />
+              <ImageUploader onFileSelect={setGarmentImageFile} title="Garment Image" isDraggingOver={false} t={t} imageUrl={garmentImageUrl} onClear={() => { setGarmentImageFile(null); if(selectedJob) setSelectedJob(null); }} isLoading={isJobImageLoading && !!selectedJob} />
             </CardContent>
           </Card>
           {!selectedJob && (
