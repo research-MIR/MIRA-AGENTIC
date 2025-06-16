@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { GoogleGenAI, Type, Part, createPartFromUri } from 'https://esm.sh/@google/genai@0.15.0';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
+import { Image } from "https://deno.land/x/imagescript@1.2.15/mod.ts";
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const MODEL_NAME = "gemini-2.5-pro-preview-06-05";
@@ -76,25 +77,31 @@ function extractJson(text: string): any {
 
 serve(async (req) => {
   const reqId = `req_${Date.now()}`;
-  console.log(`[SegmentAI Log][${reqId}] Function invoked (Attempting single mask).`);
+  console.log(`[SegmentAI Log][${reqId}] Function invoked (Downscaling image).`);
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
     const { base64_image_data, mime_type, user_id } = await req.json();
-    console.log(`[SegmentAI Log][${reqId}] Received request payload for user: ${user_id}.`);
-
     if (!base64_image_data || !mime_type || !user_id) {
       throw new Error("base64_image_data, mime_type, and user_id are required.");
     }
-    console.log(`[SegmentAI Log][${reqId}] Input validated. Mime type: ${mime_type}.`);
+
+    // --- Image Downscaling Step ---
+    console.log(`[SegmentAI Log][${reqId}] Decoding and resizing image...`);
+    const originalBuffer = decodeBase64(base64_image_data);
+    const image = await Image.decode(originalBuffer);
+    image.resize(image.width / 2, Image.RESIZE_AUTO);
+    const resizedBuffer = await image.encode(0); // Encode as PNG
+    const resizedMimeType = 'image/png';
+    console.log(`[SegmentAI Log][${reqId}] Image resized to ${image.width}x${image.height}.`);
+    // --- End of Downscaling Step ---
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
-    console.log(`[SegmentAI Log][${reqId}] Uploading file to Google Files API...`);
-    const imageBuffer = decodeBase64(base64_image_data);
-    const imageBlob = new Blob([imageBuffer], { type: mime_type });
+    console.log(`[SegmentAI Log][${reqId}] Uploading RESIZED file to Google Files API...`);
+    const imageBlob = new Blob([resizedBuffer], { type: resizedMimeType });
     
     const uploadResult = await ai.files.upload({
         file: imageBlob,
@@ -104,7 +111,7 @@ serve(async (req) => {
 
     let file = await ai.files.get({ name: uploadResult.name as string });
     let retries = 0;
-    const maxRetries = 10; // Poll for 30 seconds max
+    const maxRetries = 10;
     while (file.state === 'PROCESSING' && retries < maxRetries) {
         console.log(`[SegmentAI Log][${reqId}] File is still processing. Retrying in 3 seconds... (Attempt ${retries + 1}/${maxRetries})`);
         await new Promise(resolve => setTimeout(resolve, 3000));
@@ -112,11 +119,8 @@ serve(async (req) => {
         retries++;
     }
 
-    if (file.state === 'FAILED') {
-        throw new Error('File processing failed on Google\'s side.');
-    }
     if (file.state !== 'ACTIVE') {
-        throw new Error(`File processing timed out after ${retries * 3} seconds. Last state: ${file.state}`);
+        throw new Error(`File processing timed out or failed. Last state: ${file.state}`);
     }
     console.log(`[SegmentAI Log][${reqId}] File is now ACTIVE. URI: ${file.uri}`);
     
@@ -134,7 +138,7 @@ serve(async (req) => {
         }
     };
 
-    console.log(`[SegmentAI Log][${reqId}] Calling Gemini API with file reference...`);
+    console.log(`[SegmentAI Log][${reqId}] Calling Gemini API with resized file reference...`);
     const result = await ai.models.generateContent(requestPayload);
     console.log(`[SegmentAI Log][${reqId}] Successfully received response from Gemini API.`);
 
@@ -142,17 +146,18 @@ serve(async (req) => {
     const responseJson = extractJson(rawTextResponse);
     console.log(`[SegmentAI Log][${reqId}] Successfully parsed JSON. Found ${responseJson.masks?.length || 0} mask(s).`);
 
-    // Post-processing to convert base64 mask to a public URL
     if (responseJson.masks && responseJson.masks.length > 0) {
         const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
         for (const mask of responseJson.masks) {
             if (mask.mask) {
                 const maskBuffer = decodeBase64(mask.mask);
-                const filePath = `${user_id}/masks/mask_${Date.now()}.png`;
+                // Note: This mask corresponds to the DOWNSIZED image.
+                // We are not yet upscaling it.
+                const filePath = `${user_id}/masks/mask_downscaled_${Date.now()}.png`;
                 await supabase.storage.from('mira-agent-user-uploads').upload(filePath, maskBuffer, { contentType: 'image/png', upsert: true });
                 const { data: { publicUrl } } = supabase.storage.from('mira-agent-user-uploads').getPublicUrl(filePath);
-                mask.mask_url = publicUrl; // Add the URL
-                delete mask.mask; // Remove the heavy base64 data
+                mask.mask_url = publicUrl;
+                delete mask.mask;
             }
         }
     }
