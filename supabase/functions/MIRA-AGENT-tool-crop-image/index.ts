@@ -11,6 +11,14 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const UPLOAD_BUCKET = 'mira-agent-user-uploads';
 
+const sanitizeFilename = (filename: string): string => {
+  return filename
+    .replace(/\s+/g, '_') // Replace spaces with underscores
+    .replace(/[^a-zA-Z0-9_.-]/g, '_') // Replace all other invalid chars with underscores
+    .replace(/_{2,}/g, '_') // Collapse multiple underscores
+    .replace(/\.{2,}/g, '.'); // Collapse multiple dots
+};
+
 serve(async (req) => {
   const reqId = `crop-tool-${Date.now()}`;
   console.log(`[${reqId}] CropTool function invoked.`);
@@ -77,7 +85,8 @@ serve(async (req) => {
 
     // Upload the cropped image
     const originalFilename = storagePath.split('/').pop() || 'image.png';
-    const croppedFilename = `cropped_${Date.now()}_${originalFilename}`;
+    const sanitizedOriginalFilename = sanitizeFilename(originalFilename);
+    const croppedFilename = `cropped_${Date.now()}_${sanitizedOriginalFilename}`;
     const croppedStoragePath = `${user_id}/${croppedFilename}`;
     
     const { error: uploadError } = await supabase.storage
