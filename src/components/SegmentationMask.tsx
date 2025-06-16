@@ -1,5 +1,11 @@
 import { useEffect, useState } from 'react';
 
+interface SegmentationMaskProps {
+  maskData: string; // The base64 encoded RLE mask
+  width: number;
+  height: number;
+}
+
 // Decodes a simple Run-Length Encoded byte array.
 // Assumes format is [value, count, value, count, ...]
 const decodeRLE = (rle: Uint8Array, width: number, height: number): Uint8ClampedArray => {
@@ -23,40 +29,30 @@ const decodeRLE = (rle: Uint8Array, width: number, height: number): Uint8Clamped
 };
 
 
-export const SegmentationMask = ({ maskData, width, height }: { maskData: string, width: number, height: number }) => {
+export const SegmentationMask = ({ maskData, width, height }: SegmentationMaskProps) => {
   const [maskUrl, setMaskUrl] = useState<string | null>(null);
-  console.log('[SegmentationMask] Rendering with props:', { maskData, width, height });
 
   useEffect(() => {
-    console.log('[SegmentationMask] useEffect triggered. Processing maskData.');
-    if (!maskData || !width || !height) {
-        console.log('[SegmentationMask] Missing props, exiting useEffect.');
-        return;
-    }
+    if (!maskData || !width || !height) return;
 
     try {
-      const decodedString = atob(maskData);
-      console.log('[SegmentationMask] Decoded Base64 string:', decodedString);
-      let rleData: number[];
-
+      let decodedData;
+      // The AI model doesn't always follow the Base64 encoding instruction.
+      // We'll try to decode it, but if it fails, we'll assume the data is raw.
       try {
-        // The AI is returning a Base64 encoded JSON array string.
-        // We first decode the Base64, then parse the resulting string as JSON.
-        rleData = JSON.parse(decodedString);
-        console.log('[SegmentationMask] Parsed RLE data from JSON:', rleData);
-        if (!Array.isArray(rleData)) {
-          throw new Error("Parsed mask data is not an array.");
-        }
+        decodedData = atob(maskData);
       } catch (e) {
-        // If JSON parsing fails, we fall back to the original method of treating it as a raw byte string.
-        // This makes the component more robust to future changes in the AI's output.
-        console.warn("Could not parse mask as JSON, falling back to raw byte string.", e);
-        rleData = decodedString.split('').map(x => x.charCodeAt(0));
+        console.warn("atob() failed, assuming mask data is not Base64 encoded.", e);
+        decodedData = maskData; // Use the raw string
       }
-      
-      const byteArray = new Uint8Array(rleData);
+
+      const charData = decodedData.split('').map(x => x.charCodeAt(0));
+      const byteArray = new Uint8Array(charData);
+
+      // RLE decode the byte array
       const pixelData = decodeRLE(byteArray, width, height);
       
+      // Create ImageData and draw to a temporary canvas
       const canvas = document.createElement('canvas');
       canvas.width = width;
       canvas.height = height;
@@ -74,12 +70,12 @@ export const SegmentationMask = ({ maskData, width, height }: { maskData: string
       }
       ctx.putImageData(imageData, 0, 0);
 
+      // Create a data URL from the canvas to use in an <img> tag
       const objectUrl = canvas.toDataURL();
       setMaskUrl(objectUrl);
-      console.log('[SegmentationMask] Created mask URL.');
 
     } catch (error) {
-      console.error("[SegmentationMask] Failed to decode and render mask:", error);
+      console.error("Failed to decode and render mask:", error);
     }
 
   }, [maskData, width, height]);
