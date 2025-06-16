@@ -183,11 +183,15 @@ const Developer = () => {
     if (!segmentationImage) return showError("Please select an image for segmentation.");
     setIsSegmenting(true);
     setSegmentationResult(null);
-    const toastId = showLoading("Sending image to segmentation AI...");
+    let toastId = showLoading("Optimizing image...");
 
     try {
+        const optimizedFile = await optimizeImage(segmentationImage);
+        dismissToast(toastId);
+        toastId = showLoading("Sending image to segmentation AI...");
+
         const reader = new FileReader();
-        reader.readAsDataURL(segmentationImage);
+        reader.readAsDataURL(optimizedFile);
         reader.onloadend = async () => {
             const base64String = reader.result as string;
             const base64Data = base64String.split(',')[1];
@@ -195,7 +199,7 @@ const Developer = () => {
             const { data, error } = await supabase.functions.invoke('MIRA-AGENT-segment-ai', {
                 body: {
                     base64_image_data: base64Data,
-                    mime_type: segmentationImage.type
+                    mime_type: optimizedFile.type // This will be 'image/webp'
                 }
             });
 
