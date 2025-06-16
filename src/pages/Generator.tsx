@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { ModelSelector } from "@/components/ModelSelector";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
-import { Sparkles, Wand2, UploadCloud, X, GalleryHorizontal } from "lucide-react";
+import { Sparkles, Wand2, UploadCloud, X, GalleryHorizontal, PlusCircle } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useLanguage } from "@/context/LanguageContext";
@@ -17,7 +17,24 @@ import { Switch } from "@/components/ui/switch";
 import { useDropzone } from "@/hooks/useDropzone";
 import { cn } from "@/lib/utils";
 import { useNavigate } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { GeneratorJobThumbnail } from "@/components/GeneratorJobThumbnail";
+import { Skeleton } from "@/components/ui/skeleton";
+
+interface Job {
+  id: string;
+  context: {
+    prompt: string;
+    negative_prompt?: string;
+    number_of_images?: number;
+    seed?: number;
+    model_id: string;
+    size: string;
+  };
+  final_result?: {
+    images?: { publicUrl: string }[];
+  };
+}
 
 interface AspectRatioOption {
     label: string;
@@ -52,9 +69,55 @@ const Generator = () => {
   const [garmentReferenceImageFiles, setGarmentReferenceImageFiles] = useState<File[]>([]);
   const [garmentReferenceImageUrls, setGarmentReferenceImageUrls] = useState<string[]>([]);
   const [isHelperEnabled, setIsHelperEnabled] = useState(true);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
 
   const garmentInputRef = useRef<HTMLInputElement>(null);
   const styleInputRef = useRef<HTMLInputElement>(null);
+
+  const { data: recentJobs, isLoading: isLoadingRecentJobs } = useQuery<Job[]>({
+    queryKey: ['directGeneratorJobs', session?.user?.id],
+    queryFn: async () => {
+      if (!session?.user) return [];
+      const { data, error } = await supabase
+        .from('mira-agent-jobs')
+        .select('id, context, final_result')
+        .eq('context->>source', 'direct_generator')
+        .eq('user_id', session.user.id)
+        .order('created_at', { ascending: false })
+        .limit(10);
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!session?.user,
+  });
+
+  const resetForm = useCallback(() => {
+    setPrompt("");
+    setNegativePrompt("");
+    setNumImages(1);
+    setSeed(undefined);
+    setAspectRatio("1024x1024");
+    setFinalPromptUsed(null);
+    handleRemoveStyleReferenceImage();
+    setGarmentReferenceImageFiles([]);
+    setGarmentReferenceImageUrls(prev => {
+      prev.forEach(url => URL.revokeObjectURL(url));
+      return [];
+    });
+    setSelectedJobId(null);
+  }, []);
+
+  const handleJobSelect = (job: Job) => {
+    resetForm();
+    setPrompt(job.context.prompt);
+    setNegativePrompt(job.context.negative_prompt || "");
+    setNumImages(job.context.number_of_images || 1);
+    setSeed(job.context.seed);
+    setSelectedModelId(job.context.model_id);
+    setAspectRatio(job.context.size || "1024x1024");
+    setSelectedJobId(job.id);
+    showSuccess("Loaded settings from previous job. Note: Reference images are not reloaded.");
+  };
 
   const handleStyleReferenceImageChange = useCallback((files: FileList | null) => {
     const file = files?.[0];
@@ -174,7 +237,8 @@ const Generator = () => {
       
       dismissToast(toastId);
       showSuccess("Job queued! Your images will appear in the gallery shortly.");
-      queryClient.invalidateQueries({ queryKey: ["jobHistory"] });
+      queryClient.invalidateQueries({ queryKey: ["directGeneratorJobs"] });
+      resetForm();
 
     } catch (err: any) {
       showError(err.message || "An unknown error occurred.");
@@ -278,7 +342,15 @@ const Generator = () => {
         <div className="lg:col-span-1 space-y-6">
           <Card id="generator-prompt-card">
             <CardHeader>
-              <CardTitle>{t.describeYourImage}</CardTitle>
+              <div className="flex justify-between items-center">
+                <CardTitle>{selectedJobId ? "Loaded Job" : "New Generation"}</CardTitle>
+                {selectedJobId && (
+                  <Button variant="outline" size="sm" onClick={resetForm}>
+                    <PlusCircle className="h-4 w-4 mr-2" />
+                    New Job
+                  </Button>
+                )}
+              </div>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
@@ -348,7 +420,7 @@ const Generator = () => {
                 </div>
                 <div>
                   <Label htmlFor="seed">{t.seed}</Label>
-                  <Input id="seed" type="number" placeholder="Random" onChange={(e) => setSeed(e.target.value ? parseInt(e.target.value, 10) : undefined)} />
+                  <Input id="seed" type="number" placeholder="Random" value={seed || ''} onChange={(e) => setSeed(e.target.value ? parseInt(e.target.value, 10) : undefined)} />
                 </div>
               </div>
             </CardContent>
@@ -363,23 +435,34 @@ const Generator = () => {
         <div className="lg:col-span-1">
           <Card className="min-h-[60vh]">
             <CardHeader>
-              <CardTitle>{t.results}</CardTitle>
+              <CardTitle>Recent Generations</CardTitle>
             </CardHeader>
             <CardContent>
+              {isLoadingRecentJobs ? (
+                <div className="flex gap-4"><Skeleton className="h-24 w-24" /><Skeleton className="h-24 w-24" /><Skeleton className="h-24 w-24" /></div>
+              ) : recentJobs && recentJobs.length > 0 ? (
+                <div className="flex gap-4 overflow-x-auto pb-2">
+                  {recentJobs.map(job => (
+                    <GeneratorJobThumbnail
+                      key={job.id}
+                      job={job}
+                      onClick={() => handleJobSelect(job)}
+                      isSelected={selectedJobId === job.id}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center text-center text-muted-foreground h-64">
+                  <Sparkles className="h-12 w-12 mb-4" />
+                  <p>Your generated images will appear here after your first job.</p>
+                </div>
+              )}
               {finalPromptUsed && (
-                <div className="mb-4">
+                <div className="mt-4">
                   <Label>Final Prompt Used</Label>
                   <Textarea readOnly value={finalPromptUsed} className="mt-1 h-24 font-mono text-xs" />
                 </div>
               )}
-              <div className="flex flex-col items-center justify-center text-center text-muted-foreground h-64">
-                <Sparkles className="h-12 w-12 mb-4" />
-                <p>Your generated images will appear in the gallery.</p>
-                <Button variant="outline" className="mt-4" onClick={() => navigate('/gallery')}>
-                  <GalleryHorizontal className="mr-2 h-4 w-4" />
-                  Go to Gallery
-                </Button>
-              </div>
             </CardContent>
           </Card>
         </div>
