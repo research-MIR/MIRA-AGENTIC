@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Plus, Trash2, Eye, EyeOff, Grain } from "lucide-react";
+import { Plus, Trash2, Eye, EyeOff, Sparkles } from "lucide-react";
 import { Layer, AdjustmentLayer, BlendMode } from "@/types/editor";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/context/LanguageContext";
@@ -67,7 +67,7 @@ export const LayerPanel = ({
       <CardContent>
         <div className="space-y-2">
           <Button onClick={() => onAddLayer('noise')} className="w-full">
-            <Grain className="mr-2 h-4 w-4" /> Add Noise
+            <Sparkles className="mr-2 h-4 w-4" /> Add Noise
           </Button>
           <Button onClick={() => onAddLayer('levels')} className="w-full">
             <Plus className="mr-2 h-4 w-4" /> {t.addLevels}
