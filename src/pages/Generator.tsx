@@ -435,38 +435,51 @@ const Generator = () => {
         <div className="lg:col-span-1">
           <Card className="min-h-[60vh]">
             <CardHeader>
-              <CardTitle>Recent Generations</CardTitle>
+              <CardTitle>{t.results}</CardTitle>
             </CardHeader>
             <CardContent>
-              {isLoadingRecentJobs ? (
-                <div className="flex gap-4"><Skeleton className="h-24 w-24" /><Skeleton className="h-24 w-24" /><Skeleton className="h-24 w-24" /></div>
-              ) : recentJobs && recentJobs.length > 0 ? (
-                <div className="flex gap-4 overflow-x-auto pb-2">
-                  {recentJobs.map(job => (
-                    <GeneratorJobThumbnail
-                      key={job.id}
-                      job={job}
-                      onClick={() => handleJobSelect(job)}
-                      isSelected={selectedJobId === job.id}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center text-center text-muted-foreground h-64">
-                  <Sparkles className="h-12 w-12 mb-4" />
-                  <p>Your generated images will appear here after your first job.</p>
-                </div>
-              )}
               {finalPromptUsed && (
-                <div className="mt-4">
+                <div className="mb-4">
                   <Label>Final Prompt Used</Label>
                   <Textarea readOnly value={finalPromptUsed} className="mt-1 h-24 font-mono text-xs" />
                 </div>
               )}
+              <div className="flex flex-col items-center justify-center text-center text-muted-foreground h-64">
+                <Sparkles className="h-12 w-12 mb-4" />
+                <p>Your generated images will appear in the gallery.</p>
+                <Button variant="outline" className="mt-4" onClick={() => navigate('/gallery')}>
+                  <GalleryHorizontal className="mr-2 h-4 w-4" />
+                  Go to Gallery
+                </Button>
+              </div>
             </CardContent>
           </Card>
         </div>
       </div>
+
+      <Card className="mt-8">
+        <CardHeader><CardTitle>Recent Generations</CardTitle></CardHeader>
+        <CardContent>
+          {isLoadingRecentJobs ? (
+            <div className="flex gap-4"><Skeleton className="h-24 w-24" /><Skeleton className="h-24 w-24" /><Skeleton className="h-24 w-24" /></div>
+          ) : recentJobs && recentJobs.length > 0 ? (
+            <div className="flex gap-4 overflow-x-auto pb-2">
+              {recentJobs.map(job => (
+                <GeneratorJobThumbnail
+                  key={job.id}
+                  job={job}
+                  onClick={() => handleJobSelect(job)}
+                  isSelected={selectedJobId === job.id}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center text-center text-muted-foreground h-24">
+              <p>Your generated images will appear here after your first job.</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 };
