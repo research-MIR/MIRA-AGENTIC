@@ -149,9 +149,8 @@ const VirtualTryOn = () => {
     if (!session?.user) return;
     const channelName = `vto-pipeline-jobs-tracker-${session.user.id}`;
     
-    const existingChannel = supabase.channel(channelName);
-    if (existingChannel && (existingChannel.state === 'joined' || existingChannel.state === 'joining')) {
-        console.log('[VTO Realtime] Already subscribed or joining. Skipping setup.');
+    if (channelRef.current && channelRef.current.topic === `realtime:public:mira-agent-vto-pipeline-jobs:user_id=eq.${session.user.id}`) {
+        console.log('[VTO Realtime] Subscription already active. Skipping setup.');
         return;
     }
 
