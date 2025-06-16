@@ -15,7 +15,6 @@ import { RealtimeChannel } from "@supabase/supabase-js";
 import { SegmentationMask } from "@/components/SegmentationMask";
 
 interface MaskItem {
-  mask: string;
   box_2d: [number, number, number, number];
   label: string;
 }
