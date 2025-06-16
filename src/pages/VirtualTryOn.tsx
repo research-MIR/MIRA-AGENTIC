@@ -1,32 +1,28 @@
-import React, { useState, useCallback, useMemo, useRef, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
-import { UploadCloud, Wand2, Loader2, Image as ImageIcon } from "lucide-react";
+import { UploadCloud, Wand2, Loader2, Image as ImageIcon, X, PlusCircle } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
 import { cn } from "@/lib/utils";
 import { useDropzone } from "@/hooks/useDropzone";
 import { optimizeImage } from "@/lib/utils";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Skeleton } from "@/components/ui/skeleton";
 import { RealtimeChannel } from "@supabase/supabase-js";
-import { SegmentationMask } from "@/components/SegmentationMask";
 
-interface MaskItem {
-  box_2d: [number, number, number, number];
-  label: string;
+interface BitStudioJob {
+  id: string;
+  status: 'queued' | 'uploading' | 'processing' | 'complete' | 'failed';
+  source_person_image_url: string;
+  source_garment_image_url: string;
+  final_image_url?: string;
+  error_message?: string;
 }
 
-interface SegmentationResult {
-  description: string;
-  masks: MaskItem[];
-}
-
-type DisplayStep = 'initial' | 'mask' | 'crop' | 'pasted';
-
-const ImageUploader = ({ onFileSelect, title, isDraggingOver, t }: { onFileSelect: (file: File) => void, title: string, isDraggingOver: boolean, t: any }) => {
+const ImageUploader = ({ onFileSelect, title, isDraggingOver, t, imageUrl, onClear }: { onFileSelect: (file: File) => void, title: string, isDraggingOver: boolean, t: any, imageUrl: string | null, onClear: () => void }) => {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -43,16 +39,26 @@ const ImageUploader = ({ onFileSelect, title, isDraggingOver, t }: { onFileSelec
     }
   });
 
+  if (imageUrl) {
+    return (
+      <div className="relative">
+        <img src={imageUrl} alt={title} className="w-full h-48 object-cover rounded-md" />
+        <Button variant="destructive" size="icon" className="absolute top-2 right-2 h-6 w-6" onClick={onClear}>
+          <X className="h-4 w-4" />
+        </Button>
+      </div>
+    );
+  }
+
   return (
     <div 
       {...dropzoneProps}
-      className={cn("flex justify-center rounded-lg border border-dashed border-border p-6 transition-colors cursor-pointer", isDraggingOver && "border-primary bg-primary/10")}
+      className={cn("flex h-48 justify-center items-center rounded-lg border border-dashed border-border p-6 transition-colors cursor-pointer", isDraggingOver && "border-primary bg-primary/10")}
       onClick={() => inputRef.current?.click()}
     >
       <div className="text-center pointer-events-none">
         <UploadCloud className="mx-auto h-12 w-12 text-muted-foreground" />
         <p className="mt-2 font-semibold">{title}</p>
-        <p className="text-xs leading-5 text-muted-foreground">{t.dragAndDrop}</p>
       </div>
       <Input ref={inputRef} type="file" className="hidden" accept="image/*" onChange={handleFileChange} />
     </div>
@@ -62,199 +68,151 @@ const ImageUploader = ({ onFileSelect, title, isDraggingOver, t }: { onFileSelec
 const VirtualTryOn = () => {
   const { supabase, session } = useSession();
   const { t } = useLanguage();
+  const queryClient = useQueryClient();
 
   const [personImageFile, setPersonImageFile] = useState<File | null>(null);
   const [garmentImageFile, setGarmentImageFile] = useState<File | null>(null);
-  const [prompt, setPrompt] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [segmentationResult, setSegmentationResult] = useState<SegmentationResult | null>(null);
-  const [isPersonDragging, setIsPersonDragging] = useState(false);
-  const [isGarmentDragging, setIsGarmentDragging] = useState(false);
-  const [activeJobId, setActiveJobId] = useState<string | null>(null);
-  const [croppedImageUrl, setCroppedImageUrl] = useState<string | null>(null);
-  const [cropMetadata, setCropMetadata] = useState<MaskItem | null>(null);
-  const [displayStep, setDisplayStep] = useState<DisplayStep>('initial');
+  const [selectedJob, setSelectedJob] = useState<BitStudioJob | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
 
   const personImageUrl = useMemo(() => personImageFile ? URL.createObjectURL(personImageFile) : null, [personImageFile]);
   const garmentImageUrl = useMemo(() => garmentImageFile ? URL.createObjectURL(garmentImageFile) : null, [garmentImageFile]);
 
-  const processImageCrop = useCallback((imageSrc: string, mask: MaskItem) => {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-
-        const [y_min, x_min, y_max, x_max] = mask.box_2d;
-        const cropX = (x_min / 1000) * img.naturalWidth;
-        const cropY = (y_min / 1000) * img.naturalHeight;
-        const cropWidth = ((x_max - x_min) / 1000) * img.naturalWidth;
-        const cropHeight = ((y_max - y_min) / 1000) * img.naturalHeight;
-
-        canvas.width = cropWidth;
-        canvas.height = cropHeight;
-
-        ctx.drawImage(img, cropX, cropY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
-
-        const imageData = ctx.getImageData(0, 0, cropWidth, cropHeight);
-        const data = imageData.data;
-        for (let i = 0; i < data.length; i += 4) {
-            const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
-            data[i] = avg;
-            data[i + 1] = avg;
-            data[i + 2] = avg;
-        }
-        ctx.putImageData(imageData, 0, 0);
-
-        setCroppedImageUrl(canvas.toDataURL());
-        setCropMetadata(mask);
-    };
-    img.src = imageSrc;
-  }, []);
+  const { data: recentJobs, isLoading: isLoadingRecentJobs } = useQuery<BitStudioJob[]>({
+    queryKey: ['bitstudioJobs', session?.user?.id],
+    queryFn: async () => {
+      if (!session?.user) return [];
+      const { data, error } = await supabase
+        .from('mira-agent-bitstudio-jobs')
+        .select('*')
+        .eq('user_id', session.user.id)
+        .order('created_at', { ascending: false })
+        .limit(10);
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!session?.user,
+  });
 
   useEffect(() => {
-    if (!activeJobId) {
-      if (channelRef.current) supabase.removeChannel(channelRef.current);
-      return;
-    }
-    if (channelRef.current?.topic === `realtime:public:mira-agent-segmentation-jobs:id=eq.${activeJobId}`) return;
-    if (channelRef.current) supabase.removeChannel(channelRef.current);
-
-    const channel = supabase.channel(`segmentation-job-${activeJobId}`)
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'mira-agent-segmentation-jobs', filter: `id=eq.${activeJobId}` },
+    if (!session?.user) return;
+    const channel = supabase.channel('bitstudio-jobs-tracker')
+      .on<BitStudioJob>(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'mira-agent-bitstudio-jobs', filter: `user_id=eq.${session.user.id}` },
         (payload) => {
-          const job = payload.new;
-          if (job.status === 'complete') {
-            setSegmentationResult(job.result);
-            setIsLoading(false);
-            showSuccess("Analysis complete!");
-            setActiveJobId(null);
-            setDisplayStep('mask');
-          } else if (job.status === 'failed') {
-            showError(`Analysis failed: ${job.error_message}`);
-            setIsLoading(false);
-            setActiveJobId(null);
+          queryClient.invalidateQueries({ queryKey: ['bitstudioJobs', session.user.id] });
+          if (selectedJob && payload.new.id === selectedJob.id) {
+            setSelectedJob(payload.new as BitStudioJob);
           }
         }
       ).subscribe();
     channelRef.current = channel;
     return () => { if (channelRef.current) supabase.removeChannel(channelRef.current); };
-  }, [activeJobId, supabase]);
+  }, [supabase, session?.user?.id, queryClient, selectedJob]);
 
-  const uploadFileAndGetUrl = async (file: File | null, bucket: string): Promise<string | null> => {
+  const uploadFileAndGetUrl = async (file: File | null): Promise<string | null> => {
     if (!file) return null;
     if (!session?.user) throw new Error("User session not found.");
     const optimizedFile = await optimizeImage(file);
     const filePath = `${session.user.id}/${Date.now()}-${optimizedFile.name}`;
-    const { error: uploadError } = await supabase.storage.from(bucket).upload(filePath, optimizedFile);
+    const { error: uploadError } = await supabase.storage.from('mira-agent-user-uploads').upload(filePath, optimizedFile);
     if (uploadError) throw new Error(`Failed to upload file: ${uploadError.message}`);
-    const { data: { publicUrl } } = supabase.storage.from(bucket).getPublicUrl(filePath);
+    const { data: { publicUrl } } = supabase.storage.from('mira-agent-user-uploads').getPublicUrl(filePath);
     return publicUrl;
   };
 
-  const handleFileSelect = (file: File, type: 'person' | 'garment') => {
-    if (file.type.startsWith('video/') || file.type === 'image/avif') {
-      showError("Unsupported file type. AVIF and video formats are not allowed.");
-      return;
-    }
-    setSegmentationResult(null);
-    setCroppedImageUrl(null);
-    setCropMetadata(null);
-    setDisplayStep('initial');
-    if (type === 'person') setPersonImageFile(file);
-    else setGarmentImageFile(file);
-  };
-
-  const handleSegment = async () => {
+  const handleTryOn = async () => {
     if (!personImageFile || !garmentImageFile) return showError("Please upload both a person and a garment image.");
     setIsLoading(true);
-    setSegmentationResult(null);
-    setCroppedImageUrl(null);
-    setCropMetadata(null);
-    setDisplayStep('initial');
     const toastId = showLoading("Uploading images and queueing job...");
     try {
-      const person_image_url = await uploadFileAndGetUrl(personImageFile, 'mira-agent-user-uploads');
-      const garment_image_url = await uploadFileAndGetUrl(garmentImageFile, 'mira-agent-user-uploads');
+      const person_image_url = await uploadFileAndGetUrl(personImageFile);
+      const garment_image_url = await uploadFileAndGetUrl(garmentImageFile);
       if (!person_image_url || !garment_image_url) throw new Error("Failed to upload one or both images.");
-      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-segmentation', { body: { person_image_url, garment_image_url, user_prompt: prompt, user_id: session?.user.id } });
+      
+      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio-vto', { body: { person_image_url, garment_image_url, user_id: session?.user.id } });
       if (error) throw error;
-      setActiveJobId(data.jobId);
+      
       dismissToast(toastId);
-      showSuccess("Job queued! The result will appear below when ready.");
+      showSuccess("Virtual Try-On job queued! It will appear in your history shortly.");
+      resetForm();
     } catch (err: any) {
       showError(err.message);
-      setIsLoading(false);
       dismissToast(toastId);
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const handleStepChange = (step: DisplayStep) => {
-    if (step === 'crop' || step === 'pasted') {
-      if (!croppedImageUrl && segmentationResult?.masks?.[0] && personImageUrl) {
-        processImageCrop(personImageUrl, segmentationResult.masks[0]);
-      }
+  const resetForm = () => {
+    setPersonImageFile(null);
+    setGarmentImageFile(null);
+    setSelectedJob(null);
+  };
+
+  const renderJobResult = (job: BitStudioJob) => {
+    switch (job.status) {
+      case 'queued':
+      case 'uploading':
+      case 'processing':
+        return <div className="flex flex-col items-center justify-center h-full text-muted-foreground"><Loader2 className="mr-2 h-8 w-8 animate-spin" /> <p className="mt-2 text-sm capitalize">{job.status}...</p></div>;
+      case 'complete':
+        return job.final_image_url ? <img src={job.final_image_url} alt="Virtual Try-On Result" className="w-full h-full object-contain rounded-md" /> : <p>Job complete, but no image URL found.</p>;
+      case 'failed':
+        return <p className="text-destructive text-sm p-2">Job failed: {job.error_message}</p>;
+      default:
+        return null;
     }
-    setDisplayStep(step);
   };
 
   return (
     <div className="p-4 md:p-8 h-screen overflow-y-auto">
-      <header className="pb-4 mb-8 border-b"><h1 className="text-3xl font-bold">{t.virtualTryOn}</h1><p className="text-muted-foreground">Describe where a garment would fit on a person.</p></header>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <div className="space-y-6">
-          <Card><CardHeader><CardTitle>1. Upload Images</CardTitle></CardHeader><CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4"><ImageUploader onFileSelect={(file) => handleFileSelect(file, 'person')} title="Person Image" isDraggingOver={isPersonDragging} t={t} /><ImageUploader onFileSelect={(file) => handleFileSelect(file, 'garment')} title="Garment Image" isDraggingOver={isGarmentDragging} t={t} /></CardContent></Card>
-          <Card><CardHeader><CardTitle>2. Add Instructions (Optional)</CardTitle></CardHeader><CardContent><Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="e.g., 'Focus on how the collar sits.'" /></CardContent></Card>
-          <Button onClick={handleSegment} disabled={isLoading} className="w-full">{isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}Analyze Placement</Button>
-        </div>
-        <div className="space-y-6">
+      <header className="pb-4 mb-8 border-b"><h1 className="text-3xl font-bold">{t.virtualTryOn}</h1><p className="text-muted-foreground">Combine a person and a garment image with AI.</p></header>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="lg:col-span-1 space-y-6">
           <Card>
-            <CardHeader><CardTitle>Results</CardTitle></CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 gap-4 mb-4">
-                <div>
-                  <h3 className="font-semibold text-center mb-2">Person</h3>
-                  {personImageUrl ? (
-                    <div className="relative">
-                      <img src={personImageUrl} alt="Person" className="w-full rounded-md" />
-                      {displayStep === 'mask' && segmentationResult && <SegmentationMask masks={segmentationResult.masks} />}
-                      {displayStep === 'pasted' && croppedImageUrl && cropMetadata && (
-                        <img src={croppedImageUrl} alt="Processed Crop" className="absolute pointer-events-none" style={{ top: `${(cropMetadata.box_2d[0] / 1000) * 100}%`, left: `${(cropMetadata.box_2d[1] / 1000) * 100}%`, width: `${((cropMetadata.box_2d[3] - cropMetadata.box_2d[1]) / 1000) * 100}%`, height: `${((cropMetadata.box_2d[2] - cropMetadata.box_2d[0]) / 1000) * 100}%` }} />
-                      )}
-                    </div>
-                  ) : <div className="aspect-square bg-muted rounded-md flex items-center justify-center"><ImageIcon className="h-12 w-12 text-muted-foreground" /></div>}
-                </div>
-                <div>
-                  <h3 className="font-semibold text-center mb-2">Garment</h3>
-                  {garmentImageUrl ? <img src={garmentImageUrl} alt="Garment" className="w-full rounded-md" /> : <div className="aspect-square bg-muted rounded-md flex items-center justify-center"><ImageIcon className="h-12 w-12 text-muted-foreground" /></div>}
-                </div>
+            <CardHeader><CardTitle>1. Upload Images</CardTitle></CardHeader>
+            <CardContent className="space-y-4">
+              <ImageUploader onFileSelect={setPersonImageFile} title="Person Image" isDraggingOver={isPersonDragging} t={t} imageUrl={personImageUrl} onClear={() => setPersonImageFile(null)} />
+              <ImageUploader onFileSelect={setGarmentImageFile} title="Garment Image" isDraggingOver={isGarmentDragging} t={t} imageUrl={garmentImageUrl} onClear={() => setGarmentImageFile(null)} />
+            </CardContent>
+          </Card>
+          <Button onClick={handleTryOn} disabled={isLoading || !personImageFile || !garmentImageFile} className="w-full">{isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}Start Virtual Try-On</Button>
+        </div>
+        <div className="lg:col-span-2">
+          <Card className="min-h-[60vh]">
+            <CardHeader>
+              <div className="flex justify-between items-center">
+                <CardTitle>Result</CardTitle>
+                {selectedJob && <Button variant="outline" size="sm" onClick={resetForm}><PlusCircle className="h-4 w-4 mr-2" />New Try-On</Button>}
               </div>
-              {isLoading && <div className="text-center text-muted-foreground py-4"><Loader2 className="h-8 w-8 animate-spin mx-auto" /><p className="mt-2">Analyzing images... this may take a moment.</p></div>}
-              {segmentationResult && (
-                <div className="space-y-4">
-                  <div><Label>AI Description</Label><div className="mt-2 p-3 bg-muted rounded-md text-sm"><p>{segmentationResult.description}</p></div></div>
-                  <div>
-                    <Label>Visualization Step</Label>
-                    <div className="flex gap-2 mt-2">
-                      <Button variant={displayStep === 'mask' ? 'default' : 'outline'} onClick={() => handleStepChange('mask')}>Mask</Button>
-                      <Button variant={displayStep === 'crop' ? 'default' : 'outline'} onClick={() => handleStepChange('crop')}>Crop</Button>
-                      <Button variant={displayStep === 'pasted' ? 'default' : 'outline'} onClick={() => handleStepChange('pasted')}>Paste</Button>
-                    </div>
-                  </div>
-                  {displayStep === 'crop' && croppedImageUrl && (
-                    <div>
-                      <h3 className="font-semibold text-center mb-2">Isolated Crop</h3>
-                      <img src={croppedImageUrl} alt="Isolated Crop" className="w-auto h-auto max-w-full max-h-64 mx-auto rounded-md" />
-                    </div>
-                  )}
-                </div>
-              )}
+            </CardHeader>
+            <CardContent className="h-[50vh] flex items-center justify-center">
+              {selectedJob ? renderJobResult(selectedJob) : <div className="text-center text-muted-foreground"><ImageIcon className="h-16 w-16 mx-auto mb-4" /><p>Your result will appear here.</p></div>}
             </CardContent>
           </Card>
         </div>
       </div>
+      <Card className="mt-8">
+        <CardHeader><CardTitle>Recent Try-Ons</CardTitle></CardHeader>
+        <CardContent>
+          {isLoadingRecentJobs ? (
+            <div className="flex gap-4"><Skeleton className="h-24 w-24" /><Skeleton className="h-24 w-24" /><Skeleton className="h-24 w-24" /></div>
+          ) : recentJobs && recentJobs.length > 0 ? (
+            <div className="flex gap-4 overflow-x-auto pb-2">
+              {recentJobs.map(job => (
+                <button key={job.id} onClick={() => setSelectedJob(job)} className={cn("border-2 rounded-lg p-1 flex-shrink-0", selectedJob?.id === job.id ? "border-primary" : "border-transparent")}>
+                  <img src={job.source_person_image_url} alt="Job source" className="w-24 h-24 object-cover rounded-md" />
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="text-muted-foreground text-sm">No recent jobs found.</p>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 };
