@@ -120,40 +120,25 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  const { job_id } = await req.json();
-  if (!job_id) {
-    return new Response(JSON.stringify({ error: "job_id is required." }), { status: 400, headers: corsHeaders });
-  }
-  console.log(`[SegmentationWorker][${job_id}] Invoked.`);
-
-  const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-
   try {
-    console.log(`[SegmentationWorker][${job_id}] Setting job status to 'processing'.`);
-    await supabase.from('mira-agent-segmentation-jobs').update({ status: 'processing' }).eq('id', job_id);
+    const { person_image_url, garment_image_url, user_prompt } = await req.json();
+    if (!person_image_url || !garment_image_url) {
+      throw new Error("person_image_url and garment_image_url are required.");
+    }
+    
+    const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
 
-    console.log(`[SegmentationWorker][${job_id}] Fetching job details.`);
-    const { data: job, error: fetchError } = await supabase
-      .from('mira-agent-segmentation-jobs')
-      .select('person_image_url, garment_image_url, user_prompt')
-      .eq('id', job_id)
-      .single();
-
-    if (fetchError) throw fetchError;
-    console.log(`[SegmentationWorker][${job_id}] Fetched job details. Person: ${job.person_image_url}, Garment: ${job.garment_image_url}`);
-
-    const personImagePart = await downloadImageAsPart(supabase, job.person_image_url);
-    const garmentImagePart = await downloadImageAsPart(supabase, job.garment_image_url);
+    const personImagePart = await downloadImageAsPart(supabase, person_image_url);
+    const garmentImagePart = await downloadImageAsPart(supabase, garment_image_url);
 
     const userParts: Part[] = [
         { text: "Person Image:" },
         personImagePart,
         { text: "Garment Image:" },
         garmentImagePart,
-        { text: `User instructions: ${job.user_prompt || 'None'}` }
+        { text: `User instructions: ${user_prompt || 'None'}` }
     ];
 
-    console.log(`[SegmentationWorker][${job_id}] All images downloaded. Calling Gemini model...`);
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
     const result = await ai.models.generateContent({
         model: MODEL_NAME,
@@ -165,37 +150,22 @@ serve(async (req) => {
         }
     });
 
-    console.log(`[SegmentationWorker][${job_id}] Received response from Gemini. Parsing JSON.`);
     const responseJson = extractJson(result.text);
-    console.log(`[SegmentationWorker][${job_id}] JSON parsed successfully. Description: "${responseJson.description.substring(0, 50)}...", Bounding boxes found: ${responseJson.masks.length}`);
-
-    // Enlarge the bounding box by 1.10x
+    
     if (responseJson.masks && responseJson.masks.length > 0) {
-        console.log(`[SegmentationWorker][${job_id}] Original box:`, responseJson.masks[0].box_2d);
         const [y_min, x_min, y_max, x_max] = responseJson.masks[0].box_2d;
         const width = x_max - x_min;
         const height = y_max - y_min;
         const centerX = x_min + width / 2;
         const centerY = y_min + height / 2;
-
         const newWidth = width * 1.10;
         const newHeight = height * 1.10;
-
         const new_x_min = Math.max(0, centerX - newWidth / 2);
         const new_y_min = Math.max(0, centerY - newHeight / 2);
         const new_x_max = Math.min(1000, centerX + newWidth / 2);
         const new_y_max = Math.min(1000, centerY + newHeight / 2);
-
         responseJson.masks[0].box_2d = [new_y_min, new_x_min, new_y_max, new_x_max];
-        console.log(`[SegmentationWorker][${job_id}] Enlarged box:`, responseJson.masks[0].box_2d);
     }
-
-    console.log(`[SegmentationWorker][${job_id}] Updating job status to 'complete' with final result.`);
-    await supabase.from('mira-agent-segmentation-jobs').update({
-      status: 'complete',
-      result: responseJson,
-      error_message: null
-    }).eq('id', job_id);
 
     return new Response(JSON.stringify({ success: true, result: responseJson }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -203,11 +173,7 @@ serve(async (req) => {
     });
 
   } catch (error) {
-    console.error(`[SegmentationWorker][${job_id}] Error:`, error);
-    await supabase.from('mira-agent-segmentation-jobs').update({
-      status: 'failed',
-      error_message: error.message
-    }).eq('id', job_id);
+    console.error(`[SegmentationTool] Error:`, error);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
       status: 500

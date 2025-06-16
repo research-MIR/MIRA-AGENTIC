@@ -26,21 +26,13 @@ serve(async (req) => {
 
     switch (job.status) {
       case 'pending_segmentation': {
-        const { data: segmentationJob, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-segmentation', {
-          body: {
-            person_image_url: job.source_person_image_url,
-            garment_image_url: job.source_garment_image_url,
-            user_id: job.user_id
-          }
-        });
-        if (error) throw error;
-        // The segmentation worker will update its own status. We need to poll or use a trigger.
-        // For now, we assume a separate mechanism will re-trigger this worker once segmentation is done.
-        // A better approach would be for the segmentation worker to call back.
-        // Let's assume for now the segmentation poller will re-trigger this.
-        // To simplify, let's make the segmentation worker synchronous for the pipeline.
+        console.log(`[VTO Worker][${job_id}] Starting segmentation...`);
         const { data: segResult, error: segError } = await supabase.functions.invoke('MIRA-AGENT-worker-segmentation', {
-            body: { job_id: segmentationJob.jobId }
+            body: { 
+                person_image_url: job.source_person_image_url,
+                garment_image_url: job.source_garment_image_url,
+                user_prompt: "Segment the main garment on the person."
+            }
         });
         if(segError) throw segError;
 
@@ -51,7 +43,51 @@ serve(async (req) => {
         supabase.functions.invoke('MIRA-AGENT-worker-vto-pipeline', { body: { job_id } });
         break;
       }
-      // ... other cases will be added here
+      case 'pending_crop': {
+        console.log(`[VTO Worker][${job_id}] Cropping image...`);
+        const segmentationResult = job.segmentation_result;
+        if (!segmentationResult || !segmentationResult.masks || segmentationResult.masks.length === 0) {
+            throw new Error("Segmentation result with a valid mask is required for cropping.");
+        }
+        const box = segmentationResult.masks[0].box_2d;
+
+        const { data: cropResult, error: cropError } = await supabase.functions.invoke('MIRA-AGENT-tool-crop-image', {
+            body: {
+                image_url: job.source_person_image_url,
+                box: box,
+                user_id: job.user_id
+            }
+        });
+        if (cropError) throw cropError;
+
+        await supabase.from('mira-agent-vto-pipeline-jobs').update({
+            status: 'pending_tryon',
+            cropped_image_url: cropResult.cropped_image_url
+        }).eq('id', job_id);
+        
+        supabase.functions.invoke('MIRA-AGENT-worker-vto-pipeline', { body: { job_id } });
+        break;
+      }
+      case 'pending_tryon': {
+        console.log(`[VTO Worker][${job_id}] Starting virtual try-on...`);
+        if (!job.cropped_image_url) throw new Error("Cropped image URL is missing for try-on step.");
+
+        const { data: bitstudioJob, error: bitstudioError } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio-vto', {
+            body: {
+                person_image_url: job.cropped_image_url, // Use the cropped image
+                garment_image_url: job.source_garment_image_url,
+                user_id: job.user_id
+            }
+        });
+        if (bitstudioError) throw bitstudioError;
+
+        await supabase.from('mira-agent-vto-pipeline-jobs').update({
+            bitstudio_job_id: bitstudioJob.jobId
+        }).eq('id', job_id);
+        
+        console.log(`[VTO Worker][${job_id}] Paused. Waiting for bitStudio job ${bitstudioJob.jobId} to complete.`);
+        break;
+      }
       default:
         console.log(`[VTO Worker] Job ${job_id} has unhandled status: ${job.status}`);
     }
