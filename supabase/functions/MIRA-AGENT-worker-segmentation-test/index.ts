@@ -20,6 +20,7 @@ const systemPrompt = `You are a precise image segmentation AI. Your task is to a
 1.  **SINGLE MASK ONLY:** Your final output MUST contain only one item in the 'masks' array.
 2.  **COMBINED MASK:** The single mask MUST enclose the main person and their primary garment(s) as a single object. Do not segment individual items of clothing.
 3.  **LABEL:** The label for this single mask must be "person_with_garment".
+4.  **PIXEL MASK:** You MUST include a base64 encoded PNG string for the \`mask\` property.
 
 ### Example Output:
 {
@@ -27,7 +28,8 @@ const systemPrompt = `You are a precise image segmentation AI. Your task is to a
   "masks": [
     {
       "box_2d": [100, 150, 800, 850],
-      "label": "person_with_garment"
+      "label": "person_with_garment",
+      "mask": "iVBORw0KGgoAAAANSUhEUg..."
     }
   ]
 }`;
@@ -53,9 +55,13 @@ const responseSchema = {
                 'label': {
                     type: Type.STRING,
                     description: "A descriptive label for the segmented object."
+                },
+                'mask': {
+                    type: Type.STRING,
+                    description: "The base64 encoded mask of the segmented object."
                 }
             },
-            required: ['box_2d', 'label']
+            required: ['box_2d', 'label', 'mask']
         }
     }
   },
