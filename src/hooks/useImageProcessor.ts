@@ -87,14 +87,28 @@ const applyCurves = (imageData: ImageData, settings: CurvesSettings) => {
       p2 = sortedPoints[pointIndex + 1];
       pointIndex++;
     }
-    const t = (i - p1.x) / (p2.x - p1.x);
+    const t = (p2.x - p1.x) > 0 ? (i - p1.x) / (p2.x - p1.x) : 0;
     lut[i] = p1.y + t * (p2.y - p1.y);
   }
 
   for (let i = 0; i < d.length; i += 4) {
-    d[i] = lut[d[i]];
-    d[i + 1] = lut[d[i + 1]];
-    d[i + 2] = lut[d[i + 2]];
+    switch(settings.channel) {
+        case 'r':
+            d[i] = lut[d[i]];
+            break;
+        case 'g':
+            d[i+1] = lut[d[i+1]];
+            break;
+        case 'b':
+            d[i+2] = lut[d[i+2]];
+            break;
+        case 'rgb':
+        default:
+            d[i] = lut[d[i]];
+            d[i + 1] = lut[d[i + 1]];
+            d[i + 2] = lut[d[i + 2]];
+            break;
+    }
   }
 };
 

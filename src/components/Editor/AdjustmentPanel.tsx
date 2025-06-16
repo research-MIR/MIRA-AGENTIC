@@ -1,6 +1,8 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AdjustmentLayer, HueSaturationSettings, LevelsSettings, CurvesSettings } from "@/types/editor";
 import { useLanguage } from "@/context/LanguageContext";
 import { useState, useRef, MouseEvent } from "react";
@@ -41,7 +43,6 @@ const LevelsControls = ({ settings, onUpdate }: { settings: LevelsSettings, onUp
       <div>
         <Label>{t.inputLevels}</Label>
         <div className="h-24 bg-muted rounded-md my-2 flex items-center justify-center text-sm text-muted-foreground relative p-2">
-          {/* Placeholder for histogram */}
           <div className="w-full h-full bg-gradient-to-r from-black via-gray-500 to-white opacity-50"></div>
         </div>
         <div className="space-y-2">
@@ -64,11 +65,12 @@ const CurvesControls = ({ settings, onUpdate }: { settings: CurvesSettings, onUp
   const [draggingPointIndex, setDraggingPointIndex] = useState<number | null>(null);
 
   const getCoords = (e: MouseEvent) => {
-    if (!graphRef.current) return { x: 0, y: 0 };
+    if (!graphRef.current) return { x: 0, y: 0, isOutside: true };
     const rect = graphRef.current.getBoundingClientRect();
+    const isOutside = e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom;
     const x = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
     const y = Math.max(0, Math.min(rect.height, e.clientY - rect.top));
-    return { x: (x / rect.width) * 255, y: 255 - (y / rect.height) * 255 };
+    return { x: (x / rect.width) * 255, y: 255 - (y / rect.height) * 255, isOutside };
   };
 
   const handleMouseDown = (e: MouseEvent, index: number) => {
@@ -78,9 +80,17 @@ const CurvesControls = ({ settings, onUpdate }: { settings: CurvesSettings, onUp
 
   const handleMouseMove = (e: MouseEvent) => {
     if (draggingPointIndex === null) return;
-    const { x, y } = getCoords(e);
+    const { x, y, isOutside } = getCoords(e);
+    
+    // Delete point if dragged outside (but not start/end points)
+    if (isOutside && draggingPointIndex > 0 && draggingPointIndex < settings.points.length - 1) {
+        const newPoints = settings.points.filter((_, i) => i !== draggingPointIndex);
+        onUpdate({ points: newPoints });
+        setDraggingPointIndex(null);
+        return;
+    }
+
     const newPoints = [...settings.points];
-    // Prevent start/end points from moving horizontally
     if (draggingPointIndex > 0 && draggingPointIndex < newPoints.length - 1) {
       newPoints[draggingPointIndex].x = x;
     }
@@ -102,6 +112,18 @@ const CurvesControls = ({ settings, onUpdate }: { settings: CurvesSettings, onUp
   return (
     <div className="space-y-4">
       <div>
+        <Label>Channel</Label>
+        <Select value={settings.channel} onValueChange={(value) => onUpdate({ channel: value })}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+                <SelectItem value="rgb">RGB</SelectItem>
+                <SelectItem value="r">Red</SelectItem>
+                <SelectItem value="g">Green</SelectItem>
+                <SelectItem value="b">Blue</SelectItem>
+            </SelectContent>
+        </Select>
+      </div>
+      <div>
         <Label>{t.curves}</Label>
         <div 
           ref={graphRef}
@@ -118,6 +140,7 @@ const CurvesControls = ({ settings, onUpdate }: { settings: CurvesSettings, onUp
           <div className="absolute left-0 top-1/4 h-px w-full bg-foreground/10"></div>
           <div className="absolute left-0 top-1/2 h-px w-full bg-foreground/20"></div>
           <div className="absolute left-0 top-3/4 h-px w-full bg-foreground/10"></div>
+          <div className="absolute top-0 left-0 w-full h-full" style={{ background: 'linear-gradient(to left top, black, transparent, white)'}}></div>
           
           {/* Curve line */}
           <svg className="absolute top-0 left-0 w-full h-full" viewBox="0 0 255 255" preserveAspectRatio="none">
