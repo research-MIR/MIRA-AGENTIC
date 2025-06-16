@@ -100,24 +100,35 @@ const Developer = () => {
   };
 
   const handleCropTest = async () => {
+    console.log("[CropTest] Starting...");
     if (!sourceImagePublicUrl || !segmentationResult || segmentationResult.length === 0) {
-      return showError("Missing source image URL or segmentation result.");
+      const errorMsg = "Missing source image URL or segmentation result.";
+      console.error("[CropTest] Error:", errorMsg, { sourceImagePublicUrl, segmentationResult });
+      return showError(errorMsg);
     }
     setIsCropping(true);
     const toastId = showLoading("Cropping image...");
+    
+    const payload = {
+      image_url: sourceImagePublicUrl,
+      box: segmentationResult[0].box_2d,
+      user_id: session?.user.id
+    };
+    console.log("[CropTest] Invoking 'MIRA-AGENT-tool-crop-image' with payload:", payload);
+
     try {
-      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-crop-image', {
-        body: {
-          image_url: sourceImagePublicUrl,
-          box: segmentationResult[0].box_2d,
-          user_id: session?.user.id
-        }
-      });
+      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-crop-image', { body: payload });
+      
+      console.log("[CropTest] Response from function:", { data, error });
+
       if (error) throw error;
+      
+      console.log("[CropTest] Setting cropped image URL state to:", data.cropped_image_url);
       setCroppedImageUrl(data.cropped_image_url);
       dismissToast(toastId);
       showSuccess("Image cropped successfully.");
     } catch (err: any) {
+      console.error("[CropTest] Catch block error:", err);
       showError(`Cropping failed: ${err.message}`);
       dismissToast(toastId);
     } finally {
