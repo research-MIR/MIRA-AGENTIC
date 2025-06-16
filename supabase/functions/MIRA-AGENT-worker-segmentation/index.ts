@@ -59,6 +59,7 @@ async function downloadImageAsPart(supabase: SupabaseClient, imageUrl: string): 
         throw new Error(`Could not parse storage path from URL: ${imageUrl}`);
     }
     const storagePath = decodeURIComponent(pathParts[1]);
+    console.log(`[SegmentationWorker] Downloading image from storage path: ${storagePath}`);
 
     const { data: blob, error } = await supabase.storage
         .from(BUCKET_NAME)
@@ -71,6 +72,7 @@ async function downloadImageAsPart(supabase: SupabaseClient, imageUrl: string): 
     const mimeType = blob.type;
     const buffer = await blob.arrayBuffer();
     const base64 = encodeBase64(buffer);
+    console.log(`[SegmentationWorker] Successfully downloaded and encoded image. Mime-type: ${mimeType}, Size: ${buffer.byteLength} bytes.`);
     return { inlineData: { mimeType, data: base64 } };
 }
 
@@ -91,12 +93,15 @@ serve(async (req) => {
   if (!job_id) {
     return new Response(JSON.stringify({ error: "job_id is required." }), { status: 400, headers: corsHeaders });
   }
+  console.log(`[SegmentationWorker][${job_id}] Invoked.`);
 
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
 
   try {
+    console.log(`[SegmentationWorker][${job_id}] Setting job status to 'processing'.`);
     await supabase.from('mira-agent-segmentation-jobs').update({ status: 'processing' }).eq('id', job_id);
 
+    console.log(`[SegmentationWorker][${job_id}] Fetching job details.`);
     const { data: job, error: fetchError } = await supabase
       .from('mira-agent-segmentation-jobs')
       .select('person_image_url, garment_image_url, user_prompt')
@@ -104,6 +109,7 @@ serve(async (req) => {
       .single();
 
     if (fetchError) throw fetchError;
+    console.log(`[SegmentationWorker][${job_id}] Fetched job details. Person: ${job.person_image_url}, Garment: ${job.garment_image_url}`);
 
     const personImagePart = await downloadImageAsPart(supabase, job.person_image_url);
     const garmentImagePart = await downloadImageAsPart(supabase, job.garment_image_url);
@@ -116,6 +122,7 @@ serve(async (req) => {
         { text: `User instructions: ${job.user_prompt || 'None'}` }
     ];
 
+    console.log(`[SegmentationWorker][${job_id}] All images downloaded. Calling Gemini model...`);
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
     const result = await ai.models.generateContent({
         model: MODEL_NAME,
@@ -127,8 +134,11 @@ serve(async (req) => {
         }
     });
 
+    console.log(`[SegmentationWorker][${job_id}] Received response from Gemini. Parsing JSON.`);
     const responseJson = extractJson(result.text);
+    console.log(`[SegmentationWorker][${job_id}] JSON parsed successfully. Description: "${responseJson.description.substring(0, 50)}...", Masks found: ${responseJson.masks.length}`);
 
+    console.log(`[SegmentationWorker][${job_id}] Updating job status to 'complete' with final result.`);
     await supabase.from('mira-agent-segmentation-jobs').update({
       status: 'complete',
       result: responseJson,
