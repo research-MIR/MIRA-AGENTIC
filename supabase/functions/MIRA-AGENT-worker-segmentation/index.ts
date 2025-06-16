@@ -127,6 +127,12 @@ serve(async (req) => {
         throw new Error("AI model call failed to produce a text response after all retries.");
     }
     
+    // Step 1: Log the raw response immediately for debugging.
+    await supabase.from('mira-agent-segmentation-jobs').update({
+      raw_ai_response: result.text
+    }).eq('id', job_id);
+    
+    // Step 2: Try to parse and finalize the job.
     const responseJson = extractJson(result.text, job_id);
     const segmentationResult = Array.isArray(responseJson) ? responseJson[0] : responseJson;
 
