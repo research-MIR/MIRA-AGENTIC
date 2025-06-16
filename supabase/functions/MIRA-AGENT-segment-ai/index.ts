@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { GoogleGenAI, Part } from 'https://esm.sh/@google/genai@0.15.0';
+import { GoogleGenAI, Type, Part } from 'https://esm.sh/@google/genai@0.15.0';
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const MODEL_NAME = "gemini-2.5-pro-preview-06-05";
@@ -9,12 +9,49 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const systemPrompt = `You are an image analysis AI. Your task is to analyze the provided image and return a JSON object describing it. For now, the JSON should contain a single key, "description".
+const systemPrompt = `You are an image analysis AI. Your task is to analyze the provided image and return a JSON object describing it. The JSON should contain a description and a list of bounding boxes for the main objects you identify.
 
 Example Output:
 {
-  "description": "A close-up shot of a golden retriever puppy playing in a field of green grass."
+  "description": "A close-up shot of a golden retriever puppy playing in a field of green grass.",
+  "masks": [
+    {
+      "box_2d": [100, 150, 800, 850],
+      "label": "golden_retriever"
+    }
+  ]
 }`;
+
+const responseSchema = {
+  type: Type.OBJECT,
+  properties: {
+    'description': {
+      type: Type.STRING,
+      description: 'A textual description of what you have segmented.',
+    },
+    'masks': {
+        type: Type.ARRAY,
+        description: "A list of bounding boxes for the segmented objects.",
+        items: {
+            type: Type.OBJECT,
+            properties: {
+                'box_2d': {
+                    type: Type.ARRAY,
+                    items: { type: Type.NUMBER },
+                    description: "The bounding box of the mask [y_min, x_min, y_max, x_max] normalized to 1000."
+                },
+                'label': {
+                    type: Type.STRING,
+                    description: "A descriptive label for the segmented object."
+                }
+            },
+            required: ['box_2d', 'label']
+        }
+    }
+  },
+  required: ['description', 'masks'],
+};
+
 
 function extractJson(text: string): any {
     const match = text.match(/```json\s*([\s\S]*?)\s*```/);
@@ -49,6 +86,7 @@ serve(async (req) => {
         contents: [{ role: 'user', parts: [imagePart] }],
         generationConfig: {
             responseMimeType: "application/json",
+            responseSchema: responseSchema,
         },
         config: {
             systemInstruction: { role: "system", parts: [{ text: systemPrompt }] }
