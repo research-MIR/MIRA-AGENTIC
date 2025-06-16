@@ -31,7 +31,7 @@ interface VtoPipelineJob {
   };
 }
 
-const ImageUploader = ({ onFileSelect, title, t, imageUrl, onClear, isLoading }: { onFileSelect: (file: File) => void, title: string, t: any, imageUrl: string | null, onClear: () => void, isLoading?: boolean }) => {
+const ImageUploader = ({ onFileSelect, title, t, imageUrl, onClear }: { onFileSelect: (file: File) => void, title: string, t: any, imageUrl: string | null, onClear: () => void }) => {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -70,11 +70,6 @@ const ImageUploader = ({ onFileSelect, title, t, imageUrl, onClear, isLoading }:
       <Button variant="destructive" size="icon" className="absolute top-2 right-2 h-6 w-6 z-10" onClick={onClear}>
         <X className="h-4 w-4" />
       </Button>
-      {isLoading && (
-        <div className="absolute inset-0 bg-black/60 flex items-center justify-center rounded-md">
-          <Loader2 className="h-8 w-8 animate-spin text-white" />
-        </div>
-      )}
     </div>
   );
 };
@@ -177,31 +172,54 @@ const VirtualTryOn = () => {
   };
 
   useEffect(() => {
-    let personUrl: string | null = null;
-    let garmentUrl: string | null = null;
+    let personUrlToRevoke: string | null = null;
+    let garmentUrlToRevoke: string | null = null;
+
+    const preloadImage = (blob: Blob): Promise<string> => {
+        return new Promise((resolve, reject) => {
+            const url = URL.createObjectURL(blob);
+            const img = new window.Image();
+            img.onload = () => resolve(url);
+            img.onerror = (err) => {
+                URL.revokeObjectURL(url);
+                reject(err);
+            };
+            img.src = url;
+        });
+    };
 
     const fetchAndSetUrls = async () => {
         if (selectedJob) {
             setIsJobImageLoading(true);
             try {
                 const personPath = new URL(selectedJob.source_person_image_url).pathname.split('/public/mira-agent-user-uploads/')[1];
-                if (personPath) {
-                    const { data: personBlob, error: personError } = await supabase.storage.from('mira-agent-user-uploads').download(personPath);
-                    if (personError) throw personError;
-                    personUrl = URL.createObjectURL(personBlob);
-                    setPersonImageBlobUrl(personUrl);
+                const garmentPath = new URL(selectedJob.source_garment_image_url).pathname.split('/public/mira-agent-user-uploads/')[1];
+
+                const [personBlobResult, garmentBlobResult] = await Promise.allSettled([
+                    supabase.storage.from('mira-agent-user-uploads').download(personPath).then(r => { if(r.error) throw r.error; return r.data; }),
+                    supabase.storage.from('mira-agent-user-uploads').download(garmentPath).then(r => { if(r.error) throw r.error; return r.data; })
+                ]);
+
+                if (personBlobResult.status === 'rejected' || garmentBlobResult.status === 'rejected') {
+                    throw new Error("Failed to download one or both images.");
                 }
 
-                const garmentPath = new URL(selectedJob.source_garment_image_url).pathname.split('/public/mira-agent-user-uploads/')[1];
-                if (garmentPath) {
-                    const { data: garmentBlob, error: garmentError } = await supabase.storage.from('mira-agent-user-uploads').download(garmentPath);
-                    if (garmentError) throw garmentError;
-                    garmentUrl = URL.createObjectURL(garmentBlob);
-                    setGarmentImageBlobUrl(garmentUrl);
-                }
+                const [personUrl, garmentUrl] = await Promise.all([
+                    preloadImage(personBlobResult.value),
+                    preloadImage(garmentBlobResult.value)
+                ]);
+                
+                personUrlToRevoke = personUrl;
+                garmentUrlToRevoke = garmentUrl;
+
+                setPersonImageBlobUrl(personUrl);
+                setGarmentImageBlobUrl(garmentUrl);
+
             } catch (error) {
                 console.error("Failed to load selected job images:", error);
                 showError("Could not load selected job images.");
+                setPersonImageBlobUrl(null);
+                setGarmentImageBlobUrl(null);
             } finally {
                 setIsJobImageLoading(false);
             }
@@ -214,8 +232,8 @@ const VirtualTryOn = () => {
     fetchAndSetUrls();
 
     return () => {
-        if (personUrl) URL.revokeObjectURL(personUrl);
-        if (garmentUrl) URL.revokeObjectURL(garmentUrl);
+        if (personUrlToRevoke) URL.revokeObjectURL(personUrlToRevoke);
+        if (garmentUrlToRevoke) URL.revokeObjectURL(garmentUrlToRevoke);
     };
   }, [selectedJob, supabase.storage]);
 
@@ -275,8 +293,8 @@ const VirtualTryOn = () => {
               </div>
             </CardHeader>
             <CardContent className="grid grid-cols-2 gap-4">
-              <ImageUploader onFileSelect={setPersonImageFile} title="Person Image" t={t} imageUrl={personImageUrl} onClear={() => { setPersonImageFile(null); if(selectedJob) setSelectedJob(null); }} isLoading={isJobImageLoading && !!selectedJob} />
-              <ImageUploader onFileSelect={setGarmentImageFile} title="Garment Image" t={t} imageUrl={garmentImageUrl} onClear={() => { setGarmentImageFile(null); if(selectedJob) setSelectedJob(null); }} isLoading={isJobImageLoading && !!selectedJob} />
+              <ImageUploader onFileSelect={setPersonImageFile} title="Person Image" t={t} imageUrl={personImageUrl} onClear={() => { setPersonImageFile(null); if(selectedJob) setSelectedJob(null); }} />
+              <ImageUploader onFileSelect={setGarmentImageFile} title="Garment Image" t={t} imageUrl={garmentImageUrl} onClear={() => { setGarmentImageFile(null); if(selectedJob) setSelectedJob(null); }} />
             </CardContent>
           </Card>
           {!selectedJob && (
@@ -287,7 +305,7 @@ const VirtualTryOn = () => {
           <Card className="min-h-[60vh]">
             <CardHeader><CardTitle>Result</CardTitle></CardHeader>
             <CardContent className="h-[50vh] flex items-center justify-center">
-              {selectedJob ? renderJobResult(selectedJob) : <div className="text-center text-muted-foreground"><ImageIcon className="h-16 w-16 mx-auto mb-4" /><p>Your result will appear here.</p></div>}
+              {isJobImageLoading ? <Loader2 className="h-8 w-8 animate-spin" /> : selectedJob ? renderJobResult(selectedJob) : <div className="text-center text-muted-foreground"><ImageIcon className="h-16 w-16 mx-auto mb-4" /><p>Your result will appear here.</p></div>}
             </CardContent>
           </Card>
         </div>
