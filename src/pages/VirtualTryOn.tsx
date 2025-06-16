@@ -18,6 +18,7 @@ import { useSecureImage } from "@/hooks/useSecureImage";
 import { useImagePreview } from "@/context/ImagePreviewContext";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Textarea } from "@/components/ui/textarea";
 
 interface VtoPipelineJob {
   id: string;
@@ -35,6 +36,7 @@ interface VtoPipelineJob {
   };
   context?: {
     mode: 'edit' | 'vton';
+    optional_details?: string;
   }
 }
 
@@ -138,6 +140,7 @@ const VirtualTryOn = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [mode, setMode] = useState<'edit' | 'vton'>('edit');
+  const [optionalDetails, setOptionalDetails] = useState("");
   const channelRef = useRef<RealtimeChannel | null>(null);
 
   const fetchVtoJobs = async () => {
@@ -216,7 +219,7 @@ const VirtualTryOn = () => {
       const garment_image_url = await uploadFileAndGetUrl(garmentImageFile);
       if (!person_image_url || !garment_image_url) throw new Error("Failed to upload one or both images.");
       
-      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-vto-pipeline', { body: { person_image_url, garment_image_url, user_id: session?.user.id, mode } });
+      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-vto-pipeline', { body: { person_image_url, garment_image_url, user_id: session?.user.id, mode, optional_details: optionalDetails } });
       if (error) throw error;
       
       const newJobPlaceholder: VtoPipelineJob = {
@@ -224,7 +227,7 @@ const VirtualTryOn = () => {
         status: 'pending_segmentation',
         source_person_image_url: person_image_url,
         source_garment_image_url: garment_image_url,
-        context: { mode }
+        context: { mode, optional_details: optionalDetails }
       };
       queryClient.setQueryData(['vtoPipelineJobs', session?.user?.id], (oldData: VtoPipelineJob[] | undefined) => {
         return oldData ? [newJobPlaceholder, ...oldData] : [newJobPlaceholder];
@@ -235,6 +238,7 @@ const VirtualTryOn = () => {
       showSuccess("VTO Pipeline job started! It will appear in your history shortly.");
       setPersonImageFile(null);
       setGarmentImageFile(null);
+      setOptionalDetails("");
 
     } catch (err: any) {
       showError(err.message);
@@ -248,6 +252,7 @@ const VirtualTryOn = () => {
     setPersonImageFile(null);
     setGarmentImageFile(null);
     setSelectedJobId(null);
+    setOptionalDetails("");
   };
 
   const handleJobSelect = (job: VtoPipelineJob) => {
@@ -255,6 +260,7 @@ const VirtualTryOn = () => {
     setGarmentImageFile(null);
     setSelectedJobId(job.id);
     setMode(job.context?.mode || 'edit');
+    setOptionalDetails(job.context?.optional_details || "");
   };
 
   const renderJobResult = (job: VtoPipelineJob) => {
@@ -329,6 +335,18 @@ const VirtualTryOn = () => {
                   </Label>
                 </div>
               </RadioGroup>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader><CardTitle>3. Optional Details</CardTitle></CardHeader>
+            <CardContent>
+              <Textarea 
+                value={optionalDetails}
+                onChange={(e) => setOptionalDetails(e.target.value)}
+                placeholder="e.g., 'make the shirt buttoned up', 'add a black handbag', 'wear it with blue jeans'..."
+                rows={3}
+                disabled={!!selectedJobId}
+              />
             </CardContent>
           </Card>
           {!selectedJobId && (

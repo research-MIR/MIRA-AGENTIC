@@ -30,32 +30,24 @@ serve(async (req) => {
       case 'pending_segmentation': {
         console.log(`[VTO Worker][${job_id}] Starting segmentation in '${mode}' mode...`);
         
-        if (mode === 'vton') {
-            // In VTON mode, we skip segmentation and use a full-frame box.
-            const fullFrameSegmentation = {
-                description: "Full frame for virtual try-on.",
-                masks: [{ box_2d: [0, 0, 1000, 1000], label: "Full Frame" }]
-            };
-            await supabase.from('mira-agent-vto-pipeline-jobs').update({
-                status: 'pending_crop',
-                segmentation_result: fullFrameSegmentation
-            }).eq('id', job_id);
-        } else {
-            // In 'edit' mode, run the detailed segmentation worker.
-            const { data: segResult, error: segError } = await supabase.functions.invoke('MIRA-AGENT-worker-segmentation', {
-                body: { 
-                    person_image_url: job.source_person_image_url,
-                    garment_image_url: job.source_garment_image_url,
-                    user_prompt: "Segment the main garment on the person."
-                }
-            });
-            if(segError) throw segError;
+        const segmentationPrompt = mode === 'vton' 
+            ? "Create a tight bounding box that encloses only the person in the image, from head to toe."
+            : "Segment the main garment on the person.";
 
-            await supabase.from('mira-agent-vto-pipeline-jobs').update({
-                status: 'pending_crop',
-                segmentation_result: segResult.result
-            }).eq('id', job_id);
-        }
+        const { data: segResult, error: segError } = await supabase.functions.invoke('MIRA-AGENT-worker-segmentation', {
+            body: { 
+                person_image_url: job.source_person_image_url,
+                garment_image_url: job.source_garment_image_url,
+                user_prompt: segmentationPrompt
+            }
+        });
+        if(segError) throw segError;
+
+        await supabase.from('mira-agent-vto-pipeline-jobs').update({
+            status: 'pending_crop',
+            segmentation_result: segResult.result
+        }).eq('id', job_id);
+        
         supabase.functions.invoke('MIRA-AGENT-worker-vto-pipeline', { body: { job_id } });
         break;
       }
@@ -92,8 +84,12 @@ serve(async (req) => {
         let promptWorkerPayload;
 
         if (mode === 'vton') {
-            promptWorkerName = 'MIRA-AGENT-worker-vto-garment-describer';
-            promptWorkerPayload = { garment_image_url: job.source_garment_image_url };
+            promptWorkerName = 'MIRA-AGENT-worker-vto-advanced-prompt-generator';
+            promptWorkerPayload = {
+                person_image_url: job.cropped_image_url,
+                garment_image_url: job.source_garment_image_url,
+                optional_details: job.context?.optional_details
+            };
         } else {
             promptWorkerName = 'MIRA-AGENT-worker-vto-prompt-generator';
             promptWorkerPayload = {

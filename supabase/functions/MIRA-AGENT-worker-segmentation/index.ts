@@ -14,36 +14,26 @@ const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const MODEL_NAME = "gemini-2.5-pro-preview-06-05";
 const BUCKET_NAME = 'mira-agent-user-uploads';
 
-const systemPrompt = `You are a virtual stylist and expert image analyst. Your goal is to determine the precise placement of a new garment onto a person in an image. This is for a high-fidelity virtual try-on, so the bounding box you create will be used to crop the image for an AI garment swap. Accuracy and context are paramount.
+const systemPrompt = `You are a virtual stylist and expert image analyst. Your goal is to determine the precise placement of a new garment onto a person in an image OR to simply find the person in the image. This is for a high-fidelity virtual try-on, so the bounding box you create will be used to crop the image. Accuracy and context are paramount.
 
 ---
 ### Your Task
 
-You will be given two images: one of a person (the 'model') and one of a garment. You must output a single JSON object with a textual description and ONE bounding box.
-
----
-### Internal Thought Process (Mandatory Pre-computation)
-
-Before generating the JSON, you MUST perform the following analysis internally. This is your private thought process.
-
-1.  **Identify Existing Garments:** Analyze the model image. What is the person currently wearing in the area where the new garment will go? (e.g., "The model is wearing a white strapless feathered dress.")
-2.  **Analyze New Garment:** Analyze the garment image. What is it, and what is its likely fit? (e.g., "The new garment is a sheer, long-sleeved button-up shirt. It appears to have a standard or slightly loose fit.")
-3.  **Synthesize Bounding Box Strategy:** Based on the above, formulate a plan for the bounding box. (e.g., "My bounding box must cover the entire existing white dress. Because the new shirt has long sleeves, I must expand the box to include the full arms from shoulder to hand to provide context for the garment swap AI.")
+You will be given one or two images and a user prompt. Your task is to output a single JSON object with a textual description and ONE bounding box based on the user's request.
 
 ---
 ### CRITICAL BOUNDING BOX RULES
 
 1.  **SINGLE BOX ONLY:** Your final output MUST contain only ONE bounding box.
-2.  **COVER EXISTING GARMENT:** The bounding box MUST completely cover any existing garment of a similar type that the person is already wearing.
-3.  **ALWAYS INCLUDE ARMS:** You MUST expand the box to include the full arms, from shoulder to fingertips, in all cases. This is crucial for the garment swap AI.
-4.  **CONSIDER FIT:** If the new garment appears to have a looser or larger fit than what the model is currently wearing, the bounding box must be expanded to accommodate this.
+2.  **GARMENT SWAP:** If the user asks to segment a garment, your bounding box MUST completely cover any existing garment of a similar type that the person is already wearing. You MUST expand the box to include the full arms, from shoulder to fingertips, in all cases.
+3.  **PERSON SEGMENTATION:** If the user asks to "enclose only the person" or "find the person", you MUST create a tight bounding box around the entire person, from head to toe, ignoring the background. Do not extend the box to the edges of the frame unless the person fills the entire frame.
 
 ---
 ### JSON Output Format
 
 Your entire response MUST be a single, valid JSON object with the following structure:
 {
-  "description": "A textual description of where the garment would be placed on the person.",
+  "description": "A textual description of what you have segmented.",
   "masks": [
     {
       "box_2d": [y_min, x_min, y_max, x_max],
@@ -122,22 +112,23 @@ serve(async (req) => {
 
   try {
     const { person_image_url, garment_image_url, user_prompt } = await req.json();
-    if (!person_image_url || !garment_image_url) {
-      throw new Error("person_image_url and garment_image_url are required.");
+    if (!person_image_url) {
+      throw new Error("person_image_url is required.");
     }
     
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
 
-    const personImagePart = await downloadImageAsPart(supabase, person_image_url);
-    const garmentImagePart = await downloadImageAsPart(supabase, garment_image_url);
-
     const userParts: Part[] = [
         { text: "Person Image:" },
-        personImagePart,
-        { text: "Garment Image:" },
-        garmentImagePart,
-        { text: `User instructions: ${user_prompt || 'None'}` }
+        await downloadImageAsPart(supabase, person_image_url),
     ];
+
+    if (garment_image_url) {
+        userParts.push({ text: "Garment Image:" });
+        userParts.push(await downloadImageAsPart(supabase, garment_image_url));
+    }
+
+    userParts.push({ text: `User instructions: ${user_prompt || 'None'}` });
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
     const result = await ai.models.generateContent({
@@ -164,7 +155,7 @@ serve(async (req) => {
         const new_y_min = Math.max(0, centerY - newHeight / 2);
         const new_x_max = Math.min(1000, centerX + newWidth / 2);
         const new_y_max = Math.min(1000, centerY + newHeight / 2);
-        responseJson.masks[0].box_2d = [new_y_min, new_x_min, new_y_max, new_x_max];
+        responseJson.masks[0].box_2d = [new_y_min, new_x_min, new_y_max, new_y_max];
     }
 
     return new Response(JSON.stringify({ success: true, result: responseJson }), {

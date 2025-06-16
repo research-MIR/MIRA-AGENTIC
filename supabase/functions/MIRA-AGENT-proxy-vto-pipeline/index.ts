@@ -15,7 +15,7 @@ serve(async (req) => {
   }
 
   try {
-    const { person_image_url, garment_image_url, user_id, mode } = await req.json();
+    const { person_image_url, garment_image_url, user_id, mode, optional_details } = await req.json();
     if (!person_image_url || !garment_image_url || !user_id) {
       throw new Error("person_image_url, garment_image_url, and user_id are required.");
     }
@@ -30,7 +30,8 @@ serve(async (req) => {
         source_garment_image_url: garment_image_url,
         status: 'pending_segmentation',
         context: {
-          mode: mode || 'edit' // Default to 'edit' if not provided
+          mode: mode || 'edit',
+          optional_details: optional_details || null
         }
       })
       .select('id')
