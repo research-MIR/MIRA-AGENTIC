@@ -16,6 +16,8 @@ import { SegmentationMask } from "@/components/SegmentationMask";
 import { RecentJobThumbnail } from "@/components/RecentJobThumbnail";
 import { useSecureImage } from "@/hooks/useSecureImage";
 import { useImagePreview } from "@/context/ImagePreviewContext";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 
 interface VtoPipelineJob {
   id: string;
@@ -31,6 +33,9 @@ interface VtoPipelineJob {
   bitstudio_job?: {
     final_image_url?: string;
   };
+  context?: {
+    mode: 'edit' | 'vton';
+  }
 }
 
 const ImageUploader = ({ onFileSelect, title, t, imageUrl, onClear }: { onFileSelect: (file: File) => void, title: string, t: any, imageUrl: string | null, onClear: () => void }) => {
@@ -132,6 +137,7 @@ const VirtualTryOn = () => {
   const [garmentImageFile, setGarmentImageFile] = useState<File | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [mode, setMode] = useState<'edit' | 'vton'>('edit');
   const channelRef = useRef<RealtimeChannel | null>(null);
 
   const fetchVtoJobs = async () => {
@@ -210,15 +216,15 @@ const VirtualTryOn = () => {
       const garment_image_url = await uploadFileAndGetUrl(garmentImageFile);
       if (!person_image_url || !garment_image_url) throw new Error("Failed to upload one or both images.");
       
-      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-vto-pipeline', { body: { person_image_url, garment_image_url, user_id: session?.user.id } });
+      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-vto-pipeline', { body: { person_image_url, garment_image_url, user_id: session?.user.id, mode } });
       if (error) throw error;
       
-      // Optimistic UI update
       const newJobPlaceholder: VtoPipelineJob = {
         id: data.jobId,
         status: 'pending_segmentation',
         source_person_image_url: person_image_url,
         source_garment_image_url: garment_image_url,
+        context: { mode }
       };
       queryClient.setQueryData(['vtoPipelineJobs', session?.user?.id], (oldData: VtoPipelineJob[] | undefined) => {
         return oldData ? [newJobPlaceholder, ...oldData] : [newJobPlaceholder];
@@ -248,6 +254,7 @@ const VirtualTryOn = () => {
     setPersonImageFile(null);
     setGarmentImageFile(null);
     setSelectedJobId(job.id);
+    setMode(job.context?.mode || 'edit');
   };
 
   const renderJobResult = (job: VtoPipelineJob) => {
@@ -301,6 +308,24 @@ const VirtualTryOn = () => {
               ) : (
                 <ImageUploader onFileSelect={setGarmentImageFile} title="Garment Image" t={t} imageUrl={garmentImageUrl} onClear={() => setGarmentImageFile(null)} />
               )}
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader><CardTitle>2. Select Mode</CardTitle></CardHeader>
+            <CardContent>
+              <div className="flex items-center justify-between rounded-lg border p-3 shadow-sm">
+                <div className="space-y-0.5">
+                  <Label>Mode: <span className="font-bold">{mode === 'edit' ? 'Creative Edit' : 'Virtual Try-On'}</span></Label>
+                  <p className="text-[0.8rem] text-muted-foreground">
+                    {mode === 'edit' ? 'Re-imagine the scene with a new pose.' : 'Swap the garment on the existing pose.'}
+                  </p>
+                </div>
+                <Switch
+                  checked={mode === 'vton'}
+                  onCheckedChange={(checked) => setMode(checked ? 'vton' : 'edit')}
+                  disabled={!!selectedJobId}
+                />
+              </div>
             </CardContent>
           </Card>
           {!selectedJobId && (

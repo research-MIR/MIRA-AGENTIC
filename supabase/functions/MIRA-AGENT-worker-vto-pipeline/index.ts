@@ -24,22 +24,38 @@ serve(async (req) => {
 
     if (fetchError) throw fetchError;
 
+    const mode = job.context?.mode || 'edit';
+
     switch (job.status) {
       case 'pending_segmentation': {
-        console.log(`[VTO Worker][${job_id}] Starting segmentation...`);
-        const { data: segResult, error: segError } = await supabase.functions.invoke('MIRA-AGENT-worker-segmentation', {
-            body: { 
-                person_image_url: job.source_person_image_url,
-                garment_image_url: job.source_garment_image_url,
-                user_prompt: "Segment the main garment on the person."
-            }
-        });
-        if(segError) throw segError;
+        console.log(`[VTO Worker][${job_id}] Starting segmentation in '${mode}' mode...`);
+        
+        if (mode === 'vton') {
+            // In VTON mode, we skip segmentation and use a full-frame box.
+            const fullFrameSegmentation = {
+                description: "Full frame for virtual try-on.",
+                masks: [{ box_2d: [0, 0, 1000, 1000], label: "Full Frame" }]
+            };
+            await supabase.from('mira-agent-vto-pipeline-jobs').update({
+                status: 'pending_crop',
+                segmentation_result: fullFrameSegmentation
+            }).eq('id', job_id);
+        } else {
+            // In 'edit' mode, run the detailed segmentation worker.
+            const { data: segResult, error: segError } = await supabase.functions.invoke('MIRA-AGENT-worker-segmentation', {
+                body: { 
+                    person_image_url: job.source_person_image_url,
+                    garment_image_url: job.source_garment_image_url,
+                    user_prompt: "Segment the main garment on the person."
+                }
+            });
+            if(segError) throw segError;
 
-        await supabase.from('mira-agent-vto-pipeline-jobs').update({
-            status: 'pending_crop',
-            segmentation_result: segResult.result
-        }).eq('id', job_id);
+            await supabase.from('mira-agent-vto-pipeline-jobs').update({
+                status: 'pending_crop',
+                segmentation_result: segResult.result
+            }).eq('id', job_id);
+        }
         supabase.functions.invoke('MIRA-AGENT-worker-vto-pipeline', { body: { job_id } });
         break;
       }
@@ -69,14 +85,25 @@ serve(async (req) => {
         break;
       }
       case 'pending_prompt_generation': {
-        console.log(`[VTO Worker][${job_id}] Starting prompt generation...`);
+        console.log(`[VTO Worker][${job_id}] Starting prompt generation in '${mode}' mode...`);
         if (!job.cropped_image_url) throw new Error("Cropped image URL is missing for prompt generation step.");
 
-        const { data: promptResult, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-worker-vto-prompt-generator', {
-            body: {
+        let promptWorkerName;
+        let promptWorkerPayload;
+
+        if (mode === 'vton') {
+            promptWorkerName = 'MIRA-AGENT-worker-vto-garment-describer';
+            promptWorkerPayload = { garment_image_url: job.source_garment_image_url };
+        } else {
+            promptWorkerName = 'MIRA-AGENT-worker-vto-prompt-generator';
+            promptWorkerPayload = {
                 person_image_url: job.cropped_image_url,
                 garment_image_url: job.source_garment_image_url
-            }
+            };
+        }
+
+        const { data: promptResult, error: promptError } = await supabase.functions.invoke(promptWorkerName, {
+            body: promptWorkerPayload
         });
         if (promptError) throw promptError;
 
