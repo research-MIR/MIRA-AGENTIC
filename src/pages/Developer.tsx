@@ -6,7 +6,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { useLanguage } from "@/context/LanguageContext";
 import { Loader2, AlertTriangle, Image as ImageIcon } from "lucide-react";
-import { RealtimeChannel } from "@supabase/supabase-js";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -25,13 +24,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SegmentationMask } from "@/components/SegmentationMask";
 
-interface ComfyJob {
-  id: string;
-  status: 'queued' | 'processing' | 'complete' | 'failed';
-  final_result?: { publicUrl: string };
-  error_message?: string;
-}
-
 const formatBytes = (bytes: number, decimals = 2) => {
   if (bytes === 0) return '0 Bytes';
   const k = 1024;
@@ -44,14 +36,8 @@ const formatBytes = (bytes: number, decimals = 2) => {
 const Developer = () => {
   const { supabase, session } = useSession();
   const { t } = useLanguage();
-  const channelRef = useRef<RealtimeChannel | null>(null);
   const queryClient = useQueryClient();
   const [isCancelling, setIsCancelling] = useState(false);
-
-  // ComfyUI State
-  const [activeJob, setActiveJob] = useState<ComfyJob | null>(null);
-  const [comfyPrompt, setComfyPrompt] = useState("");
-  const [sourceImage, setSourceImage] = useState<File | null>(null);
 
   // Image Optimizer State
   const [originalImage, setOriginalImage] = useState<File | null>(null);
@@ -59,25 +45,23 @@ const Developer = () => {
   const [quality, setQuality] = useState(80);
 
   // Segmentation State
-  const [segmentationImage, setSegmentationImage] = useState<File | null>(null);
+  const [segPersonImage, setSegPersonImage] = useState<File | null>(null);
+  const [segGarmentImage, setSegGarmentImage] = useState<File | null>(null);
+  const [segPrompt, setSegPrompt] = useState("Segment the main garment on the person.");
   const [segmentationResult, setSegmentationResult] = useState<any | null>(null);
   const [isSegmenting, setIsSegmenting] = useState(false);
 
   const originalImageUrl = originalImage ? URL.createObjectURL(originalImage) : null;
   const optimizedImageUrl = optimizedImage ? URL.createObjectURL(optimizedImage) : null;
-  const segmentationImageUrl = segmentationImage ? URL.createObjectURL(segmentationImage) : null;
+  const segPersonImageUrl = segPersonImage ? URL.createObjectURL(segPersonImage) : null;
 
   useEffect(() => {
     return () => {
-      if (channelRef.current) {
-        console.log("[DevPage] Cleaning up Realtime channel.");
-        supabase.removeChannel(channelRef.current);
-      }
       if (originalImageUrl) URL.revokeObjectURL(originalImageUrl);
       if (optimizedImageUrl) URL.revokeObjectURL(optimizedImageUrl);
-      if (segmentationImageUrl) URL.revokeObjectURL(segmentationImageUrl);
+      if (segPersonImageUrl) URL.revokeObjectURL(segPersonImageUrl);
     };
-  }, [supabase, originalImageUrl, optimizedImageUrl, segmentationImageUrl]);
+  }, [originalImageUrl, optimizedImageUrl, segPersonImageUrl]);
 
   const handleImageTestChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -91,71 +75,6 @@ const Developer = () => {
       optimizeImage(originalImage, quality / 100).then(setOptimizedImage);
     }
   }, [originalImage, quality]);
-
-  const handleQueuePrompt = async () => {
-    if (!session?.user) return showError("You must be logged in to queue a job.");
-    if (!sourceImage) return showError("A source image is required for this workflow.");
-    if (!comfyPrompt.trim()) return showError("A prompt is required for this workflow.");
-
-    setActiveJob({ id: '', status: 'queued' });
-    let toastId = showLoading("Uploading source image...");
-
-    try {
-      const uploadFormData = new FormData();
-      uploadFormData.append('image', sourceImage);
-      
-      const { data: uploadResult, error: uploadError } = await supabase.functions.invoke('MIRA-AGENT-proxy-comfyui-upload', {
-          body: uploadFormData
-      });
-
-      if (uploadError) throw new Error(`Image upload failed: ${uploadError.message}`);
-      const uploadedFilename = uploadResult.name;
-      if (!uploadedFilename) throw new Error("ComfyUI did not return a filename for the uploaded image.");
-      
-      dismissToast(toastId);
-      toastId = showLoading("Sending prompt to ComfyUI...");
-
-      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-comfyui', {
-        body: {
-          prompt_text: comfyPrompt,
-          image_filename: uploadedFilename,
-          invoker_user_id: session.user.id
-        }
-      });
-
-      if (error) throw error;
-      
-      const { jobId } = data;
-      if (!jobId) throw new Error("Did not receive a job ID from the server.");
-      
-      dismissToast(toastId);
-      showSuccess("ComfyUI job queued. Waiting for result...");
-      setActiveJob({ id: jobId, status: 'queued' });
-
-      if (channelRef.current) supabase.removeChannel(channelRef.current);
-
-      channelRef.current = supabase.channel(`comfyui-job-${jobId}`)
-        .on<ComfyJob>(
-          'postgres_changes',
-          { event: 'UPDATE', schema: 'public', table: 'mira-agent-comfyui-jobs', filter: `id=eq.${jobId}` },
-          (payload) => {
-            console.log('[DevPage] Realtime update received:', payload.new);
-            setActiveJob(payload.new as ComfyJob);
-            if (payload.new.status === 'complete' || payload.new.status === 'failed') {
-              supabase.removeChannel(channelRef.current!);
-              channelRef.current = null;
-            }
-          }
-        )
-        .subscribe();
-
-    } catch (err: any) {
-      setActiveJob(null);
-      showError(`Failed to queue prompt: ${err.message}`);
-      console.error("[DevPage] Error in handleQueuePrompt:", err);
-      dismissToast(toastId);
-    }
-  };
 
   const handleCancelAllJobs = async () => {
     if (!session?.user) return showError("You must be logged in.");
@@ -179,65 +98,46 @@ const Developer = () => {
     }
   };
 
-  const handleSegmentation = async () => {
-    if (!segmentationImage) return showError("Please select an image for segmentation.");
-    if (!session?.user) return showError("You must be logged in.");
-    setIsSegmenting(true);
-    setSegmentationResult(null);
-    let toastId = showLoading("Optimizing image...");
-
-    try {
-        const optimizedFile = await optimizeImage(segmentationImage);
-        dismissToast(toastId);
-        toastId = showLoading("Sending image to segmentation AI...");
-
-        const reader = new FileReader();
-        reader.readAsDataURL(optimizedFile);
-        reader.onloadend = async () => {
-            const base64String = reader.result as string;
-            const base64Data = base64String.split(',')[1];
-
-            const { data, error } = await supabase.functions.invoke('MIRA-AGENT-segment-ai', {
-                body: {
-                    base64_image_data: base64Data,
-                    mime_type: optimizedFile.type,
-                    user_id: session.user.id
-                }
-            });
-
-            if (error) throw error;
-
-            setSegmentationResult(data);
-            dismissToast(toastId);
-            showSuccess("Segmentation analysis complete.");
-        };
-        reader.onerror = (error) => {
-            throw error;
-        };
-    } catch (err: any) {
-        showError(`Segmentation failed: ${err.message}`);
-        dismissToast(toastId);
-    } finally {
-        setIsSegmenting(false);
-    }
+  const uploadFileAndGetUrl = async (file: File | null): Promise<string | null> => {
+    if (!file) return null;
+    if (!session?.user) throw new Error("User session not found.");
+    const filePath = `${session.user.id}/dev-test/${Date.now()}-${file.name}`;
+    const { error } = await supabase.storage.from('mira-agent-user-uploads').upload(filePath, file, { upsert: true });
+    if (error) throw new Error(`Upload failed: ${error.message}`);
+    const { data: { publicUrl } } = supabase.storage.from('mira-agent-user-uploads').getPublicUrl(filePath);
+    return publicUrl;
   };
 
-  const renderJobStatus = () => {
-    if (!activeJob) return <p className="text-center text-muted-foreground">{t.resultsPlaceholder}</p>;
+  const handleSegmentationTest = async () => {
+    if (!segPersonImage) return showError("Please select a person image for segmentation.");
+    setIsSegmenting(true);
+    setSegmentationResult(null);
+    const toastId = showLoading("Running segmentation test...");
 
-    switch (activeJob.status) {
-      case 'queued':
-        return <div className="flex items-center justify-center"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Waiting in queue...</div>;
-      case 'processing':
-        return <div className="flex items-center justify-center"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating image...</div>;
-      case 'complete':
-        return activeJob.final_result?.publicUrl ? (
-          <img src={activeJob.final_result.publicUrl} alt="Generated by ComfyUI" className="max-w-full mx-auto rounded-lg" />
-        ) : <p>Job complete, but no image URL found.</p>;
-      case 'failed':
-        return <p className="text-destructive">Job failed: {activeJob.error_message}</p>;
-      default:
-        return null;
+    try {
+      const person_image_url = await uploadFileAndGetUrl(segPersonImage);
+      const garment_image_url = await uploadFileAndGetUrl(segGarmentImage);
+
+      if (!person_image_url) throw new Error("Failed to upload person image.");
+
+      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-worker-segmentation-test', {
+        body: {
+          person_image_url,
+          garment_image_url,
+          user_prompt: segPrompt
+        }
+      });
+
+      if (error) throw error;
+
+      setSegmentationResult(data.result);
+      dismissToast(toastId);
+      showSuccess("Segmentation analysis complete.");
+    } catch (err: any) {
+      showError(`Segmentation failed: ${err.message}`);
+      dismissToast(toastId);
+    } finally {
+      setIsSegmenting(false);
     }
   };
 
@@ -250,27 +150,30 @@ const Developer = () => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         <div className="space-y-4">
           <Card>
-            <CardHeader><CardTitle>AI Segmentation Tester</CardTitle></CardHeader>
+            <CardHeader><CardTitle>AI Segmentation Tester (Test Environment)</CardTitle></CardHeader>
             <CardContent className="space-y-4">
-                <p className="text-sm text-muted-foreground">Upload an image to get a JSON description from the AI.</p>
-                <Input
-                    id="segmentation-upload"
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => {
-                      setSegmentationImage(e.target.files?.[0] || null);
-                      setSegmentationResult(null);
-                    }}
-                />
-                {segmentationImageUrl && (
+                <p className="text-sm text-muted-foreground">Upload images and a prompt to test the isolated segmentation function.</p>
+                <div>
+                  <Label htmlFor="seg-person-upload">Person Image</Label>
+                  <Input id="seg-person-upload" type="file" accept="image/*" onChange={(e) => setSegPersonImage(e.target.files?.[0] || null)} />
+                </div>
+                <div>
+                  <Label htmlFor="seg-garment-upload">Garment Image (Optional)</Label>
+                  <Input id="seg-garment-upload" type="file" accept="image/*" onChange={(e) => setSegGarmentImage(e.target.files?.[0] || null)} />
+                </div>
+                <div>
+                  <Label htmlFor="seg-prompt">Segmentation Prompt</Label>
+                  <Textarea id="seg-prompt" value={segPrompt} onChange={(e) => setSegPrompt(e.target.value)} />
+                </div>
+                {segPersonImageUrl && (
                   <div className="relative w-full max-w-md mx-auto">
-                    <img src={segmentationImageUrl} alt="Segmentation Source" className="w-full h-auto rounded-md" />
+                    <img src={segPersonImageUrl} alt="Segmentation Source" className="w-full h-auto rounded-md" />
                     {segmentationResult && <SegmentationMask masks={segmentationResult.masks} />}
                   </div>
                 )}
-                <Button onClick={handleSegmentation} disabled={isSegmenting || !segmentationImage}>
+                <Button onClick={handleSegmentationTest} disabled={isSegmenting || !segPersonImage}>
                     {isSegmenting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    Analyze Image
+                    Run Segmentation Test
                 </Button>
                 {segmentationResult && (
                     <div>
@@ -302,7 +205,7 @@ const Developer = () => {
                       <p className="text-sm text-center text-muted-foreground mt-1">{formatBytes(originalImage.size)}</p>
                     </div>
                     <div>
-                      <h4 className="font-semibold text-center">Optimized (WebP)</h4>
+                      <h4 className="font-semibold text-center">Optimized (PNG)</h4>
                       {optimizedImageUrl && <img src={optimizedImageUrl} alt="Optimized" className="w-full rounded-md mt-2" />}
                       {optimizedImage && <p className="text-sm text-center text-muted-foreground mt-1">{formatBytes(optimizedImage.size)}</p>}
                     </div>
@@ -311,7 +214,8 @@ const Developer = () => {
               )}
             </CardContent>
           </Card>
-
+        </div>
+        <div>
           <Card>
             <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-destructive">
@@ -345,14 +249,6 @@ const Developer = () => {
                         </AlertDialogFooter>
                     </AlertDialogContent>
                 </AlertDialog>
-            </CardContent>
-          </Card>
-        </div>
-        <div>
-          <Card>
-            <CardHeader><CardTitle>{t.results}</CardTitle></CardHeader>
-            <CardContent className="min-h-[300px] flex items-center justify-center">
-              {renderJobStatus()}
             </CardContent>
           </Card>
         </div>

@@ -56,8 +56,8 @@ export const optimizeImage = (file: File, quality = 0.92): Promise<File> => {
     const originalSize = file.size;
     const MAX_DIMENSION = 1440;
 
-    if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type)) {
-      console.log(`[ImageOptimizer] Skipped optimization for ${file.type}. Passing through original file.`);
+    if (!file.type.startsWith('image/')) {
+      console.log(`[ImageOptimizer] Skipped optimization for non-image file: ${file.type}. Passing through original file.`);
       resolve(file);
       return;
     }
@@ -101,7 +101,7 @@ export const optimizeImage = (file: File, quality = 0.92): Promise<File> => {
             resolve(newFile);
           },
           'image/png',
-          quality // For PNG, this is more about compression level, but the API is the same.
+          quality
         );
       };
       img.onerror = (error) => reject(error);
