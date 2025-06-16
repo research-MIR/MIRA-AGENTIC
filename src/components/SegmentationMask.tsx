@@ -5,12 +5,10 @@ interface MaskItem {
 
 interface SegmentationMaskProps {
   masks: MaskItem[];
-  width: number;
-  height: number;
 }
 
-export const SegmentationMask = ({ masks, width, height }: SegmentationMaskProps) => {
-  if (!masks || masks.length === 0 || !width || !height) {
+export const SegmentationMask = ({ masks }: SegmentationMaskProps) => {
+  if (!masks || masks.length === 0) {
     return null;
   }
 

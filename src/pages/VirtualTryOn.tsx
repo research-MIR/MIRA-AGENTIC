@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { useDropzone } from "@/hooks/useDropzone";
 import { optimizeImage } from "@/lib/utils";
 import { RealtimeChannel } from "@supabase/supabase-js";
+import { SegmentationMask } from "@/components/SegmentationMask";
 
 interface MaskItem {
   box_2d: [number, number, number, number];
@@ -22,6 +23,8 @@ interface SegmentationResult {
   description: string;
   masks: MaskItem[];
 }
+
+type DisplayStep = 'initial' | 'mask' | 'crop' | 'pasted';
 
 const ImageUploader = ({ onFileSelect, title, isDraggingOver, t }: { onFileSelect: (file: File) => void, title: string, isDraggingOver: boolean, t: any }) => {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -70,6 +73,7 @@ const VirtualTryOn = () => {
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [croppedImageUrl, setCroppedImageUrl] = useState<string | null>(null);
   const [cropMetadata, setCropMetadata] = useState<MaskItem | null>(null);
+  const [displayStep, setDisplayStep] = useState<DisplayStep>('initial');
   const channelRef = useRef<RealtimeChannel | null>(null);
 
   const personImageUrl = useMemo(() => personImageFile ? URL.createObjectURL(personImageFile) : null, [personImageFile]);
@@ -94,7 +98,6 @@ const VirtualTryOn = () => {
 
         ctx.drawImage(img, cropX, cropY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
 
-        // Make it black and white for testing
         const imageData = ctx.getImageData(0, 0, cropWidth, cropHeight);
         const data = imageData.data;
         for (let i = 0; i < data.length; i += 4) {
@@ -113,25 +116,14 @@ const VirtualTryOn = () => {
 
   useEffect(() => {
     if (!activeJobId) {
-      if (channelRef.current) {
-        supabase.removeChannel(channelRef.current);
-        channelRef.current = null;
-      }
+      if (channelRef.current) supabase.removeChannel(channelRef.current);
       return;
     }
-
-    if (channelRef.current?.topic === `realtime:public:mira-agent-segmentation-jobs:id=eq.${activeJobId}`) {
-      return;
-    }
-
-    if (channelRef.current) {
-      supabase.removeChannel(channelRef.current);
-    }
+    if (channelRef.current?.topic === `realtime:public:mira-agent-segmentation-jobs:id=eq.${activeJobId}`) return;
+    if (channelRef.current) supabase.removeChannel(channelRef.current);
 
     const channel = supabase.channel(`segmentation-job-${activeJobId}`)
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'mira-agent-segmentation-jobs', filter: `id=eq.${activeJobId}` },
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'mira-agent-segmentation-jobs', filter: `id=eq.${activeJobId}` },
         (payload) => {
           const job = payload.new;
           if (job.status === 'complete') {
@@ -139,34 +131,22 @@ const VirtualTryOn = () => {
             setIsLoading(false);
             showSuccess("Analysis complete!");
             setActiveJobId(null);
-            if (job.result.masks && job.result.masks.length > 0 && personImageUrl) {
-              processImageCrop(personImageUrl, job.result.masks[0]);
-            }
+            setDisplayStep('mask');
           } else if (job.status === 'failed') {
             showError(`Analysis failed: ${job.error_message}`);
             setIsLoading(false);
             setActiveJobId(null);
           }
         }
-      )
-      .subscribe();
-    
+      ).subscribe();
     channelRef.current = channel;
-
-    return () => {
-      if (channelRef.current) {
-        supabase.removeChannel(channelRef.current);
-        channelRef.current = null;
-      }
-    };
-  }, [activeJobId, supabase, personImageUrl, processImageCrop]);
+    return () => { if (channelRef.current) supabase.removeChannel(channelRef.current); };
+  }, [activeJobId, supabase]);
 
   const uploadFileAndGetUrl = async (file: File | null, bucket: string): Promise<string | null> => {
     if (!file) return null;
     if (!session?.user) throw new Error("User session not found.");
-    
     const optimizedFile = await optimizeImage(file);
-
     const filePath = `${session.user.id}/${Date.now()}-${optimizedFile.name}`;
     const { error: uploadError } = await supabase.storage.from(bucket).upload(filePath, optimizedFile);
     if (uploadError) throw new Error(`Failed to upload file: ${uploadError.message}`);
@@ -182,46 +162,28 @@ const VirtualTryOn = () => {
     setSegmentationResult(null);
     setCroppedImageUrl(null);
     setCropMetadata(null);
-    if (type === 'person') {
-      setPersonImageFile(file);
-    } else {
-      setGarmentImageFile(file);
-    }
+    setDisplayStep('initial');
+    if (type === 'person') setPersonImageFile(file);
+    else setGarmentImageFile(file);
   };
 
   const handleSegment = async () => {
-    if (!personImageFile || !garmentImageFile) {
-      return showError("Please upload both a person and a garment image.");
-    }
+    if (!personImageFile || !garmentImageFile) return showError("Please upload both a person and a garment image.");
     setIsLoading(true);
     setSegmentationResult(null);
     setCroppedImageUrl(null);
     setCropMetadata(null);
+    setDisplayStep('initial');
     const toastId = showLoading("Uploading images and queueing job...");
-
     try {
       const person_image_url = await uploadFileAndGetUrl(personImageFile, 'mira-agent-user-uploads');
       const garment_image_url = await uploadFileAndGetUrl(garmentImageFile, 'mira-agent-user-uploads');
-
-      if (!person_image_url || !garment_image_url) {
-        throw new Error("Failed to upload one or both images.");
-      }
-      
-      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-segmentation', {
-        body: { 
-          person_image_url, 
-          garment_image_url, 
-          user_prompt: prompt,
-          user_id: session?.user.id
-        }
-      });
-
+      if (!person_image_url || !garment_image_url) throw new Error("Failed to upload one or both images.");
+      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-segmentation', { body: { person_image_url, garment_image_url, user_prompt: prompt, user_id: session?.user.id } });
       if (error) throw error;
-
       setActiveJobId(data.jobId);
       dismissToast(toastId);
       showSuccess("Job queued! The result will appear below when ready.");
-
     } catch (err: any) {
       showError(err.message);
       setIsLoading(false);
@@ -229,62 +191,37 @@ const VirtualTryOn = () => {
     }
   };
 
+  const handleStepChange = (step: DisplayStep) => {
+    if (step === 'crop' || step === 'pasted') {
+      if (!croppedImageUrl && segmentationResult?.masks?.[0] && personImageUrl) {
+        processImageCrop(personImageUrl, segmentationResult.masks[0]);
+      }
+    }
+    setDisplayStep(step);
+  };
+
   return (
     <div className="p-4 md:p-8 h-screen overflow-y-auto">
-      <header className="pb-4 mb-8 border-b">
-        <h1 className="text-3xl font-bold">{t.virtualTryOn}</h1>
-        <p className="text-muted-foreground">Describe where a garment would fit on a person.</p>
-      </header>
-
+      <header className="pb-4 mb-8 border-b"><h1 className="text-3xl font-bold">{t.virtualTryOn}</h1><p className="text-muted-foreground">Describe where a garment would fit on a person.</p></header>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* Controls */}
         <div className="space-y-6">
-          <Card>
-            <CardHeader><CardTitle>1. Upload Images</CardTitle></CardHeader>
-            <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <ImageUploader onFileSelect={(file) => handleFileSelect(file, 'person')} title="Person Image" isDraggingOver={isPersonDragging} t={t} />
-              <ImageUploader onFileSelect={(file) => handleFileSelect(file, 'garment')} title="Garment Image" isDraggingOver={isGarmentDragging} t={t} />
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader><CardTitle>2. Add Instructions (Optional)</CardTitle></CardHeader>
-            <CardContent>
-              <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="e.g., 'Focus on how the collar sits.'" />
-            </CardContent>
-          </Card>
-          <Button onClick={handleSegment} disabled={isLoading} className="w-full">
-            {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
-            Analyze Placement
-          </Button>
+          <Card><CardHeader><CardTitle>1. Upload Images</CardTitle></CardHeader><CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4"><ImageUploader onFileSelect={(file) => handleFileSelect(file, 'person')} title="Person Image" isDraggingOver={isPersonDragging} t={t} /><ImageUploader onFileSelect={(file) => handleFileSelect(file, 'garment')} title="Garment Image" isDraggingOver={isGarmentDragging} t={t} /></CardContent></Card>
+          <Card><CardHeader><CardTitle>2. Add Instructions (Optional)</CardTitle></CardHeader><CardContent><Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="e.g., 'Focus on how the collar sits.'" /></CardContent></Card>
+          <Button onClick={handleSegment} disabled={isLoading} className="w-full">{isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}Analyze Placement</Button>
         </div>
-
-        {/* Results */}
         <div className="space-y-6">
           <Card>
             <CardHeader><CardTitle>Results</CardTitle></CardHeader>
             <CardContent>
               <div className="grid grid-cols-2 gap-4 mb-4">
-                <div className="relative">
+                <div>
                   <h3 className="font-semibold text-center mb-2">Person</h3>
                   {personImageUrl ? (
                     <div className="relative">
-                      <img 
-                        src={personImageUrl} 
-                        alt="Person" 
-                        className="w-full rounded-md"
-                      />
-                      {croppedImageUrl && cropMetadata && (
-                        <img
-                          src={croppedImageUrl}
-                          alt="Processed Crop"
-                          className="absolute pointer-events-none"
-                          style={{
-                            top: `${(cropMetadata.box_2d[0] / 1000) * 100}%`,
-                            left: `${(cropMetadata.box_2d[1] / 1000) * 100}%`,
-                            width: `${((cropMetadata.box_2d[3] - cropMetadata.box_2d[1]) / 1000) * 100}%`,
-                            height: `${((cropMetadata.box_2d[2] - cropMetadata.box_2d[0]) / 1000) * 100}%`,
-                          }}
-                        />
+                      <img src={personImageUrl} alt="Person" className="w-full rounded-md" />
+                      {displayStep === 'mask' && segmentationResult && <SegmentationMask masks={segmentationResult.masks} />}
+                      {displayStep === 'pasted' && croppedImageUrl && cropMetadata && (
+                        <img src={croppedImageUrl} alt="Processed Crop" className="absolute pointer-events-none" style={{ top: `${(cropMetadata.box_2d[0] / 1000) * 100}%`, left: `${(cropMetadata.box_2d[1] / 1000) * 100}%`, width: `${((cropMetadata.box_2d[3] - cropMetadata.box_2d[1]) / 1000) * 100}%`, height: `${((cropMetadata.box_2d[2] - cropMetadata.box_2d[0]) / 1000) * 100}%` }} />
                       )}
                     </div>
                   ) : <div className="aspect-square bg-muted rounded-md flex items-center justify-center"><ImageIcon className="h-12 w-12 text-muted-foreground" /></div>}
@@ -294,18 +231,24 @@ const VirtualTryOn = () => {
                   {garmentImageUrl ? <img src={garmentImageUrl} alt="Garment" className="w-full rounded-md" /> : <div className="aspect-square bg-muted rounded-md flex items-center justify-center"><ImageIcon className="h-12 w-12 text-muted-foreground" /></div>}
                 </div>
               </div>
-              {isLoading && (
-                <div className="text-center text-muted-foreground py-4">
-                  <Loader2 className="h-8 w-8 animate-spin mx-auto" />
-                  <p className="mt-2">Analyzing images... this may take a moment.</p>
-                </div>
-              )}
+              {isLoading && <div className="text-center text-muted-foreground py-4"><Loader2 className="h-8 w-8 animate-spin mx-auto" /><p className="mt-2">Analyzing images... this may take a moment.</p></div>}
               {segmentationResult && (
-                <div>
-                  <Label>AI Description</Label>
-                  <div className="mt-2 p-3 bg-muted rounded-md text-sm">
-                    <p>{segmentationResult.description}</p>
+                <div className="space-y-4">
+                  <div><Label>AI Description</Label><div className="mt-2 p-3 bg-muted rounded-md text-sm"><p>{segmentationResult.description}</p></div></div>
+                  <div>
+                    <Label>Visualization Step</Label>
+                    <div className="flex gap-2 mt-2">
+                      <Button variant={displayStep === 'mask' ? 'default' : 'outline'} onClick={() => handleStepChange('mask')}>Mask</Button>
+                      <Button variant={displayStep === 'crop' ? 'default' : 'outline'} onClick={() => handleStepChange('crop')}>Crop</Button>
+                      <Button variant={displayStep === 'pasted' ? 'default' : 'outline'} onClick={() => handleStepChange('pasted')}>Paste</Button>
+                    </div>
                   </div>
+                  {displayStep === 'crop' && croppedImageUrl && (
+                    <div>
+                      <h3 className="font-semibold text-center mb-2">Isolated Crop</h3>
+                      <img src={croppedImageUrl} alt="Isolated Crop" className="w-auto h-auto max-w-full max-h-64 mx-auto rounded-md" />
+                    </div>
+                  )}
                 </div>
               )}
             </CardContent>
