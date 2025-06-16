@@ -13,6 +13,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Skeleton } from "@/components/ui/skeleton";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { SegmentationMask } from "@/components/SegmentationMask";
+import { RecentJobThumbnail } from "@/components/RecentJobThumbnail";
 
 interface VtoPipelineJob {
   id: string;
@@ -84,8 +85,8 @@ const VirtualTryOn = () => {
   const [selectedJob, setSelectedJob] = useState<VtoPipelineJob | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
 
-  const personImageUrl = useMemo(() => personImageFile ? URL.createObjectURL(personImageFile) : (selectedJob ? selectedJob.source_person_image_url : null), [personImageFile, selectedJob]);
-  const garmentImageUrl = useMemo(() => garmentImageFile ? URL.createObjectURL(garmentImageFile) : (selectedJob ? selectedJob.source_garment_image_url : null), [garmentImageFile, selectedJob]);
+  const [personImageBlobUrl, setPersonImageBlobUrl] = useState<string | null>(null);
+  const [garmentImageBlobUrl, setGarmentImageBlobUrl] = useState<string | null>(null);
 
   const { data: recentJobs, isLoading: isLoadingRecentJobs } = useQuery<VtoPipelineJob[]>({
     queryKey: ['vtoPipelineJobs', session?.user?.id],
@@ -102,16 +103,6 @@ const VirtualTryOn = () => {
     },
     enabled: !!session?.user,
   });
-
-  useEffect(() => {
-    if (selectedJob) {
-      console.log(`[VirtualTryOn] Selected job changed to ${selectedJob.id}.`);
-      console.log(`[VirtualTryOn] Person Image URL: ${selectedJob.source_person_image_url}`);
-      console.log(`[VirtualTryOn] Garment Image URL: ${selectedJob.source_garment_image_url}`);
-    } else {
-      console.log('[VirtualTryOn] Selection cleared.');
-    }
-  }, [selectedJob]);
 
   useEffect(() => {
     if (!session?.user) return;
@@ -178,6 +169,56 @@ const VirtualTryOn = () => {
     setGarmentImageFile(null);
     setSelectedJob(job);
   };
+
+  useEffect(() => {
+    let personUrl: string | null = null;
+    let garmentUrl: string | null = null;
+
+    const fetchAndSetUrls = async () => {
+        if (selectedJob) {
+            setPersonImageBlobUrl(null);
+            setGarmentImageBlobUrl(null);
+
+            try {
+                const personPath = new URL(selectedJob.source_person_image_url).pathname.split('/public/mira-agent-user-uploads/')[1];
+                if (personPath) {
+                    const { data: personBlob, error: personError } = await supabase.storage.from('mira-agent-user-uploads').download(personPath);
+                    if (personError) throw personError;
+                    personUrl = URL.createObjectURL(personBlob);
+                    setPersonImageBlobUrl(personUrl);
+                }
+
+                const garmentPath = new URL(selectedJob.source_garment_image_url).pathname.split('/public/mira-agent-user-uploads/')[1];
+                if (garmentPath) {
+                    const { data: garmentBlob, error: garmentError } = await supabase.storage.from('mira-agent-user-uploads').download(garmentPath);
+                    if (garmentError) throw garmentError;
+                    garmentUrl = URL.createObjectURL(garmentBlob);
+                    setGarmentImageBlobUrl(garmentUrl);
+                }
+            } catch (error) {
+                console.error("Failed to load selected job images:", error);
+                showError("Could not load selected job images.");
+            }
+        }
+    };
+
+    fetchAndSetUrls();
+
+    return () => {
+        if (personUrl) URL.revokeObjectURL(personUrl);
+        if (garmentUrl) URL.revokeObjectURL(garmentUrl);
+    };
+  }, [selectedJob, supabase.storage]);
+
+  const personImageUrl = useMemo(() => {
+    if (selectedJob) return personImageBlobUrl;
+    return personImageFile ? URL.createObjectURL(personImageFile) : null;
+  }, [personImageFile, selectedJob, personImageBlobUrl]);
+
+  const garmentImageUrl = useMemo(() => {
+    if (selectedJob) return garmentImageBlobUrl;
+    return garmentImageFile ? URL.createObjectURL(garmentImageFile) : null;
+  }, [garmentImageFile, selectedJob, garmentImageBlobUrl]);
 
   const renderJobResult = (job: VtoPipelineJob) => {
     const isProcessing = ['pending_segmentation', 'pending_crop', 'pending_tryon', 'pending_composite'].includes(job.status);
@@ -250,9 +291,12 @@ const VirtualTryOn = () => {
           ) : recentJobs && recentJobs.length > 0 ? (
             <div className="flex gap-4 overflow-x-auto pb-2">
               {recentJobs.map(job => (
-                <button key={job.id} onClick={() => handleJobSelect(job)} className={cn("border-2 rounded-lg p-1 flex-shrink-0", selectedJob?.id === job.id ? "border-primary" : "border-transparent")}>
-                  <img src={job.source_garment_image_url} alt="Job source garment" className="w-24 h-24 object-cover rounded-md" />
-                </button>
+                <RecentJobThumbnail
+                  key={job.id}
+                  job={job}
+                  onClick={() => handleJobSelect(job)}
+                  isSelected={selectedJob?.id === job.id}
+                />
               ))}
             </div>
           ) : (

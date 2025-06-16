@@ -6,9 +6,7 @@ import { AlertTriangle } from 'lucide-react';
 
 interface ComfyJob {
   id: string;
-  metadata?: {
-    source_image_url?: string;
-  };
+  source_garment_image_url: string;
 }
 
 interface Props {
@@ -27,11 +25,8 @@ export const RecentJobThumbnail = ({ job, onClick, isSelected }: Props) => {
     let objectUrl: string | null = null;
 
     const fetchImage = async () => {
-      const sourceUrl = job.metadata?.source_image_url;
-      console.log(`[RecentJobThumbnail][${job.id}] Starting fetch. Source URL from metadata:`, sourceUrl);
-
+      const sourceUrl = job.source_garment_image_url;
       if (!sourceUrl) {
-        console.error(`[RecentJobThumbnail][${job.id}] No source_image_url in metadata.`);
         setIsLoading(false);
         setHasError(true);
         return;
@@ -50,7 +45,6 @@ export const RecentJobThumbnail = ({ job, onClick, isSelected }: Props) => {
         }
         
         const storagePath = decodeURIComponent(url.pathname.substring(pathStartIndex + bucketIdentifier.length));
-        console.log(`[RecentJobThumbnail][${job.id}] Parsed storage path:`, storagePath);
         
         const { data: blob, error } = await supabase.storage
           .from('mira-agent-user-uploads')
@@ -58,10 +52,8 @@ export const RecentJobThumbnail = ({ job, onClick, isSelected }: Props) => {
         
         if (error) throw error;
 
-        console.log(`[RecentJobThumbnail][${job.id}] Image blob downloaded successfully. Size: ${blob.size}`);
         objectUrl = URL.createObjectURL(blob);
         setImageUrl(objectUrl);
-        console.log(`[RecentJobThumbnail][${job.id}] Created object URL:`, objectUrl);
       } catch (err) {
         console.error(`[RecentJobThumbnail][${job.id}] Failed to load thumbnail. Error:`, err);
         setHasError(true);
@@ -77,7 +69,7 @@ export const RecentJobThumbnail = ({ job, onClick, isSelected }: Props) => {
         URL.revokeObjectURL(objectUrl);
       }
     };
-  }, [job.id, job.metadata?.source_image_url, supabase]);
+  }, [job.id, job.source_garment_image_url, supabase]);
 
   if (isLoading) {
     return <Skeleton className="w-24 h-24 flex-shrink-0" />;
