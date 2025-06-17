@@ -112,9 +112,28 @@ async function downloadImageAsPart(supabase: SupabaseClient, imageUrl: string): 
 }
 
 function extractJson(text: string): any {
-    const match = text.match(/```json\s*([\s\S]*?)\s*```/);
-    if (match && match[1]) { return JSON.parse(match[1]); }
-    try { return JSON.parse(text); } catch (e) {
+    // First, try to find the JSON within markdown code blocks
+    let match = text.match(/```json\s*([\s\S]*?)\s*```/);
+    let jsonText = match ? match[1] : text;
+
+    // If no markdown block found, try to find the first '{' and last '}'
+    if (!match) {
+        const firstBrace = jsonText.indexOf('{');
+        const lastBrace = jsonText.lastIndexOf('}');
+        if (firstBrace !== -1 && lastBrace > firstBrace) {
+            jsonText = jsonText.substring(firstBrace, lastBrace + 1);
+        }
+    }
+
+    // Clean the extracted text
+    jsonText = jsonText.trim();
+
+    try {
+        return JSON.parse(jsonText);
+    } catch (e) {
+        console.error("Final JSON parsing attempt failed.");
+        console.error("Cleaned JSON Text that failed:", jsonText);
+        console.error("Original Error:", e);
         throw new Error("The model returned a response that could not be parsed as JSON.");
     }
 }
