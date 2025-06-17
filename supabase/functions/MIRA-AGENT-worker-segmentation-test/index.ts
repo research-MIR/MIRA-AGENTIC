@@ -94,6 +94,7 @@ async function downloadImageAsPart(supabase: SupabaseClient, imageUrl: string): 
         throw new Error(`Could not parse storage path from URL: ${imageUrl}`);
     }
     const storagePath = decodeURIComponent(pathParts[1]);
+    console.log(`[SegmentationWorker Test] Downloading image from storage path: ${storagePath}`);
     
     const { data: blob, error } = await supabase.storage
         .from(BUCKET_NAME)
@@ -106,6 +107,7 @@ async function downloadImageAsPart(supabase: SupabaseClient, imageUrl: string): 
     const mimeType = blob.type;
     const buffer = await blob.arrayBuffer();
     const base64 = encodeBase64(buffer);
+    console.log(`[SegmentationWorker Test] Successfully downloaded and encoded image. Mime-type: ${mimeType}, Size: ${buffer.byteLength} bytes.`);
     return { inlineData: { mimeType, data: base64 } };
 }
 
@@ -124,6 +126,7 @@ serve(async (req) => {
 
   try {
     const { person_image_url, garment_image_url, user_prompt, user_id } = await req.json();
+    console.log(`[SegmentationWorker Test] Invoked with user_id: ${user_id}`);
     if (!person_image_url || !user_id) {
       throw new Error("person_image_url and user_id are required.");
     }
@@ -142,6 +145,7 @@ serve(async (req) => {
 
     userParts.push({ text: `User instructions: ${user_prompt || 'None'}` });
 
+    console.log(`[SegmentationWorker Test] Calling Gemini with ${userParts.length} parts.`);
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
     const result = await ai.models.generateContent({
         model: MODEL_NAME,
@@ -156,6 +160,7 @@ serve(async (req) => {
     });
 
     const responseJson = extractJson(result.text);
+    console.log(`[SegmentationWorker Test] Received and parsed JSON response. Found ${responseJson.masks?.length || 0} mask(s).`);
 
     if (responseJson.masks && responseJson.masks.length > 0 && responseJson.masks[0].mask) {
         let maskBase64 = responseJson.masks[0].mask;
@@ -178,6 +183,7 @@ serve(async (req) => {
             .getPublicUrl(filePath);
             
         responseJson.masks[0].mask_url = publicUrl;
+        console.log(`[SegmentationWorker Test] Uploaded mask to: ${publicUrl}`);
     }
     
     return new Response(JSON.stringify({ success: true, result: responseJson }), {
