@@ -19,7 +19,7 @@ import { Switch } from "@/components/ui/switch";
 import { useDropzone } from "@/hooks/useDropzone";
 import { cn } from "@/lib/utils";
 import { RealtimeChannel } from "@supabase/supabase-js";
-import { RecentJobThumbnail } from "@/components/RecentJobThumbnail";
+import { RecentJobThumbnail } from "@/components/Jobs/RecentJobThumbnail";
 
 interface ComfyJob {
   id: string;

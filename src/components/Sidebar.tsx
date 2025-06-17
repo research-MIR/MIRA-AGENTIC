@@ -8,14 +8,14 @@ import { supabase } from "@/integrations/supabase/client";
 import { Skeleton } from "./ui/skeleton";
 import { useLanguage } from "@/context/LanguageContext";
 import { useOnboardingTour } from "@/context/OnboardingTourContext";
-import { ActiveJobsTracker } from "./ActiveJobsTracker";
+import { ActiveJobsTracker } from "@/components/Jobs/ActiveJobsTracker";
 import { ProjectFolders } from "./ProjectFolders";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { RadioGroup, RadioGroupItem } from "./ui/radio-group";
-import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
+import { showError, showSuccess, showLoading, dismissToast } from "@/utils/toast";
 
 interface JobHistory {
   id: string;

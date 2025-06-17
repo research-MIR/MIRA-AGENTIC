@@ -18,7 +18,7 @@ import { useDropzone } from "@/hooks/useDropzone";
 import { cn } from "@/lib/utils";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { GeneratorJobThumbnail } from "@/components/GeneratorJobThumbnail";
+import { GeneratorJobThumbnail } from "@/components/Jobs/GeneratorJobThumbnail";
 import { Skeleton } from "@/components/ui/skeleton";
 import { RealtimeChannel } from "@supabase/supabase-js";
 
