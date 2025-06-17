@@ -23,11 +23,17 @@ export const useSecureImage = (imageUrl: string | null | undefined) => {
           setDisplayUrl(imageUrl);
         } else if (imageUrl.includes('supabase.co')) {
           const url = new URL(imageUrl);
-          const bucketIdentifier = '/public/mira-agent-user-uploads/';
-          const pathStartIndex = url.pathname.indexOf(bucketIdentifier);
-          if (pathStartIndex === -1) throw new Error("Invalid Supabase URL path.");
-          const storagePath = decodeURIComponent(url.pathname.substring(pathStartIndex + bucketIdentifier.length));
-          const { data, error } = await supabase.storage.from('mira-agent-user-uploads').download(storagePath);
+          
+          // Dynamically find bucket name from URL path
+          const bucketMatch = url.pathname.match(/\/public\/([a-zA-Z0-9_-]+)\//);
+          if (!bucketMatch || !bucketMatch[1]) {
+            throw new Error("Could not determine bucket name from Supabase URL.");
+          }
+          const bucketName = bucketMatch[1];
+          const pathStartIndex = url.pathname.indexOf(bucketMatch[0]);
+          const storagePath = decodeURIComponent(url.pathname.substring(pathStartIndex + bucketMatch[0].length));
+
+          const { data, error } = await supabase.storage.from(bucketName).download(storagePath);
           if (error) throw error;
           objectUrl = URL.createObjectURL(data);
           setDisplayUrl(objectUrl);
