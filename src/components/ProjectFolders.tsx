@@ -8,6 +8,8 @@ import { Input } from './ui/input';
 import { Plus, Folder } from 'lucide-react';
 import { showError, showSuccess } from '@/utils/toast';
 import { Skeleton } from './ui/skeleton';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger, DialogClose } from '@/components/ui/dialog';
+import { Label } from './ui/label';
 
 interface Project {
   id: string;
@@ -64,6 +66,7 @@ export const ProjectFolders = () => {
   const queryClient = useQueryClient();
   const [newProjectName, setNewProjectName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   const { data: projects, isLoading: isLoadingProjects } = useQuery<Project[]>({
     queryKey: ['projects', session?.user?.id],
@@ -81,7 +84,7 @@ export const ProjectFolders = () => {
   });
 
   const { data: allJobs, isLoading: isLoadingJobs } = useQuery<Job[]>({
-    queryKey: ['jobHistory', session?.user?.id], // Re-uses the main job history query
+    queryKey: ['jobHistory', session?.user?.id],
     queryFn: async () => {
       if (!session?.user) return [];
       const { data, error } = await supabase
@@ -104,6 +107,7 @@ export const ProjectFolders = () => {
       showSuccess(`Project "${newProjectName}" created.`);
       setNewProjectName('');
       queryClient.invalidateQueries({ queryKey: ['projects'] });
+      setIsModalOpen(false);
     } catch (err: any) {
       showError(`Failed to create project: ${err.message}`);
     } finally {
@@ -122,18 +126,39 @@ export const ProjectFolders = () => {
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-2">
-        <Input
-          placeholder="New project name..."
-          value={newProjectName}
-          onChange={(e) => setNewProjectName(e.target.value)}
-          className="h-8 text-sm"
-          onKeyDown={(e) => e.key === 'Enter' && handleCreateProject()}
-        />
-        <Button size="sm" onClick={handleCreateProject} disabled={isCreating || !newProjectName.trim()}>
-          <Plus className="h-4 w-4" />
-        </Button>
-      </div>
+      <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
+        <DialogTrigger asChild>
+          <Button variant="outline" size="sm" className="w-full">
+            <Plus className="h-4 w-4 mr-2" />
+            New Project
+          </Button>
+        </DialogTrigger>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create New Project</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="project-name" className="text-right">Name</Label>
+              <Input
+                id="project-name"
+                value={newProjectName}
+                onChange={(e) => setNewProjectName(e.target.value)}
+                className="col-span-3"
+                onKeyDown={(e) => e.key === 'Enter' && handleCreateProject()}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <DialogClose asChild><Button variant="ghost">Cancel</Button></DialogClose>
+            <Button onClick={handleCreateProject} disabled={isCreating || !newProjectName.trim()}>
+              {isCreating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Create Project
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
       {projects && projects.length > 0 && allJobs && (
         <Accordion type="multiple" className="w-full">
           {projects.map(p => <ProjectItem key={p.id} project={p} allJobs={allJobs} />)}

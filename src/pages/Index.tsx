@@ -14,9 +14,10 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { PlusCircle, Trash2, FolderPlus } from "lucide-react";
+import { PlusCircle, Trash2, FolderPlus, Edit } from "lucide-react";
 import { optimizeImage } from "@/lib/utils";
 import { BranchPrompt } from "@/components/Chat/BranchPrompt";
+import { Input } from "@/components/ui/input";
 
 interface UploadedFile {
   name: string;
@@ -127,6 +128,8 @@ const Index = () => {
   const [ratioMode, setRatioMode] = useState<'auto' | string>('auto');
   const [numImagesMode, setNumImagesMode] = useState<'auto' | number>('auto');
   const [isOwner, setIsOwner] = useState(true);
+  const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
+  const [newChatName, setNewChatName] = useState("");
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
 
@@ -464,6 +467,23 @@ const Index = () => {
     }
   };
 
+  const handleRenameChat = async () => {
+    if (!jobId || !newChatName.trim()) return;
+    const toastId = showLoading("Renaming chat...");
+    try {
+      const { error } = await supabase.from('mira-agent-jobs').update({ original_prompt: newChatName }).eq('id', jobId);
+      if (error) throw error;
+      dismissToast(toastId);
+      showSuccess("Chat renamed.");
+      queryClient.invalidateQueries({ queryKey: ['jobHistory'] });
+      queryClient.invalidateQueries({ queryKey: ['chatJob', jobId] });
+      setIsRenameModalOpen(false);
+    } catch (err: any) {
+      dismissToast(toastId);
+      showError(`Failed to rename chat: ${err.message}`);
+    }
+  };
+
   const lastMessageWithHistory = [...messages].reverse().find(m => m.historyIndex !== undefined);
   const lastHistoryIndex = lastMessageWithHistory?.historyIndex;
 
@@ -483,19 +503,19 @@ const Index = () => {
             <>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="icon" title="Assign to Project">
+                  <Button variant="outline" size="icon" title="Chat Actions">
                     <FolderPlus className="h-4 w-4" />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                  {jobData?.project_id && (
-                    <>
-                      <DropdownMenuItem onSelect={() => handleAssignToProject(null)}>
-                        Remove from Project
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                    </>
-                  )}
+                  <DropdownMenuItem onSelect={() => { setNewChatName(chatTitle); setIsRenameModalOpen(true); }}>
+                    <Edit className="mr-2 h-4 w-4" />
+                    {t.renameChat}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={() => handleAssignToProject(null)} disabled={!jobData?.project_id}>
+                    Remove from Project
+                  </DropdownMenuItem>
                   {projects?.map(p => (
                     <DropdownMenuItem key={p.id} onSelect={() => handleAssignToProject(p.id)} disabled={p.id === jobData?.project_id}>
                       {p.name}
@@ -552,6 +572,26 @@ const Index = () => {
           ) : null
         )}
       </div>
+
+      <AlertDialog open={isRenameModalOpen} onOpenChange={setIsRenameModalOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t.renameChat}</AlertDialogTitle>
+            <AlertDialogDescription>
+              Enter a new name for this chat session.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <Input 
+            value={newChatName} 
+            onChange={(e) => setNewChatName(e.target.value)} 
+            onKeyDown={(e) => e.key === 'Enter' && handleRenameChat()}
+          />
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleRenameChat}>Save</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
