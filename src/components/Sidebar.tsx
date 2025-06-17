@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { NavLink, useNavigate, useParams } from "react-router-dom";
 import { Button } from "./ui/button";
-import { MessageSquare, Image, GalleryHorizontal, LogOut, HelpCircle, LogIn, Shirt, Code, Wand2, PencilRuler, Edit, Trash2, Settings } from "lucide-react";
+import { MessageSquare, Image, GalleryHorizontal, LogOut, HelpCircle, LogIn, Shirt, Code, Wand2, PencilRuler, Edit, Trash2, Settings, FolderPlus } from "lucide-react";
 import { useSession } from "./Auth/SessionContextProvider";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -16,6 +16,7 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { RadioGroup, RadioGroupItem } from "./ui/radio-group";
 import { showError, showSuccess, showLoading, dismissToast } from "@/utils/toast";
+import { AddToProjectDialog } from "./Jobs/AddToProjectDialog";
 
 interface JobHistory {
   id: string;
@@ -38,6 +39,7 @@ export const Sidebar = () => {
 
   const [renamingJob, setRenamingJob] = useState<JobHistory | null>(null);
   const [deletingJobId, setDeletingJobId] = useState<string | null>(null);
+  const [movingJob, setMovingJob] = useState<JobHistory | null>(null);
   const [newName, setNewName] = useState("");
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [sortOrder, setSortOrder] = useState<'created_at' | 'updated_at'>('updated_at');
@@ -174,14 +176,17 @@ export const Sidebar = () => {
             ) : (
               uncategorizedJobs.map(job => (
                 <div key={job.id} className="group relative">
-                  <NavLink to={`/chat/${job.id}`} className={({ isActive }) => `block p-2 rounded-md text-sm truncate pr-16 ${isActive ? 'bg-primary text-primary-foreground font-semibold' : 'hover:bg-muted'}`}>
+                  <NavLink to={`/chat/${job.id}`} className={({ isActive }) => `block p-2 rounded-md text-sm truncate pr-24 ${isActive ? 'bg-primary text-primary-foreground font-semibold' : 'hover:bg-muted'}`}>
                     {job.original_prompt || "Untitled Chat"}
                   </NavLink>
                   <div className="absolute right-1 top-1/2 -translate-y-1/2 hidden group-hover:flex items-center gap-0.5 bg-muted/80 rounded-md">
-                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.preventDefault(); setNewName(job.original_prompt); setRenamingJob(job); }}>
+                    <Button variant="ghost" size="icon" className="h-7 w-7" title="Add to project" onClick={(e) => { e.preventDefault(); setMovingJob(job); }}>
+                      <FolderPlus className="h-4 w-4" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-7 w-7" title="Rename" onClick={(e) => { e.preventDefault(); setNewName(job.original_prompt); setRenamingJob(job); }}>
                       <Edit className="h-4 w-4" />
                     </Button>
-                    <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-destructive/10" onClick={(e) => { e.preventDefault(); setDeletingJobId(job.id); }}>
+                    <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-destructive/10" title="Delete" onClick={(e) => { e.preventDefault(); setDeletingJobId(job.id); }}>
                       <Trash2 className="h-4 w-4 text-destructive/80" />
                     </Button>
                   </div>
@@ -209,6 +214,13 @@ export const Sidebar = () => {
           )}
         </div>
       </aside>
+
+      <AddToProjectDialog 
+        job={movingJob}
+        projects={projects || []}
+        isOpen={!!movingJob}
+        onClose={() => setMovingJob(null)}
+      />
 
       <Dialog open={!!renamingJob} onOpenChange={(open) => !open && setRenamingJob(null)}>
         <DialogContent>

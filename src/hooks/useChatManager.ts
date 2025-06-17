@@ -163,9 +163,11 @@ export const useChatManager = () => {
         if (!jobId) return;
 
         const channel = supabase.channel(`job-updates-${jobId}`)
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'mira-agent-jobs', filter: `id=eq.${jobId}` },
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'mira-agent-jobs' },
                 (payload) => {
-                    queryClient.invalidateQueries({ queryKey: ['chatJob', jobId] });
+                    if (payload.new.id === jobId) {
+                        queryClient.invalidateQueries({ queryKey: ['chatJob', jobId] });
+                    }
                 }
             ).subscribe();
         channelRef.current = channel;
@@ -186,8 +188,6 @@ export const useChatManager = () => {
     }, [error, navigate]);
 
     const sendMessage = useCallback(async (text: string, files: UploadedFile[], isSilent: boolean) => {
-        setIsSending(true);
-        
         if (!isSilent) {
             const optimisticMessage: Message = {
                 from: 'user',
@@ -196,7 +196,7 @@ export const useChatManager = () => {
             };
             setMessages(prev => [...prev, optimisticMessage]);
         }
-
+        setIsSending(true);
         try {
             const payload = { 
                 jobId, 
