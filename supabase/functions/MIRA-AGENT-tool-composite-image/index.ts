@@ -20,7 +20,7 @@ async function downloadImage(supabase: SupabaseClient, imageUrl: string): Promis
 
     if (imageUrl.includes('supabase.co')) {
         const url = new URL(imageUrl);
-        const pathParts = url.pathname.split(`/public/${bucketName}/`);
+        const pathParts = url.pathname.split(`/storage/v1/object/public/${bucketName}/`);
         if (pathParts.length < 2) {
             throw new Error(`Could not parse Supabase storage path from URL: ${imageUrl}`);
         }

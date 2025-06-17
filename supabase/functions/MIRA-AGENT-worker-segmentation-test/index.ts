@@ -89,7 +89,7 @@ const responseSchema = {
 
 async function downloadImageAsPart(supabase: SupabaseClient, imageUrl: string): Promise<Part> {
     const url = new URL(imageUrl);
-    const pathParts = url.pathname.split(`/public/${BUCKET_NAME}/`);
+    const pathParts = url.pathname.split(`/storage/v1/object/public/${BUCKET_NAME}/`);
     if (pathParts.length < 2) {
         throw new Error(`Could not parse storage path from URL: ${imageUrl}`);
     }
@@ -181,7 +181,7 @@ serve(async (req) => {
   } catch (error) {
     console.error(`[SegmentationTool Test] Error:`, error);
     return new Response(JSON.stringify({ error: error.message }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500
     });
   }
