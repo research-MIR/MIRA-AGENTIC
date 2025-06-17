@@ -32,10 +32,11 @@ const parseHistoryToMessages = (jobData: any): Message[] => {
         }
 
         if (turn.role === 'function') {
-            const response = turn.parts[0]?.functionResponse?.response;
-            const callName = history[i - 1]?.parts[0]?.functionCall?.name;
+            const functionResponse = turn.parts[0]?.functionResponse;
+            if (!functionResponse || !functionResponse.name || !functionResponse.response) continue;
 
-            if (!response || !callName) continue;
+            const callName = functionResponse.name;
+            const response = functionResponse.response;
 
             const botMessage: Message = { from: 'bot', historyIndex };
 
@@ -63,7 +64,7 @@ const parseHistoryToMessages = (jobData: any): Message[] => {
                     }
                     break;
                 case 'critique_images': continue;
-                case 'finish_task': continue; // Explicitly ignore the old finish_task
+                case 'finish_task': continue;
                 default: continue;
             }
             messages.push(botMessage);
