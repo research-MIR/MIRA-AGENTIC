@@ -1,10 +1,10 @@
 import { useState, useRef, useEffect } from "react";
 import { FileDropzone } from "@/components/FileDropzone";
-import { ControlPanel } from "@/components/Chat/ControlPanel";
-import { PromptInput } from "@/components/Chat/PromptInput";
-import { MessageList } from "@/components/Chat/MessageList";
-import { BranchPrompt } from "@/components/Chat/BranchPrompt";
-import { ChatHeader } from "@/components/Chat/ChatHeader";
+import { ControlPanel } from "./ControlPanel";
+import { PromptInput } from "./PromptInput";
+import { MessageList } from "./MessageList";
+import { BranchPrompt } from "./BranchPrompt";
+import { ChatHeader } from "./ChatHeader";
 import { useChatManager } from "@/hooks/useChatManager";
 import { useFileUpload } from "@/hooks/useFileUpload";
 
