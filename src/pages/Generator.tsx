@@ -17,7 +17,6 @@ import { Switch } from "@/components/ui/switch";
 import { useDropzone } from "@/hooks/useDropzone";
 import { cn } from "@/lib/utils";
 import { useNavigate } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
 import { GeneratorJobThumbnail } from "@/components/Jobs/GeneratorJobThumbnail";
 import { Skeleton } from "@/components/ui/skeleton";
 import { RealtimeChannel } from "@supabase/supabase-js";
@@ -72,7 +71,6 @@ const Generator = () => {
   const { supabase, session } = useSession();
   const { t } = useLanguage();
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const channelRef = useRef<RealtimeChannel | null>(null);
 
   const {
@@ -93,7 +91,8 @@ const Generator = () => {
   }, [session?.user, fetchRecentJobs]);
 
   useEffect(() => {
-    if (!session?.user) return;
+    if (!session?.user?.id) return;
+
     const channel = supabase.channel('direct-generator-jobs-tracker')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'mira-agent-jobs', filter: `user_id=eq.${session.user.id}` },
         (payload) => {
@@ -103,11 +102,15 @@ const Generator = () => {
           }
         }
       ).subscribe();
+      
     channelRef.current = channel;
+
     return () => {
-      if (channelRef.current) supabase.removeChannel(channelRef.current);
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+      }
     };
-  }, [supabase, session?.user, queryClient, fetchRecentJobs]);
+  }, [supabase, session?.user?.id, fetchRecentJobs]);
 
   useEffect(() => {
     return () => {
