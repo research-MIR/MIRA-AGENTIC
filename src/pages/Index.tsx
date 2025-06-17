@@ -10,25 +10,17 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ControlPanel } from "@/components/Chat/ControlPanel";
 import { PromptInput } from "@/components/Chat/PromptInput";
 import { MessageList, Message } from "@/components/Chat/MessageList";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { PlusCircle, Trash2, FolderPlus, Edit } from "lucide-react";
+import { PlusCircle } from "lucide-react";
 import { optimizeImage } from "@/lib/utils";
 import { BranchPrompt } from "@/components/Chat/BranchPrompt";
-import { Input } from "@/components/ui/input";
 
 interface UploadedFile {
   name: string;
   path: string;
   previewUrl: string;
   isImage: boolean;
-}
-
-interface Project {
-  id: string;
-  name: string;
 }
 
 const sanitizeFilename = (filename: string): string => {
@@ -128,21 +120,8 @@ const Index = () => {
   const [ratioMode, setRatioMode] = useState<'auto' | string>('auto');
   const [numImagesMode, setNumImagesMode] = useState<'auto' | number>('auto');
   const [isOwner, setIsOwner] = useState(true);
-  const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
-  const [newChatName, setNewChatName] = useState("");
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
-
-  const { data: projects } = useQuery<Project[]>({
-    queryKey: ['projects', session?.user?.id],
-    queryFn: async () => {
-      if (!session?.user) return [];
-      const { data, error } = await supabase.from('projects').select('id, name').eq('user_id', session.user.id).order('name');
-      if (error) throw error;
-      return data;
-    },
-    enabled: !!session?.user,
-  });
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -397,22 +376,6 @@ const Index = () => {
     }
   }, [session, supabase]);
 
-  const handleDeleteChat = useCallback(async () => {
-    if (!jobId) return;
-    const toastId = showLoading("Deleting chat...");
-    try {
-      const { error } = await supabase.rpc('delete_mira_agent_job', { p_job_id: jobId });
-      if (error) throw error;
-      dismissToast(toastId);
-      showSuccess(t.chatDeleted);
-      await queryClient.invalidateQueries({ queryKey: ["jobHistory"] });
-      navigate("/chat");
-    } catch (error: any) {
-      dismissToast(toastId);
-      showError(`${t.errorDeletingChat}: ${error.message}`);
-    }
-  }, [jobId, supabase, navigate, queryClient, t]);
-
   const handleRefinementComplete = useCallback((newImageUrl: string) => {
     setMessages(prev => {
       const newMessages = prev.filter(m => !m.refinementProposal);
@@ -451,39 +414,6 @@ const Index = () => {
     }
   }, [jobId, session, supabase, navigate, queryClient]);
 
-  const handleAssignToProject = async (projectId: string | null) => {
-    if (!jobId) return;
-    const toastId = showLoading("Assigning to project...");
-    try {
-      const { error } = await supabase.from('mira-agent-jobs').update({ project_id: projectId }).eq('id', jobId);
-      if (error) throw error;
-      dismissToast(toastId);
-      showSuccess("Chat assigned to project.");
-      queryClient.invalidateQueries({ queryKey: ['jobHistory'] });
-      queryClient.invalidateQueries({ queryKey: ['chatJob', jobId] });
-    } catch (err: any) {
-      dismissToast(toastId);
-      showError(`Failed to assign: ${err.message}`);
-    }
-  };
-
-  const handleRenameChat = async () => {
-    if (!jobId || !newChatName.trim()) return;
-    const toastId = showLoading("Renaming chat...");
-    try {
-      const { error } = await supabase.from('mira-agent-jobs').update({ original_prompt: newChatName }).eq('id', jobId);
-      if (error) throw error;
-      dismissToast(toastId);
-      showSuccess("Chat renamed.");
-      queryClient.invalidateQueries({ queryKey: ['jobHistory'] });
-      queryClient.invalidateQueries({ queryKey: ['chatJob', jobId] });
-      setIsRenameModalOpen(false);
-    } catch (err: any) {
-      dismissToast(toastId);
-      showError(`Failed to rename chat: ${err.message}`);
-    }
-  };
-
   const lastMessageWithHistory = [...messages].reverse().find(m => m.historyIndex !== undefined);
   const lastHistoryIndex = lastMessageWithHistory?.historyIndex;
 
@@ -499,39 +429,6 @@ const Index = () => {
         <div className="flex items-center gap-2">
           <LanguageSwitcher />
           <ThemeToggle />
-          {jobId && isOwner && (
-            <>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="icon" title="Chat Actions">
-                    <FolderPlus className="h-4 w-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onSelect={() => { setNewChatName(chatTitle); setIsRenameModalOpen(true); }}>
-                    <Edit className="mr-2 h-4 w-4" />
-                    {t.renameChat}
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onSelect={() => handleAssignToProject(null)} disabled={!jobData?.project_id}>
-                    Remove from Project
-                  </DropdownMenuItem>
-                  {projects?.map(p => (
-                    <DropdownMenuItem key={p.id} onSelect={() => handleAssignToProject(p.id)} disabled={p.id === jobData?.project_id}>
-                      {p.name}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <AlertDialog>
-                <AlertDialogTrigger asChild><Button variant="destructive" size="icon" title={t.deleteChat}><Trash2 className="h-4 w-4" /></Button></AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader><AlertDialogTitle>{t.deleteConfirmationTitle}</AlertDialogTitle><AlertDialogDescription>{t.deleteConfirmationDescription}</AlertDialogDescription></AlertDialogHeader>
-                  <AlertDialogFooter><AlertDialogCancel>{t.cancel}</AlertDialogCancel><AlertDialogAction onClick={handleDeleteChat}>{t.delete}</AlertDialogAction></AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-            </>
-          )}
           <Button id="new-chat-button" variant="outline" onClick={() => navigate("/chat")}><PlusCircle className="mr-2 h-4 w-4" />{t.newChat}</Button>
         </div>
       </header>
@@ -572,26 +469,6 @@ const Index = () => {
           ) : null
         )}
       </div>
-
-      <AlertDialog open={isRenameModalOpen} onOpenChange={setIsRenameModalOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t.renameChat}</AlertDialogTitle>
-            <AlertDialogDescription>
-              Enter a new name for this chat session.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <Input 
-            value={newChatName} 
-            onChange={(e) => setNewChatName(e.target.value)} 
-            onKeyDown={(e) => e.key === 'Enter' && handleRenameChat()}
-          />
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleRenameChat}>Save</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 };
