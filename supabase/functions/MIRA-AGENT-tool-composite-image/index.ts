@@ -20,12 +20,11 @@ async function downloadImage(supabase: SupabaseClient, imageUrl: string): Promis
 
     if (imageUrl.includes('supabase.co')) {
         const url = new URL(imageUrl);
-        const pathParts = url.pathname.split(`/storage/v1/object/public/${bucketName}/`);
+        const pathParts = url.pathname.split(`/public/${bucketName}/`);
         if (pathParts.length < 2) {
             throw new Error(`Could not parse Supabase storage path from URL: ${imageUrl}`);
         }
         const storagePath = decodeURIComponent(pathParts[1]);
-        console.log(`[CompositeTool] Parsed storage path: ${storagePath}`);
         
         const { data: blob, error: downloadError } = await supabase.storage
             .from(bucketName)
@@ -43,9 +42,7 @@ async function downloadImage(supabase: SupabaseClient, imageUrl: string): Promis
         imageBuffer = await response.arrayBuffer();
     }
     
-    const decodedImage = await Image.decode(imageBuffer);
-    console.log(`[CompositeTool] Successfully decoded image. Dimensions: ${decodedImage.width}x${decodedImage.height}`);
-    return decodedImage;
+    return Image.decode(imageBuffer);
 }
 
 serve(async (req) => {
@@ -54,7 +51,6 @@ serve(async (req) => {
   }
 
   try {
-    console.log("[CompositeTool] Function invoked.");
     const { base_image_url, overlay_image_url, box, user_id } = await req.json();
     if (!base_image_url || !overlay_image_url || !box || !user_id) {
       throw new Error("base_image_url, overlay_image_url, box, and user_id are required.");
@@ -69,7 +65,6 @@ serve(async (req) => {
 
     const { width: baseW, height: baseH } = baseImage;
     const [y_min_norm, x_min_norm, y_max_norm, x_max_norm] = box;
-    console.log(`[CompositeTool] Base image: ${baseW}x${baseH}. Overlay image: ${overlayImage.width}x${overlayImage.height}. Box:`, box);
 
     let targetPasteX, targetPasteY;
 
@@ -84,13 +79,12 @@ serve(async (req) => {
       targetPasteX = x_min_norm * scale - x_offset;
       targetPasteY = y_min_norm * scale;
     }
-    console.log(`[CompositeTool] Calculated paste coordinates: x=${targetPasteX}, y=${targetPasteY}`);
 
+    // The overlay image is already the correct size because it was generated from the cropped source.
+    // We do not need to resize it. We simply paste it at the calculated top-left coordinate.
     baseImage.composite(overlayImage, Math.floor(targetPasteX), Math.floor(targetPasteY));
-    console.log("[CompositeTool] Composited overlay onto base image.");
 
     const finalImageBuffer = await baseImage.encode(0); // PNG
-    console.log(`[CompositeTool] Encoded final image. Size: ${finalImageBuffer.byteLength} bytes.`);
 
     const finalFilename = `final_vto_${Date.now()}.png`;
     const finalStoragePath = `${user_id}/${finalFilename}`;
@@ -100,12 +94,11 @@ serve(async (req) => {
       .upload(finalStoragePath, finalImageBuffer, { contentType: 'image/png', upsert: true });
 
     if (uploadError) throw new Error(`Failed to upload final composite image: ${uploadError.message}`);
-    console.log(`[CompositeTool] Uploaded final image to: ${finalStoragePath}`);
 
     const { data: { publicUrl } } = supabase.storage.from(UPLOAD_BUCKET).getPublicUrl(finalStoragePath);
 
     return new Response(JSON.stringify({ success: true, final_composite_url: publicUrl }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });
 

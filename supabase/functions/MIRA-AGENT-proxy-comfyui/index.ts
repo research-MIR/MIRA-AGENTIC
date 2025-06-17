@@ -547,12 +547,7 @@ serve(async (req) => {
         imageFile = await imageResponse.blob();
         originalFilename = body.image_url.split('/').pop() || 'image.png';
       } else if (body.base64_image_data) {
-        let base64Data = body.base64_image_data;
-        const prefixMatch = base64Data.match(/^data:(image\/\w+);base64,/);
-        if (prefixMatch) {
-          base64Data = base64Data.substring(prefixMatch[0].length);
-        }
-        const imageBuffer = decodeBase64(base64Data);
+        const imageBuffer = decodeBase64(body.base64_image_data);
         imageFile = new Blob([imageBuffer], { type: body.mime_type || 'image/png' });
         originalFilename = 'agent_history_image.png';
       }

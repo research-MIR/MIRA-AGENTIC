@@ -38,8 +38,7 @@ serve(async (req) => {
             body: { 
                 person_image_url: job.source_person_image_url,
                 garment_image_url: job.source_garment_image_url,
-                user_prompt: segmentationPrompt,
-                user_id: job.user_id // <-- FIX: Added missing user_id
+                user_prompt: segmentationPrompt
             }
         });
         if(segError) throw segError;

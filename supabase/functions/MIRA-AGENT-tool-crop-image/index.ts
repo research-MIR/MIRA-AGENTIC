@@ -38,7 +38,7 @@ serve(async (req) => {
 
     // Download the original image
     const url = new URL(image_url);
-    const pathParts = url.pathname.split(`/storage/v1/object/public/${UPLOAD_BUCKET}/`);
+    const pathParts = url.pathname.split(`/public/${UPLOAD_BUCKET}/`);
     if (pathParts.length < 2) throw new Error(`Could not parse storage path from URL: ${image_url}`);
     const storagePath = decodeURIComponent(pathParts[1]);
     console.log(`[${reqId}] Parsed storage path: ${storagePath}`);

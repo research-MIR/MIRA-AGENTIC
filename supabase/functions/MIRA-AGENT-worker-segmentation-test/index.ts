@@ -1,8 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { GoogleGenAI, Type, Part, createPartFromUri } from 'https://esm.sh/@google/genai@0.15.0';
-import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
-import { Image } from "https://deno.land/x/imagescript@1.2.15/mod.ts";
+import { GoogleGenAI, Type, Part } from 'https://esm.sh/@google/genai@0.15.0';
+import { encodeBase64, decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -15,55 +14,36 @@ const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const MODEL_NAME = "gemini-2.5-pro-preview-06-05";
 const BUCKET_NAME = 'mira-agent-user-uploads';
 
-const systemPrompt = `You are a virtual stylist and expert image analyst. Your goal is to determine the precise placement of a new garment onto a person in an image by generating a segmentation mask. This is for a high-fidelity virtual try-on, so the mask you create will be used to inpaint the new garment. Accuracy and context are paramount.
+const systemPrompt = `You are a precise image segmentation AI. Your task is to analyze the provided image and return a JSON object containing a description and ONLY ONE segmentation mask.
 
----
-### Your Task
+### CRITICAL RULES:
+1.  **SINGLE MASK ONLY:** Your final output MUST contain only one item in the 'masks' array.
+2.  **COMBINED MASK:** The single mask MUST enclose the main person and their primary garment(s) as a single object. Do not segment individual items of clothing.
+3.  **LABEL:** The label for this single mask must be "person_with_garment".
+4.  **PIXEL MASK:** You MUST include a base64 encoded PNG string for the \`mask\` property.
 
-You will be given one or two images and a user prompt. Your task is to output a single JSON object with a textual description and ONLY ONE segmentation mask based on the user's request and a complex set of rules.
-
----
-### CRITICAL MASK GENERATION RULES
-
-1.  **SINGLE MASK ONLY:** Your final output MUST contain only ONE bounding box and ONE corresponding pixel mask.
-2.  **GARMENT ANALYSIS:** If a garment image is provided, you must first analyze it to understand its type (e.g., jacket, dress, pants), material, and fit.
-3.  **PERSON ANALYSIS:** Analyze the person's pose and their existing clothing.
-4.  **HYPOTHETICAL PLACEMENT:** Your main task is to generate a mask on the person image that represents where the NEW garment would go.
-5.  **COVER-UP RULE:** The generated mask MUST be slightly larger than the area of any existing garment it is intended to replace. This ensures full coverage for clean inpainting. For example, if placing a new t-shirt over an old one, the mask must completely cover the old t-shirt.
-6.  **INVENTION RULE:** If a user wants to place an upper-body garment (e.g., a shirt) on a person wearing a one-piece (e.g., a dress), you must logically deduce the area for the shirt mask. Your description should note that a lower-body garment would need to be imagined to complete the outfit, but the mask should ONLY be for the new upper-body item.
-7.  **PERSON SEGMENTATION (Fallback):** If only a person image is provided and the prompt asks to "find the person" or "segment the person", you MUST create a tight bounding box around the entire person, from head to toe, ignoring the background.
-8.  **LABEL:** The label for the mask must be "inpainting_mask_area".
-9.  **PIXEL MASK:** You MUST include a base64 encoded PNG string for the \`mask\` property.
-
----
-### JSON Output Format
-
-Your entire response MUST be a single, valid JSON object.
-
-\`\`\`json
+### Example Output:
 {
-  "description": "A textual description of your reasoning. For example: 'Generated a mask for the new jacket, assuming it will be worn over the existing t-shirt and ensuring full coverage.'",
+  "description": "A close-up shot of a golden retriever puppy playing in a field of green grass.",
   "masks": [
     {
       "box_2d": [100, 150, 800, 850],
-      "label": "inpainting_mask_area",
+      "label": "person_with_garment",
       "mask": "iVBORw0KGgoAAAANSUhEUg..."
     }
   ]
-}
-\`\`\`
-`;
+}`;
 
 const responseSchema = {
   type: Type.OBJECT,
   properties: {
     'description': {
       type: Type.STRING,
-      description: 'A textual description of what you have segmented and your reasoning.',
+      description: 'A textual description of what you have segmented.',
     },
     'masks': {
         type: Type.ARRAY,
-        description: "A list containing a single segmentation mask for the target area.",
+        description: "A list containing a single segmentation mask for the person and their garment.",
         items: {
             type: Type.OBJECT,
             properties: {
@@ -88,100 +68,72 @@ const responseSchema = {
   required: ['description', 'masks'],
 };
 
-async function downloadAndPrepareImagePart(supabase: SupabaseClient, ai: GoogleGenAI, imageUrl: string, reqId: string): Promise<Part> {
-    // 1. Download from Supabase
+async function downloadImageAsPart(supabase: SupabaseClient, imageUrl: string): Promise<Part> {
     const url = new URL(imageUrl);
-    const pathParts = url.pathname.split(`/storage/v1/object/public/${BUCKET_NAME}/`);
-    if (pathParts.length < 2) throw new Error(`Could not parse storage path from URL: ${imageUrl}`);
+    const pathParts = url.pathname.split(`/public/${BUCKET_NAME}/`);
+    if (pathParts.length < 2) {
+        throw new Error(`Could not parse storage path from URL: ${imageUrl}`);
+    }
     const storagePath = decodeURIComponent(pathParts[1]);
     
-    const { data: blob, error } = await supabase.storage.from(BUCKET_NAME).download(storagePath);
-    if (error) throw new Error(`Supabase download failed for path ${storagePath}: ${error.message}`);
+    const { data: blob, error } = await supabase.storage
+        .from(BUCKET_NAME)
+        .download(storagePath);
 
-    // 2. Downscale the image to prevent hitting other limits and for speed
-    const originalBuffer = await blob.arrayBuffer();
-    const image = await Image.decode(originalBuffer);
-    image.resize(image.width / 2, Image.RESIZE_AUTO);
-    const resizedBuffer = await image.encode(0); // Encode as PNG
-    const resizedMimeType = 'image/png';
-    console.log(`[SegmentTest][${reqId}] Image resized to ${image.width}x${image.height}.`);
-
-    // 3. Upload to Google Files API
-    console.log(`[SegmentTest][${reqId}] Uploading RESIZED file to Google Files API...`);
-    const imageBlobForUpload = new Blob([resizedBuffer], { type: resizedMimeType });
-    const uploadResult = await ai.files.upload({
-        file: imageBlobForUpload,
-        config: { displayName: `segmentation_upload_${reqId}` }
-    });
-    console.log(`[SegmentTest][${reqId}] File upload initiated. File name: ${uploadResult.name}`);
-
-    // 4. Poll until file is active
-    let file = await ai.files.get({ name: uploadResult.name as string });
-    let retries = 0;
-    const maxRetries = 10;
-    while (file.state === 'PROCESSING' && retries < maxRetries) {
-        console.log(`[SegmentTest][${reqId}] File is still processing. Retrying in 3 seconds...`);
-        await new Promise(resolve => setTimeout(resolve, 3000));
-        file = await ai.files.get({ name: uploadResult.name as string });
-        retries++;
+    if (error) {
+        throw new Error(`Supabase download failed for path ${storagePath}: ${error.message}`);
     }
-    if (file.state !== 'ACTIVE') throw new Error(`File processing timed out. Last state: ${file.state}`);
-    console.log(`[SegmentTest][${reqId}] File is now ACTIVE. URI: ${file.uri}`);
-    
-    // 5. Return the file part reference
-    return createPartFromUri(file.uri, file.mimeType);
+
+    const mimeType = blob.type;
+    const buffer = await blob.arrayBuffer();
+    const base64 = encodeBase64(buffer);
+    return { inlineData: { mimeType, data: base64 } };
+}
+
+function extractJson(text: string): any {
+    const match = text.match(/```json\s*([\s\S]*?)\s*```/);
+    if (match && match[1]) { return JSON.parse(match[1]); }
+    try { return JSON.parse(text); } catch (e) {
+        throw new Error("The model returned a response that could not be parsed as JSON.");
+    }
 }
 
 serve(async (req) => {
-  const reqId = `test_${Date.now()}`;
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    console.log(`[SegmentTest][${reqId}] Function invoked.`);
     const { person_image_url, garment_image_url, user_prompt, user_id } = await req.json();
     if (!person_image_url || !user_id) {
       throw new Error("person_image_url and user_id are required.");
     }
     
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-    const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
     const userParts: Part[] = [
         { text: "Person Image:" },
-        await downloadAndPrepareImagePart(supabase, ai, person_image_url, `${reqId}_person`),
+        await downloadImageAsPart(supabase, person_image_url),
     ];
 
     if (garment_image_url) {
         userParts.push({ text: "Garment Image:" });
-        userParts.push(await downloadAndPrepareImagePart(supabase, ai, garment_image_url, `${reqId}_garment`));
+        userParts.push(await downloadImageAsPart(supabase, garment_image_url));
     }
 
     userParts.push({ text: `User instructions: ${user_prompt || 'None'}` });
-    
-    console.log(`[SegmentTest][${reqId}] Calling Gemini API with file references...`);
+
+    const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
     const result = await ai.models.generateContent({
         model: MODEL_NAME,
         contents: [{ role: 'user', parts: userParts }],
         generationConfig: {
             responseMimeType: "application/json",
             responseSchema: responseSchema,
-        },
-        config: {
-            systemInstruction: { role: "system", parts: [{ text: systemPrompt }] }
         }
     });
 
-    console.log(`[SegmentTest][${reqId}] Received response from Gemini. Invoking JSON parser tool...`);
-    const { data: responseJson, error: parseError } = await supabase.functions.invoke('MIRA-AGENT-tool-parse-json', {
-        body: { text_to_parse: result.text }
-    });
-
-    if (parseError) throw new Error(`JSON parsing function failed: ${parseError.message}`);
-    if (responseJson.error) throw new Error(`Failed to parse Gemini response: ${responseJson.details}`);
-    
-    console.log(`[SegmentTest][${reqId}] Successfully parsed JSON response.`);
+    const responseJson = extractJson(result.text);
 
     if (responseJson.masks && responseJson.masks.length > 0 && responseJson.masks[0].mask) {
         const maskBase64 = responseJson.masks[0].mask;
@@ -205,9 +157,9 @@ serve(async (req) => {
     });
 
   } catch (error) {
-    console.error(`[SegmentTest][${reqId}] Error:`, error);
+    console.error(`[SegmentationTool Test] Error:`, error);
     return new Response(JSON.stringify({ error: error.message }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
       status: 500
     });
   }
