@@ -1,6 +1,6 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import { Button } from "./ui/button";
-import { MessageSquare, Image, GalleryHorizontal, LogOut, HelpCircle, LogIn, Shirt, Code, Wand2, PencilRuler } from "lucide-react";
+import { MessageSquare, Image, GalleryHorizontal, LogOut, HelpCircle, LogIn, Shirt, Code, Wand2, PencilRuler, Folder } from "lucide-react";
 import { useSession } from "./Auth/SessionContextProvider";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -8,10 +8,12 @@ import { Skeleton } from "./ui/skeleton";
 import { useLanguage } from "@/context/LanguageContext";
 import { useOnboardingTour } from "@/context/OnboardingTourContext";
 import { ActiveJobsTracker } from "./ActiveJobsTracker";
+import { ProjectFolders } from "./ProjectFolders";
 
 interface JobHistory {
   id: string;
   original_prompt: string;
+  project_id: string | null;
 }
 
 export const Sidebar = () => {
@@ -24,11 +26,10 @@ export const Sidebar = () => {
     if (!session?.user) return [];
     const { data, error } = await supabase
       .from("mira-agent-jobs")
-      .select("id, original_prompt")
+      .select("id, original_prompt, project_id")
       .eq("user_id", session.user.id)
-      .or("context->>source.eq.agent,context->>source.is.null,context->>source.eq.agent_branch")
       .order("created_at", { ascending: false })
-      .limit(20);
+      .limit(100); // Fetch more to have data for projects
     if (error) throw new Error(error.message);
     return data as JobHistory[];
   };
@@ -49,6 +50,8 @@ export const Sidebar = () => {
     navigate('/chat');
     startTour();
   };
+
+  const uncategorizedJobs = jobHistory?.filter(job => !job.project_id).slice(0, 20) || [];
 
   return (
     <aside className="w-64 bg-background border-r flex flex-col">
@@ -85,19 +88,25 @@ export const Sidebar = () => {
           {t.developer}
         </NavLink>
       </nav>
-      <div className="flex-1 p-4 space-y-2 overflow-y-auto">
-        <h2 className="text-sm font-semibold text-muted-foreground">{t.chatHistory}</h2>
-        {isLoading ? (
-          <div className="space-y-2">
-            {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}
-          </div>
-        ) : (
-          jobHistory?.map(job => (
-            <NavLink key={job.id} to={`/chat/${job.id}`} className={({ isActive }) => `block p-2 rounded-md text-sm truncate ${isActive ? 'bg-primary text-primary-foreground font-semibold' : 'hover:bg-muted'}`}>
-              {job.original_prompt || "Untitled Chat"}
-            </NavLink>
-          ))
-        )}
+      <div className="flex-1 p-4 space-y-4 overflow-y-auto">
+        <div>
+          <h2 className="text-sm font-semibold text-muted-foreground mb-2">Projects</h2>
+          <ProjectFolders />
+        </div>
+        <div className="pt-4 border-t">
+          <h2 className="text-sm font-semibold text-muted-foreground mb-2">Recent Chats</h2>
+          {isLoading ? (
+            <div className="space-y-2">
+              {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}
+            </div>
+          ) : (
+            uncategorizedJobs.map(job => (
+              <NavLink key={job.id} to={`/chat/${job.id}`} className={({ isActive }) => `block p-2 rounded-md text-sm truncate ${isActive ? 'bg-primary text-primary-foreground font-semibold' : 'hover:bg-muted'}`}>
+                {job.original_prompt || "Untitled Chat"}
+              </NavLink>
+            ))
+          )}
+        </div>
       </div>
       <div className="p-4 border-t space-y-2">
         <ActiveJobsTracker />

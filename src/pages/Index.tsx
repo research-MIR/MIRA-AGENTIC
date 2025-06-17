@@ -11,9 +11,10 @@ import { ControlPanel } from "@/components/Chat/ControlPanel";
 import { PromptInput } from "@/components/Chat/PromptInput";
 import { MessageList, Message } from "@/components/Chat/MessageList";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { PlusCircle, Trash2 } from "lucide-react";
+import { PlusCircle, Trash2, FolderPlus } from "lucide-react";
 import { optimizeImage } from "@/lib/utils";
 import { BranchPrompt } from "@/components/Chat/BranchPrompt";
 
@@ -22,6 +23,11 @@ interface UploadedFile {
   path: string;
   previewUrl: string;
   isImage: boolean;
+}
+
+interface Project {
+  id: string;
+  name: string;
 }
 
 const sanitizeFilename = (filename: string): string => {
@@ -123,6 +129,17 @@ const Index = () => {
   const [isOwner, setIsOwner] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
+
+  const { data: projects } = useQuery<Project[]>({
+    queryKey: ['projects', session?.user?.id],
+    queryFn: async () => {
+      if (!session?.user) return [];
+      const { data, error } = await supabase.from('projects').select('id, name').eq('user_id', session.user.id).order('name');
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!session?.user,
+  });
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -431,6 +448,22 @@ const Index = () => {
     }
   }, [jobId, session, supabase, navigate, queryClient]);
 
+  const handleAssignToProject = async (projectId: string | null) => {
+    if (!jobId) return;
+    const toastId = showLoading("Assigning to project...");
+    try {
+      const { error } = await supabase.from('mira-agent-jobs').update({ project_id: projectId }).eq('id', jobId);
+      if (error) throw error;
+      dismissToast(toastId);
+      showSuccess("Chat assigned to project.");
+      queryClient.invalidateQueries({ queryKey: ['jobHistory'] });
+      queryClient.invalidateQueries({ queryKey: ['chatJob', jobId] });
+    } catch (err: any) {
+      dismissToast(toastId);
+      showError(`Failed to assign: ${err.message}`);
+    }
+  };
+
   const lastMessageWithHistory = [...messages].reverse().find(m => m.historyIndex !== undefined);
   const lastHistoryIndex = lastMessageWithHistory?.historyIndex;
 
@@ -448,6 +481,28 @@ const Index = () => {
           <ThemeToggle />
           {jobId && isOwner && (
             <>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="icon" title="Assign to Project">
+                    <FolderPlus className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {jobData?.project_id && (
+                    <>
+                      <DropdownMenuItem onSelect={() => handleAssignToProject(null)}>
+                        Remove from Project
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                    </>
+                  )}
+                  {projects?.map(p => (
+                    <DropdownMenuItem key={p.id} onSelect={() => handleAssignToProject(p.id)} disabled={p.id === jobData?.project_id}>
+                      {p.name}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
               <AlertDialog>
                 <AlertDialogTrigger asChild><Button variant="destructive" size="icon" title={t.deleteChat}><Trash2 className="h-4 w-4" /></Button></AlertDialogTrigger>
                 <AlertDialogContent>
