@@ -2,7 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Wand2, Loader2 } from "lucide-react";
 import { useState } from "react";
-import { useSession } from "./Auth/SessionContextProvider";
+import { useSession } from "@/components/Auth/SessionContextProvider";
 import { showError, showLoading, dismissToast } from "@/utils/toast";
 import { useLanguage } from "@/context/LanguageContext";
 
