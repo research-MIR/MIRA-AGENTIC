@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { NavLink, useNavigate, useParams } from "react-router-dom";
 import { Button } from "./ui/button";
-import { MessageSquare, Image, GalleryHorizontal, LogOut, HelpCircle, LogIn, Shirt, Code, Wand2, PencilRuler, Edit, Trash2, Settings, FolderPlus } from "lucide-react";
+import { MessageSquare, Image, GalleryHorizontal, LogOut, HelpCircle, LogIn, Shirt, Code, Wand2, PencilRuler, Edit, Trash2, Settings, FolderPlus, Move } from "lucide-react";
 import { useSession } from "./Auth/SessionContextProvider";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -17,6 +17,7 @@ import { Label } from "./ui/label";
 import { RadioGroup, RadioGroupItem } from "./ui/radio-group";
 import { showError, showSuccess, showLoading, dismissToast } from "@/utils/toast";
 import { AddToProjectDialog } from "./Jobs/AddToProjectDialog";
+import { cn } from "@/lib/utils";
 
 interface JobHistory {
   id: string;
@@ -43,6 +44,7 @@ export const Sidebar = () => {
   const [newName, setNewName] = useState("");
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [sortOrder, setSortOrder] = useState<'created_at' | 'updated_at'>('updated_at');
+  const [draggingOverProjectId, setDraggingOverProjectId] = useState<string | null>(null);
 
   const { data: projects, isLoading: isLoadingProjects } = useQuery<Project[]>({
     queryKey: ['projects', session?.user?.id],
@@ -121,6 +123,25 @@ export const Sidebar = () => {
     setIsSettingsModalOpen(false);
   };
 
+  const handleDropOnProject = async (projectId: string, e: React.DragEvent) => {
+    e.preventDefault();
+    const jobId = e.dataTransfer.getData("application/mira-job-id");
+    setDraggingOverProjectId(null);
+    if (!jobId) return;
+
+    const toastId = showLoading("Moving chat to project...");
+    try {
+      const { error } = await supabase.rpc('update_job_project', { p_job_id: jobId, p_project_id: projectId });
+      if (error) throw error;
+      dismissToast(toastId);
+      showSuccess("Chat moved successfully.");
+      queryClient.invalidateQueries({ queryKey: ['jobHistory'] });
+    } catch (err: any) {
+      dismissToast(toastId);
+      showError(`Failed to move chat: ${err.message}`);
+    }
+  };
+
   const uncategorizedJobs = jobHistory?.filter(job => !job.project_id).slice(0, 20) || [];
 
   return (
@@ -162,7 +183,16 @@ export const Sidebar = () => {
         <div className="flex-1 p-4 space-y-4 overflow-y-auto">
           <div>
             <h2 className="text-sm font-semibold text-muted-foreground mb-2">Projects</h2>
-            {isLoadingProjects || isLoadingJobs ? <Skeleton className="h-8 w-full" /> : <ProjectFolders projects={projects || []} allJobs={jobHistory || []} />}
+            {isLoadingProjects || isLoadingJobs ? <Skeleton className="h-8 w-full" /> : 
+              <ProjectFolders 
+                projects={projects || []} 
+                allJobs={jobHistory || []} 
+                draggingOverProjectId={draggingOverProjectId}
+                onDragEnter={(projectId) => setDraggingOverProjectId(projectId)}
+                onDragLeave={() => setDraggingOverProjectId(null)}
+                onDrop={handleDropOnProject}
+              />
+            }
           </div>
           <div className="pt-4 border-t">
             <div className="flex justify-between items-center mb-2">
@@ -175,7 +205,12 @@ export const Sidebar = () => {
               </div>
             ) : (
               uncategorizedJobs.map(job => (
-                <div key={job.id} className="group relative">
+                <div 
+                  key={job.id} 
+                  className="group relative"
+                  draggable
+                  onDragStart={(e) => e.dataTransfer.setData("application/mira-job-id", job.id)}
+                >
                   <NavLink to={`/chat/${job.id}`} className={({ isActive }) => `block p-2 rounded-md text-sm truncate pr-24 ${isActive ? 'bg-primary text-primary-foreground font-semibold' : 'hover:bg-muted'}`}>
                     {job.original_prompt || "Untitled Chat"}
                   </NavLink>

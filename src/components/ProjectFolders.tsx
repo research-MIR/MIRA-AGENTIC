@@ -5,11 +5,12 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/
 import { NavLink, useParams, useNavigate } from 'react-router-dom';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
-import { Plus, Folder, Edit, Trash2, Loader2 } from 'lucide-react';
+import { Plus, Folder, Edit, Trash2, Loader2, Move } from 'lucide-react';
 import { showError, showSuccess, showLoading, dismissToast } from '@/utils/toast';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger, DialogClose } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Label } from './ui/label';
+import { cn } from '@/lib/utils';
 
 interface Project {
   id: string;
@@ -22,12 +23,29 @@ interface Job {
   project_id: string;
 }
 
-const ProjectItem = ({ project, allJobs, onRename, onDelete }: { project: Project, allJobs: Job[], onRename: (job: Job) => void, onDelete: (jobId: string) => void }) => {
+const ProjectItem = ({ project, allJobs, onRename, onDelete, onDrop, onDragEnter, onDragLeave, isBeingDraggedOver }: { 
+  project: Project, 
+  allJobs: Job[], 
+  onRename: (job: Job) => void, 
+  onDelete: (jobId: string) => void,
+  onDrop: (projectId: string, e: React.DragEvent) => void,
+  onDragEnter: (projectId: string) => void,
+  onDragLeave: () => void,
+  isBeingDraggedOver: boolean
+}) => {
   const projectJobs = allJobs.filter(job => job.project_id === project.id);
 
-  if (projectJobs.length === 0) {
+  if (projectJobs.length === 0 && !isBeingDraggedOver) {
     return (
-      <AccordionItem value={project.id} disabled>
+      <AccordionItem 
+        value={project.id} 
+        disabled 
+        onDrop={(e) => onDrop(project.id, e)}
+        onDragOver={(e) => e.preventDefault()}
+        onDragEnter={() => onDragEnter(project.id)}
+        onDragLeave={onDragLeave}
+        className={cn("rounded-md transition-colors", isBeingDraggedOver && "bg-primary/10 border border-primary")}
+      >
         <AccordionTrigger className="hover:no-underline">
           <div className="flex items-center gap-2">
             <Folder className="h-4 w-4" />
@@ -39,11 +57,20 @@ const ProjectItem = ({ project, allJobs, onRename, onDelete }: { project: Projec
   }
 
   return (
-    <AccordionItem value={project.id}>
+    <AccordionItem 
+      value={project.id}
+      onDrop={(e) => onDrop(project.id, e)}
+      onDragOver={(e) => e.preventDefault()}
+      onDragEnter={() => onDragEnter(project.id)}
+      onDragLeave={onDragLeave}
+      className={cn("rounded-md transition-colors", isBeingDraggedOver && "bg-primary/10 border border-primary")}
+    >
       <AccordionTrigger className="hover:no-underline">
         <div className="flex items-center gap-2">
-          <Folder className="h-4 w-4" />
-          <span className="text-sm font-semibold">{project.name}</span>
+          {isBeingDraggedOver ? <Move className="h-4 w-4 text-primary" /> : <Folder className="h-4 w-4" />}
+          <span className={cn("text-sm font-semibold", isBeingDraggedOver && "text-primary")}>
+            {isBeingDraggedOver ? `Move to ${project.name}` : project.name}
+          </span>
         </div>
       </AccordionTrigger>
       <AccordionContent className="pl-4">
@@ -73,9 +100,13 @@ const ProjectItem = ({ project, allJobs, onRename, onDelete }: { project: Projec
 interface ProjectFoldersProps {
     projects: Project[];
     allJobs: Job[];
+    draggingOverProjectId: string | null;
+    onDragEnter: (projectId: string) => void;
+    onDragLeave: () => void;
+    onDrop: (projectId: string, e: React.DragEvent) => void;
 }
 
-export const ProjectFolders = ({ projects, allJobs }: ProjectFoldersProps) => {
+export const ProjectFolders = ({ projects, allJobs, draggingOverProjectId, onDragEnter, onDragLeave, onDrop }: ProjectFoldersProps) => {
   const { supabase, session } = useSession();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -160,9 +191,21 @@ export const ProjectFolders = ({ projects, allJobs }: ProjectFoldersProps) => {
         </DialogContent>
       </Dialog>
       
-      {projects && projects.length > 0 && allJobs && (
+      {projects && allJobs && (
         <Accordion type="multiple" className="w-full">
-          {projects.map(p => <ProjectItem key={p.id} project={p} allJobs={allJobs} onRename={(job) => { setNewName(job.original_prompt); setRenamingJob(job); }} onDelete={setDeletingJobId} />)}
+          {projects.map(p => 
+            <ProjectItem 
+              key={p.id} 
+              project={p} 
+              allJobs={allJobs as Job[]} 
+              onRename={(job) => { setNewName(job.original_prompt); setRenamingJob(job); }} 
+              onDelete={setDeletingJobId}
+              onDrop={onDrop}
+              onDragEnter={onDragEnter}
+              onDragLeave={onDragLeave}
+              isBeingDraggedOver={draggingOverProjectId === p.id}
+            />
+          )}
         </Accordion>
       )}
 
