@@ -11,13 +11,24 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
 const POLLING_INTERVAL_MS = 5000; // 5 seconds for rapid polling
+const FINAL_OUTPUT_NODE_ID = "431"; // The ID of the "Save Image" node in the workflow
 
 async function findOutputImage(historyOutputs: any): Promise<any | null> {
     if (!historyOutputs) return null;
+    
+    // First, try to find the specific output node. This is the most reliable method.
+    const finalNodeOutput = historyOutputs[FINAL_OUTPUT_NODE_ID];
+    if (finalNodeOutput?.images && Array.isArray(finalNodeOutput.images) && finalNodeOutput.images.length > 0) {
+        console.log(`[Poller] Found output image in designated final node ${FINAL_OUTPUT_NODE_ID}.`);
+        return finalNodeOutput.images[0];
+    }
+
+    // Fallback for safety: check all nodes if the specific one isn't found.
+    console.warn(`[Poller] Could not find output in designated node ${FINAL_OUTPUT_NODE_ID}. Searching all nodes as a fallback.`);
     for (const nodeId in historyOutputs) {
         const outputData = historyOutputs[nodeId];
         if (outputData.images && Array.isArray(outputData.images) && outputData.images.length > 0) {
-            console.log(`[Poller] Found output image in node ${nodeId}.`);
+            console.log(`[Poller] Found fallback output image in node ${nodeId}.`);
             return outputData.images[0];
         }
     }
