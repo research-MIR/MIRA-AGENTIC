@@ -16,29 +16,61 @@ Our objective is to take a source image and, based on a prompt, generate a semi-
 
 ### 2. The Gemini API Call: Getting the Mask
 
-To get a pixel-level mask, we need to configure our Gemini API call to request it. The most reliable method is to combine a clear, natural language instruction in the system prompt with the `responseMimeType: "application/json"` setting.
+To get a pixel-level mask, we need to configure our Gemini API call to request it specifically. This is done by defining a `responseSchema` that includes a `mask` property.
 
-#### 2.1. The System Prompt (Updated & Simplified)
+#### 2.1. The System Prompt
 
-The system prompt must instruct the AI to return a single, combined mask for the object of interest. Instead of providing a full JSON example, we give a clear instruction on the desired output format.
+The system prompt must instruct the AI to return a single, combined mask for the object of interest.
 
 ```javascript
-const systemPrompt = `You are a virtual stylist and expert image analyst...
+const systemPrompt = `You are a precise image segmentation AI. Your task is to analyze the provided image and return a JSON object containing a description and ONLY ONE segmentation mask.
 
-[...All the critical rules about what to segment remain here...]
+### CRITICAL RULES:
+1.  **SINGLE MASK ONLY:** You MUST return one and only one item in the 'masks' array.
+2.  **COMBINED MASK:** The single mask MUST enclose the main person and their primary garment(s) as a single object. Do not segment individual items of clothing.
+3.  **LABEL:** The label for this single mask must be "person_with_garment".
+4.  **PIXEL MASK:** You MUST include a base64 encoded PNG string for the \`mask\` property.
 
 ### Example Output:
-Output a JSON segmentation mask where each entry contains the 2D
-bounding box in the key "box_2d", the segmentation mask in key "mask", and
-the text label in the key "label". Use descriptive labels.`;
+{
+  "description": "A close-up shot of a golden retriever puppy playing in a field of green grass.",
+  "masks": [
+    {
+      "box_2d": [100, 150, 800, 850],
+      "label": "person_with_garment",
+      "mask": "iVBORw0KGgoAAAANSUhEUg..."
+    }
+  ]
+}`;
 ```
 
-#### 2.2. The API Call Structure (Updated)
+#### 2.2. The API Call Structure
 
-The key is to use `responseMimeType: "application/json"` **without** a `responseSchema`. The combination of the MIME type hint and the clear instruction in the system prompt is sufficient and more reliable.
+The key is to use `responseMimeType: "application/json"` and provide a `responseSchema` that tells the model exactly what to return.
 
 ```typescript
-import { GoogleGenAI, Part } from '@google/genai';
+import { GoogleGenAI, Type, Part } from '@google/genai';
+
+// Define the expected JSON structure
+const responseSchema = {
+  type: Type.OBJECT,
+  properties: {
+    'description': { type: Type.STRING },
+    'masks': {
+        type: Type.ARRAY,
+        items: {
+            type: Type.OBJECT,
+            properties: {
+                'box_2d': { type: Type.ARRAY, items: { type: Type.NUMBER } },
+                'label': { type: Type.STRING },
+                'mask': { type: Type.STRING, description: "The base64 encoded PNG mask." }
+            },
+            required: ['box_2d', 'label', 'mask']
+        }
+    }
+  },
+  required: ['description', 'masks'],
+};
 
 // Make the API call
 const ai = new GoogleGenAI({ apiKey: 'YOUR_API_KEY' });
@@ -47,22 +79,13 @@ const result = await ai.models.generateContent({
     contents: [{ role: 'user', parts: [/* your image part here */] }],
     generationConfig: {
         responseMimeType: "application/json",
-        // NO responseSchema is needed here.
+        responseSchema: responseSchema,
     },
     config: {
         systemInstruction: { role: "system", parts: [{ text: systemPrompt }] }
     }
 });
 ```
-
-#### 2.3. Key Lesson Learned
-
-Previous versions of this function used a rigid `responseSchema` and a full JSON object in the "Example Output" section of the prompt. This proved to be brittle. The model would sometimes fail to generate a response, likely because it was struggling to perfectly match the complex example structure.
-
-**The new, more robust approach is to:**
-1.  Tell the model what to do in plain English within the prompt.
-2.  Set `responseMimeType: "application/json"` to hint at the desired output container.
-3.  **Do not** provide a `responseSchema` or a full JSON example in the prompt, as this can be counter-productive.
 
 ---
 

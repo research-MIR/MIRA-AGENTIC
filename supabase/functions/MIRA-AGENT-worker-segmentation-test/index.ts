@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { GoogleGenAI, Part } from 'https://esm.sh/@google/genai@0.15.0';
+import { GoogleGenAI, Type, Part } from 'https://esm.sh/@google/genai@0.15.0';
 import { encodeBase64, decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const corsHeaders = {
@@ -34,7 +34,16 @@ You will be given one or two images and a user prompt. Your task is to output a 
 8.  **LABEL:** The label for the mask must be "person_with_garment".
 
 ### Example Output:
-Output a JSON segmentation mask where each entry contains the 2D bounding box in the key "box_2d", the segmentation mask in key "mask", and the text label in the key "label". Use descriptive labels.`;
+{
+  "description": "A close-up shot of a golden retriever puppy playing in a field of green grass.",
+  "masks": [
+    {
+      "box_2d": [100, 150, 800, 850],
+      "label": "person_with_garment",
+      "mask": "iVBORw0KGgoAAAANSUhEUg..."
+    }
+  ]
+}`;
 
 async function downloadImageAsPart(supabase: SupabaseClient, imageUrl: string): Promise<Part> {
     const url = new URL(imageUrl);
