@@ -6,6 +6,7 @@ import { showError, showSuccess, showLoading, dismissToast } from '@/utils/toast
 import { RealtimeChannel } from '@supabase/supabase-js';
 import { Message } from '@/components/Chat/MessageList';
 import { useLanguage } from '@/context/LanguageContext';
+import { UploadedFile } from './useFileUpload';
 
 const parseHistoryToMessages = (jobData: any): Message[] => {
     const history = jobData?.context?.history;
@@ -162,11 +163,9 @@ export const useChatManager = () => {
         if (!jobId) return;
 
         const channel = supabase.channel(`job-updates-${jobId}`)
-            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'mira-agent-jobs' },
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'mira-agent-jobs', filter: `id=eq.${jobId}` },
                 (payload) => {
-                    if (payload.new.id === jobId) {
-                        queryClient.invalidateQueries({ queryKey: ['chatJob', jobId] });
-                    }
+                    queryClient.invalidateQueries({ queryKey: ['chatJob', jobId] });
                 }
             ).subscribe();
         channelRef.current = channel;
@@ -186,8 +185,18 @@ export const useChatManager = () => {
         }
     }, [error, navigate]);
 
-    const sendMessage = useCallback(async (text: string, files: { path: string }[], isSilent: boolean) => {
+    const sendMessage = useCallback(async (text: string, files: UploadedFile[], isSilent: boolean) => {
         setIsSending(true);
+        
+        if (!isSilent) {
+            const optimisticMessage: Message = {
+                from: 'user',
+                text: text,
+                imageUrls: files.map(f => f.previewUrl)
+            };
+            setMessages(prev => [...prev, optimisticMessage]);
+        }
+
         try {
             const payload = { 
                 jobId, 
