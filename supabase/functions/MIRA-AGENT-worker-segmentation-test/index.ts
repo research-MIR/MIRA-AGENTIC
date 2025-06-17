@@ -109,20 +109,13 @@ async function downloadImageAsPart(supabase: SupabaseClient, imageUrl: string): 
     return { inlineData: { mimeType, data: base64 } };
 }
 
-function extractJson(text: string): any {
-    const match = text.match(/```json\s*([\s\S]*?)\s*```/);
-    if (match && match[1]) { return JSON.parse(match[1]); }
-    try { return JSON.parse(text); } catch (e) {
-        throw new Error("The model returned a response that could not be parsed as JSON.");
-    }
-}
-
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
+    console.log("[SegmentationTool Test] Function invoked.");
     const { person_image_url, garment_image_url, user_prompt, user_id } = await req.json();
     if (!person_image_url || !user_id) {
       throw new Error("person_image_url and user_id are required.");
@@ -141,8 +134,9 @@ serve(async (req) => {
     }
 
     userParts.push({ text: `User instructions: ${user_prompt || 'None'}` });
-
+    
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+    console.log("[SegmentationTool Test] Calling Gemini API...");
     const result = await ai.models.generateContent({
         model: MODEL_NAME,
         contents: [{ role: 'user', parts: userParts }],
@@ -155,17 +149,18 @@ serve(async (req) => {
         }
     });
 
-    const responseJson = extractJson(result.text);
+    console.log("[SegmentationTool Test] Received response from Gemini. Invoking JSON parser tool...");
+    const { data: responseJson, error: parseError } = await supabase.functions.invoke('MIRA-AGENT-tool-parse-json', {
+        body: { text_to_parse: result.text }
+    });
+
+    if (parseError) throw new Error(`JSON parsing function failed: ${parseError.message}`);
+    if (responseJson.error) throw new Error(`Failed to parse Gemini response: ${responseJson.details}`);
+    
+    console.log("[SegmentationTool Test] Successfully parsed JSON response.");
 
     if (responseJson.masks && responseJson.masks.length > 0 && responseJson.masks[0].mask) {
-        let maskBase64 = responseJson.masks[0].mask;
-        
-        const prefix = 'data:image/png;base64,';
-        if (maskBase64.startsWith(prefix)) {
-            console.log("[SegmentationTool Test] Stripping data URI prefix from mask data.");
-            maskBase64 = maskBase64.substring(prefix.length);
-        }
-
+        const maskBase64 = responseJson.masks[0].mask;
         const maskBuffer = decodeBase64(maskBase64);
         const filePath = `${user_id}/masks/mask_${Date.now()}.png`;
         
