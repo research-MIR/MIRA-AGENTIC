@@ -33,8 +33,9 @@ You will be given one or two images and a user prompt. Your task is to output a 
 7.  **PERSON SEGMENTATION (Fallback):** If only a person image is provided and the prompt asks to "find the person" or "segment the person", you MUST create a tight bounding box around the entire person, from head to toe, ignoring the background.
 8.  **LABEL:** The label for the mask must be "person_with_garment".
 
-### Example Output:
-Output a JSON segmentation mask where each entry contains the 2D bounding box in the key "box_2d", the segmentation mask in key "mask", and the text label in the key "label". Use descriptive labels.`;
+### task:
+Give the segmentation masks for the requested task
+Output a JSON segmentation mask where each entry contains the 2D bounding box in the key "box_2d", the segmentation mask in key "mask" (the actual mask data - do not allucinate), and the text label in the key "label". Use descriptive labels.`;
 
 async function downloadImageAsPart(supabase, imageUrl) {
   const url = new URL(imageUrl);
@@ -126,6 +127,7 @@ serve(async (req)=>{
         responseMimeType: "application/json"
       },
       config: {
+        temperature: 0.5,
         systemInstruction: {
           role: "system",
           parts: [
