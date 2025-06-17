@@ -32,7 +32,6 @@ You will be given one or two images and a user prompt. Your task is to output a 
 6.  **INVENTION RULE:** If a user wants to place an upper-body garment (e.g., a shirt) on a person wearing a one-piece (e.g., a dress), you must logically deduce the area for the shirt mask. Your description should note that a lower-body garment would need to be imagined to complete the outfit, but the mask should ONLY be for the new upper-body item.
 7.  **PERSON SEGMENTATION (Fallback):** If only a person image is provided and the prompt asks to "find the person" or "segment the person", you MUST create a tight bounding box around the entire person, from head to toe, ignoring the background.
 8.  **LABEL:** The label for the mask must be "person_with_garment".
-9.  **PIXEL MASK:** You MUST include a base64 encoded PNG string for the \`mask\` property.
 
 ### Example Output:
 {
