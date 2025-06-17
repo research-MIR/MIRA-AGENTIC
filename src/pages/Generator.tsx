@@ -101,15 +101,16 @@ const Generator = () => {
     const channel = supabase.channel(`direct-generator-jobs-tracker-${userId}`)
       .on(
         'postgres_changes', 
-        { event: '*', schema: 'public', table: 'mira-agent-jobs', filter: `user_id=eq.${userId}` },
+        { event: '*', schema: 'public', table: 'mira-agent-jobs' }, // REMOVED filter
         (payload) => {
           console.log('[Generator Realtime] Received payload:', payload);
           const job = payload.new as any;
-          if (job?.context?.source === 'direct_generator') {
-            console.log(`[Generator Realtime] Job ${job.id} is from direct_generator. Fetching recent jobs.`);
+          // Client-side filtering
+          if (job?.user_id === userId && job?.context?.source === 'direct_generator') {
+            console.log(`[Generator Realtime] Job ${job.id} matches user and source. Fetching recent jobs.`);
             fetchRecentJobs(userId);
           } else {
-            console.log(`[Generator Realtime] Job ${job.id} is NOT from direct_generator. Ignoring.`);
+            console.log(`[Generator Realtime] Job update received, but it's not for this user or not from the direct generator. Ignoring.`);
           }
         }
       )
