@@ -153,17 +153,27 @@ export const useChatManager = () => {
     }, [jobId, jobData, processJobData, t.newChat]);
 
     useEffect(() => {
-        if (channelRef.current) supabase.removeChannel(channelRef.current);
+        if (channelRef.current) {
+            supabase.removeChannel(channelRef.current);
+            channelRef.current = null;
+        }
         if (!jobId) return;
 
         const channel = supabase.channel(`job-updates-${jobId}`)
-            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'mira-agent-jobs', filter: `id=eq.${jobId}` },
-                () => queryClient.invalidateQueries({ queryKey: ['chatJob', jobId] })
+            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'mira-agent-jobs' },
+                (payload) => {
+                    if (payload.new.id === jobId) {
+                        queryClient.invalidateQueries({ queryKey: ['chatJob', jobId] });
+                    }
+                }
             ).subscribe();
         channelRef.current = channel;
 
         return () => {
-            if (channelRef.current) supabase.removeChannel(channelRef.current);
+            if (channelRef.current) {
+                supabase.removeChannel(channelRef.current);
+                channelRef.current = null;
+            }
         };
     }, [jobId, supabase, queryClient]);
 
