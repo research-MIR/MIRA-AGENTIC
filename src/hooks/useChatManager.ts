@@ -43,6 +43,7 @@ const parseHistoryToMessages = (jobData: any): Message[] => {
                 case 'dispatch_to_artisan_engine': botMessage.artisanResponse = response; break;
                 case 'generate_image': case 'generate_image_with_reference': botMessage.imageGenerationResponse = response; break;
                 case 'dispatch_to_brand_analyzer': botMessage.brandAnalysisResponse = response; break;
+                case 'provide_text_response': botMessage.text = response.text; break;
                 case 'present_image_choice':
                     botMessage.imageChoiceProposal = response;
                     const nextTurn = history[i + 1];

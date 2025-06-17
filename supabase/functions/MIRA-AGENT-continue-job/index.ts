@@ -30,7 +30,7 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
 
   try {
-    const { jobId, prompt, storagePaths, isDesignerMode, pipelineMode, ratioMode, numImagesMode, isSilent } = await req.json();
+    const { jobId, prompt, storagePaths, isDesignerMode, pipelineMode, selectedModelId, language, ratioMode, numImagesMode, isSilent } = await req.json();
     if (!jobId) { throw new Error("jobId is required to continue a job."); }
 
     console.log(`[ContinueJob][${jobId}] Received request. isSilent: ${isSilent}`);
@@ -43,14 +43,12 @@ serve(async (req) => {
     const lastResult = job.final_result;
     const lastTurn = history.length > 0 ? history[history.length - 1] : null;
 
-    // If the job was 'complete' or 'awaiting_feedback', its last message was in final_result.
-    // We need to commit this to the history to ensure the log is complete before adding new user input.
     if (lastResult && lastTurn && lastTurn.role === 'model' && lastTurn.parts[0]?.functionCall) {
         history.push({
             role: 'function',
             parts: [{
                 functionResponse: {
-                    name: lastTurn.parts[0].functionCall.name,
+                    name: 'provide_text_response', // Use a generic name that the parser will not ignore
                     response: lastResult
                 }
             }]
@@ -90,6 +88,8 @@ serve(async (req) => {
         history, 
         isDesignerMode, 
         pipelineMode,
+        selectedModelId,
+        language,
         ratioMode,
         numImagesMode
     };
