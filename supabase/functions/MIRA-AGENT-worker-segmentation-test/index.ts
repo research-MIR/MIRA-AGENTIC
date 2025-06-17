@@ -149,6 +149,9 @@ serve(async (req) => {
         generationConfig: {
             responseMimeType: "application/json",
             responseSchema: responseSchema,
+        },
+        config: {
+            systemInstruction: { role: "system", parts: [{ text: systemPrompt }] }
         }
     });
 
