@@ -10,6 +10,24 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SegmentationMask } from "@/components/SegmentationMask";
 import { useSecureImage } from "@/hooks/useSecureImage";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { RealtimeChannel } from "@supabase/supabase-js";
+
+interface VtoPipelineJob {
+  id: string;
+  status: 'pending_segmentation' | 'pending_crop' | 'pending_tryon' | 'pending_composite' | 'complete' | 'failed';
+  source_person_image_url: string;
+  source_garment_image_url: string;
+  cropped_image_url?: string;
+  segmentation_result?: {
+    masks: { box_2d: [number, number, number, number], label: string }[];
+  };
+  final_composite_url?: string;
+  error_message?: string;
+  bitstudio_job?: {
+    final_image_url?: string;
+  };
+}
 
 const SecureImageDisplay = ({ imageUrl, alt }: { imageUrl: string | null, alt: string }) => {
   const { displayUrl, isLoading, error } = useSecureImage(imageUrl);
@@ -24,82 +42,49 @@ const SecureImageDisplay = ({ imageUrl, alt }: { imageUrl: string | null, alt: s
 const Developer = () => {
   const { supabase, session } = useSession();
   const { t } = useLanguage();
+  const queryClient = useQueryClient();
+  const channelRef = useRef<RealtimeChannel | null>(null);
 
-  const [segPersonImage, setSegPersonImage] = useState<File | null>(null);
-  const [segGarmentImage, setSegGarmentImage] = useState<File | null>(null);
-  const [segPrompt, setSegPrompt] = useState("Segment the main garment on the person.");
-  const [segmentationResult, setSegmentationResult] = useState<any | null>(null);
-  const [isSegmenting, setIsSegmenting] = useState(false);
-  const [isCropping, setIsCropping] = useState(false);
-  const [sourceImageDimensions, setSourceImageDimensions] = useState<{ width: number; height: number } | null>(null);
-  const [sourceImagePublicUrl, setSourceImagePublicUrl] = useState<string | null>(null);
-  const [croppedImageUrl, setCroppedImageUrl] = useState<string | null>(null);
-  const [maskImageUrl, setMaskImageUrl] = useState<string | null>(null);
+  const [personImageFile, setPersonImageFile] = useState<File | null>(null);
+  const [garmentImageFile, setGarmentImageFile] = useState<File | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
 
-  const segPersonImageUrl = segPersonImage ? URL.createObjectURL(segPersonImage) : null;
+  const { data: activeJob } = useQuery<VtoPipelineJob | null>({
+    queryKey: ['vtoPipelineTestJob', activeJobId],
+    queryFn: async () => {
+      if (!activeJobId) return null;
+      const { data, error } = await supabase
+        .from('mira-agent-vto-pipeline-jobs-test')
+        .select('*, bitstudio_job:bitstudio_job_id(final_image_url)')
+        .eq('id', activeJobId)
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!activeJobId,
+  });
 
   useEffect(() => {
+    if (!session?.user?.id) return;
+    const channel = supabase.channel(`vto-pipeline-test-tracker-${session.user.id}`)
+      .on<VtoPipelineJob>(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'mira-agent-vto-pipeline-jobs-test', filter: `user_id=eq.${session.user.id}` },
+        (payload) => {
+          if (payload.new.id === activeJobId) {
+            queryClient.invalidateQueries({ queryKey: ['vtoPipelineTestJob', activeJobId] });
+          }
+        }
+      )
+      .subscribe();
+    channelRef.current = channel;
     return () => {
-      if (segPersonImageUrl) URL.revokeObjectURL(segPersonImageUrl);
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+      }
     };
-  }, [segPersonImageUrl]);
-
-  useEffect(() => {
-    if (segmentationResult && segmentationResult[0]?.mask && sourceImageDimensions) {
-      const maskItem = segmentationResult[0];
-      const base64Data = maskItem.mask;
-      const imageUrl = base64Data.startsWith('data:image') ? base64Data : `data:image/png;base64,${base64Data}`;
-
-      const maskImg = new Image();
-      maskImg.onload = () => {
-        const [y0, x0, y1, x1] = maskItem.box_2d;
-        const absX0 = Math.floor((x0 / 1000) * sourceImageDimensions.width);
-        const absY0 = Math.floor((y0 / 1000) * sourceImageDimensions.height);
-        const bboxWidth = Math.ceil(((x1 - x0) / 1000) * sourceImageDimensions.width);
-        const bboxHeight = Math.ceil(((y1 - y0) / 1000) * sourceImageDimensions.height);
-
-        if (bboxWidth < 1 || bboxHeight < 1) return;
-
-        const resizedMaskCanvas = document.createElement('canvas');
-        resizedMaskCanvas.width = bboxWidth;
-        resizedMaskCanvas.height = bboxHeight;
-        const resizedCtx = resizedMaskCanvas.getContext('2d');
-        if (!resizedCtx) return;
-        resizedCtx.drawImage(maskImg, 0, 0, bboxWidth, bboxHeight);
-
-        const fullCanvas = document.createElement('canvas');
-        fullCanvas.width = sourceImageDimensions.width;
-        fullCanvas.height = sourceImageDimensions.height;
-        const fullCtx = fullCanvas.getContext('2d');
-        if (!fullCtx) return;
-        
-        fullCtx.drawImage(resizedMaskCanvas, absX0, absY0);
-        setMaskImageUrl(fullCanvas.toDataURL());
-      };
-      maskImg.src = imageUrl;
-    }
-  }, [segmentationResult, sourceImageDimensions]);
-
-  const handlePersonImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setSegPersonImage(file);
-    setSegmentationResult(null);
-    setCroppedImageUrl(null);
-    setSourceImagePublicUrl(null);
-    setMaskImageUrl(null);
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const img = new Image();
-      img.onload = () => {
-        setSourceImageDimensions({ width: img.naturalWidth, height: img.naturalHeight });
-      };
-      img.src = event.target?.result as string;
-    };
-    reader.readAsDataURL(file);
-  };
+  }, [supabase, session?.user?.id, queryClient, activeJobId]);
 
   const uploadFileAndGetUrl = async (file: File | null): Promise<string | null> => {
     if (!file) return null;
@@ -111,70 +96,36 @@ const Developer = () => {
     return publicUrl;
   };
 
-  const handleSegmentationTest = async () => {
-    if (!segPersonImage) return showError("Please select a person image for segmentation.");
-    setIsSegmenting(true);
-    setSegmentationResult(null);
-    setCroppedImageUrl(null);
-    setMaskImageUrl(null);
-    const toastId = showLoading("Running segmentation test...");
+  const handlePipelineTest = async () => {
+    if (!personImageFile || !garmentImageFile) return showError("Please select both a person and a garment image.");
+    setIsLoading(true);
+    setActiveJobId(null);
+    const toastId = showLoading("Uploading images and starting pipeline...");
 
     try {
-      const person_image_url = await uploadFileAndGetUrl(segPersonImage);
-      setSourceImagePublicUrl(person_image_url);
-      const garment_image_url = await uploadFileAndGetUrl(segGarmentImage);
+      const person_image_url = await uploadFileAndGetUrl(personImageFile);
+      const garment_image_url = await uploadFileAndGetUrl(garmentImageFile);
+      if (!person_image_url || !garment_image_url) throw new Error("Failed to upload one or both images.");
 
-      if (!person_image_url) throw new Error("Failed to upload person image.");
-
-      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-worker-segmentation-test', {
+      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-vto-pipeline-test', {
         body: {
           person_image_url,
           garment_image_url,
-          user_prompt: segPrompt,
-          user_id: session?.user.id
+          user_id: session?.user.id,
+          mode: 'edit' // Hardcode to edit mode for this test
         }
       });
 
       if (error) throw error;
-
-      const masksArray = data.result.masks ? data.result.masks : data.result;
-      setSegmentationResult(masksArray);
       
+      setActiveJobId(data.jobId);
       dismissToast(toastId);
-      showSuccess("Segmentation analysis complete.");
+      showSuccess("Test pipeline job started!");
     } catch (err: any) {
-      showError(`Segmentation failed: ${err.message}`);
+      showError(`Pipeline start failed: ${err.message}`);
       dismissToast(toastId);
     } finally {
-      setIsSegmenting(false);
-    }
-  };
-
-  const handleCropTest = async () => {
-    if (!sourceImagePublicUrl || !segmentationResult || segmentationResult.length === 0) {
-      return showError("Missing source image URL or segmentation result.");
-    }
-    setIsCropping(true);
-    const toastId = showLoading("Cropping image...");
-    
-    const payload = {
-      image_url: sourceImagePublicUrl,
-      box: segmentationResult[0].box_2d,
-      user_id: session?.user.id
-    };
-
-    try {
-      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-crop-image', { body: payload });
-      if (error) throw error;
-      
-      setCroppedImageUrl(data.cropped_image_url);
-      dismissToast(toastId);
-      showSuccess("Image cropped successfully.");
-    } catch (err: any) {
-      showError(`Cropping failed: ${err.message}`);
-      dismissToast(toastId);
-    } finally {
-      setIsCropping(false);
+      setIsLoading(false);
     }
   };
 
@@ -187,64 +138,59 @@ const Developer = () => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         <div className="space-y-4">
           <Card>
-            <CardHeader><CardTitle>AI Segmentation Tester (Test Environment)</CardTitle></CardHeader>
+            <CardHeader><CardTitle>VTO Pipeline Tester</CardTitle></CardHeader>
             <CardContent className="space-y-4">
-                <p className="text-sm text-muted-foreground">Upload images and a prompt to test the isolated segmentation function.</p>
+                <p className="text-sm text-muted-foreground">Test the full VTO pipeline from segmentation to final composite.</p>
                 <div>
-                  <Label htmlFor="seg-person-upload">Person Image</Label>
-                  <Input id="seg-person-upload" type="file" accept="image/*" onChange={handlePersonImageChange} />
+                  <Label htmlFor="person-upload">Person Image</Label>
+                  <Input id="person-upload" type="file" accept="image/*" onChange={(e) => setPersonImageFile(e.target.files?.[0] || null)} />
                 </div>
                 <div>
-                  <Label htmlFor="seg-garment-upload">Garment Image (Optional)</Label>
-                  <Input id="seg-garment-upload" type="file" accept="image/*" onChange={(e) => setSegGarmentImage(e.target.files?.[0] || null)} />
+                  <Label htmlFor="garment-upload">Garment Image</Label>
+                  <Input id="garment-upload" type="file" accept="image/*" onChange={(e) => setGarmentImageFile(e.target.files?.[0] || null)} />
                 </div>
-                <div>
-                  <Label htmlFor="seg-prompt">Segmentation Prompt</Label>
-                  <Textarea id="seg-prompt" value={segPrompt} onChange={(e) => setSegPrompt(e.target.value)} />
-                </div>
-                {segPersonImageUrl && (
-                  <div className="relative w-full max-w-md mx-auto">
-                    <img src={segPersonImageUrl} alt="Segmentation Source" className="w-full h-auto rounded-md" />
-                    {segmentationResult && sourceImageDimensions && (
-                        <SegmentationMask 
-                            masks={segmentationResult} 
-                            imageDimensions={sourceImageDimensions} 
-                        />
-                    )}
-                  </div>
-                )}
-                <Button onClick={handleSegmentationTest} disabled={isSegmenting || !segPersonImage}>
-                    {isSegmenting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    Run Segmentation Test
+                <Button onClick={handlePipelineTest} disabled={isLoading || !personImageFile || !garmentImageFile}>
+                    {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Run Full Pipeline Test
                 </Button>
-                {segmentationResult && (
-                    <div className="space-y-4 pt-4 border-t">
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <Label>JSON Response</Label>
-                                <Textarea
-                                    readOnly
-                                    value={JSON.stringify(segmentationResult, null, 2)}
-                                    className="mt-1 h-48 font-mono text-xs"
-                                />
-                            </div>
-                            <div>
-                                <Label>Corresponding Mask</Label>
-                                <SecureImageDisplay imageUrl={maskImageUrl} alt="Segmentation Mask" />
-                            </div>
-                        </div>
-                        <Button onClick={handleCropTest} disabled={isCropping}>
-                            {isCropping && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                            Test Crop with BBox
-                        </Button>
+            </CardContent>
+          </Card>
+        </div>
+        <div className="space-y-4">
+          <Card>
+            <CardHeader><CardTitle>Pipeline Status</CardTitle></CardHeader>
+            <CardContent>
+              {!activeJob && <p className="text-sm text-muted-foreground">Run a test to see the results here.</p>}
+              {activeJob && (
+                <div className="space-y-4">
+                  <p className="text-sm font-mono">Job ID: {activeJob.id}</p>
+                  <p className="text-sm font-semibold">Status: <span className="font-mono p-1 bg-muted rounded-md">{activeJob.status}</span></p>
+                  {activeJob.error_message && <div className="p-2 bg-destructive/10 text-destructive rounded-md text-sm"><AlertTriangle className="inline h-4 w-4 mr-2"/>{activeJob.error_message}</div>}
+                  
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label>Source Person</Label>
+                      <SecureImageDisplay imageUrl={activeJob.source_person_image_url} alt="Source Person" />
                     </div>
-                )}
-                {croppedImageUrl && (
-                  <div className="space-y-4 pt-4 border-t">
-                    <h3 className="font-semibold">Crop Result</h3>
-                    <SecureImageDisplay imageUrl={croppedImageUrl} alt="Cropped Result" />
+                    <div>
+                      <Label>Source Garment</Label>
+                      <SecureImageDisplay imageUrl={activeJob.source_garment_image_url} alt="Source Garment" />
+                    </div>
+                    <div>
+                      <Label>Cropped Image</Label>
+                      <SecureImageDisplay imageUrl={activeJob.cropped_image_url} alt="Cropped Image" />
+                    </div>
+                    <div>
+                      <Label>VTO Result (Mock)</Label>
+                      <SecureImageDisplay imageUrl={activeJob.bitstudio_job?.final_image_url} alt="VTO Result" />
+                    </div>
                   </div>
-                )}
+                   <div>
+                      <Label>Final Composite</Label>
+                      <SecureImageDisplay imageUrl={activeJob.final_composite_url} alt="Final Composite" />
+                    </div>
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>

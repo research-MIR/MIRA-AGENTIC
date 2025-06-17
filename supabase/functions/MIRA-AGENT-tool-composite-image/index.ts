@@ -98,7 +98,7 @@ serve(async (req) => {
     const { data: { publicUrl } } = supabase.storage.from(UPLOAD_BUCKET).getPublicUrl(finalStoragePath);
 
     return new Response(JSON.stringify({ success: true, final_composite_url: publicUrl }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
       status: 200,
     });
 
