@@ -44,6 +44,42 @@ const Developer = () => {
     };
   }, [segPersonImageUrl]);
 
+  useEffect(() => {
+    if (segmentationResult && segmentationResult[0]?.mask && sourceImageDimensions) {
+      const maskItem = segmentationResult[0];
+      const base64Data = maskItem.mask;
+      const imageUrl = base64Data.startsWith('data:image') ? base64Data : `data:image/png;base64,${base64Data}`;
+
+      const maskImg = new Image();
+      maskImg.onload = () => {
+        const [y0, x0, y1, x1] = maskItem.box_2d;
+        const absX0 = Math.floor((x0 / 1000) * sourceImageDimensions.width);
+        const absY0 = Math.floor((y0 / 1000) * sourceImageDimensions.height);
+        const bboxWidth = Math.ceil(((x1 - x0) / 1000) * sourceImageDimensions.width);
+        const bboxHeight = Math.ceil(((y1 - y0) / 1000) * sourceImageDimensions.height);
+
+        if (bboxWidth < 1 || bboxHeight < 1) return;
+
+        const resizedMaskCanvas = document.createElement('canvas');
+        resizedMaskCanvas.width = bboxWidth;
+        resizedMaskCanvas.height = bboxHeight;
+        const resizedCtx = resizedMaskCanvas.getContext('2d');
+        if (!resizedCtx) return;
+        resizedCtx.drawImage(maskImg, 0, 0, bboxWidth, bboxHeight);
+
+        const fullCanvas = document.createElement('canvas');
+        fullCanvas.width = sourceImageDimensions.width;
+        fullCanvas.height = sourceImageDimensions.height;
+        const fullCtx = fullCanvas.getContext('2d');
+        if (!fullCtx) return;
+        
+        fullCtx.drawImage(resizedMaskCanvas, absX0, absY0);
+        setMaskImageUrl(fullCanvas.toDataURL());
+      };
+      maskImg.src = imageUrl;
+    }
+  }, [segmentationResult, sourceImageDimensions]);
+
   const handlePersonImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -103,14 +139,6 @@ const Developer = () => {
 
       const masksArray = data.result.masks ? data.result.masks : data.result;
       setSegmentationResult(masksArray);
-      
-      if (masksArray[0]?.mask_url) {
-        setMaskImageUrl(masksArray[0].mask_url);
-      } else if (masksArray[0]?.mask) { // Fallback to base64
-        const base64Data = masksArray[0].mask;
-        const imageUrl = base64Data.startsWith('data:image') ? base64Data : `data:image/png;base64,${base64Data}`;
-        setMaskImageUrl(imageUrl);
-      }
       
       dismissToast(toastId);
       showSuccess("Segmentation analysis complete.");
