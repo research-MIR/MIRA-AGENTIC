@@ -13,8 +13,9 @@ import { MessageList, Message } from "@/components/Chat/MessageList";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { PlusCircle, Trash2, Eye } from "lucide-react";
+import { PlusCircle, Trash2 } from "lucide-react";
 import { optimizeImage } from "@/lib/utils";
+import { BranchPrompt } from "@/components/Chat/BranchPrompt";
 
 interface UploadedFile {
   name: string;
@@ -430,6 +431,9 @@ const Index = () => {
     }
   }, [jobId, session, supabase, navigate, queryClient]);
 
+  const lastMessageWithHistory = [...messages].reverse().find(m => m.historyIndex !== undefined);
+  const lastHistoryIndex = lastMessageWithHistory?.historyIndex;
+
   return (
     <div className="flex flex-col h-full relative" onDragEnter={() => setIsDragging(true)}>
       {isDragging && <FileDropzone onDrop={(files) => handleFileUpload(files)} onDragStateChange={setIsDragging} />}
@@ -459,7 +463,7 @@ const Index = () => {
 
       <div className="flex-1 overflow-y-auto">
         <div className="p-4 md:p-6 space-y-4">
-            <MessageList messages={messages} jobId={jobId} onRefinementComplete={handleRefinementComplete} onSendMessage={handleSendMessage} onBranch={handleBranch} />
+            <MessageList messages={messages} jobId={jobId} onRefinementComplete={handleRefinementComplete} onSendMessage={handleSendMessage} />
             <div ref={messagesEndRef} />
         </div>
       </div>
@@ -488,10 +492,9 @@ const Index = () => {
             onSendMessage={() => handleSendMessage()}
           />
         ) : (
-          <div className="p-4 text-center text-sm text-muted-foreground bg-muted/50">
-            <Eye className="inline-block h-4 w-4 mr-2" />
-            You are viewing a shared chat. You can branch it to start your own conversation from any point.
-          </div>
+          jobId && lastHistoryIndex !== undefined ? (
+            <BranchPrompt onBranch={() => handleBranch(lastHistoryIndex)} />
+          ) : null
         )}
       </div>
     </div>

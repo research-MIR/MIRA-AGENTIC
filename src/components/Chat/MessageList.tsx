@@ -78,10 +78,9 @@ interface MessageListProps {
   jobId?: string;
   onRefinementComplete: (newImageUrl: string) => void;
   onSendMessage: (message: string) => void;
-  onBranch: (historyIndex: number) => void;
 }
 
-export const MessageList = ({ messages, jobId, onRefinementComplete, onSendMessage, onBranch }: MessageListProps) => {
+export const MessageList = ({ messages, jobId, onRefinementComplete, onSendMessage }: MessageListProps) => {
   const { showImage } = useImagePreview();
   const { t } = useLanguage();
 
@@ -97,12 +96,9 @@ export const MessageList = ({ messages, jobId, onRefinementComplete, onSendMessa
             return null;
         }
 
-        const isBotMessage = message.from === 'bot';
-        const canBranch = isBotMessage && message.historyIndex !== undefined && !message.jobInProgress;
-
         return (
-          <div key={key} className={`flex items-start gap-3 group ${message.from === "user" ? "justify-end" : ""}`}>
-            {isBotMessage && !message.artisanResponse && !message.brandAnalysisResponse && !message.jobInProgress && !message.imageGenerationResponse && !message.creativeProcessResponse && !message.refinementProposal && !message.imageChoiceProposal && <div className="p-2 bg-primary rounded-full text-primary-foreground self-start"><Bot size={20} /></div>}
+          <div key={key} className={`flex items-start gap-3 ${message.from === "user" ? "justify-end" : ""}`}>
+            {message.from === 'bot' && !message.artisanResponse && !message.brandAnalysisResponse && !message.jobInProgress && !message.imageGenerationResponse && !message.creativeProcessResponse && !message.refinementProposal && !message.imageChoiceProposal && <div className="p-2 bg-primary rounded-full text-primary-foreground self-start"><Bot size={20} /></div>}
             
             {message.jobInProgress ? (
               <JobStatusCard message={message.jobInProgress.message} jobId={message.jobInProgress.jobId} />
@@ -143,12 +139,6 @@ export const MessageList = ({ messages, jobId, onRefinementComplete, onSendMessa
                   {message.text && <div className="markdown-content"><ReactMarkdown remarkPlugins={[remarkGfm]}>{(t[message.text as keyof typeof t]) || message.text}</ReactMarkdown></div>}
                 </CardContent>
               </Card>
-            )}
-
-            {canBranch && (
-              <Button variant="ghost" size="icon" className="opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => onBranch(message.historyIndex!)}>
-                <GitBranch className="h-4 w-4" />
-              </Button>
             )}
 
             {message.from === "user" && <div className="p-2 bg-secondary rounded-full text-secondary-foreground self-start"><User size={20} /></div>}
