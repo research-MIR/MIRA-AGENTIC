@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { GoogleGenAI, Type, Part, createPartFromUri } from 'https://esm.sh/@google/genai@0.15.0';
+import { GoogleGenAI, Type, Part } from 'https://esm.sh/@google/genai@0.15.0';
 import { encodeBase64, decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const corsHeaders = {
@@ -87,7 +87,7 @@ const responseSchema = {
   required: ['description', 'masks'],
 };
 
-async function downloadImageAsBlob(supabase: SupabaseClient, imageUrl: string): Promise<Blob> {
+async function downloadImageAsPart(supabase: SupabaseClient, imageUrl: string): Promise<Part> {
     const url = new URL(imageUrl);
     const pathParts = url.pathname.split(`/storage/v1/object/public/${BUCKET_NAME}/`);
     if (pathParts.length < 2) {
@@ -103,29 +103,18 @@ async function downloadImageAsBlob(supabase: SupabaseClient, imageUrl: string): 
     if (error) {
         throw new Error(`Supabase download failed for path ${storagePath}: ${error.message}`);
     }
-    return blob;
+
+    const mimeType = blob.type;
+    const buffer = await blob.arrayBuffer();
+    const base64 = encodeBase64(buffer);
+    console.log(`[SegmentationWorker] Successfully downloaded and encoded image. Mime-type: ${mimeType}, Size: ${buffer.byteLength} bytes.`);
+    return { inlineData: { mimeType, data: base64 } };
 }
 
 function extractJson(text: string): any {
-    let match = text.match(/```json\s*([\s\S]*?)\s*```/);
-    let jsonText = match ? match[1] : text;
-
-    if (!match) {
-        const firstBrace = jsonText.indexOf('{');
-        const lastBrace = jsonText.lastIndexOf('}');
-        if (firstBrace !== -1 && lastBrace > firstBrace) {
-            jsonText = jsonText.substring(firstBrace, lastBrace + 1);
-        }
-    }
-
-    jsonText = jsonText.trim();
-
-    try {
-        return JSON.parse(jsonText);
-    } catch (e) {
-        console.error("Final JSON parsing attempt failed.");
-        console.error("Cleaned JSON Text that failed:", jsonText);
-        console.error("Original Error:", e);
+    const match = text.match(/```json\s*([\s\S]*?)\s*```/);
+    if (match && match[1]) { return JSON.parse(match[1]); }
+    try { return JSON.parse(text); } catch (e) {
         throw new Error("The model returned a response that could not be parsed as JSON.");
     }
 }
@@ -143,41 +132,23 @@ serve(async (req) => {
     }
     
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-    const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-
-    const uploadAndGetPart = async (imageUrl: string, displayName: string): Promise<Part> => {
-        const imageBlob = await downloadImageAsBlob(supabase, imageUrl);
-        console.log(`[SegmentationTool Test] Uploading ${displayName} to Google Files API...`);
-        const uploadResult = await ai.files.upload({ file: imageBlob, config: { displayName } });
-        
-        let file = await ai.files.get({ name: uploadResult.name as string });
-        let retries = 0;
-        while (file.state === 'PROCESSING' && retries < 10) {
-            await new Promise(resolve => setTimeout(resolve, 2000));
-            file = await ai.files.get({ name: uploadResult.name as string });
-            retries++;
-        }
-
-        if (file.state !== 'ACTIVE') {
-            throw new Error(`File processing failed for ${displayName}. Last state: ${file.state}`);
-        }
-        console.log(`[SegmentationTool Test] File ${displayName} is ACTIVE. URI: ${file.uri}`);
-        return createPartFromUri(file.uri, file.mimeType);
-    };
 
     const userParts: Part[] = [
         { text: "Person Image:" },
-        await uploadAndGetPart(person_image_url, `person_${user_id}`),
+        await downloadImageAsPart(supabase, person_image_url),
     ];
 
     if (garment_image_url) {
         userParts.push({ text: "Garment Image:" });
-        userParts.push(await uploadAndGetPart(garment_image_url, `garment_${user_id}`));
+        userParts.push(await downloadImageAsPart(supabase, garment_image_url));
     }
 
     userParts.push({ text: `User instructions: ${user_prompt || 'None'}` });
     console.log("[SegmentationTool Test] Prepared parts for Gemini API.");
+    console.log("[SegmentationTool Test] Payload being sent to Gemini:", JSON.stringify(userParts, null, 2));
 
+
+    const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
     console.log("[SegmentationTool Test] Calling Gemini API...");
     const result = await ai.models.generateContent({
         model: MODEL_NAME,
