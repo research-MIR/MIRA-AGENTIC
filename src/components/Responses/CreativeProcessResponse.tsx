@@ -31,6 +31,8 @@ interface Props {
   data: {
     iterations: Iteration[];
     final_generation_result: GenerationResult;
+    text?: string;
+    follow_up_message?: string;
   };
   jobId?: string;
 }
@@ -51,9 +53,13 @@ export const CreativeProcessResponse = ({ data, jobId }: Props) => {
             </div>
             <div className="text-left">
                 <p className="font-semibold">Creative Process Complete</p>
-                <p className="text-sm text-muted-foreground">
-                Finished in {totalIterations} iteration(s).
-                </p>
+                {data.text ? (
+                  <p className="text-sm text-muted-foreground">{data.text}</p>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    Finished in {totalIterations} iteration(s).
+                  </p>
+                )}
             </div>
         </div>
       </CardHeader>
@@ -62,7 +68,6 @@ export const CreativeProcessResponse = ({ data, jobId }: Props) => {
           {data.iterations.map((iteration, index) => {
             const { artisan_result, initial_generation_result, critique_result } = iteration;
             
-            // If there's nothing to show for this iteration, don't render the card at all.
             if (!artisan_result && !initial_generation_result && !critique_result) {
                 return null;
             }
@@ -128,6 +133,11 @@ export const CreativeProcessResponse = ({ data, jobId }: Props) => {
             <div className="mt-4">
                 <h3 className="text-lg font-semibold mb-2">{finalTitle}</h3>
                 <ImageGenerationResponse data={data.final_generation_result.response} jobId={jobId} />
+            </div>
+        )}
+        {data.follow_up_message && (
+            <div className="mt-4 p-3 bg-background/50 rounded-md text-sm text-muted-foreground italic">
+                {data.follow_up_message}
             </div>
         )}
       </CardContent>
