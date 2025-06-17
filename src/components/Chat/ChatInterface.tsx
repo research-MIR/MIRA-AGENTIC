@@ -1,4 +1,4 @@
-import { useRef, useEffect } from "react";
+import { useState, useRef, useEffect } from "react";
 import { FileDropzone } from "@/components/FileDropzone";
 import { ControlPanel } from "@/components/Chat/ControlPanel";
 import { PromptInput } from "@/components/Chat/PromptInput";
