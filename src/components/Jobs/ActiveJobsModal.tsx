@@ -8,7 +8,7 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Loader2, X } from "lucide-react";
-import { useSession } from "./Auth/SessionContextProvider";
+import { useSession } from "@/components/Auth/SessionContextProvider";
 import { useQueryClient } from "@tanstack/react-query";
 import { showError } from "@/utils/toast";
 
