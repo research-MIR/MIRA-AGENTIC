@@ -25,8 +25,9 @@ async function findOutputImage(historyOutputs: any): Promise<any | null> {
 }
 
 async function createGalleryEntry(supabase: any, job: any, finalResult: any) {
+    console.log(`[Poller][${job.id}] Attempting to create gallery entry.`);
     if (!job.metadata?.invoker_user_id || !job.metadata?.original_prompt_for_gallery) {
-        console.log(`[Poller][${job.id}] Skipping gallery entry creation: missing metadata.`);
+        console.log(`[Poller][${job.id}] Skipping gallery entry creation: missing metadata. invoker_user_id: ${job.metadata?.invoker_user_id}, original_prompt: ${job.metadata?.original_prompt_for_gallery}`);
         return;
     }
     const jobPayload = {
@@ -36,6 +37,7 @@ async function createGalleryEntry(supabase: any, job: any, finalResult: any) {
         final_result: { isImageGeneration: true, images: [finalResult] },
         context: { source: 'refiner' }
     };
+    console.log(`[Poller][${job.id}] Inserting new job into mira-agent-jobs for gallery.`);
     const { error: insertError } = await supabase.from('mira-agent-jobs').insert(jobPayload);
     if (insertError) {
         console.error(`[Poller][${job.id}] Failed to create gallery entry:`, insertError);
@@ -114,14 +116,15 @@ serve(async (req) => {
     if (fetchError) throw new Error(`Failed to fetch job: ${fetchError.message}`);
     
     if (job.status === 'complete' || job.status === 'failed') {
-        console.log(`[Poller][${job_id}] Job already resolved. Halting check.`);
+        console.log(`[Poller][${job_id}] Job already resolved with status '${job.status}'. Halting check.`);
         return new Response(JSON.stringify({ success: true, message: "Job already resolved." }), { headers: corsHeaders });
     }
 
     const historyUrl = `${job.comfyui_address}/history/${job.comfyui_prompt_id}`;
+    console.log(`[Poller][${job_id}] Fetching history from ComfyUI: ${historyUrl}`);
     const historyResponse = await fetch(historyUrl);
     if (!historyResponse.ok) {
-        console.warn(`[Poller][${job_id}] ComfyUI history not available yet. Will retry.`);
+        console.warn(`[Poller][${job_id}] ComfyUI history not available yet (Status: ${historyResponse.status}). Will retry.`);
         setTimeout(() => {
             supabase.functions.invoke('MIRA-AGENT-poller-comfyui', { body: { job_id } }).catch(console.error);
         }, POLLING_INTERVAL_MS);
@@ -142,17 +145,20 @@ serve(async (req) => {
     const outputImage = await findOutputImage(promptHistory.outputs);
 
     if (outputImage) {
-        console.log(`[Poller][${job_id}] Image found! Filename: ${outputImage.filename}`);
+        console.log(`[Poller][${job_id}] Image found! Filename: ${outputImage.filename}. Downloading...`);
         const imageUrl = `${job.comfyui_address}/view?filename=${encodeURIComponent(outputImage.filename)}&subfolder=${encodeURIComponent(outputImage.subfolder)}&type=${outputImage.type}`;
         const imageResponse = await fetch(imageUrl);
         if (!imageResponse.ok) throw new Error("Failed to download final image from ComfyUI.");
         const imageBuffer = await imageResponse.arrayBuffer();
+        console.log(`[Poller][${job_id}] Download complete. Uploading to Supabase Storage...`);
         
         const filePath = `${job.user_id}/${Date.now()}_comfyui_${outputImage.filename}`;
         await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(filePath, imageBuffer, { contentType: 'image/png', upsert: true });
         const { data: { publicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
+        console.log(`[Poller][${job_id}] Upload complete. Public URL: ${publicUrl}`);
         
         const finalResult = { publicUrl, storagePath: filePath };
+        console.log(`[Poller][${job_id}] Updating job status to 'complete'.`);
         await supabase.from('mira-agent-comfyui-jobs').update({
             status: 'complete',
             final_result: finalResult
@@ -163,6 +169,7 @@ serve(async (req) => {
         } else {
             await createGalleryEntry(supabase, job, finalResult);
         }
+        console.log(`[Poller][${job_id}] All steps complete. Polling finished.`);
 
         return new Response(JSON.stringify({ success: true, status: 'complete', publicUrl }), { headers: corsHeaders });
     } else {
