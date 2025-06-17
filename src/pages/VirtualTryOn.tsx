@@ -13,7 +13,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Skeleton } from "@/components/ui/skeleton";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { SegmentationMask } from "@/components/SegmentationMask";
-import { RecentJobThumbnail } from "@/components/RecentJobThumbnail";
+import { RecentJobThumbnail } from "@/components/Jobs/RecentJobThumbnail";
 import { useSecureImage } from "@/hooks/useSecureImage";
 import { useImagePreview } from "@/context/ImagePreviewContext";
 import { Label } from "@/components/ui/label";
