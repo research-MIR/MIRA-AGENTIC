@@ -91,23 +91,47 @@ const Generator = () => {
   }, [session?.user, fetchRecentJobs]);
 
   useEffect(() => {
-    if (!session?.user?.id) return;
+    if (!session?.user?.id) {
+      console.log("[Generator Realtime] No user session, skipping subscription.");
+      return;
+    }
+    const userId = session.user.id;
+    console.log(`[Generator Realtime] Setting up subscription for user: ${userId}`);
 
-    const channel = supabase.channel('direct-generator-jobs-tracker')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'mira-agent-jobs', filter: `user_id=eq.${session.user.id}` },
+    const channel = supabase.channel(`direct-generator-jobs-tracker-${userId}`)
+      .on(
+        'postgres_changes', 
+        { event: '*', schema: 'public', table: 'mira-agent-jobs', filter: `user_id=eq.${userId}` },
         (payload) => {
+          console.log('[Generator Realtime] Received payload:', payload);
           const job = payload.new as any;
           if (job?.context?.source === 'direct_generator') {
-            fetchRecentJobs(session.user.id);
+            console.log(`[Generator Realtime] Job ${job.id} is from direct_generator. Fetching recent jobs.`);
+            fetchRecentJobs(userId);
+          } else {
+            console.log(`[Generator Realtime] Job ${job.id} is NOT from direct_generator. Ignoring.`);
           }
         }
-      ).subscribe();
+      )
+      .subscribe((status, err) => {
+          if (status === 'SUBSCRIBED') {
+              console.log(`[Generator Realtime] Successfully subscribed to channel for user ${userId}!`);
+          }
+          if (status === 'CHANNEL_ERROR') {
+              console.error('[Generator Realtime] Subscription failed:', err);
+          }
+          if (status === 'TIMED_OUT') {
+              console.warn('[Generator Realtime] Subscription timed out.');
+          }
+      });
       
     channelRef.current = channel;
 
     return () => {
       if (channelRef.current) {
+        console.log(`[Generator Realtime] Cleaning up and removing channel for user ${userId}.`);
         supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
       }
     };
   }, [supabase, session?.user?.id, fetchRecentJobs]);
