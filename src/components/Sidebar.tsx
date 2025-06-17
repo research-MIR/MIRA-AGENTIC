@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { NavLink, useNavigate, useParams } from "react-router-dom";
 import { Button } from "./ui/button";
-import { MessageSquare, Image, GalleryHorizontal, LogOut, HelpCircle, LogIn, Shirt, Code, Wand2, PencilRuler, Folder, Edit, Trash2, Loader2 } from "lucide-react";
+import { MessageSquare, Image, GalleryHorizontal, LogOut, HelpCircle, LogIn, Shirt, Code, Wand2, PencilRuler, Edit, Trash2, Settings } from "lucide-react";
 import { useSession } from "./Auth/SessionContextProvider";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -11,14 +11,21 @@ import { useOnboardingTour } from "@/context/OnboardingTourContext";
 import { ActiveJobsTracker } from "./ActiveJobsTracker";
 import { ProjectFolders } from "./ProjectFolders";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Input } from "./ui/input";
+import { Label } from "./ui/label";
+import { RadioGroup, RadioGroupItem } from "./ui/radio-group";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 
 interface JobHistory {
   id: string;
   original_prompt: string;
   project_id: string | null;
+}
+
+interface Project {
+  id: string;
+  name: string;
 }
 
 export const Sidebar = () => {
@@ -32,24 +39,33 @@ export const Sidebar = () => {
   const [renamingJob, setRenamingJob] = useState<JobHistory | null>(null);
   const [deletingJobId, setDeletingJobId] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [sortOrder, setSortOrder] = useState<'created_at' | 'updated_at'>('updated_at');
 
-  const fetchJobHistory = async () => {
-    if (!session?.user) return [];
-    const { data, error } = await supabase
-      .from("mira-agent-jobs")
-      .select("id, original_prompt, project_id")
-      .eq("user_id", session.user.id)
-      .order("created_at", { ascending: false })
-      .limit(100);
-    if (error) throw new Error(error.message);
-    return data as JobHistory[];
-  };
-
-  const { data: jobHistory, isLoading } = useQuery<JobHistory[]>({
-    queryKey: ["jobHistory", session?.user?.id],
-    queryFn: fetchJobHistory,
+  const { data: projects, isLoading: isLoadingProjects } = useQuery<Project[]>({
+    queryKey: ['projects', session?.user?.id],
+    queryFn: async () => {
+      if (!session?.user) return [];
+      const { data, error } = await supabase.from('projects').select('id, name').eq('user_id', session.user.id).order('name', { ascending: true });
+      if (error) throw error;
+      return data;
+    },
     enabled: !!session?.user,
-    refetchOnWindowFocus: true,
+  });
+
+  const { data: jobHistory, isLoading: isLoadingJobs } = useQuery<JobHistory[]>({
+    queryKey: ["jobHistory", session?.user?.id, sortOrder],
+    queryFn: async () => {
+      if (!session?.user) return [];
+      const { data, error } = await supabase
+        .from("mira-agent-jobs")
+        .select("id, original_prompt, project_id")
+        .eq("user_id", session.user.id)
+        .order(sortOrder, { ascending: false });
+      if (error) throw new Error(error.message);
+      return data as JobHistory[];
+    },
+    enabled: !!session?.user,
   });
 
   const handleLogout = async () => {
@@ -98,6 +114,11 @@ export const Sidebar = () => {
     }
   };
 
+  const handleSortChange = (newSortOrder: 'created_at' | 'updated_at') => {
+    setSortOrder(newSortOrder);
+    setIsSettingsModalOpen(false);
+  };
+
   const uncategorizedJobs = jobHistory?.filter(job => !job.project_id).slice(0, 20) || [];
 
   return (
@@ -139,11 +160,14 @@ export const Sidebar = () => {
         <div className="flex-1 p-4 space-y-4 overflow-y-auto">
           <div>
             <h2 className="text-sm font-semibold text-muted-foreground mb-2">Projects</h2>
-            <ProjectFolders />
+            {isLoadingProjects || isLoadingJobs ? <Skeleton className="h-8 w-full" /> : <ProjectFolders projects={projects || []} allJobs={jobHistory || []} />}
           </div>
           <div className="pt-4 border-t">
-            <h2 className="text-sm font-semibold text-muted-foreground mb-2">Recent Chats</h2>
-            {isLoading ? (
+            <div className="flex justify-between items-center mb-2">
+              <h2 className="text-sm font-semibold text-muted-foreground">Recent Chats</h2>
+              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setIsSettingsModalOpen(true)}><Settings className="h-4 w-4" /></Button>
+            </div>
+            {isLoadingJobs ? (
               <div className="space-y-2">
                 {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}
               </div>
@@ -203,6 +227,28 @@ export const Sidebar = () => {
           <AlertDialogFooter><AlertDialogCancel onClick={() => setDeletingJobId(null)}>Cancel</AlertDialogCancel><AlertDialogAction onClick={handleDelete}>Delete</AlertDialogAction></AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog open={isSettingsModalOpen} onOpenChange={setIsSettingsModalOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Chat Settings</DialogTitle>
+            <DialogDescription>Manage how your chat history is displayed.</DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <Label>Sort Chats By</Label>
+            <RadioGroup defaultValue={sortOrder} onValueChange={(value: 'created_at' | 'updated_at') => handleSortChange(value)} className="mt-2">
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="updated_at" id="sort-updated" />
+                <Label htmlFor="sort-updated">Last Updated</Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="created_at" id="sort-created" />
+                <Label htmlFor="sort-created">Creation Date</Label>
+              </div>
+            </RadioGroup>
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 };

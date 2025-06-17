@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { useSession } from './Auth/SessionContextProvider';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { NavLink, useParams, useNavigate } from 'react-router-dom';
@@ -7,9 +7,8 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Plus, Folder, Edit, Trash2, Loader2 } from 'lucide-react';
 import { showError, showSuccess, showLoading, dismissToast } from '@/utils/toast';
-import { Skeleton } from './ui/skeleton';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger, DialogClose } from '@/components/ui/dialog';
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Label } from './ui/label';
 
 interface Project {
@@ -71,7 +70,12 @@ const ProjectItem = ({ project, allJobs, onRename, onDelete }: { project: Projec
   );
 };
 
-export const ProjectFolders = () => {
+interface ProjectFoldersProps {
+    projects: Project[];
+    allJobs: Job[];
+}
+
+export const ProjectFolders = ({ projects, allJobs }: ProjectFoldersProps) => {
   const { supabase, session } = useSession();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -83,28 +87,6 @@ export const ProjectFolders = () => {
   const [renamingJob, setRenamingJob] = useState<Job | null>(null);
   const [deletingJobId, setDeletingJobId] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
-
-  const { data: projects, isLoading: isLoadingProjects } = useQuery<Project[]>({
-    queryKey: ['projects', session?.user?.id],
-    queryFn: async () => {
-      if (!session?.user) return [];
-      const { data, error } = await supabase.from('projects').select('id, name').eq('user_id', session.user.id).order('name', { ascending: true });
-      if (error) throw error;
-      return data;
-    },
-    enabled: !!session?.user,
-  });
-
-  const { data: allJobs, isLoading: isLoadingJobs } = useQuery<Job[]>({
-    queryKey: ['jobHistory', session?.user?.id],
-    queryFn: async () => {
-      if (!session?.user) return [];
-      const { data, error } = await supabase.from("mira-agent-jobs").select("id, original_prompt, project_id").eq("user_id", session.user.id).order("created_at", { ascending: false });
-      if (error) throw new Error(error.message);
-      return data as Job[];
-    },
-    enabled: !!session?.user,
-  });
 
   const handleCreateProject = async () => {
     if (!newProjectName.trim() || !session?.user) return;
@@ -158,10 +140,6 @@ export const ProjectFolders = () => {
       showError(`Error deleting chat: ${error.message}`);
     }
   };
-
-  if (isLoadingProjects || isLoadingJobs) {
-    return <div className="space-y-2"><Skeleton className="h-8 w-full" /><Skeleton className="h-8 w-full" /></div>;
-  }
 
   return (
     <div className="space-y-2">
