@@ -10,9 +10,10 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ControlPanel } from "@/components/Chat/ControlPanel";
 import { PromptInput } from "@/components/Chat/PromptInput";
 import { MessageList, Message } from "@/components/Chat/MessageList";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { PlusCircle } from "lucide-react";
+import { PlusCircle, Trash2 } from "lucide-react";
 import { optimizeImage } from "@/lib/utils";
 import { BranchPrompt } from "@/components/Chat/BranchPrompt";
 
@@ -376,6 +377,22 @@ const Index = () => {
     }
   }, [session, supabase]);
 
+  const handleDeleteChat = useCallback(async () => {
+    if (!jobId) return;
+    const toastId = showLoading("Deleting chat...");
+    try {
+      const { error } = await supabase.rpc('delete_mira_agent_job', { p_job_id: jobId });
+      if (error) throw error;
+      dismissToast(toastId);
+      showSuccess(t.chatDeleted);
+      await queryClient.invalidateQueries({ queryKey: ["jobHistory"] });
+      navigate("/chat");
+    } catch (error: any) {
+      dismissToast(toastId);
+      showError(`${t.errorDeletingChat}: ${error.message}`);
+    }
+  }, [jobId, supabase, navigate, queryClient, t]);
+
   const handleRefinementComplete = useCallback((newImageUrl: string) => {
     setMessages(prev => {
       const newMessages = prev.filter(m => !m.refinementProposal);
@@ -429,13 +446,31 @@ const Index = () => {
         <div className="flex items-center gap-2">
           <LanguageSwitcher />
           <ThemeToggle />
+          {jobId && isOwner && (
+            <>
+              <AlertDialog>
+                <AlertDialogTrigger asChild><Button variant="destructive" size="icon" title={t.deleteChat}><Trash2 className="h-4 w-4" /></Button></AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader><AlertDialogTitle>{t.deleteConfirmationTitle}</AlertDialogTitle><AlertDialogDescription>{t.deleteConfirmationDescription}</AlertDialogDescription></AlertDialogHeader>
+                  <AlertDialogFooter><AlertDialogCancel>{t.cancel}</AlertDialogCancel><AlertDialogAction onClick={handleDeleteChat}>{t.delete}</AlertDialogAction></AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </>
+          )}
           <Button id="new-chat-button" variant="outline" onClick={() => navigate("/chat")}><PlusCircle className="mr-2 h-4 w-4" />{t.newChat}</Button>
         </div>
       </header>
 
       <div className="flex-1 overflow-y-auto">
         <div className="p-4 md:p-6 space-y-4">
-            <MessageList messages={messages} jobId={jobId} onRefinementComplete={handleRefinementComplete} onSendMessage={handleSendMessage} />
+            <MessageList 
+              messages={messages} 
+              jobId={jobId} 
+              onRefinementComplete={handleRefinementComplete} 
+              onSendMessage={handleSendMessage}
+              onBranch={handleBranch}
+              isOwner={isOwner}
+            />
             <div ref={messagesEndRef} />
         </div>
       </div>
