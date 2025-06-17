@@ -191,12 +191,20 @@ const Developer = () => {
                 </Button>
                 {segmentationResult && (
                     <div className="space-y-4 pt-4 border-t">
-                        <Label>JSON Response</Label>
-                        <Textarea
-                            readOnly
-                            value={JSON.stringify(segmentationResult, null, 2)}
-                            className="mt-1 h-48 font-mono text-xs"
-                        />
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <Label>JSON Response</Label>
+                                <Textarea
+                                    readOnly
+                                    value={JSON.stringify(segmentationResult, null, 2)}
+                                    className="mt-1 h-48 font-mono text-xs"
+                                />
+                            </div>
+                            <div>
+                                <Label>Corresponding Mask</Label>
+                                <SecureImageDisplay imageUrl={maskImageUrl} alt="Segmentation Mask" />
+                            </div>
+                        </div>
                         <Button onClick={handleCropTest} disabled={isCropping}>
                             {isCropping && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             Test Crop with BBox
@@ -205,17 +213,8 @@ const Developer = () => {
                 )}
                 {croppedImageUrl && (
                   <div className="space-y-4 pt-4 border-t">
-                    <h3 className="font-semibold">Crop Results</h3>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <Label>Cropped Image</Label>
-                        <SecureImageDisplay imageUrl={croppedImageUrl} alt="Cropped Result" />
-                      </div>
-                      <div>
-                        <Label>Corresponding Mask</Label>
-                        <SecureImageDisplay imageUrl={maskImageUrl} alt="Segmentation Mask" />
-                      </div>
-                    </div>
+                    <h3 className="font-semibold">Crop Result</h3>
+                    <SecureImageDisplay imageUrl={croppedImageUrl} alt="Cropped Result" />
                   </div>
                 )}
             </CardContent>
