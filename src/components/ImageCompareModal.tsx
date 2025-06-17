@@ -2,6 +2,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Slider } from "@/components/ui/slider";
 import { useState, useRef, useCallback, MouseEvent, TouchEvent } from "react";
 import { useLanguage } from "@/context/LanguageContext";
+import { useSecureImage } from "@/hooks/useSecureImage";
+import { Loader2 } from "lucide-react";
 
 interface ImageCompareModalProps {
   isOpen: boolean;
@@ -9,6 +11,34 @@ interface ImageCompareModalProps {
   beforeUrl: string;
   afterUrl: string;
 }
+
+const ImageDisplay = ({ imageUrl, alt }: { imageUrl: string, alt: string }) => {
+  const { displayUrl, isLoading, error } = useSecureImage(imageUrl);
+
+  if (isLoading) {
+    return (
+      <div className="w-full h-full flex items-center justify-center bg-muted rounded-md">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (error || !displayUrl) {
+    return (
+      <div className="w-full h-full flex items-center justify-center bg-destructive/10 rounded-md text-destructive text-sm p-2">
+        Error loading {alt} image.
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={displayUrl}
+      alt={alt}
+      className="w-full h-full object-contain pointer-events-none"
+    />
+  );
+};
 
 export const ImageCompareModal = ({ isOpen, onClose, beforeUrl, afterUrl }: ImageCompareModalProps) => {
   const [sliderPosition, setSliderPosition] = useState(50);
@@ -76,24 +106,15 @@ export const ImageCompareModal = ({ isOpen, onClose, beforeUrl, afterUrl }: Imag
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
         >
-          {/* Before Image (Bottom Layer) */}
-          <img
-            src={beforeUrl}
-            alt="Before"
-            className="w-full h-full object-contain pointer-events-none"
-          />
-          {/* After Image (Top Layer, clipped) */}
+          <ImageDisplay imageUrl={beforeUrl} alt="Before" />
+          
           <div
             className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none"
             style={{ clipPath: `inset(0 ${100 - sliderPosition}% 0 0)` }}
           >
-            <img
-              src={afterUrl}
-              alt="After"
-              className="w-full h-full object-contain pointer-events-none"
-            />
+            <ImageDisplay imageUrl={afterUrl} alt="After" />
           </div>
-          {/* Slider Handle */}
+          
           <div
             className="absolute top-0 bottom-0 w-1 bg-white/80 cursor-ew-resize shadow-lg pointer-events-none"
             style={{ left: `${sliderPosition}%`, transform: 'translateX(-50%)' }}
