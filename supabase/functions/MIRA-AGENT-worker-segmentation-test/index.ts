@@ -165,7 +165,6 @@ serve(async (req) => {
     if (responseJson.masks && responseJson.masks.length > 0 && responseJson.masks[0].mask) {
         let maskBase64 = responseJson.masks[0].mask;
         
-        // Clean the base64 string by removing any whitespace characters
         maskBase64 = maskBase64.replace(/\s/g, '');
 
         const prefix = 'data:image/png;base64,';
