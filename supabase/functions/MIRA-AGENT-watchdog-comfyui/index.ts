@@ -9,8 +9,8 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// A job is considered stalled if it's been polled more than 2 minutes ago
-const STALLED_THRESHOLD_MINUTES = 2;
+// A job is considered stalled if it's been polled more than 1 minute ago
+const STALLED_THRESHOLD_MINUTES = 1;
 
 serve(async (req) => {
   console.log("ComfyUI Watchdog: Function invoked.");
@@ -52,7 +52,7 @@ serve(async (req) => {
     const triggerPromises = stalledJobs.map(job => {
       console.log(`ComfyUI Watchdog: Re-triggering poller for stalled job ID: ${job.id}`);
       // We don't await this, just fire and forget
-      supabase.functions.invoke('MIRA-AGENT-poller-comfyui', { body: { job_id: job.id } });
+      supabase.functions.invoke('MIRA-AGENT-poller-comfyui', { body: { job_id: job.id } }).catch(console.error);
       return job.id;
     });
 

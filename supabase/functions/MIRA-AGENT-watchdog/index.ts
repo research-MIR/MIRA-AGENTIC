@@ -9,8 +9,8 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// A job is considered stalled if it's been in 'processing' for more than 2 minutes
-const STALLED_THRESHOLD_MINUTES = 2;
+// A job is considered stalled if it's been in 'processing' for more than 1 minute
+const STALLED_THRESHOLD_MINUTES = 1;
 
 serve(async (req) => {
   console.log("MIRA-AGENT-watchdog: Function invoked.");

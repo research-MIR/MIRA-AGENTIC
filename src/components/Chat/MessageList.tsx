@@ -105,7 +105,7 @@ export const MessageList = ({ messages, jobId, onRefinementComplete, onSendMessa
             {isBotMessage && !message.artisanResponse && !message.brandAnalysisResponse && !message.jobInProgress && !message.imageGenerationResponse && !message.creativeProcessResponse && !message.refinementProposal && !message.imageChoiceProposal && <div className="p-2 bg-primary rounded-full text-primary-foreground self-start"><Bot size={20} /></div>}
             
             {message.jobInProgress ? (
-              <JobStatusCard message={message.jobInProgress.message} />
+              <JobStatusCard message={message.jobInProgress.message} jobId={message.jobInProgress.jobId} />
             ) : message.creativeProcessResponse ? (
               <SafeComponent schema={CreativeProcessResponseSchema} data={message.creativeProcessResponse} Component={CreativeProcessResponse} jobId={jobId} />
             ) : message.imageGenerationResponse ? (
