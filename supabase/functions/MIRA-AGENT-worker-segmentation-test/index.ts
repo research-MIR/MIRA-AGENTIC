@@ -94,7 +94,6 @@ async function downloadImageAsPart(supabase: SupabaseClient, imageUrl: string): 
         throw new Error(`Could not parse storage path from URL: ${imageUrl}`);
     }
     const storagePath = decodeURIComponent(pathParts[1]);
-    console.log(`[SegmentationWorker] Downloading image from storage path: ${storagePath}`);
     
     const { data: blob, error } = await supabase.storage
         .from(BUCKET_NAME)
@@ -107,7 +106,6 @@ async function downloadImageAsPart(supabase: SupabaseClient, imageUrl: string): 
     const mimeType = blob.type;
     const buffer = await blob.arrayBuffer();
     const base64 = encodeBase64(buffer);
-    console.log(`[SegmentationWorker] Successfully downloaded and encoded image. Mime-type: ${mimeType}, Size: ${buffer.byteLength} bytes.`);
     return { inlineData: { mimeType, data: base64 } };
 }
 
@@ -125,7 +123,6 @@ serve(async (req) => {
   }
 
   try {
-    console.log("[SegmentationTool Test] Function invoked.");
     const { person_image_url, garment_image_url, user_prompt, user_id } = await req.json();
     if (!person_image_url || !user_id) {
       throw new Error("person_image_url and user_id are required.");
@@ -144,10 +141,8 @@ serve(async (req) => {
     }
 
     userParts.push({ text: `User instructions: ${user_prompt || 'None'}` });
-    console.log("[SegmentationTool Test] Prepared parts for Gemini API.");
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-    console.log("[SegmentationTool Test] Calling Gemini API...");
     const result = await ai.models.generateContent({
         model: MODEL_NAME,
         contents: [{ role: 'user', parts: userParts }],
@@ -160,16 +155,20 @@ serve(async (req) => {
         }
     });
 
-    console.log("[SegmentationTool Test] Received response from Gemini.");
     const responseJson = extractJson(result.text);
-    console.log("[SegmentationTool Test] Parsed JSON response.");
 
     if (responseJson.masks && responseJson.masks.length > 0 && responseJson.masks[0].mask) {
-        const maskBase64 = responseJson.masks[0].mask;
+        let maskBase64 = responseJson.masks[0].mask;
+        
+        const prefix = 'data:image/png;base64,';
+        if (maskBase64.startsWith(prefix)) {
+            console.log("[SegmentationTool Test] Stripping data URI prefix from mask data.");
+            maskBase64 = maskBase64.substring(prefix.length);
+        }
+
         const maskBuffer = decodeBase64(maskBase64);
         const filePath = `${user_id}/masks/mask_${Date.now()}.png`;
         
-        console.log(`[SegmentationTool Test] Uploading mask to ${filePath}`);
         await supabase.storage
             .from('mira-agent-user-uploads')
             .upload(filePath, maskBuffer, { contentType: 'image/png', upsert: true });
@@ -179,7 +178,6 @@ serve(async (req) => {
             .getPublicUrl(filePath);
             
         responseJson.masks[0].mask_url = publicUrl;
-        console.log(`[SegmentationTool Test] Mask uploaded successfully. URL: ${publicUrl}`);
     }
     
     return new Response(JSON.stringify({ success: true, result: responseJson }), {
