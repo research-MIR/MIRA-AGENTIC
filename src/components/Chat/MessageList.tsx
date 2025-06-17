@@ -3,16 +3,16 @@ import { Button } from "@/components/ui/button";
 import { User, Bot, Copy, AlertTriangle, GitBranch } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArtisanEngineResponse } from "@/components/ArtisanEngineResponse";
-import { BrandAnalyzerResponse } from "@/components/BrandAnalyzerResponse";
-import { JobStatusCard } from "@/components/JobStatusCard";
-import { ImageGenerationResponse } from "@/components/ImageGenerationResponse";
-import { CreativeProcessResponse } from "@/components/CreativeProcessResponse";
+import { ArtisanEngineResponse } from "@/components/Responses/ArtisanEngineResponse";
+import { BrandAnalyzerResponse } from "@/components/Responses/BrandAnalyzerResponse";
+import { JobStatusCard } from "@/components/Responses/JobStatusCard";
+import { ImageGenerationResponse } from "@/components/Responses/ImageGenerationResponse";
+import { CreativeProcessResponse } from "@/components/Responses/CreativeProcessResponse";
 import { useImagePreview } from "@/context/ImagePreviewContext";
 import { showSuccess } from "@/utils/toast";
-import { RefinementProposalCard } from "../RefinementProposalCard";
+import { RefinementProposalCard } from "@/components/Responses/RefinementProposalCard";
 import { useLanguage } from "@/context/LanguageContext";
-import { ImageChoiceProposalCard } from "../ImageChoiceProposalCard";
+import { ImageChoiceProposalCard } from "@/components/Responses/ImageChoiceProposalCard";
 import { 
   ArtisanEngineResponseSchema,
   BrandAnalyzerResponseSchema,
