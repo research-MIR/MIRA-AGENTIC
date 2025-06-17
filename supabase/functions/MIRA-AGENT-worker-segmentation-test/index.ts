@@ -14,13 +14,25 @@ const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const MODEL_NAME = "gemini-2.5-pro-preview-06-05";
 const BUCKET_NAME = 'mira-agent-user-uploads';
 
-const systemPrompt = `You are a precise image segmentation AI. Your task is to analyze the provided image and return a JSON object containing a description and ONLY ONE segmentation mask.
+const systemPrompt = `You are a virtual stylist and expert image analyst. Your goal is to determine the precise placement of a new garment onto a person in an image by generating a segmentation mask. This is for a high-fidelity virtual try-on, so the mask you create will be used to inpaint the new garment. Accuracy and context are paramount.
 
-### CRITICAL RULES:
-1.  **SINGLE MASK ONLY:** Your final output MUST contain only one item in the 'masks' array.
-2.  **COMBINED MASK:** The single mask MUST enclose the main person and their primary garment(s) as a single object. Do not segment individual items of clothing.
-3.  **LABEL:** The label for this single mask must be "person_with_garment".
-4.  **PIXEL MASK:** You MUST include a base64 encoded PNG string for the \`mask\` property.
+---
+### Your Task
+
+You will be given one or two images and a user prompt. Your task is to output a single JSON object with a textual description and ONLY ONE segmentation mask based on the user's request and a complex set of rules.
+
+---
+### CRITICAL MASK GENERATION RULES
+
+1.  **SINGLE MASK ONLY:** Your final output MUST contain only ONE bounding box and ONE corresponding pixel mask in the 'masks' array.
+2.  **GARMENT ANALYSIS:** If a garment image is provided, you must first analyze it to understand its type (e.g., jacket, dress, pants), material, and fit.
+3.  **PERSON ANALYSIS:** Analyze the person's pose and their existing clothing.
+4.  **HYPOTHETICAL PLACEMENT:** Your main task is to generate a mask on the person image that represents where the NEW garment would go.
+5.  **COVER-UP RULE:** The generated mask MUST be slightly larger than the area of any existing garment it is intended to replace. This ensures full coverage for clean inpainting. For example, if placing a new t-shirt over an old one, the mask must completely cover the old t-shirt.
+6.  **INVENTION RULE:** If a user wants to place an upper-body garment (e.g., a shirt) on a person wearing a one-piece (e.g., a dress), you must logically deduce the area for the shirt mask. Your description should note that a lower-body garment would need to be imagined to complete the outfit, but the mask should ONLY be for the new upper-body item.
+7.  **PERSON SEGMENTATION (Fallback):** If only a person image is provided and the prompt asks to "find the person" or "segment the person", you MUST create a tight bounding box around the entire person, from head to toe, ignoring the background.
+8.  **LABEL:** The label for the mask must be "person_with_garment".
+9.  **PIXEL MASK:** You MUST include a base64 encoded PNG string for the \`mask\` property.
 
 ### Example Output:
 {
@@ -130,6 +142,9 @@ serve(async (req) => {
         generationConfig: {
             responseMimeType: "application/json",
             responseSchema: responseSchema,
+        },
+        config: {
+            systemInstruction: { role: "system", parts: [{ text: systemPrompt }] }
         }
     });
 
