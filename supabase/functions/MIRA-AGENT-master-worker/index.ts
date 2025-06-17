@@ -30,11 +30,15 @@ const getDynamicSystemPrompt = (jobContext: any): string => {
         userPreferences += `\n- **Number of Images:** The user has specified they want **${jobContext.numImagesMode}** image(s). You MUST use this number in your \`generate_image\` tool call.`;
     }
 
+    const designerModeInstructions = jobContext?.isDesignerMode
+        ? `\n- **Designer Mode is ON:** After calling \`generate_image\`, your next step MUST be to call \`critique_images\` to evaluate the result.`
+        : `\n- **Designer Mode is OFF:** After calling \`generate_image\`, your next step MUST be to call \`finish_task\` to show the results to the user immediately. Do NOT critique the images.`;
+
     return `You are Mira, a master AI orchestrator. Your purpose is to create and execute a multi-step plan to fulfill a user's request by calling the appropriate tools.
 
 ### Core Capabilities
 You have several powerful capabilities, each corresponding to a tool or a sequence of tools:
-1.  **Creative Production:** Generate highly detailed image prompts and then create images from them, including a self-correction loop for quality control.
+1.  **Creative Production:** Generate highly detailed image prompts and then create images from them. This can include a self-correction loop for quality control if Designer Mode is enabled.
 2.  **Brand Analysis:** Autonomously research a brand's online presence to understand its visual identity before creating content.
 3.  **User-Driven Refinement:** When a user asks to "refine," "improve," or "upscale" an image from the conversation, you can call a special tool to perform this action.
 4.  **Conversational Interaction:** Ask clarifying questions or provide final answers to the user.
@@ -45,7 +49,8 @@ You have several powerful capabilities, each corresponding to a tool or a sequen
 3.  **Image Descriptions:** After generating images, the history will be updated with a text description for each one. You MUST use these descriptions to understand which image the user is referring to in subsequent requests (e.g., "refine the one with the red dress").
 4.  **Avoid Redundant Actions:** If the last action in the history was a successful tool call (e.g., \`dispatch_to_refinement_agent\`), and the user has not provided any new input since then, your **only** valid next step is to call \`finish_task\` to present the result. Do not call the same tool again on its own output.
 5.  **Be Conversational:** If a user asks a question about an image (e.g., "check this image", "read this brief") instead of requesting a creative task, do not immediately generate or refine. First, analyze their question and respond helpfully using your tools.
-6.  **The "finish_task" Imperative:** After a successful tool execution (like \`generate_image\` or \`dispatch_to_artisan_engine\`), if there is no new, unaddressed user feedback following it in the history, you MUST call \`finish_task\` to show the result to the user. Do not call another tool unless the user has provided new instructions.
+6.  **The "finish_task" Imperative:** After a successful tool execution (like \`dispatch_to_artisan_engine\`), if there is no new, unaddressed user feedback following it in the history, you MUST call \`finish_task\` to show the result to the user. Do not call another tool unless the user has provided new instructions.
+7.  **Designer Mode Logic:** You must adhere to the specific workflow for the current Designer Mode setting.${designerModeInstructions}
 
 ---
 
@@ -84,7 +89,6 @@ async function getDynamicMasterTools(jobContext: any, supabase: SupabaseClient):
       { name: "dispatch_to_brand_analyzer", description: "Analyzes a brand's online presence (website, social media) to understand its visual identity. Use this when the user asks to analyze a brand or generate content inspired by a brand, especially if they provide a URL.", parameters: { type: Type.OBJECT, properties: { brand_name: { type: Type.STRING, description: "The name of the brand to analyze." } }, required: ["brand_name"] } },
       { name: "dispatch_to_artisan_engine", description: "Generates or refines a detailed image prompt. This is the correct first step if the user provides a reference image.", parameters: { type: Type.OBJECT, properties: { user_request_summary: { type: Type.STRING, description: "A brief summary of the user's request for the Artisan Engine, noting that a reference image was provided for style/composition." } }, required: ["user_request_summary"] } },
       { name: "dispatch_to_refinement_agent", description: "When the user asks to refine, improve, or upscale the most recent image in the conversation, call this tool.", parameters: { type: Type.OBJECT, properties: { prompt: { type: Type.STRING, description: "The user's instructions for refinement." }, upscale_factor: { type: Type.NUMBER, description: "The upscale factor to use. 1.2 for 'refine', 1.4 for 'upscale', 2.0 for 'improve'." } }, required: ["prompt", "upscale_factor"] } },
-      { name: "critique_images", description: "Invokes the Art Director agent to critique generated images.", parameters: { type: Type.OBJECT, properties: { reason_for_critique: { type: Type.STRING, description: "A brief summary of why the critique is necessary." } }, required: ["reason_for_critique"] } },
       { name: "present_image_choice", description: "When you have generated multiple images and need the user to choose one to proceed, call this tool. You MUST provide a summary to ask the user which one they prefer.", parameters: { type: Type.OBJECT, properties: { summary: { type: Type.STRING, description: "The question to ask the user, e.g., 'I've created a couple of options for you. Which one should we refine?'" } }, required: ["summary"] } },
       { name: "finish_task", description: "Call this to respond to the user.", parameters: { type: Type.OBJECT, properties: { response_type: { type: Type.STRING, enum: ["clarification_question", "creative_process_complete", "text"], description: "The type of response to send." }, summary: { type: Type.STRING, description: "The message to send to the user." }, follow_up_message: { type: Type.STRING, description: "A helpful follow-up message." } }, required: ["response_type", "summary"] } },
     ];
@@ -133,6 +137,25 @@ async function getDynamicMasterTools(jobContext: any, supabase: SupabaseClient):
     };
     
     const allTools = [generateImageTool, ...baseTools];
+
+    if (jobContext?.isDesignerMode) {
+        console.log("[MasterWorker] Designer Mode is ON. Adding critique_images tool.");
+        const critiqueTool: FunctionDeclaration = {
+            name: "critique_images",
+            description: "Invokes the Art Director agent to critique generated images. This should only be called after 'generate_image' when in Designer Mode.",
+            parameters: {
+                type: Type.OBJECT,
+                properties: {
+                    reason_for_critique: {
+                        type: Type.STRING,
+                        description: "A brief summary of why the critique is necessary (e.g., 'First pass generation complete, proceeding to critique.')."
+                    }
+                },
+                required: ["reason_for_critique"]
+            }
+        };
+        allTools.push(critiqueTool);
+    }
 
     const hasReferenceImage = jobContext?.user_provided_assets?.some((asset: any) => asset.type === 'image');
     if (hasReferenceImage && supportsImg2Img) {
