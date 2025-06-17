@@ -13,7 +13,7 @@ import { MessageList, Message } from "@/components/Chat/MessageList";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { PlusCircle, Trash2 } from "lucide-react";
+import { PlusCircle, Trash2, Eye } from "lucide-react";
 import { optimizeImage } from "@/lib/utils";
 
 interface UploadedFile {
@@ -119,6 +119,7 @@ const Index = () => {
   const [isDesignerMode, setIsDesignerMode] = useState(false);
   const [ratioMode, setRatioMode] = useState<'auto' | string>('auto');
   const [numImagesMode, setNumImagesMode] = useState<'auto' | number>('auto');
+  const [isOwner, setIsOwner] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
 
@@ -190,6 +191,7 @@ const Index = () => {
   const processJobData = useCallback((jobData: any) => {
     if (!jobData) return;
     
+    setIsOwner(jobData.user_id === session?.user?.id);
     setChatTitle(jobData.original_prompt || "Untitled Chat");
     if (jobData.context?.isDesignerMode !== undefined) setIsDesignerMode(jobData.context.isDesignerMode);
     if (jobData.context?.selectedModelId) setSelectedModelId(jobData.context.selectedModelId);
@@ -231,7 +233,7 @@ const Index = () => {
     }
     
     setMessages(conversationMessages);
-  }, []);
+  }, [session?.user?.id]);
 
   const fetchChatJob = async (jobId: string | undefined) => {
     if (!jobId || !session?.user) return null;
@@ -266,6 +268,7 @@ const Index = () => {
       setUploadedFiles([]);
       setIsJobRunning(false);
       setIsSending(false);
+      setIsOwner(true);
     }
   }, [jobId, jobData, processJobData, t.newChat]);
 
@@ -439,7 +442,7 @@ const Index = () => {
         <div className="flex items-center gap-2">
           <LanguageSwitcher />
           <ThemeToggle />
-          {jobId && (
+          {jobId && isOwner && (
             <>
               <AlertDialog>
                 <AlertDialogTrigger asChild><Button variant="destructive" size="icon" title={t.deleteChat}><Trash2 className="h-4 w-4" /></Button></AlertDialogTrigger>
@@ -473,16 +476,23 @@ const Index = () => {
           onNumImagesModeChange={setNumImagesMode}
           isJobActive={!!jobId}
         />
-        <PromptInput
-          input={input}
-          onInputChange={setInput}
-          onFileUpload={handleFileUpload}
-          uploadedFiles={uploadedFiles}
-          onRemoveFile={(path) => setUploadedFiles(files => files.filter(f => f.path !== path))}
-          isJobRunning={isJobRunning}
-          isSending={isSending}
-          onSendMessage={() => handleSendMessage()}
-        />
+        {isOwner ? (
+          <PromptInput
+            input={input}
+            onInputChange={setInput}
+            onFileUpload={handleFileUpload}
+            uploadedFiles={uploadedFiles}
+            onRemoveFile={(path) => setUploadedFiles(files => files.filter(f => f.path !== path))}
+            isJobRunning={isJobRunning}
+            isSending={isSending}
+            onSendMessage={() => handleSendMessage()}
+          />
+        ) : (
+          <div className="p-4 text-center text-sm text-muted-foreground bg-muted/50">
+            <Eye className="inline-block h-4 w-4 mr-2" />
+            You are viewing a shared chat. You can branch it to start your own conversation from any point.
+          </div>
+        )}
       </div>
     </div>
   );
