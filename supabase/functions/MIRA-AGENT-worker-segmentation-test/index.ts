@@ -1,7 +1,8 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { GoogleGenAI, Type, Part } from 'https://esm.sh/@google/genai@0.15.0';
-import { encodeBase64, decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
+import { GoogleGenAI, Type, Part, createPartFromUri } from 'https://esm.sh/@google/genai@0.15.0';
+import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
+import { Image } from "https://deno.land/x/imagescript@1.2.15/mod.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -87,56 +88,79 @@ const responseSchema = {
   required: ['description', 'masks'],
 };
 
-async function downloadImageAsPart(supabase: SupabaseClient, imageUrl: string): Promise<Part> {
+async function downloadAndPrepareImagePart(supabase: SupabaseClient, ai: GoogleGenAI, imageUrl: string, reqId: string): Promise<Part> {
+    // 1. Download from Supabase
     const url = new URL(imageUrl);
     const pathParts = url.pathname.split(`/storage/v1/object/public/${BUCKET_NAME}/`);
-    if (pathParts.length < 2) {
-        throw new Error(`Could not parse storage path from URL: ${imageUrl}`);
-    }
+    if (pathParts.length < 2) throw new Error(`Could not parse storage path from URL: ${imageUrl}`);
     const storagePath = decodeURIComponent(pathParts[1]);
     
-    const { data: blob, error } = await supabase.storage
-        .from(BUCKET_NAME)
-        .download(storagePath);
+    const { data: blob, error } = await supabase.storage.from(BUCKET_NAME).download(storagePath);
+    if (error) throw new Error(`Supabase download failed for path ${storagePath}: ${error.message}`);
 
-    if (error) {
-        throw new Error(`Supabase download failed for path ${storagePath}: ${error.message}`);
+    // 2. Downscale the image to prevent hitting other limits and for speed
+    const originalBuffer = await blob.arrayBuffer();
+    const image = await Image.decode(originalBuffer);
+    image.resize(image.width / 2, Image.RESIZE_AUTO);
+    const resizedBuffer = await image.encode(0); // Encode as PNG
+    const resizedMimeType = 'image/png';
+    console.log(`[SegmentTest][${reqId}] Image resized to ${image.width}x${image.height}.`);
+
+    // 3. Upload to Google Files API
+    console.log(`[SegmentTest][${reqId}] Uploading RESIZED file to Google Files API...`);
+    const imageBlobForUpload = new Blob([resizedBuffer], { type: resizedMimeType });
+    const uploadResult = await ai.files.upload({
+        file: imageBlobForUpload,
+        config: { displayName: `segmentation_upload_${reqId}` }
+    });
+    console.log(`[SegmentTest][${reqId}] File upload initiated. File name: ${uploadResult.name}`);
+
+    // 4. Poll until file is active
+    let file = await ai.files.get({ name: uploadResult.name as string });
+    let retries = 0;
+    const maxRetries = 10;
+    while (file.state === 'PROCESSING' && retries < maxRetries) {
+        console.log(`[SegmentTest][${reqId}] File is still processing. Retrying in 3 seconds...`);
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        file = await ai.files.get({ name: uploadResult.name as string });
+        retries++;
     }
-
-    const mimeType = blob.type;
-    const buffer = await blob.arrayBuffer();
-    const base64 = encodeBase64(buffer);
-    return { inlineData: { mimeType, data: base64 } };
+    if (file.state !== 'ACTIVE') throw new Error(`File processing timed out. Last state: ${file.state}`);
+    console.log(`[SegmentTest][${reqId}] File is now ACTIVE. URI: ${file.uri}`);
+    
+    // 5. Return the file part reference
+    return createPartFromUri(file.uri, file.mimeType);
 }
 
 serve(async (req) => {
+  const reqId = `test_${Date.now()}`;
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    console.log("[SegmentationTool Test] Function invoked.");
+    console.log(`[SegmentTest][${reqId}] Function invoked.`);
     const { person_image_url, garment_image_url, user_prompt, user_id } = await req.json();
     if (!person_image_url || !user_id) {
       throw new Error("person_image_url and user_id are required.");
     }
     
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
+    const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
     const userParts: Part[] = [
         { text: "Person Image:" },
-        await downloadImageAsPart(supabase, person_image_url),
+        await downloadAndPrepareImagePart(supabase, ai, person_image_url, `${reqId}_person`),
     ];
 
     if (garment_image_url) {
         userParts.push({ text: "Garment Image:" });
-        userParts.push(await downloadImageAsPart(supabase, garment_image_url));
+        userParts.push(await downloadAndPrepareImagePart(supabase, ai, garment_image_url, `${reqId}_garment`));
     }
 
     userParts.push({ text: `User instructions: ${user_prompt || 'None'}` });
     
-    const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-    console.log("[SegmentationTool Test] Calling Gemini API...");
+    console.log(`[SegmentTest][${reqId}] Calling Gemini API with file references...`);
     const result = await ai.models.generateContent({
         model: MODEL_NAME,
         contents: [{ role: 'user', parts: userParts }],
@@ -149,12 +173,7 @@ serve(async (req) => {
         }
     });
 
-    // --- IMMEDIATE LOGGING ---
-    // Log the raw response text as soon as we get it, before any other processing.
-    console.log("==================================================");
-    console.log("[SegmentationTool Test] RAW GEMINI RESPONSE TEXT:", result.text);
-    console.log("==================================================");
-
+    console.log(`[SegmentTest][${reqId}] Received response from Gemini. Invoking JSON parser tool...`);
     const { data: responseJson, error: parseError } = await supabase.functions.invoke('MIRA-AGENT-tool-parse-json', {
         body: { text_to_parse: result.text }
     });
@@ -162,7 +181,7 @@ serve(async (req) => {
     if (parseError) throw new Error(`JSON parsing function failed: ${parseError.message}`);
     if (responseJson.error) throw new Error(`Failed to parse Gemini response: ${responseJson.details}`);
     
-    console.log("[SegmentationTool Test] Successfully parsed JSON response.");
+    console.log(`[SegmentTest][${reqId}] Successfully parsed JSON response.`);
 
     if (responseJson.masks && responseJson.masks.length > 0 && responseJson.masks[0].mask) {
         const maskBase64 = responseJson.masks[0].mask;
@@ -186,7 +205,7 @@ serve(async (req) => {
     });
 
   } catch (error) {
-    console.error(`[SegmentationTool Test] Error:`, error);
+    console.error(`[SegmentTest][${reqId}] Error:`, error);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500
