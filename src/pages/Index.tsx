@@ -235,9 +235,10 @@ const Index = () => {
 
   const fetchChatJob = async (jobId: string | undefined) => {
     if (!jobId || !session?.user) return null;
-    const { data, error } = await supabase.from("mira-agent-jobs").select("*").eq("id", jobId).eq("user_id", session.user.id).single();
+    const { data, error } = await supabase.from("mira-agent-jobs").select("*").eq("id", jobId).single();
     if (error) {
         if (error.code === 'PGRST116') {
+            showError("Chat not found or you don't have permission to view it.");
             navigate('/chat');
             return null;
         }

@@ -32,12 +32,7 @@ serve(async (req) => {
     if (fetchError) throw fetchError;
     if (!sourceJob) throw new Error("Source job not found.");
 
-    // 2. Security check to ensure the user owns the job they're branching
-    if (sourceJob.user_id !== invoker_user_id) {
-      throw new Error("User is not authorized to branch this job.");
-    }
-
-    // 3. Slice the history to the specified branch point
+    // 2. Slice the history to the specified branch point
     const sourceHistory = sourceJob.context?.history || [];
     // The history_index is the index of the last item to *include* in the new history.
     const newHistory = sourceHistory.slice(0, history_index + 1);
@@ -46,7 +41,7 @@ serve(async (req) => {
         throw new Error("Cannot branch from the beginning of a conversation.");
     }
 
-    // 4. Determine the initial state for the new branched job
+    // 3. Determine the initial state for the new branched job
     const lastTurn = newHistory[newHistory.length - 1];
     let initialResult = null;
     // If the last turn was a function response, we can use that as the initial "message" in the new chat.
@@ -54,9 +49,9 @@ serve(async (req) => {
         initialResult = lastTurn.parts[0].functionResponse.response;
     }
 
-    // 5. Create the new job payload
+    // 4. Create the new job payload
     const newJobPayload = {
-      user_id: sourceJob.user_id,
+      user_id: invoker_user_id,
       original_prompt: `[Branch] ${sourceJob.original_prompt || 'Untitled'}`,
       status: 'awaiting_feedback', // Start in a paused state, ready for new user input
       context: {
@@ -77,7 +72,7 @@ serve(async (req) => {
 
     if (insertError) throw insertError;
 
-    // 6. Return the ID of the newly created job
+    // 5. Return the ID of the newly created job
     return new Response(JSON.stringify({ newJobId: newJob.id }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
