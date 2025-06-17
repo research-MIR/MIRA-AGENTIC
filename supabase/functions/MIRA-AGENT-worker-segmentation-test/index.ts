@@ -145,8 +145,6 @@ serve(async (req) => {
 
     userParts.push({ text: `User instructions: ${user_prompt || 'None'}` });
     console.log("[SegmentationTool Test] Prepared parts for Gemini API.");
-    console.log("[SegmentationTool Test] Payload being sent to Gemini:", JSON.stringify(userParts, null, 2));
-
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
     console.log("[SegmentationTool Test] Calling Gemini API...");
@@ -163,8 +161,6 @@ serve(async (req) => {
     });
 
     console.log("[SegmentationTool Test] Received response from Gemini.");
-    console.log("[SegmentationTool Test] Raw Gemini response text:", result.text);
-
     const responseJson = extractJson(result.text);
     console.log("[SegmentationTool Test] Parsed JSON response.");
 
