@@ -63,8 +63,9 @@ export const Sidebar = () => {
       if (!session?.user) return [];
       const { data, error } = await supabase
         .from("mira-agent-jobs")
-        .select("id, original_prompt, project_id")
+        .select("id, original_prompt, project_id, context")
         .eq("user_id", session.user.id)
+        .or('context->>source.eq.agent,context->>source.eq.agent_branch,context->>source.is.null')
         .order(sortOrder, { ascending: false });
       if (error) throw new Error(error.message);
       return data as JobHistory[];
