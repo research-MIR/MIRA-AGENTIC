@@ -149,7 +149,12 @@ serve(async (req) => {
         }
     });
 
-    console.log("[SegmentationTool Test] Received response from Gemini. Invoking JSON parser tool...");
+    // --- IMMEDIATE LOGGING ---
+    // Log the raw response text as soon as we get it, before any other processing.
+    console.log("==================================================");
+    console.log("[SegmentationTool Test] RAW GEMINI RESPONSE TEXT:", result.text);
+    console.log("==================================================");
+
     const { data: responseJson, error: parseError } = await supabase.functions.invoke('MIRA-AGENT-tool-parse-json', {
         body: { text_to_parse: result.text }
     });
