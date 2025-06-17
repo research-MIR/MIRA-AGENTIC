@@ -31,7 +31,7 @@ const getDynamicSystemPrompt = (jobContext: any): string => {
     }
 
     const designerModeInstructions = jobContext?.isDesignerMode
-        ? `\n- **Designer Mode is ON:** After calling \`generate_image\`, your next step MUST be to call \`critique_images\` to evaluate the result.`
+        ? `\n- **Designer Mode is ON:** This is the highest priority rule. Your workflow MUST be: \`dispatch_to_artisan_engine\` -> \`generate_image\` -> \`critique_images\`. If the critique is negative, repeat the cycle. If the critique is positive, call \`finish_task\`. This workflow overrides all other decision paths.`
         : `\n- **Designer Mode is OFF:** After calling \`generate_image\`, your next step MUST be to call \`finish_task\` to show the results to the user immediately. Do NOT critique the images.`;
 
     return `You are Mira, a master AI orchestrator. Your purpose is to create and execute a multi-step plan to fulfill a user's request by calling the appropriate tools.
@@ -49,7 +49,7 @@ You have several powerful capabilities, each corresponding to a tool or a sequen
 3.  **Image Descriptions:** After generating images, the history will be updated with a text description for each one. You MUST use these descriptions to understand which image the user is referring to in subsequent requests (e.g., "refine the one with the red dress").
 4.  **Avoid Redundant Actions:** If the last action in the history was a successful tool call (e.g., \`dispatch_to_refinement_agent\`), and the user has not provided any new input since then, your **only** valid next step is to call \`finish_task\` to present the result. Do not call the same tool again on its own output.
 5.  **Be Conversational:** If a user asks a question about an image (e.g., "check this image", "read this brief") instead of requesting a creative task, do not immediately generate or refine. First, analyze their question and respond helpfully using your tools.
-6.  **The "finish_task" Imperative:** After a successful tool execution (like \`dispatch_to_artisan_engine\`), if there is no new, unaddressed user feedback following it in the history, you MUST call \`finish_task\` to show the result to the user. Do not call another tool unless the user has provided new instructions.
+6.  **The "finish_task" Imperative:** After a successful tool execution (like \`dispatch_to_artisan_engine\`, \`generate_image\`, or \`dispatch_to_refinement_agent\`), if the plan is complete and there is no new, unaddressed user feedback following it in the history, you MUST call \`finish_task\` to show the result to the user. Do not call another tool unless the user has provided new instructions.
 7.  **Designer Mode Logic:** You must adhere to the specific workflow for the current Designer Mode setting.${designerModeInstructions}
 
 ---
@@ -444,12 +444,25 @@ serve(async (req) => {
             images: images
         };
 
+        // Add the choice proposal to the history so the UI can render it
+        history.push({
+            role: 'function',
+            parts: [{
+                functionResponse: {
+                    name: 'present_image_choice',
+                    response: finalResult
+                }
+            }]
+        });
+
+        currentContext.history = history;
         await supabase.from('mira-agent-jobs').update({
             status: 'awaiting_feedback',
-            final_result: finalResult
+            context: currentContext,
+            final_result: null // Clear final_result, history is the source of truth
         }).eq('id', currentJobId);
 
-        console.log(`[MasterWorker][${currentJobId}] Job status set to 'awaiting_feedback' with an image choice proposal.`);
+        console.log(`[MasterWorker][${currentJobId}] Job status set to 'awaiting_feedback' with an image choice proposal in history.`);
         return new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
     } else if (call.name === 'finish_task') {
