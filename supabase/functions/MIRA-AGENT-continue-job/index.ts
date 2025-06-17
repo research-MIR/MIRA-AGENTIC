@@ -40,21 +40,6 @@ serve(async (req) => {
     if (fetchError) throw fetchError;
 
     const history = job.context?.history || [];
-    const lastResult = job.final_result;
-    const lastTurn = history.length > 0 ? history[history.length - 1] : null;
-
-    if (lastResult && lastTurn && lastTurn.role === 'model' && lastTurn.parts[0]?.functionCall) {
-        history.push({
-            role: 'function',
-            parts: [{
-                functionResponse: {
-                    name: 'provide_text_response', // Use a generic name that the parser will not ignore
-                    response: lastResult
-                }
-            }]
-        });
-        console.log(`[ContinueJob][${jobId}] Preserved previous final_result in history by completing the last model turn.`);
-    }
     
     const userParts: Part[] = [];
 

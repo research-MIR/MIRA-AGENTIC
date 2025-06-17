@@ -197,7 +197,7 @@ function assembleCreativeProcessResult(history: Content[]): any {
             const callName = turn.parts[0]?.functionResponse?.name;
             const response = turn.parts[0]?.functionResponse?.response;
 
-            if (!callName || !response) continue;
+            if (!response || !callName) continue;
 
             switch (callName) {
                 case 'dispatch_to_artisan_engine':
@@ -454,11 +454,12 @@ serve(async (req) => {
             finalStatus = 'awaiting_feedback';
         }
 
+        // The final response is now part of the history, making it the single source of truth.
         history.push({
             role: 'function',
             parts: [{
                 functionResponse: {
-                    name: 'finish_task',
+                    name: 'provide_text_response',
                     response: finalResult
                 }
             }]
@@ -466,7 +467,8 @@ serve(async (req) => {
 
         currentContext.history = history;
         currentContext.iteration_number = iterationNumber;
-        await supabase.from('mira-agent-jobs').update({ status: finalStatus, final_result: finalResult, context: currentContext }).eq('id', currentJobId);
+        // We no longer need to store the result separately.
+        await supabase.from('mira-agent-jobs').update({ status: finalStatus, final_result: null, context: currentContext }).eq('id', currentJobId);
         console.log(`[MasterWorker][${currentJobId}] Job status set to '${finalStatus}'. Job is complete.`);
         return new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     } else {

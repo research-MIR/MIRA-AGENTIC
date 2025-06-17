@@ -35,7 +35,7 @@ const parseHistoryToMessages = (jobData: any): Message[] => {
             const response = turn.parts[0]?.functionResponse?.response;
             const callName = history[i - 1]?.parts[0]?.functionCall?.name;
 
-            if (!response || !callName || callName === 'finish_task') continue;
+            if (!response || !callName) continue;
 
             const botMessage: Message = { from: 'bot', historyIndex };
 
@@ -43,7 +43,14 @@ const parseHistoryToMessages = (jobData: any): Message[] => {
                 case 'dispatch_to_artisan_engine': botMessage.artisanResponse = response; break;
                 case 'generate_image': case 'generate_image_with_reference': botMessage.imageGenerationResponse = response; break;
                 case 'dispatch_to_brand_analyzer': botMessage.brandAnalysisResponse = response; break;
-                case 'provide_text_response': botMessage.text = response.text; break;
+                case 'provide_text_response': 
+                    if (response.isCreativeProcess) botMessage.creativeProcessResponse = response;
+                    else if (response.isImageGeneration) botMessage.imageGenerationResponse = response;
+                    else if (response.isBrandAnalysis) botMessage.brandAnalysisResponse = response;
+                    else if (response.isImageChoiceProposal) botMessage.imageChoiceProposal = response;
+                    else if (response.isRefinementProposal) botMessage.refinementProposal = response;
+                    else if (response.text) botMessage.text = response.text;
+                    break;
                 case 'present_image_choice':
                     botMessage.imageChoiceProposal = response;
                     const nextTurn = history[i + 1];
@@ -56,6 +63,7 @@ const parseHistoryToMessages = (jobData: any): Message[] => {
                     }
                     break;
                 case 'critique_images': continue;
+                case 'finish_task': continue; // Explicitly ignore the old finish_task
                 default: continue;
             }
             messages.push(botMessage);
@@ -124,15 +132,7 @@ export const useChatManager = () => {
         setIsJobRunning(isRunning);
         if (!isRunning) setIsSending(false);
 
-        if (data.status === 'complete' || data.status === 'awaiting_feedback') {
-            const finalResult = data.final_result;
-            if (finalResult?.isCreativeProcess) conversationMessages.push({ from: 'bot', creativeProcessResponse: finalResult });
-            else if (finalResult?.isImageGeneration) conversationMessages.push({ from: 'bot', imageGenerationResponse: finalResult });
-            else if (finalResult?.isBrandAnalysis) conversationMessages.push({ from: 'bot', brandAnalysisResponse: finalResult });
-            else if (finalResult?.isImageChoiceProposal) conversationMessages.push({ from: 'bot', imageChoiceProposal: finalResult });
-            else if (finalResult?.isRefinementProposal) conversationMessages.push({ from: 'bot', refinementProposal: finalResult });
-            else if (finalResult?.text) conversationMessages.push({ from: 'bot', text: finalResult.text });
-        } else if (isRunning) {
+        if (isRunning) {
             const message = data.status === 'processing' ? 'Thinking...' : 'Refining image...';
             conversationMessages.push({ from: 'bot', jobInProgress: { jobId: data.id, message } });
         } else if (data.status === 'failed') {
