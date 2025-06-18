@@ -5,7 +5,7 @@ import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Folder, MessageSquare, Image as ImageIcon, MoreVertical, Pencil, Trash2, ImagePlus, Loader2, Move, Info, X, Star, ListMinus } from "lucide-react";
+import { Folder, MessageSquare, Image as ImageIcon, MoreVertical, Pencil, Trash2, ImagePlus, Loader2, Move, Info, X, Star, ListMinus, Share2 } from "lucide-react";
 import { useImagePreview } from "@/context/ImagePreviewContext";
 import { useSecureImage } from "@/hooks/useSecureImage";
 import { useLanguage } from "@/context/LanguageContext";
@@ -20,6 +20,7 @@ import { showError, showSuccess, showLoading, dismissToast } from "@/utils/toast
 import { ProjectImageManagerModal } from "@/components/ProjectImageManagerModal";
 import { useDropzone } from "@/hooks/useDropzone";
 import { cn } from "@/lib/utils";
+import { ShareProjectModal } from "@/components/ShareProjectModal";
 
 interface Job {
   id: string;
@@ -39,6 +40,7 @@ interface ProjectPreview {
   project_name: string;
   chat_count: number;
   latest_image_url: string | null;
+  sharing_mode: 'private' | 'public_link' | 'restricted';
 }
 
 const ProjectDetail = () => {
@@ -53,6 +55,7 @@ const ProjectDetail = () => {
   const [isDeleteAlertOpen, setIsDeleteAlertOpen] = useState(false);
   const [isImageManagerOpen, setIsImageManagerOpen] = useState(false);
   const [isManageChatsModalOpen, setIsManageChatsModalOpen] = useState(false);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
   const [isUpdating, setIsUpdating] = useState(false);
   const [jobToDelete, setJobToDelete] = useState<string | null>(null);
@@ -245,13 +248,19 @@ const ProjectDetail = () => {
             {isDraggingOver ? <Move className="h-8 w-8 text-primary" /> : <Folder className="h-8 w-8 text-primary" />}
             {project.project_name}
           </h1>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild><Button variant="ghost" size="icon"><MoreVertical className="h-4 w-4" /></Button></DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onSelect={() => setIsRenameModalOpen(true)}><Pencil className="mr-2 h-4 w-4" />Rename</DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => setIsDeleteAlertOpen(true)} className="text-destructive"><Trash2 className="mr-2 h-4 w-4" />Delete</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={() => setIsShareModalOpen(true)}>
+              <Share2 className="mr-2 h-4 w-4" />
+              Share
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild><Button variant="ghost" size="icon"><MoreVertical className="h-4 w-4" /></Button></DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={() => setIsRenameModalOpen(true)}><Pencil className="mr-2 h-4 w-4" />Rename</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => setIsDeleteAlertOpen(true)} className="text-destructive"><Trash2 className="mr-2 h-4 w-4" />Delete</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </header>
 
         <Alert className="mb-8 shrink-0">
@@ -325,6 +334,7 @@ const ProjectDetail = () => {
       </div>
 
       {/* Modals and Dialogs */}
+      <ShareProjectModal project={project} isOpen={isShareModalOpen} onClose={() => setIsShareModalOpen(false)} />
       <Dialog open={isRenameModalOpen} onOpenChange={setIsRenameModalOpen}>
         <DialogContent>
           <DialogHeader><DialogTitle>Rename Project</DialogTitle></DialogHeader>
