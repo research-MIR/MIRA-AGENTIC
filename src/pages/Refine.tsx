@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Loader2, Image as ImageIcon, Sparkles, Wand2, UploadCloud, X, PlusCircle, AlertTriangle } from "lucide-react";
+import { Loader2, Image as ImageIcon, Sparkles, Wand2, UploadCloud, X, PlusCircle, AlertTriangle, CheckCircle } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { useFileUpload } from "@/hooks/useFileUpload";
@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils";
 import { RecentJobThumbnail } from "@/components/Jobs/RecentJobThumbnail";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useSecureImage } from "@/hooks/useSecureImage";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 
 interface VtoPipelineJob {
   id: string;
@@ -70,6 +71,8 @@ const Refine = () => {
   
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
+  const [promptReady, setPromptReady] = useState(false);
+  const [openAccordion, setOpenAccordion] = useState("");
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [isCompareModalOpen, setIsCompareModalOpen] = useState(false);
 
@@ -105,6 +108,7 @@ const Refine = () => {
   const handleGeneratePrompt = async () => {
     if (uploadedFiles.length === 0) return showError("Please upload an image first.");
     setIsGeneratingPrompt(true);
+    setPromptReady(false);
     const toastId = showLoading("Generating prompt from image...");
     try {
       const file = uploadedFiles[0].file;
@@ -115,6 +119,7 @@ const Refine = () => {
       });
       if (error) throw error;
       setPrompt(data.auto_prompt);
+      setPromptReady(true);
       dismissToast(toastId);
       showSuccess("Prompt generated!");
     } catch (err: any) {
@@ -172,6 +177,8 @@ const Refine = () => {
     setSelectedJobId(null);
     setUploadedFiles([]);
     setPrompt("");
+    setPromptReady(false);
+    setOpenAccordion("");
   };
 
   return (
@@ -207,18 +214,37 @@ const Refine = () => {
               <CardHeader><CardTitle>{t('refinementPrompt')}</CardTitle></CardHeader>
               <CardContent className="space-y-4">
                 <div className="flex items-center space-x-2">
-                  <Switch id="auto-prompt" checked={useAutoPrompt} onCheckedChange={setUseAutoPrompt} />
+                  <Switch id="auto-prompt" checked={useAutoPrompt} onCheckedChange={(checked) => {
+                    setUseAutoPrompt(checked);
+                    if (!checked) {
+                      setPrompt("");
+                      setPromptReady(false);
+                    }
+                  }} />
                   <Label htmlFor="auto-prompt">{t('autoPrompt')}</Label>
                 </div>
                 {useAutoPrompt ? (
-                  <Button className="w-full" onClick={handleGeneratePrompt} disabled={isGeneratingPrompt || uploadedFiles.length === 0}>
-                    {isGeneratingPrompt ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-                    {t('generateAndRefine')}
-                  </Button>
+                  <>
+                    <Button className="w-full" onClick={handleGeneratePrompt} disabled={isGeneratingPrompt || promptReady || uploadedFiles.length === 0}>
+                      {isGeneratingPrompt ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating...</>
+                        : promptReady ? <><CheckCircle className="mr-2 h-4 w-4" /> Prompt Ready</>
+                        : <><Sparkles className="mr-2 h-4 w-4" /> Generate Prompt</>
+                      }
+                    </Button>
+                    {prompt && (
+                      <Accordion type="single" collapsible className="w-full" value={openAccordion} onValueChange={(value) => { setOpenAccordion(value); if (value) setPromptReady(false); }}>
+                        <AccordionItem value="item-1">
+                          <AccordionTrigger className={cn(promptReady && "text-primary animate-pulse")}>View Generated Prompt</AccordionTrigger>
+                          <AccordionContent>
+                            <p className="text-sm p-2 bg-muted rounded-md">{prompt}</p>
+                          </AccordionContent>
+                        </AccordionItem>
+                      </Accordion>
+                    )}
+                  </>
                 ) : (
                   <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t('refinementPromptPlaceholder')} />
                 )}
-                {useAutoPrompt && prompt && <p className="text-sm p-2 bg-muted rounded-md">{prompt}</p>}
               </CardContent>
             </Card>
             <Card>
