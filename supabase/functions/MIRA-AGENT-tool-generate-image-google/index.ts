@@ -15,7 +15,7 @@ const GOOGLE_PROJECT_ID = Deno.env.get('GOOGLE_PROJECT_ID');
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const GOOGLE_LOCATION = 'us-central1';
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
-const MAX_RETRIES = 2;
+const MAX_RETRIES = 3; // Increased to 3 for more resilience
 const RETRY_DELAY_MS = 1500;
 
 const visionSystemPrompt = "You are an expert image analyst. Your sole task is to describe the provided image in a single, concise sentence. Focus on the main subject, their pose, and key attributes. Do not mention colors or background unless they are critical for identification. Example: 'A woman standing with her hands on her hips, wearing a red dress.'";
@@ -110,8 +110,25 @@ serve(async (req)=>{
     if (!prompt) throw new Error("Prompt is required.");
     if (!invoker_user_id) throw new Error("invoker_user_id is required to attribute image generation.");
 
-    const { data: profile, error: profileError } = await supabaseAdmin.from('profiles').select('images_generated_count, image_generation_quota').eq('id', invoker_user_id).single();
-    if (profileError) throw new Error(`Could not retrieve user profile: ${profileError.message}`);
+    let profile = null;
+    let profileError = null;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        console.log(`[ImageGenerator-Google][${requestId}] Attempt ${attempt}/${MAX_RETRIES} to fetch user profile...`);
+        const { data, error } = await supabaseAdmin.from('profiles').select('images_generated_count, image_generation_quota').eq('id', invoker_user_id).single();
+        if (!error) {
+            profile = data;
+            profileError = null;
+            console.log(`[ImageGenerator-Google][${requestId}] Successfully fetched user profile.`);
+            break;
+        }
+        profileError = error;
+        console.warn(`[ImageGenerator-Google][${requestId}] Failed to fetch profile, attempt ${attempt}. Error: ${error.message}. Retrying in ${RETRY_DELAY_MS}ms...`);
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+    }
+
+    if (profileError || !profile) {
+        throw new Error(`Could not retrieve user profile after ${MAX_RETRIES} attempts: ${profileError?.message}`);
+    }
     
     const finalImageCount = number_of_images || 4;
     if (profile.images_generated_count + finalImageCount > profile.image_generation_quota) {
