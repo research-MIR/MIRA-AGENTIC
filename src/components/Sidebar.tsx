@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState } from "react";
 import { NavLink, useNavigate, useParams } from "react-router-dom";
 import { Button } from "./ui/button";
 import { MessageSquare, Image, GalleryHorizontal, LogOut, HelpCircle, LogIn, Shirt, Code, Wand2, PencilRuler, Edit, Trash2, Settings, FolderPlus, Move, LayoutGrid } from "lucide-react";
@@ -9,16 +9,13 @@ import { Skeleton } from "./ui/skeleton";
 import { useLanguage } from "@/context/LanguageContext";
 import { useOnboardingTour } from "@/context/OnboardingTourContext";
 import { ActiveJobsTracker } from "@/components/Jobs/ActiveJobsTracker";
-import { ProjectFolders } from "./ProjectFolders";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { RadioGroup, RadioGroupItem } from "./ui/radio-group";
 import { showError, showSuccess, showLoading, dismissToast } from "@/utils/toast";
 import { AddToProjectDialog } from "./Jobs/AddToProjectDialog";
-import { cn } from "@/lib/utils";
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface JobHistory {
@@ -46,9 +43,8 @@ export const Sidebar = () => {
   const [newName, setNewName] = useState("");
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [sortOrder, setSortOrder] = useState<'created_at' | 'updated_at'>('updated_at');
-  const [draggingOverProjectId, setDraggingOverProjectId] = useState<string | null>(null);
 
-  const { data: projects, isLoading: isLoadingProjects } = useQuery<Project[]>({
+  const { data: projects } = useQuery<Project[]>({
     queryKey: ['projects', session?.user?.id],
     queryFn: async () => {
       if (!session?.user) return [];
@@ -126,25 +122,6 @@ export const Sidebar = () => {
     setIsSettingsModalOpen(false);
   };
 
-  const handleDropOnProject = async (projectId: string, e: React.DragEvent) => {
-    e.preventDefault();
-    const jobId = e.dataTransfer.getData("application/mira-job-id");
-    setDraggingOverProjectId(null);
-    if (!jobId) return;
-
-    const toastId = showLoading("Moving chat to project...");
-    try {
-      const { error } = await supabase.rpc('update_job_project', { p_job_id: jobId, p_project_id: projectId });
-      if (error) throw error;
-      dismissToast(toastId);
-      showSuccess("Chat moved successfully.");
-      queryClient.invalidateQueries({ queryKey: ['jobHistory'] });
-    } catch (err: any) {
-      dismissToast(toastId);
-      showError(`Failed to move chat: ${err.message}`);
-    }
-  };
-
   const recentChats = jobHistory?.slice(0, 20) || [];
 
   return (
@@ -160,7 +137,7 @@ export const Sidebar = () => {
           </NavLink>
           <NavLink id="projects-nav-link" to="/projects" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
             <LayoutGrid size={20} />
-            Projects
+            {t.projectsTitle}
           </NavLink>
           <NavLink id="generator-nav-link" to="/generator" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
             <Image size={20} />
@@ -187,71 +164,42 @@ export const Sidebar = () => {
             {t.developer}
           </NavLink>
         </nav>
-        <div className="flex-1 flex flex-col overflow-hidden">
-            <Accordion type="multiple" defaultValue={['projects', 'recent-chats']} className="w-full flex flex-col flex-1">
-                <AccordionItem value="projects" className="border-b">
-                    <AccordionTrigger className="px-4 py-2 text-sm font-semibold text-muted-foreground hover:no-underline">Projects</AccordionTrigger>
-                    <AccordionContent>
-                        <ScrollArea className="h-48">
-                            <div className="p-2 space-y-2">
-                                {isLoadingProjects || isLoadingJobs ? <Skeleton className="h-8 w-full" /> : 
-                                <ProjectFolders 
-                                    projects={projects || []} 
-                                    allJobs={jobHistory || []} 
-                                    draggingOverProjectId={draggingOverProjectId}
-                                    onDragEnter={(projectId) => setDraggingOverProjectId(projectId)}
-                                    onDragLeave={() => setDraggingOverProjectId(null)}
-                                    onDrop={handleDropOnProject}
-                                />
-                                }
-                            </div>
-                        </ScrollArea>
-                    </AccordionContent>
-                </AccordionItem>
-                <AccordionItem value="recent-chats" className="border-none flex-1 flex flex-col">
-                    <AccordionTrigger className="px-4 py-2 hover:no-underline">
-                        <div className="flex justify-between items-center w-full">
-                            <h2 className="text-sm font-semibold text-muted-foreground">Recent Chats</h2>
-                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); setIsSettingsModalOpen(true); }}><Settings className="h-4 w-4" /></Button>
+        <div className="flex-1 flex flex-col overflow-hidden px-2">
+            <div className="flex justify-between items-center w-full p-2">
+                <h2 className="text-sm font-semibold text-muted-foreground">Recent Chats</h2>
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); setIsSettingsModalOpen(true); }}><Settings className="h-4 w-4" /></Button>
+            </div>
+            <ScrollArea className="flex-1">
+                <div className="p-2 space-y-1">
+                    {isLoadingJobs ? (
+                    <div className="space-y-2">
+                        {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}
+                    </div>
+                    ) : (
+                    recentChats.map(job => (
+                        <div 
+                        key={job.id} 
+                        className="group relative"
+                        >
+                        <NavLink to={`/chat/${job.id}`} className={({ isActive }) => `block p-2 rounded-md text-sm truncate pr-24 ${isActive ? 'bg-primary text-primary-foreground font-semibold' : 'hover:bg-muted'}`}>
+                            {job.original_prompt || "Untitled Chat"}
+                        </NavLink>
+                        <div className="absolute right-1 top-1/2 -translate-y-1/2 hidden group-hover:flex items-center gap-0.5 bg-muted/80 rounded-md">
+                            <Button variant="ghost" size="icon" className="h-7 w-7" title="Add to project" onClick={(e) => { e.preventDefault(); setMovingJob(job); }}>
+                            <FolderPlus className="h-4 w-4" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-7 w-7" title="Rename" onClick={(e) => { e.preventDefault(); setNewName(job.original_prompt); setRenamingJob(job); }}>
+                            <Edit className="h-4 w-4" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-destructive/10" title="Delete" onClick={(e) => { e.preventDefault(); setDeletingJobId(job.id); }}>
+                            <Trash2 className="h-4 w-4 text-destructive/80" />
+                            </Button>
                         </div>
-                    </AccordionTrigger>
-                    <AccordionContent className="flex-1 overflow-hidden">
-                        <ScrollArea className="h-full">
-                            <div className="p-2 space-y-1">
-                                {isLoadingJobs ? (
-                                <div className="space-y-2">
-                                    {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}
-                                </div>
-                                ) : (
-                                recentChats.map(job => (
-                                    <div 
-                                    key={job.id} 
-                                    className="group relative"
-                                    draggable
-                                    onDragStart={(e) => e.dataTransfer.setData("application/mira-job-id", job.id)}
-                                    >
-                                    <NavLink to={`/chat/${job.id}`} className={({ isActive }) => `block p-2 rounded-md text-sm truncate pr-24 ${isActive ? 'bg-primary text-primary-foreground font-semibold' : 'hover:bg-muted'}`}>
-                                        {job.original_prompt || "Untitled Chat"}
-                                    </NavLink>
-                                    <div className="absolute right-1 top-1/2 -translate-y-1/2 hidden group-hover:flex items-center gap-0.5 bg-muted/80 rounded-md">
-                                        <Button variant="ghost" size="icon" className="h-7 w-7" title="Add to project" onClick={(e) => { e.preventDefault(); setMovingJob(job); }}>
-                                        <FolderPlus className="h-4 w-4" />
-                                        </Button>
-                                        <Button variant="ghost" size="icon" className="h-7 w-7" title="Rename" onClick={(e) => { e.preventDefault(); setNewName(job.original_prompt); setRenamingJob(job); }}>
-                                        <Edit className="h-4 w-4" />
-                                        </Button>
-                                        <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-destructive/10" title="Delete" onClick={(e) => { e.preventDefault(); setDeletingJobId(job.id); }}>
-                                        <Trash2 className="h-4 w-4 text-destructive/80" />
-                                        </Button>
-                                    </div>
-                                    </div>
-                                ))
-                                )}
-                            </div>
-                        </ScrollArea>
-                    </AccordionContent>
-                </AccordionItem>
-            </Accordion>
+                        </div>
+                    ))
+                    )}
+                </div>
+            </ScrollArea>
         </div>
         <div className="p-4 border-t space-y-2">
           <ActiveJobsTracker />

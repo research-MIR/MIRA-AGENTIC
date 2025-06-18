@@ -125,11 +125,11 @@ const ProjectDetail = () => {
               <p className="text-sm text-muted-foreground">{t.keyVisualDescription}</p>
             </CardHeader>
             <CardContent>
-              <div className="aspect-video bg-muted rounded-lg flex items-center justify-center overflow-hidden">
+              <div className="aspect-square max-h-64 mx-auto bg-muted rounded-lg flex items-center justify-center overflow-hidden">
                 {isLoadingLatestImage ? <Skeleton className="w-full h-full" /> : latestImageDisplayUrl ? (
                   <img src={latestImageDisplayUrl} alt="Latest project image" className="w-full h-full object-contain" />
                 ) : (
-                  <ImageIcon className="h-24 w-24 text-muted-foreground" />
+                  <ImageIcon className="h-16 w-16 text-muted-foreground" />
                 )}
               </div>
             </CardContent>
