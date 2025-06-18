@@ -86,9 +86,9 @@ export const ActiveJobsTracker = () => {
             } else if (updatedJob.status === 'failed') {
               showError(`Upscale failed: ${updatedJob.error_message || 'Unknown error'}`);
             }
+            // Only invalidate the main gallery query when a job is finished.
+            queryClient.invalidateQueries({ queryKey: ['galleryJobs'] });
           }
-          
-          queryClient.invalidateQueries({ queryKey: ['galleryJobs'] });
         }
       )
       .subscribe();
