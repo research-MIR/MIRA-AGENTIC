@@ -27,21 +27,22 @@ export const ActiveJobsTracker = () => {
     queryKey: ['activeComfyJobs', session?.user?.id],
     queryFn: async () => {
       if (!session?.user) return [];
-      console.log('[ActiveJobsTracker] Polling for active jobs...'); // Added log for verification
+      console.log('[ActiveJobsTracker] Polling for active jobs...');
       const { data, error } = await supabase
         .from('mira-agent-comfyui-jobs')
         .select('*')
         .eq('user_id', session.user.id)
         .in('status', ['queued', 'processing']);
       if (error) {
-        console.error("Error fetching active jobs:", error);
-        return [];
+        // Re-throw the error so react-query can handle it with retries
+        throw new Error(error.message);
       }
       return data;
     },
     enabled: !!session?.user,
-    refetchInterval: 15000, // Refetch every 15 seconds as a fallback
+    refetchInterval: 15000, // Refetch every 15 seconds
     refetchOnWindowFocus: true,
+    retry: 2, // Retry up to 2 times on failure
   });
 
   useEffect(() => {
