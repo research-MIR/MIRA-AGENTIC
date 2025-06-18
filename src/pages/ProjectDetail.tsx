@@ -20,6 +20,7 @@ import { ProjectImageManagerModal } from "@/components/ProjectImageManagerModal"
 import { useDropzone } from "@/hooks/useDropzone";
 import { cn } from "@/lib/utils";
 import { ShareProjectModal } from "@/components/ShareProjectModal";
+import { useImagePreview } from "@/context/ImagePreviewContext";
 
 interface Job {
   id: string;
@@ -48,6 +49,7 @@ const ProjectDetail = () => {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const { showImage } = useImagePreview();
 
   const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
   const [isDeleteAlertOpen, setIsDeleteAlertOpen] = useState(false);
@@ -58,6 +60,7 @@ const ProjectDetail = () => {
   const [isUpdating, setIsUpdating] = useState(false);
   const [jobToDelete, setJobToDelete] = useState<string | null>(null);
   const [jobBeingRemoved, setJobBeingRemoved] = useState<string | null>(null);
+  const [isDraggingOverKeyVisual, setIsDraggingOverKeyVisual] = useState(false);
 
   const { data: allProjects, isLoading: isLoadingProject } = useQuery<ProjectPreview[]>({
     queryKey: ["projectPreviews", session?.user?.id],
@@ -151,7 +154,7 @@ const ProjectDetail = () => {
     }
   };
 
-  const handleDrop = async (e: React.DragEvent) => {
+  const handleDropOnProject = async (e: React.DragEvent) => {
     e.preventDefault();
     const jobDataString = e.dataTransfer.getData('application/json');
     if (!jobDataString || !projectId) return;
@@ -175,7 +178,7 @@ const ProjectDetail = () => {
     }
   };
 
-  const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: handleDrop });
+  const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: handleDropOnProject });
 
   const handleRemoveChat = async (jobId: string) => {
     if (!session?.user) return;
@@ -227,6 +230,15 @@ const ProjectDetail = () => {
     } catch (err: any) {
       dismissToast(toastId);
       showError(`Failed to set key visual: ${err.message}`);
+    }
+  };
+
+  const handleDropOnKeyVisual = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDraggingOverKeyVisual(false);
+    const imageUrl = e.dataTransfer.getData('text/plain');
+    if (imageUrl) {
+      handleSetKeyVisual(imageUrl);
     }
   };
 
@@ -299,7 +311,13 @@ const ProjectDetail = () => {
             <Card>
               <CardHeader><CardTitle>{t('keyVisualTitle')}</CardTitle><p className="text-sm text-muted-foreground">{t('keyVisualDescription')}</p></CardHeader>
               <CardContent>
-                <div className="h-64 w-full flex items-center justify-center bg-muted rounded-lg overflow-hidden">
+                <div 
+                  className={cn("h-64 w-full flex items-center justify-center bg-muted rounded-lg overflow-hidden transition-all", isDraggingOverKeyVisual && "ring-2 ring-primary")}
+                  onDrop={handleDropOnKeyVisual}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDragEnter={() => setIsDraggingOverKeyVisual(true)}
+                  onDragLeave={() => setIsDraggingOverKeyVisual(false)}
+                >
                   {isLoadingKeyVisual ? <Skeleton className="w-full h-full" /> : keyVisualDisplayUrl ? (<img src={keyVisualDisplayUrl} alt="Latest project image" className="max-w-full max-h-full object-contain" />) : (<ImageIcon className="h-16 w-16 text-muted-foreground" />)}
                 </div>
               </CardContent>
@@ -313,10 +331,21 @@ const ProjectDetail = () => {
                 <ScrollArea className="h-full">
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 pr-4">
                     {projectImages.map((image, index) => (
-                      <div key={image.publicUrl} className="group relative">
-                        <div className="aspect-square block w-full h-full">
+                      <div 
+                        key={image.publicUrl} 
+                        className="group relative"
+                        draggable
+                        onDragStart={(e) => e.dataTransfer.setData('text/plain', image.publicUrl)}
+                      >
+                        <button
+                          className="aspect-square block w-full h-full"
+                          onClick={() => showImage({
+                            images: projectImages.map(img => ({ url: img.publicUrl, jobId: img.jobId })),
+                            currentIndex: index
+                          })}
+                        >
                           <img src={image.publicUrl} alt={`Project image ${index + 1}`} className="w-full h-full object-cover rounded-md" />
-                        </div>
+                        </button>
                         <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col gap-1">
                           <Button variant="secondary" size="icon" className="h-7 w-7" title="Set as Key Visual" onClick={() => handleSetKeyVisual(image.publicUrl)}>
                             <Star className="h-4 w-4" />
