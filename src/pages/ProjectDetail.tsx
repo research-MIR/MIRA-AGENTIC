@@ -273,11 +273,13 @@ const ProjectDetail = () => {
                 <ScrollArea className="h-full">
                   <div className="space-y-1 pr-4">
                     {jobs?.map(job => (
-                      <div key={job.id} className="group flex items-center justify-between p-2 rounded-md hover:bg-muted">
-                        <Link to={`/chat/${job.id}`} className="truncate pr-2">
-                          <span className="font-medium">{job.original_prompt || "Untitled Chat"}</span>
+                      <div key={job.id} className="group relative">
+                        <Link to={`/chat/${job.id}`} className="flex items-center justify-between p-2 rounded-md hover:bg-muted text-sm w-full">
+                          <span className="truncate pr-1 font-medium">
+                            {job.original_prompt || "Untitled Chat"}
+                          </span>
                         </Link>
-                        <div className="opacity-0 transition-opacity group-hover:opacity-100">
+                        <div className="absolute right-1 top-1/2 -translate-y-1/2 z-10 flex items-center opacity-0 transition-opacity group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto">
                           <Button variant="ghost" size="icon" className="h-7 w-7" title="Remove from project" onClick={(e) => { e.preventDefault(); setJobToUnassign(job.id); }}>
                             <X className="h-4 w-4" />
                           </Button>
