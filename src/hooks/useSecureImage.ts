@@ -15,41 +15,55 @@ export const useSecureImage = (imageUrl: string | null | undefined) => {
         return;
       }
       
+      console.log(`[useSecureImage] Received URL: ${imageUrl}`);
       setIsLoading(true);
       setError(null);
 
       try {
         if (imageUrl.startsWith('data:image') || imageUrl.startsWith('blob:')) {
-          // Handle local data URLs (base64 or blob) directly
+          console.log("[useSecureImage] Handling local data/blob URL directly.");
           setDisplayUrl(imageUrl);
         } else if (imageUrl.includes('supabase.co')) {
-          // Handle Supabase storage URLs
+          console.log("[useSecureImage] Handling Supabase URL.");
           const url = new URL(imageUrl);
+          const pathParts = url.pathname.split('/public/');
           
-          const bucketMatch = url.pathname.match(/\/public\/([a-zA-Z0-9_-]+)\//);
-          if (!bucketMatch || !bucketMatch[1]) {
-            throw new Error("Could not determine bucket name from Supabase URL.");
+          if (pathParts.length < 2) {
+            throw new Error(`Could not parse public Supabase URL: ${imageUrl}`);
           }
-          const bucketName = bucketMatch[1];
-          const pathStartIndex = url.pathname.indexOf(bucketMatch[0]);
-          const storagePath = decodeURIComponent(url.pathname.substring(pathStartIndex + bucketMatch[0].length));
+          
+          const pathWithBucket = pathParts[1];
+          const [bucketName, ...filePathParts] = pathWithBucket.split('/');
+          const storagePath = filePathParts.join('/');
 
-          const { data, error } = await supabase.storage.from(bucketName).download(storagePath);
-          if (error) throw error;
+          console.log(`[useSecureImage] Parsed Bucket: ${bucketName}, Path: ${storagePath}`);
+
+          if (!bucketName || !storagePath) {
+            throw new Error(`Invalid bucket name or storage path parsed from URL: ${imageUrl}`);
+          }
+
+          const { data, error: downloadError } = await supabase.storage.from(bucketName).download(storagePath);
+          
+          if (downloadError) {
+            console.error(`[useSecureImage] Supabase download error for path "${storagePath}" in bucket "${bucketName}":`, downloadError);
+            throw downloadError;
+          }
+          
+          console.log(`[useSecureImage] Successfully downloaded blob of size ${data.size}.`);
           objectUrl = URL.createObjectURL(data);
           setDisplayUrl(objectUrl);
         } else {
-          // Use the proxy for any other external URLs
-          const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-image-download', { body: { url: imageUrl } });
-          if (error) throw new Error(`Proxy failed: ${error.message}`);
-          if (data.base64 && data.mimeType) {
-            setDisplayUrl(`data:${data.mimeType};base64,${data.base64}`);
+          console.log("[useSecureImage] Handling external URL via proxy.");
+          const { data: proxyData, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-image-download', { body: { url: imageUrl } });
+          if (proxyError) throw new Error(`Proxy failed: ${proxyError.message}`);
+          if (proxyData.base64 && proxyData.mimeType) {
+            setDisplayUrl(`data:${proxyData.mimeType};base64,${proxyData.base64}`);
           } else {
             throw new Error("Proxy did not return valid image data.");
           }
         }
       } catch (err: any) {
-        console.error(`Failed to load image from ${imageUrl}:`, err);
+        console.error(`[useSecureImage] Failed to load image from ${imageUrl}:`, err);
         setError(err.message);
         setDisplayUrl(null);
       } finally {
@@ -61,6 +75,7 @@ export const useSecureImage = (imageUrl: string | null | undefined) => {
 
     return () => {
       if (objectUrl) {
+        console.log(`[useSecureImage] Revoking object URL: ${objectUrl}`);
         URL.revokeObjectURL(objectUrl);
       }
     };
