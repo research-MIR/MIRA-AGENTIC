@@ -11,7 +11,7 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
 const POLLING_INTERVAL_MS = 5000; // 5 seconds for rapid polling
-const FINAL_OUTPUT_NODE_ID = "442"; // The ID of the node that produces the final image to be saved.
+const FINAL_OUTPUT_NODE_ID = "432"; // The ID of the node that produces the final image to be saved.
 
 async function findOutputImage(historyOutputs: any): Promise<any | null> {
     if (!historyOutputs) return null;
