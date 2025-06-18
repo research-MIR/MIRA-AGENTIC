@@ -145,7 +145,7 @@ export const Sidebar = () => {
     }
   };
 
-  const uncategorizedJobs = jobHistory?.filter(job => !job.project_id).slice(0, 20) || [];
+  const recentChats = jobHistory?.slice(0, 20) || [];
 
   return (
     <>
@@ -219,7 +219,7 @@ export const Sidebar = () => {
                                     {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}
                                 </div>
                                 ) : (
-                                uncategorizedJobs.map(job => (
+                                recentChats.map(job => (
                                     <div 
                                     key={job.id} 
                                     className="group relative"
