@@ -10,6 +10,7 @@ import { useLanguage } from "@/context/LanguageContext";
 import { useQueryClient } from "@tanstack/react-query";
 import { type PreviewData, type PreviewImage } from "@/context/ImagePreviewContext";
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious, type CarouselApi } from "@/components/ui/carousel";
+import { SecureImageDisplay } from "./SecureImageDisplay";
 
 interface ImagePreviewModalProps {
   data: PreviewData | null;
@@ -56,21 +57,16 @@ export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => 
     let toastId = showLoading("Analyzing image to create prompt...");
     
     try {
-      // Step 1: Fetch the image blob and convert to base64 for auto-prompting
-      const imageResponse = await fetch(currentImage.url);
-      if (!imageResponse.ok) throw new Error("Failed to fetch image for analysis.");
-      const imageBlob = await imageResponse.blob();
-      const reader = new FileReader();
-      reader.readAsDataURL(imageBlob);
-      const base64String = await new Promise<string>((resolve, reject) => {
-        reader.onloadend = () => resolve(reader.result as string);
-        reader.onerror = reject;
+      // Step 1: Use the proxy to get the image data
+      const { data: proxyData, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-image-download', {
+        body: { url: currentImage.url }
       });
-      const base64Data = base64String.split(',')[1];
+      if (proxyError) throw proxyError;
+      if (!proxyData.base64 || !proxyData.mimeType) throw new Error("Proxy did not return valid image data.");
 
       // Step 2: Get the auto-generated prompt
       const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-auto-describe-image', {
-        body: { base64_image_data: base64Data, mime_type: imageBlob.type }
+        body: { base64_image_data: proxyData.base64, mime_type: proxyData.mimeType }
       });
       if (promptError) throw promptError;
       const autoPrompt = promptData.auto_prompt;
@@ -115,7 +111,7 @@ export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => 
             <CarouselContent>
               {data.images.map((image, index) => (
                 <CarouselItem key={index}>
-                  <img src={image.url} alt={`Preview ${index + 1}`} className="max-h-[90vh] w-full object-contain rounded-md" />
+                  <SecureImageDisplay imageUrl={image.url} alt={`Preview ${index + 1}`} className="max-h-[90vh] w-full object-contain rounded-md" />
                 </CarouselItem>
               ))}
             </CarouselContent>

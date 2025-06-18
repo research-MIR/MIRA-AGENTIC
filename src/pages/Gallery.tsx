@@ -9,6 +9,7 @@ import { useImagePreview } from "@/context/ImagePreviewContext";
 import { useLanguage } from "@/context/LanguageContext";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
+import { SecureImageDisplay } from "@/components/SecureImageDisplay";
 
 interface ImageResult {
   url: string;
@@ -85,7 +86,7 @@ const Gallery = () => {
         {images.map((image, index) => (
           <div key={image.url} className="group relative aspect-square">
             <button onClick={() => showImage({ images, currentIndex: index })} className="w-full h-full">
-              <img src={image.url} alt={`Generated image ${index + 1}`} className="w-full h-full object-cover rounded-md" />
+              <SecureImageDisplay imageUrl={image.url} alt={`Generated image ${index + 1}`} className="w-full h-full object-cover rounded-md" />
             </button>
             <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity rounded-b-md">
               <Button size="sm" variant="secondary" className="w-full" onClick={() => navigate(`/chat/${image.jobId}`)}>{t('viewChat')}</Button>
