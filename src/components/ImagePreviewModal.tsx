@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Download, Wand2, Loader2 } from "lucide-react";
+import { Download, Wand2, Loader2, AlertTriangle } from "lucide-react";
 import { downloadImage } from "@/lib/utils";
 import { useSession } from "./Auth/SessionContextProvider";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
@@ -10,11 +10,37 @@ import { useLanguage } from "@/context/LanguageContext";
 import { useQueryClient } from "@tanstack/react-query";
 import { type PreviewData, type PreviewImage } from "@/context/ImagePreviewContext";
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious, type CarouselApi } from "@/components/ui/carousel";
+import { useSecureImage } from "@/hooks/useSecureImage";
 
 interface ImagePreviewModalProps {
   data: PreviewData | null;
   onClose: () => void;
 }
+
+const ImageWithLoader = ({ imageUrl }: { imageUrl: string }) => {
+  const { displayUrl, isLoading, error } = useSecureImage(imageUrl);
+
+  if (isLoading) {
+    return (
+      <div className="w-full h-full flex items-center justify-center bg-muted rounded-md min-h-[50vh]">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (error || !displayUrl) {
+    return (
+      <div className="w-full h-full flex items-center justify-center bg-destructive/10 rounded-md text-destructive text-sm p-4 min-h-[50vh]">
+        <AlertTriangle className="h-5 w-5 mr-2" />
+        Error loading image.
+      </div>
+    );
+  }
+
+  return (
+    <img src={displayUrl} alt="Preview" className="max-h-[90vh] w-full object-contain rounded-md" />
+  );
+};
 
 export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => {
   const { supabase, session } = useSession();
@@ -25,14 +51,12 @@ export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => 
   const [currentImage, setCurrentImage] = useState<PreviewImage | null>(null);
 
   useEffect(() => {
-    console.log('[ImagePreviewModal] Modal received data:', data);
     if (!api || !data) return;
 
     const handleSelect = () => {
       const selectedIndex = api.selectedScrollSnap();
       const currentImg = data.images[selectedIndex];
       setCurrentImage(currentImg);
-      console.log(`[ImagePreviewModal] Image selected. Index: ${selectedIndex}, URL: ${currentImg?.url}`);
     };
 
     api.on("select", handleSelect);
@@ -118,7 +142,7 @@ export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => 
             <CarouselContent>
               {data.images.map((image, index) => (
                 <CarouselItem key={index}>
-                  <img src={image.url} alt={`Preview ${index + 1}`} className="max-h-[90vh] w-full object-contain rounded-md" />
+                  <ImageWithLoader imageUrl={image.url} />
                 </CarouselItem>
               ))}
             </CarouselContent>
