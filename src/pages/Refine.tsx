@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Button } from "@/components/ui/button";
@@ -30,7 +30,7 @@ interface VtoPipelineJob {
   };
 }
 
-const SourceImageDisplay = ({ imageUrl, onClear }: { imageUrl: string | null, onClear: () => void }) => {
+const SecureDisplayImage = ({ imageUrl, onClear, showClearButton = false }: { imageUrl: string | null, onClear?: () => void, showClearButton?: boolean }) => {
   const { displayUrl, isLoading, error } = useSecureImage(imageUrl);
 
   if (!imageUrl) return null;
@@ -40,9 +40,11 @@ const SourceImageDisplay = ({ imageUrl, onClear }: { imageUrl: string | null, on
       {isLoading && <Skeleton className="w-full aspect-square" />}
       {error && <div className="w-full aspect-square bg-destructive/10 rounded-md flex items-center justify-center text-destructive text-sm p-2"><AlertTriangle className="h-6 w-6 mr-2" />Error loading image.</div>}
       {displayUrl && <img src={displayUrl} alt="Source for refinement" className="rounded-md w-full" />}
-      <Button variant="destructive" size="icon" className="absolute -top-2 -right-2 h-6 w-6 rounded-full" onClick={onClear}>
-        <X className="h-4 w-4" />
-      </Button>
+      {showClearButton && onClear && (
+        <Button variant="destructive" size="icon" className="absolute -top-2 -right-2 h-6 w-6 rounded-full" onClick={onClear}>
+          <X className="h-4 w-4" />
+        </Button>
+      )}
     </div>
   );
 };
@@ -51,7 +53,7 @@ const Refine = () => {
   const { supabase, session } = useSession();
   const { t } = useLanguage();
   const queryClient = useQueryClient();
-  const { uploadedFiles, setUploadedFiles, handleFileUpload, removeFile } = useFileUpload();
+  const { uploadedFiles, setUploadedFiles, handleFileUpload } = useFileUpload();
 
   const [prompt, setPrompt] = useState("");
   const [upscaleFactor, setUpscaleFactor] = useState(1.5);
@@ -171,58 +173,69 @@ const Refine = () => {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-1 space-y-6">
-            <Card>
-              <CardHeader><CardTitle>{t('sourceImage')}</CardTitle></CardHeader>
-              <CardContent>
-                {sourceImageUrl ? (
-                  <SourceImageDisplay imageUrl={sourceImageUrl} onClear={startNew} />
-                ) : (
-                  <div className="p-4 border-2 border-dashed rounded-lg text-center">
-                    <UploadCloud className="mx-auto h-8 w-8 text-muted-foreground" />
-                    <Label htmlFor="refine-upload" className="mt-2 text-sm font-medium text-primary underline cursor-pointer">{t('uploadAFile')}</Label>
-                    <p className="text-xs text-muted-foreground">{t('dragAndDrop')}</p>
-                    <Input id="refine-upload" type="file" className="hidden" accept="image/*" onChange={(e) => handleFileUpload(e.target.files)} />
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader><CardTitle>{t('refinementPrompt')}</CardTitle></CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-center space-x-2">
-                  <Switch id="auto-prompt" checked={useAutoPrompt} onCheckedChange={setUseAutoPrompt} />
-                  <Label htmlFor="auto-prompt">{t('autoPrompt')}</Label>
-                </div>
-                {useAutoPrompt ? (
-                  <Button className="w-full" onClick={handleGeneratePrompt} disabled={isGeneratingPrompt || uploadedFiles.length === 0}>
-                    {isGeneratingPrompt ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-                    {t('generateAndRefine')}
-                  </Button>
-                ) : (
-                  <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t('refinementPromptPlaceholder')} />
-                )}
-                {useAutoPrompt && prompt && <p className="text-sm p-2 bg-muted rounded-md">{prompt}</p>}
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader><CardTitle>{t('upscaleSettings')}</CardTitle></CardHeader>
-              <CardContent>
-                <Label>{t('upscaleFactor')}: {upscaleFactor}x</Label>
-                <Slider value={[upscaleFactor]} onValueChange={(v) => setUpscaleFactor(v[0])} min={1} max={3} step={0.1} />
-              </CardContent>
-            </Card>
-            <Button size="lg" className="w-full" onClick={handleSubmit} disabled={isSubmitting || !sourceImageUrl || !prompt}>
-              {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
-              {t('refineButton')}
-            </Button>
+            {selectedJob ? (
+              <Card>
+                <CardHeader>
+                  <CardTitle>{t('loadedJob')}</CardTitle>
+                  <p className="text-sm text-muted-foreground">Viewing a previous refinement job.</p>
+                </CardHeader>
+                <CardContent>
+                  <Button className="w-full" onClick={startNew}><PlusCircle className="mr-2 h-4 w-4" />{t('startNewJob')}</Button>
+                </CardContent>
+              </Card>
+            ) : (
+              <>
+                <Card>
+                  <CardHeader><CardTitle>{t('sourceImage')}</CardTitle></CardHeader>
+                  <CardContent>
+                    {sourceImageUrl ? (
+                      <SecureDisplayImage imageUrl={sourceImageUrl} onClear={startNew} showClearButton={true} />
+                    ) : (
+                      <div className="p-4 border-2 border-dashed rounded-lg text-center">
+                        <UploadCloud className="mx-auto h-8 w-8 text-muted-foreground" />
+                        <Label htmlFor="refine-upload" className="mt-2 text-sm font-medium text-primary underline cursor-pointer">{t('uploadAFile')}</Label>
+                        <p className="text-xs text-muted-foreground">{t('dragAndDrop')}</p>
+                        <Input id="refine-upload" type="file" className="hidden" accept="image/*" onChange={(e) => handleFileUpload(e.target.files)} />
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader><CardTitle>{t('refinementPrompt')}</CardTitle></CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="flex items-center space-x-2">
+                      <Switch id="auto-prompt" checked={useAutoPrompt} onCheckedChange={setUseAutoPrompt} />
+                      <Label htmlFor="auto-prompt">{t('autoPrompt')}</Label>
+                    </div>
+                    {useAutoPrompt ? (
+                      <Button className="w-full" onClick={handleGeneratePrompt} disabled={isGeneratingPrompt || uploadedFiles.length === 0}>
+                        {isGeneratingPrompt ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+                        {t('generateAndRefine')}
+                      </Button>
+                    ) : (
+                      <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t('refinementPromptPlaceholder')} />
+                    )}
+                    {useAutoPrompt && prompt && <p className="text-sm p-2 bg-muted rounded-md">{prompt}</p>}
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader><CardTitle>{t('upscaleSettings')}</CardTitle></CardHeader>
+                  <CardContent>
+                    <Label>{t('upscaleFactor')}: {upscaleFactor}x</Label>
+                    <Slider value={[upscaleFactor]} onValueChange={(v) => setUpscaleFactor(v[0])} min={1} max={3} step={0.1} />
+                  </CardContent>
+                </Card>
+                <Button size="lg" className="w-full" onClick={handleSubmit} disabled={isSubmitting || !sourceImageUrl || !prompt}>
+                  {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+                  {t('refineButton')}
+                </Button>
+              </>
+            )}
           </div>
           <div className="lg:col-span-2 space-y-6">
             <Card>
               <CardHeader>
-                <div className="flex justify-between items-center">
-                  <CardTitle>{t('workbench')}</CardTitle>
-                  {selectedJob && <Button variant="outline" onClick={startNew}>{t('startNewJob')}</Button>}
-                </div>
+                <CardTitle>{t('workbench')}</CardTitle>
                 <p className="text-sm text-muted-foreground">{t('refineWorkbenchTooltip')}</p>
               </CardHeader>
               <CardContent className="min-h-[400px]">
@@ -231,12 +244,12 @@ const Refine = () => {
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <h3 className="font-semibold mb-2">{t('originalImage')}</h3>
-                        <SourceImageDisplay imageUrl={selectedJob.metadata?.source_image_url || null} onClear={() => {}} />
+                        <SecureDisplayImage imageUrl={selectedJob.metadata?.source_image_url || null} />
                       </div>
                       <div>
                         <h3 className="font-semibold mb-2">{t('refinedImage')}</h3>
                         {resultImageUrl ? (
-                          <SourceImageDisplay imageUrl={resultImageUrl} onClear={() => {}} />
+                          <SecureDisplayImage imageUrl={resultImageUrl} />
                         ) : (
                           <div className="aspect-square bg-muted rounded-md flex flex-col items-center justify-center text-muted-foreground">
                             <Loader2 className="h-8 w-8 animate-spin" />
@@ -246,7 +259,7 @@ const Refine = () => {
                       </div>
                     </div>
                     {resultImageUrl && (
-                      <Button className="w-full" onClick={() => setIsCompareModalOpen(true)}>{t('compareResults')}</Button>
+                      <Button className="w-full mt-4" onClick={() => setIsCompareModalOpen(true)}>{t('compareResults')}</Button>
                     )}
                   </div>
                 ) : (
