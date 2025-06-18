@@ -8,6 +8,7 @@ export const useSecureImage = (imageUrl: string | null | undefined) => {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let objectUrl: string | null = null;
     const loadImage = async () => {
       if (!imageUrl) {
         setDisplayUrl(null);
@@ -18,25 +19,37 @@ export const useSecureImage = (imageUrl: string | null | undefined) => {
       setError(null);
 
       try {
-        // If it's already a data URL or a local blob, just use it directly.
         if (imageUrl.startsWith('data:image') || imageUrl.startsWith('blob:')) {
+          // Handle local data URLs (base64 or blob) directly
           setDisplayUrl(imageUrl);
-        } else {
-          // For all other URLs, get a secure, short-lived signed URL from our proxy.
-          const { data: proxyData, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-image-download', { body: { url: imageUrl } });
+        } else if (imageUrl.includes('supabase.co')) {
+          // Handle Supabase storage URLs
+          const url = new URL(imageUrl);
           
-          if (proxyError) {
-            throw new Error(`Proxy failed: ${proxyError.message}`);
+          const bucketMatch = url.pathname.match(/\/public\/([a-zA-Z0-9_-]+)\//);
+          if (!bucketMatch || !bucketMatch[1]) {
+            throw new Error("Could not determine bucket name from Supabase URL.");
           }
-          
-          if (proxyData.signedUrl) {
-            setDisplayUrl(proxyData.signedUrl);
+          const bucketName = bucketMatch[1];
+          const pathStartIndex = url.pathname.indexOf(bucketMatch[0]);
+          const storagePath = decodeURIComponent(url.pathname.substring(pathStartIndex + bucketMatch[0].length));
+
+          const { data, error } = await supabase.storage.from(bucketName).download(storagePath);
+          if (error) throw error;
+          objectUrl = URL.createObjectURL(data);
+          setDisplayUrl(objectUrl);
+        } else {
+          // Use the proxy for any other external URLs
+          const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-image-download', { body: { url: imageUrl } });
+          if (error) throw new Error(`Proxy failed: ${error.message}`);
+          if (data.base64 && data.mimeType) {
+            setDisplayUrl(`data:${data.mimeType};base64,${data.base64}`);
           } else {
-            throw new Error("Proxy did not return a signed URL.");
+            throw new Error("Proxy did not return valid image data.");
           }
         }
       } catch (err: any) {
-        console.error(`[useSecureImage] Failed to load image from ${imageUrl}:`, err);
+        console.error(`Failed to load image from ${imageUrl}:`, err);
         setError(err.message);
         setDisplayUrl(null);
       } finally {
@@ -46,6 +59,11 @@ export const useSecureImage = (imageUrl: string | null | undefined) => {
 
     loadImage();
 
+    return () => {
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
   }, [imageUrl, supabase]);
 
   return { displayUrl, isLoading, error };
