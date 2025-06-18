@@ -38,7 +38,11 @@ const ImageWithLoader = ({ imageUrl }: { imageUrl: string }) => {
   }
 
   return (
-    <img src={displayUrl} alt="Preview" className="max-h-[90vh] w-auto h-auto max-w-full object-contain rounded-md" />
+    <img
+      src={displayUrl}
+      alt="Preview"
+      className="max-h-[90vh] max-w-full object-contain rounded-md"
+    />
   );
 };
 
