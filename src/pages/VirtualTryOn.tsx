@@ -51,9 +51,9 @@ const ImageUploader = ({ onFileSelect, title, t, imageUrl, onClear }: { onFileSe
   };
 
   const { dropzoneProps, isDraggingOver } = useDropzone({
-    onDrop: (files) => {
-      if (files && files[0]) {
-        onFileSelect(files[0]);
+    onDrop: (e) => {
+      if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+        onFileSelect(e.dataTransfer.files[0]);
       }
     }
   });
@@ -364,7 +364,7 @@ const VirtualTryOn = () => {
     <>
       <div className="p-4 md:p-8 h-screen overflow-y-auto">
         <header className="pb-4 mb-8 border-b flex justify-between items-center">
-            <h1 className="text-3xl font-bold">{t.virtualTryOn}</h1>
+            <h1 className="text-3xl font-bold">{t('virtualTryOn')}</h1>
             <Button variant="outline" size="icon" onClick={() => setIsSettingsModalOpen(true)}>
                 <Settings className="h-4 w-4" />
             </Button>

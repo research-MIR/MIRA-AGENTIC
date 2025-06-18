@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 
 interface DropzoneOptions {
-  onDrop: (files: FileList) => void;
+  onDrop: (e: React.DragEvent<HTMLElement>) => void;
 }
 
 export const useDropzone = ({ onDrop }: DropzoneOptions) => {
@@ -29,10 +29,8 @@ export const useDropzone = ({ onDrop }: DropzoneOptions) => {
       e.preventDefault();
       e.stopPropagation();
       setIsDraggingOver(false);
-      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-        onDrop(e.dataTransfer.files);
-        e.dataTransfer.clearData();
-      }
+      onDrop(e);
+      // It's the responsibility of the onDrop handler to clear data if needed
     },
     [onDrop]
   );
