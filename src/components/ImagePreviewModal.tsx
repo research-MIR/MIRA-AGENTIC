@@ -51,7 +51,14 @@ export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => 
   const [currentImage, setCurrentImage] = useState<PreviewImage | null>(null);
 
   useEffect(() => {
-    if (!api || !data) return;
+    if (!data) return;
+    if (!api) {
+      // Handle the case where there's only one image and the carousel API might not be needed
+      if (data.images.length > 0) {
+        setCurrentImage(data.images[data.currentIndex]);
+      }
+      return;
+    }
 
     const handleSelect = () => {
       const selectedIndex = api.selectedScrollSnap();
