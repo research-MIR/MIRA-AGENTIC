@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { showError, showSuccess, showLoading, dismissToast } from "@/utils/toast";
 import { cn } from "@/lib/utils";
 import { ProjectImageManagerModal } from "@/components/ProjectImageManagerModal";
+import { useDropzone } from "@/hooks/useDropzone";
 
 interface ProjectPreview {
   project_id: string;
@@ -136,8 +137,10 @@ const Projects = () => {
     }
   };
 
+  const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: handleDrop });
+
   return (
-    <>
+    <div className="h-full" {...dropzoneProps}>
       <div className="p-4 md:p-8 h-screen overflow-y-auto">
         <header className="pb-4 mb-8 border-b flex justify-between items-center">
           <div>
@@ -208,7 +211,7 @@ const Projects = () => {
           onClose={() => setManagingProject(null)}
         />
       )}
-    </>
+    </div>
   );
 };
 

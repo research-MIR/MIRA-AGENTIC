@@ -372,7 +372,7 @@ const ProjectDetail = () => {
             <Button onClick={() => setIsManageChatsModalOpen(false)}>{t('done')}</Button>
           </DialogFooter>
         </DialogContent>
-      </AlertDialog>
+      </Dialog>
 
       <AlertDialog open={!!jobToDelete} onOpenChange={(open) => !open && setJobToDelete(null)}>
         <AlertDialogContent>
