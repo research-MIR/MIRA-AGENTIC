@@ -527,6 +527,8 @@ serve(async (req)=>{
     let body;
     let imageFile = null;
     let originalFilename = 'image.png';
+    let sourceImageUrlForCheck: string | null = null;
+
     const contentType = req.headers.get('content-type');
     if (contentType && contentType.includes('multipart/form-data')) {
       const formData = await req.formData();
@@ -539,6 +541,7 @@ serve(async (req)=>{
     } else {
       body = await req.json();
       if (body.image_url) {
+        sourceImageUrlForCheck = body.image_url;
         const imageResponse = await fetch(body.image_url);
         if (!imageResponse.ok) throw new Error(`Failed to download image from URL: ${imageResponse.statusText}`);
         imageFile = await imageResponse.blob();
@@ -557,6 +560,33 @@ serve(async (req)=>{
     if (!invoker_user_id) throw new Error("Missing required parameter: invoker_user_id");
     if (!prompt_text) throw new Error("Missing required parameter: prompt_text");
     if (!imageFile) throw new Error("Missing image data.");
+
+    // --- Duplicate Job Check ---
+    if (sourceImageUrlForCheck) {
+        const { data: existingJob, error: checkError } = await supabase
+            .from('mira-agent-comfyui-jobs')
+            .select('id, status')
+            .eq('user_id', invoker_user_id)
+            .eq('metadata->>source_image_url', sourceImageUrlForCheck)
+            .eq('metadata->>prompt', prompt_text)
+            .in('status', ['queued', 'processing'])
+            .maybeSingle();
+
+        if (checkError) {
+            console.warn(`[QueueProxy][${requestId}] Error checking for duplicate jobs:`, checkError.message);
+        }
+
+        if (existingJob) {
+            console.log(`[QueueProxy][${requestId}] Found existing active job ${existingJob.id}. Re-triggering poller instead of creating a new job.`);
+            supabase.functions.invoke('MIRA-AGENT-poller-comfyui', { body: { job_id: existingJob.id } }).catch(console.error);
+            return new Response(JSON.stringify({ success: true, jobId: existingJob.id, message: "Existing job found and re-triggered." }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200
+            });
+        }
+    }
+    // --- End Duplicate Job Check ---
+
     // Step 1: Upload the source image to Supabase Storage to get a persistent URL
     const storagePath = `${invoker_user_id}/source_${Date.now()}_${originalFilename}`;
     const { error: storageError } = await supabase.storage.from(UPLOAD_BUCKET).upload(storagePath, imageFile, {
