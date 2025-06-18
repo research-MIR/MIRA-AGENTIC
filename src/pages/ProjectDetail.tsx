@@ -45,8 +45,10 @@ const ProjectDetail = () => {
     queryKey: ['projectJobs', projectId],
     queryFn: async () => {
       if (!projectId) return [];
+      console.log(`[ProjectDetail] Fetching jobs for project: ${projectId}`);
       const { data, error } = await supabase.from('mira-agent-jobs').select('id, original_prompt, context, final_result').eq('project_id', projectId).order('created_at', { ascending: false });
       if (error) throw error;
+      console.log(`[ProjectDetail] Fetched ${data.length} jobs:`, data);
       return data;
     },
     enabled: !!projectId,
@@ -55,19 +57,40 @@ const ProjectDetail = () => {
   const projectImages = useMemo((): ImageResult[] => {
     if (!jobs) return [];
     const allImages: ImageResult[] = [];
+
     for (const job of jobs) {
-      const extractImages = (result: any) => {
-        if (result?.isImageGeneration && Array.isArray(result.images)) {
-          return result.images.map((img: any) => ({ ...img, jobId: job.id }));
+      // Case 1: Images are directly in the final_result (Direct Generator, simple agent responses)
+      if (job.final_result?.isImageGeneration && Array.isArray(job.final_result.images)) {
+        for (const image of job.final_result.images) {
+          allImages.push({ ...image, jobId: job.id });
         }
-        if (result?.isCreativeProcess && result.final_generation_result?.response?.images) {
-          return result.final_generation_result.response.images.map((img: any) => ({ ...img, jobId: job.id }));
+      }
+
+      // Case 2: Images are in the final_result of a creative process
+      if (job.final_result?.isCreativeProcess && job.final_result.final_generation_result?.response?.images) {
+        for (const image of job.final_result.final_generation_result.response.images) {
+          allImages.push({ ...image, jobId: job.id });
         }
-        return [];
-      };
-      allImages.push(...extractImages(job.final_result));
+      }
+
+      // Case 3: Images are buried in the history
+      if (job.context?.history) {
+        for (const turn of job.context.history) {
+          if (turn.role === 'function' && turn.parts[0]?.functionResponse?.response?.isImageGeneration) {
+            const imagesInTurn = turn.parts[0].functionResponse.response.images;
+            if (Array.isArray(imagesInTurn)) {
+              for (const image of imagesInTurn) {
+                allImages.push({ ...image, jobId: job.id });
+              }
+            }
+          }
+        }
+      }
     }
-    return Array.from(new Map(allImages.map(item => [item.publicUrl, item])).values());
+    
+    const uniqueImages = Array.from(new Map(allImages.map(item => [item.publicUrl, item])).values());
+    console.log(`[ProjectDetail] Extracted ${uniqueImages.length} unique images from jobs.`);
+    return uniqueImages;
   }, [jobs]);
 
   const latestImageUrl = projectImages.length > 0 ? projectImages[0].publicUrl : null;
@@ -140,7 +163,7 @@ const ProjectDetail = () => {
               <ScrollArea className="h-full">
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 pr-4">
                   {projectImages.map((image, index) => (
-                    <button key={image.publicUrl} onClick={() => showImage({ images: projectImages, currentIndex: index })} className="aspect-square block">
+                    <button key={image.publicUrl} onClick={() => showImage({ images: projectImages.map(img => ({ url: img.publicUrl, jobId: img.jobId })), currentIndex: index })} className="aspect-square block">
                       <img src={image.publicUrl} alt={`Project image ${index + 1}`} className="w-full h-full object-cover rounded-md hover:opacity-80 transition-opacity" />
                     </button>
                   ))}

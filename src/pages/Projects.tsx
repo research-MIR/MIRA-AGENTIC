@@ -67,8 +67,10 @@ const Projects = () => {
     queryKey: ["projectPreviews", session?.user?.id],
     queryFn: async () => {
       if (!session?.user) return [];
+      console.log("[ProjectsPage] Fetching project previews...");
       const { data, error } = await supabase.rpc('get_project_previews', { p_user_id: session.user.id });
       if (error) throw error;
+      console.log("[ProjectsPage] Fetched previews:", data);
       return data;
     },
     enabled: !!session?.user,
