@@ -14,11 +14,11 @@ import { useSecureImage } from "@/hooks/useSecureImage";
 const SecureImageDisplay = ({ imageUrl, alt }: { imageUrl: string | null, alt: string }) => {
   const { displayUrl, isLoading, error } = useSecureImage(imageUrl);
 
-  if (isLoading) return <div className="w-full h-32 bg-muted rounded-md flex items-center justify-center"><Loader2 className="h-6 w-6 animate-spin" /></div>;
-  if (error) return <div className="w-full h-32 bg-destructive/10 rounded-md flex items-center justify-center text-destructive text-sm p-2">Error loading image: {error}</div>;
+  if (isLoading) return <div className="w-full h-full bg-muted rounded-md flex items-center justify-center"><Loader2 className="h-6 w-6 animate-spin" /></div>;
+  if (error) return <div className="w-full h-full bg-destructive/10 rounded-md flex items-center justify-center text-destructive text-sm p-2">Error loading image: {error}</div>;
   if (!displayUrl) return null;
 
-  return <img src={displayUrl} alt={alt} className="mt-2 rounded-md border" />;
+  return <img src={displayUrl} alt={alt} className="w-full h-full object-contain" />;
 };
 
 const Developer = () => {
@@ -203,8 +203,8 @@ const Developer = () => {
                   <Textarea id="seg-prompt" value={segPrompt} onChange={(e) => setSegPrompt(e.target.value)} />
                 </div>
                 {segPersonImageUrl && (
-                  <div className="relative w-full max-w-md mx-auto">
-                    <img src={segPersonImageUrl} alt="Segmentation Source" className="w-full h-auto rounded-md" />
+                  <div className="relative w-full max-w-md mx-auto aspect-square bg-muted rounded-md overflow-hidden">
+                    <img src={segPersonImageUrl} alt="Segmentation Source" className="w-full h-full object-contain" />
                     {segmentationResult && sourceImageDimensions && (
                         <SegmentationMask 
                             masks={segmentationResult} 
@@ -228,7 +228,7 @@ const Developer = () => {
                                     className="mt-1 h-48 font-mono text-xs"
                                 />
                             </div>
-                            <div>
+                            <div className="aspect-square bg-muted rounded-md overflow-hidden">
                                 <Label>Corresponding Mask</Label>
                                 <SecureImageDisplay imageUrl={maskImageUrl} alt="Segmentation Mask" />
                             </div>
@@ -242,7 +242,9 @@ const Developer = () => {
                 {croppedImageUrl && (
                   <div className="space-y-4 pt-4 border-t">
                     <h3 className="font-semibold">Crop Result</h3>
-                    <SecureImageDisplay imageUrl={croppedImageUrl} alt="Cropped Result" />
+                    <div className="aspect-square bg-muted rounded-md overflow-hidden">
+                      <SecureImageDisplay imageUrl={croppedImageUrl} alt="Cropped Result" />
+                    </div>
                   </div>
                 )}
             </CardContent>

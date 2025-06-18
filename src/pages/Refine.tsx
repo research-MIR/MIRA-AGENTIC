@@ -36,10 +36,10 @@ const SecureDisplayImage = ({ imageUrl, onClear, showClearButton = false }: { im
   if (!imageUrl) return null;
 
   return (
-    <div className="relative">
-      {isLoading && <Skeleton className="w-full aspect-square" />}
-      {error && <div className="w-full aspect-square bg-destructive/10 rounded-md flex items-center justify-center text-destructive text-sm p-2"><AlertTriangle className="h-6 w-6 mr-2" />Error loading image.</div>}
-      {displayUrl && <img src={displayUrl} alt="Source for refinement" className="rounded-md w-full" />}
+    <div className="relative w-full h-full">
+      {isLoading && <Skeleton className="w-full h-full" />}
+      {error && <div className="w-full h-full bg-destructive/10 rounded-md flex items-center justify-center text-destructive text-sm p-2"><AlertTriangle className="h-6 w-6 mr-2" />Error loading image.</div>}
+      {displayUrl && <img src={displayUrl} alt="Source for refinement" className="w-full h-full object-contain" />}
       {showClearButton && onClear && (
         <Button variant="destructive" size="icon" className="absolute -top-2 -right-2 h-6 w-6 rounded-full" onClick={onClear}>
           <X className="h-4 w-4" />
@@ -142,13 +142,11 @@ const Refine = () => {
       };
 
       if (sourceImageUrl.startsWith('blob:')) {
-        // It's a newly uploaded file
         const file = uploadedFiles[0].file;
         payload.base64_image_data = await fileToBase64(file);
         payload.mime_type = file.type;
-        payload.metadata = { source_image_url: sourceImageUrl }; // Keep for display
+        payload.metadata = { source_image_url: sourceImageUrl };
       } else {
-        // It's an existing image from a selected job
         payload.image_url = sourceImageUrl;
         payload.metadata = { source_image_url: sourceImageUrl };
       }
@@ -190,7 +188,9 @@ const Refine = () => {
               <CardHeader><CardTitle>{t('sourceImage')}</CardTitle></CardHeader>
               <CardContent>
                 {sourceImageUrl ? (
-                  <SecureDisplayImage imageUrl={sourceImageUrl} onClear={startNew} showClearButton={true} />
+                  <div className="aspect-square bg-muted rounded-md overflow-hidden">
+                    <SecureDisplayImage imageUrl={sourceImageUrl} onClear={startNew} showClearButton={true} />
+                  </div>
                 ) : (
                   <div className="p-4 border-2 border-dashed rounded-lg text-center">
                     <UploadCloud className="mx-auto h-8 w-8 text-muted-foreground" />
@@ -244,16 +244,16 @@ const Refine = () => {
                 {selectedJob ? (
                   <div className="space-y-4">
                     <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <h3 className="font-semibold mb-2">{t('originalImage')}</h3>
+                      <div className="aspect-square bg-muted rounded-md overflow-hidden">
+                        <h3 className="font-semibold mb-2 absolute top-2 left-2 bg-background/80 px-2 py-1 rounded-full text-xs">{t('originalImage')}</h3>
                         <SecureDisplayImage imageUrl={selectedJob.metadata?.source_image_url || null} />
                       </div>
-                      <div>
-                        <h3 className="font-semibold mb-2">{t('refinedImage')}</h3>
+                      <div className="aspect-square bg-muted rounded-md overflow-hidden">
+                        <h3 className="font-semibold mb-2 absolute top-2 left-2 bg-background/80 px-2 py-1 rounded-full text-xs">{t('refinedImage')}</h3>
                         {resultImageUrl ? (
                           <SecureDisplayImage imageUrl={resultImageUrl} />
                         ) : (
-                          <div className="aspect-square bg-muted rounded-md flex flex-col items-center justify-center text-muted-foreground">
+                          <div className="w-full h-full flex flex-col items-center justify-center text-muted-foreground">
                             <Loader2 className="h-8 w-8 animate-spin" />
                             <p className="mt-2 text-sm">{t('inProgress')}</p>
                           </div>
