@@ -188,7 +188,7 @@ const Refine = () => {
               <CardHeader><CardTitle>{t('sourceImage')}</CardTitle></CardHeader>
               <CardContent>
                 {sourceImageUrl ? (
-                  <div className="aspect-square bg-muted rounded-md overflow-hidden">
+                  <div className="max-h-96 bg-muted rounded-md overflow-hidden flex justify-center items-center">
                     <SecureDisplayImage imageUrl={sourceImageUrl} onClear={startNew} showClearButton={true} />
                   </div>
                 ) : (
@@ -244,11 +244,11 @@ const Refine = () => {
                 {selectedJob ? (
                   <div className="space-y-4">
                     <div className="grid grid-cols-2 gap-4">
-                      <div className="aspect-square bg-muted rounded-md overflow-hidden">
+                      <div className="max-h-96 bg-muted rounded-md overflow-hidden flex justify-center items-center">
                         <h3 className="font-semibold mb-2 absolute top-2 left-2 bg-background/80 px-2 py-1 rounded-full text-xs">{t('originalImage')}</h3>
                         <SecureDisplayImage imageUrl={selectedJob.metadata?.source_image_url || null} />
                       </div>
-                      <div className="aspect-square bg-muted rounded-md overflow-hidden">
+                      <div className="max-h-96 bg-muted rounded-md overflow-hidden flex justify-center items-center">
                         <h3 className="font-semibold mb-2 absolute top-2 left-2 bg-background/80 px-2 py-1 rounded-full text-xs">{t('refinedImage')}</h3>
                         {resultImageUrl ? (
                           <SecureDisplayImage imageUrl={resultImageUrl} />
