@@ -7,7 +7,6 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Folder, MessageSquare, Image as ImageIcon, Plus, Move, ImagePlus, Info } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { useLanguage } from "@/context/LanguageContext";
-import { useSecureImage } from "@/hooks/useSecureImage";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -31,8 +30,6 @@ const ProjectCard = ({ project, onDrop, onDragEnter, onDragLeave, isBeingDragged
   isBeingDraggedOver: boolean,
   onManageImages: (project: ProjectPreview) => void
 }) => {
-  const { displayUrl, isLoading } = useSecureImage(project.latest_image_url);
-
   return (
     <div
       onDrop={(e) => onDrop(project.project_id, e)}
@@ -54,10 +51,8 @@ const ProjectCard = ({ project, onDrop, onDragEnter, onDragLeave, isBeingDragged
           </CardHeader>
           <CardContent className="p-4 pt-0 flex-1">
             <div className="aspect-[4/3] bg-muted rounded-md flex items-center justify-center overflow-hidden">
-              {isLoading ? (
-                <Skeleton className="w-full h-full" />
-              ) : displayUrl ? (
-                <img src={displayUrl} alt={project.project_name} className="w-full h-full object-cover" />
+              {project.latest_image_url ? (
+                <img src={project.latest_image_url} alt={project.project_name} className="w-full h-full object-cover" />
               ) : (
                 <ImageIcon className="h-10 w-10 text-muted-foreground" />
               )}

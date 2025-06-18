@@ -238,8 +238,8 @@ const ProjectDetail = () => {
   }
 
   return (
-    <>
-      <div className={cn("p-4 md:p-8 h-screen flex flex-col transition-all", isDraggingOver && "ring-2 ring-primary ring-offset-4 ring-offset-background rounded-lg")} {...dropzoneProps}>
+    <div className="h-full">
+      <div className={cn("p-4 md:p-8 h-full flex flex-col transition-all", isDraggingOver && "ring-2 ring-primary ring-offset-4 ring-offset-background rounded-lg")} {...dropzoneProps}>
         <header className="pb-4 mb-4 border-b shrink-0 flex justify-between items-center">
           <h1 className="text-3xl font-bold flex items-center gap-3">
             {isDraggingOver ? <Move className="h-8 w-8 text-primary" /> : <Folder className="h-8 w-8 text-primary" />}
@@ -334,7 +334,6 @@ const ProjectDetail = () => {
         </div>
       </div>
 
-      {/* Modals and Dialogs */}
       <ShareProjectModal project={project} isOpen={isShareModalOpen} onClose={() => setIsShareModalOpen(false)} />
       <Dialog open={isRenameModalOpen} onOpenChange={setIsRenameModalOpen}>
         <DialogContent>
@@ -383,7 +382,7 @@ const ProjectDetail = () => {
       </AlertDialog>
 
       {project && <ProjectImageManagerModal project={{ project_id: projectId!, project_name: project.project_name }} isOpen={isImageManagerOpen} onClose={() => setIsImageManagerOpen(false)} />}
-    </>
+    </div>
   );
 };
 
