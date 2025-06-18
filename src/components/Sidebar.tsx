@@ -16,7 +16,6 @@ import { Label } from "./ui/label";
 import { RadioGroup, RadioGroupItem } from "./ui/radio-group";
 import { showError, showSuccess, showLoading, dismissToast } from "@/utils/toast";
 import { AddToProjectDialog } from "./Jobs/AddToProjectDialog";
-import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface JobHistory {
   id: string;
@@ -164,16 +163,16 @@ export const Sidebar = () => {
             {t.developer}
           </NavLink>
         </nav>
-        <div className="flex-1 flex flex-col">
+        <div className="flex-1 flex flex-col overflow-hidden">
             <div className="flex justify-between items-center w-full px-4 pt-2 pb-2">
                 <h2 className="text-sm font-semibold text-muted-foreground">Recent Chats</h2>
                 <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); setIsSettingsModalOpen(true); }}><Settings className="h-4 w-4" /></Button>
             </div>
-            <ScrollArea className="flex-1">
+            <div className="flex-1 overflow-y-auto no-scrollbar">
                 <div className="p-2 space-y-1">
                     {isLoadingJobs ? (
                     <div className="space-y-2">
-                        {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}
+                        {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}
                     </div>
                     ) : (
                     recentChats.map(job => (
@@ -181,8 +180,8 @@ export const Sidebar = () => {
                         key={job.id} 
                         className="group relative"
                         >
-                        <NavLink to={`/chat/${job.id}`} className={({ isActive }) => `block p-2 rounded-md text-sm truncate ${isActive ? 'bg-primary text-primary-foreground font-semibold' : 'hover:bg-muted'}`}>
-                            {job.original_prompt || "Untitled Chat"}
+                        <NavLink to={`/chat/${job.id}`} className={({ isActive }) => `flex items-center justify-between p-2 rounded-md text-sm ${isActive ? 'bg-primary text-primary-foreground font-semibold' : 'hover:bg-muted'}`}>
+                            <span className="truncate pr-1">{job.original_prompt || "Untitled Chat"}</span>
                         </NavLink>
                         <div className="absolute right-1 top-1/2 -translate-y-1/2 z-10 flex items-center gap-0.5 rounded-md bg-muted/80 opacity-0 transition-opacity group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto">
                             <Button variant="ghost" size="icon" className="h-7 w-7" title="Add to project" onClick={(e) => { e.preventDefault(); setMovingJob(job); }}>
@@ -199,7 +198,7 @@ export const Sidebar = () => {
                     ))
                     )}
                 </div>
-            </ScrollArea>
+            </div>
         </div>
         <div className="p-4 border-t space-y-2">
           <ActiveJobsTracker />
