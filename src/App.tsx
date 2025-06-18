@@ -42,12 +42,12 @@ const App = () => {
   }, [isTourPending, location.pathname, openTour]);
 
   const steps: StepType[] = [
-    { selector: '#model-selector', content: t.onboardingModelDescription },
-    { selector: '#designer-mode-switch', content: t.onboardingDesignerDescription },
-    { selector: '#pipeline-mode-select', content: t.onboardingPipelineDescription },
-    { selector: '#prompt-input-area', content: t.onboardingPromptDescription },
-    { selector: '#file-upload-button', content: t.onboardingUploadDescription },
-    { selector: '#new-chat-button', content: t.onboardingNewChatDescription },
+    { selector: '#model-selector', content: t('onboardingModelDescription') },
+    { selector: '#designer-mode-switch', content: t('onboardingDesignerDescription') },
+    { selector: '#pipeline-mode-select', content: t('onboardingPipelineDescription') },
+    { selector: '#prompt-input-area', content: t('onboardingPromptDescription') },
+    { selector: '#file-upload-button', content: t('onboardingUploadDescription') },
+    { selector: '#new-chat-button', content: t('onboardingNewChatDescription') },
   ];
 
   const handleTourEnd = async () => {

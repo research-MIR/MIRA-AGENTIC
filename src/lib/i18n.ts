@@ -2,6 +2,7 @@ export const translations = {
   it: {
     // ... (keep existing translations)
     // General
+    greeting: "Ciao! Come posso aiutarti?",
     agentChat: "Chat Agente",
     generator: "Generatore",
     gallery: "Galleria",
@@ -235,6 +236,7 @@ export const translations = {
   en: {
     // ... (keep existing translations)
     // General
+    greeting: "Hi! How can I help you today?",
     agentChat: "Agent Chat",
     generator: "Generator",
     gallery: "Gallery",

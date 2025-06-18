@@ -11,7 +11,6 @@ import { CreativeProcessResponse } from "@/components/Responses/CreativeProcessR
 import { useImagePreview } from "@/context/ImagePreviewContext";
 import { showSuccess } from "@/utils/toast";
 import { RefinementProposalCard } from "@/components/Responses/RefinementProposalCard";
-import { useLanguage } from "@/context/LanguageContext";
 import { ImageChoiceProposalCard } from "@/components/Responses/ImageChoiceProposalCard";
 import { 
   ArtisanEngineResponseSchema,
@@ -84,7 +83,6 @@ interface MessageListProps {
 
 export const MessageList = ({ messages, jobId, onRefinementComplete, onSendMessage, onBranch, isOwner }: MessageListProps) => {
   const { showImage } = useImagePreview();
-  const { t } = useLanguage();
 
   return (
     <>
@@ -141,7 +139,7 @@ export const MessageList = ({ messages, jobId, onRefinementComplete, onSendMessa
                       ))}
                     </div>
                   )}
-                  {message.text && <div className="markdown-content"><ReactMarkdown remarkPlugins={[remarkGfm]}>{(t[message.text as keyof typeof t]) || message.text}</ReactMarkdown></div>}
+                  {message.text && <div className="markdown-content"><ReactMarkdown remarkPlugins={[remarkGfm]}>{message.text}</ReactMarkdown></div>}
                 </CardContent>
               </Card>
             )}

@@ -52,7 +52,7 @@ const parseHistoryToMessages = (jobData: any, t: (key: string) => string): Messa
                     else if (response.isBrandAnalysis) botMessage.brandAnalysisResponse = response;
                     else if (response.isImageChoiceProposal) botMessage.imageChoiceProposal = response;
                     else if (response.isRefinementProposal) botMessage.refinementProposal = response;
-                    else if (response.text) botMessage.text = translateErrorMessage(response.text, t);
+                    else if (response.text) botMessage.text = t(response.text);
                     break;
                 case 'present_image_choice':
                     botMessage.imageChoiceProposal = response;
@@ -85,7 +85,7 @@ export const useChatManager = () => {
     const channelRef = useRef<RealtimeChannel | null>(null);
 
     const [messages, setMessages] = useState<Message[]>([]);
-    const [chatTitle, setChatTitle] = useState<string>(t.newChat);
+    const [chatTitle, setChatTitle] = useState<string>(t('newChat'));
     const [isJobRunning, setIsJobRunning] = useState(false);
     const [isSending, setIsSending] = useState(false);
     const [isOwner, setIsOwner] = useState(true);
@@ -149,13 +149,13 @@ export const useChatManager = () => {
         if (jobId && jobData) {
             processJobData(jobData);
         } else if (!jobId) {
-            setMessages([{ from: "bot", text: "Ciao! Come posso aiutarti oggi?" }]);
-            setChatTitle(t.newChat);
+            setMessages([{ from: "bot", text: t('greeting') }]);
+            setChatTitle(t('newChat'));
             setIsJobRunning(false);
             setIsSending(false);
             setIsOwner(true);
         }
-    }, [jobId, jobData, processJobData, t.newChat]);
+    }, [jobId, jobData, processJobData, t]);
 
     useEffect(() => {
         if (channelRef.current) {
@@ -177,7 +177,6 @@ export const useChatManager = () => {
         return () => {
             if (channelRef.current) {
                 supabase.removeChannel(channelRef.current);
-                channelRef.current = null;
             }
         };
     }, [jobId, supabase, queryClient]);
@@ -234,12 +233,12 @@ export const useChatManager = () => {
             const { error } = await supabase.rpc('delete_mira_agent_job', { p_job_id: jobId });
             if (error) throw error;
             dismissToast(toastId);
-            showSuccess(t.chatDeleted);
+            showSuccess(t('chatDeleted'));
             await queryClient.invalidateQueries({ queryKey: ["jobHistory"] });
             navigate("/chat");
         } catch (err: any) {
             dismissToast(toastId);
-            showError(`${t.errorDeletingChat}: ${translateErrorMessage(err.message, t)}`);
+            showError(`${t('errorDeletingChat')}: ${translateErrorMessage(err.message, t)}`);
         }
     }, [jobId, supabase, navigate, queryClient, t]);
 
