@@ -7,8 +7,9 @@ import { RealtimeChannel } from '@supabase/supabase-js';
 import { Message } from '@/components/Chat/MessageList';
 import { useLanguage } from '@/context/LanguageContext';
 import { UploadedFile } from './useFileUpload';
+import { translateErrorMessage } from '@/lib/errors';
 
-const parseHistoryToMessages = (jobData: any): Message[] => {
+const parseHistoryToMessages = (jobData: any, t: (key: string) => string): Message[] => {
     const history = jobData?.context?.history;
     const messages: Message[] = [];
     if (!history) return messages;
@@ -51,7 +52,7 @@ const parseHistoryToMessages = (jobData: any): Message[] => {
                     else if (response.isBrandAnalysis) botMessage.brandAnalysisResponse = response;
                     else if (response.isImageChoiceProposal) botMessage.imageChoiceProposal = response;
                     else if (response.isRefinementProposal) botMessage.refinementProposal = response;
-                    else if (response.text) botMessage.text = response.text;
+                    else if (response.text) botMessage.text = translateErrorMessage(response.text, t);
                     break;
                 case 'present_image_choice':
                     botMessage.imageChoiceProposal = response;
@@ -129,7 +130,7 @@ export const useChatManager = () => {
             numImagesMode: data.context?.numImagesMode ?? 'auto',
         });
 
-        let conversationMessages = parseHistoryToMessages(data);
+        let conversationMessages = parseHistoryToMessages(data, t);
         const isRunning = data.status === 'processing' || data.status === 'awaiting_refinement';
         setIsJobRunning(isRunning);
         if (!isRunning) setIsSending(false);
@@ -138,10 +139,11 @@ export const useChatManager = () => {
             const message = data.status === 'processing' ? 'Thinking...' : 'Refining image...';
             conversationMessages.push({ from: 'bot', jobInProgress: { jobId: data.id, message } });
         } else if (data.status === 'failed') {
-            conversationMessages.push({ from: 'bot', text: data.error_message });
+            const friendlyError = translateErrorMessage(data.error_message, t);
+            conversationMessages.push({ from: 'bot', text: friendlyError });
         }
         setMessages(conversationMessages);
-    }, [session?.user?.id]);
+    }, [session?.user?.id, t]);
 
     useEffect(() => {
         if (jobId && jobData) {
@@ -182,10 +184,10 @@ export const useChatManager = () => {
 
     useEffect(() => {
         if (error) {
-            showError(error.message);
+            showError(translateErrorMessage(error.message, t));
             navigate("/chat");
         }
-    }, [error, navigate]);
+    }, [error, navigate, t]);
 
     const sendMessage = useCallback(async (text: string, files: UploadedFile[], isSilent: boolean) => {
         if (!isSilent) {
@@ -220,10 +222,10 @@ export const useChatManager = () => {
                 navigate(`/chat/${newJob.id}`);
             }
         } catch (err: any) {
-            showError("Error communicating with Mira: " + err.message);
+            showError(translateErrorMessage(err.message, t));
             setIsSending(false);
         }
-    }, [jobId, session, jobSettings, language, supabase, navigate, queryClient]);
+    }, [jobId, session, jobSettings, language, supabase, navigate, queryClient, t]);
 
     const deleteChat = useCallback(async () => {
         if (!jobId) return;
@@ -237,7 +239,7 @@ export const useChatManager = () => {
             navigate("/chat");
         } catch (err: any) {
             dismissToast(toastId);
-            showError(`${t.errorDeletingChat}: ${err.message}`);
+            showError(`${t.errorDeletingChat}: ${translateErrorMessage(err.message, t)}`);
         }
     }, [jobId, supabase, navigate, queryClient, t]);
 
@@ -255,9 +257,9 @@ export const useChatManager = () => {
             navigate(`/chat/${data.newJobId}`);
         } catch (err: any) {
             dismissToast(toastId);
-            showError(`Failed to branch chat: ${err.message}`);
+            showError(`Failed to branch chat: ${translateErrorMessage(err.message, t)}`);
         }
-    }, [jobId, session, supabase, navigate, queryClient]);
+    }, [jobId, session, supabase, navigate, queryClient, t]);
 
     return {
         jobId,

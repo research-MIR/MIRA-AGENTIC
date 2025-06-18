@@ -1,5 +1,6 @@
 export const translations = {
   it: {
+    // ... (keep existing translations)
     // General
     agentChat: "Chat Agente",
     generator: "Generatore",
@@ -208,8 +209,16 @@ export const translations = {
     lacunarity: "Lacunarità",
     monochromatic: "Monocromatico",
     newSeed: "Nuovo Seed",
+    // User-Friendly Errors
+    errorQuotaExceeded: "Hai raggiunto il tuo limite di generazioni di immagini per questo periodo. Controlla i dettagli del tuo piano.",
+    errorSafetyFilters: "La richiesta non può essere completata a causa dei filtri di sicurezza. Modifica il tuo prompt e riprova.",
+    errorAgentStuck: "L'IA sembra bloccata. Prova a riformulare la tua richiesta o a iniziare una nuova chat.",
+    errorNoImageToRefine: "Non sono riuscito a trovare un'immagine da affinare in questa conversazione. Per favore, caricane o generane una prima.",
+    errorNetwork: "Si è verificato un problema di rete. Controlla la tua connessione e riprova.",
+    errorUnknown: "Si è verificato un errore imprevisto. Per favore, riprova."
   },
   en: {
+    // ... (keep existing translations)
     // General
     agentChat: "Agent Chat",
     generator: "Generator",
@@ -418,5 +427,12 @@ export const translations = {
     lacunarity: "Lacunarità",
     monochromatic: "Monochromatic",
     newSeed: "New Seed",
+    // User-Friendly Errors
+    errorQuotaExceeded: "You have reached your image generation limit for this period. Please check your plan details.",
+    errorSafetyFilters: "The request could not be completed due to safety filters. Please modify your prompt and try again.",
+    errorAgentStuck: "The AI seems to be stuck. Try rephrasing your request, or start a new chat.",
+    errorNoImageToRefine: "I couldn't find an image to refine in this conversation. Please upload or generate one first.",
+    errorNetwork: "A network problem occurred. Please check your connection and try again.",
+    errorUnknown: "An unexpected error occurred. Please try again."
   },
 };
