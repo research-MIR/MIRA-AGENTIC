@@ -63,8 +63,8 @@ const Generator = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Left Column: Controls */}
         <div className="lg:col-span-1 flex flex-col gap-4">
-          <div className="flex-grow">
-            <Accordion type="multiple" defaultValue={['item-1', 'item-2']} className="w-full">
+          <div className="flex-grow space-y-4">
+            <Accordion type="multiple" defaultValue={['item-1']} className="w-full">
               <AccordionItem value="item-1">
                 <AccordionTrigger className="text-base font-semibold">1. {t('describeYourImage')}</AccordionTrigger>
                 <AccordionContent className="pt-4 space-y-4">
@@ -121,46 +121,46 @@ const Generator = () => {
                   </div>
                 </AccordionContent>
               </AccordionItem>
-              <AccordionItem value="item-3">
-                <AccordionTrigger className="text-base font-semibold">3. {t('configureSettings')}</AccordionTrigger>
-                <AccordionContent className="pt-4 space-y-4">
-                  <div>
-                    <Label>{t('model')}</Label>
-                    <ModelSelector selectedModelId={state.selectedModelId} onModelChange={(val) => state.setField('selectedModelId', val)} />
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <Label htmlFor="aspect-ratio">{t('aspectRatio')}</Label>
-                      <Select value={state.aspectRatio} onValueChange={(val) => state.setField('aspectRatio', val)}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="1024x1024">1:1</SelectItem>
-                          <SelectItem value="1408x768">16:9</SelectItem>
-                          <SelectItem value="768x1408">9:16</SelectItem>
-                          <SelectItem value="1280x896">4:3</SelectItem>
-                          <SelectItem value="896x1280">3:4</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <Label htmlFor="num-images">{t('images')}</Label>
-                      <Select value={String(state.numImages)} onValueChange={(v) => state.setField('numImages', Number(v))}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="1">1</SelectItem>
-                          <SelectItem value="2">2</SelectItem>
-                          <SelectItem value="4">4</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                  <div>
-                    <Label htmlFor="seed">{t('seed')}</Label>
-                    <Input id="seed" type="number" value={state.seed || ''} onChange={(e) => state.setField('seed', e.target.value ? Number(e.target.value) : undefined)} placeholder="e.g. 12345" />
-                  </div>
-                </AccordionContent>
-              </AccordionItem>
             </Accordion>
+            <Card>
+              <CardHeader><CardTitle className="text-base font-semibold">3. {t('configureSettings')}</CardTitle></CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <Label>{t('model')}</Label>
+                  <ModelSelector selectedModelId={state.selectedModelId} onModelChange={(val) => state.setField('selectedModelId', val)} />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="aspect-ratio">{t('aspectRatio')}</Label>
+                    <Select value={state.aspectRatio} onValueChange={(val) => state.setField('aspectRatio', val)}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="1024x1024">1:1</SelectItem>
+                        <SelectItem value="1408x768">16:9</SelectItem>
+                        <SelectItem value="768x1408">9:16</SelectItem>
+                        <SelectItem value="1280x896">4:3</SelectItem>
+                        <SelectItem value="896x1280">3:4</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label htmlFor="num-images">{t('images')}</Label>
+                    <Select value={String(state.numImages)} onValueChange={(v) => state.setField('numImages', Number(v))}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="1">1</SelectItem>
+                        <SelectItem value="2">2</SelectItem>
+                        <SelectItem value="4">4</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div>
+                  <Label htmlFor="seed">{t('seed')}</Label>
+                  <Input id="seed" type="number" value={state.seed || ''} onChange={(e) => state.setField('seed', e.target.value ? Number(e.target.value) : undefined)} placeholder="e.g. 12345" />
+                </div>
+              </CardContent>
+            </Card>
           </div>
           <div className="mt-auto sticky bottom-0 py-4 bg-background">
             <Button size="lg" className="w-full h-12 text-lg" onClick={handleGenerate} disabled={state.isLoading}>

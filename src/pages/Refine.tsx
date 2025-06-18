@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Button } from "@/components/ui/button";
@@ -47,6 +47,15 @@ const SecureDisplayImage = ({ imageUrl, onClear, showClearButton = false }: { im
       )}
     </div>
   );
+};
+
+const fileToBase64 = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve((reader.result as string).split(',')[1]);
+    reader.onerror = (error) => reject(error);
+  });
 };
 
 const Refine = () => {
@@ -99,13 +108,7 @@ const Refine = () => {
     const toastId = showLoading("Generating prompt from image...");
     try {
       const file = uploadedFiles[0].file;
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      const base64String = await new Promise<string>((resolve, reject) => {
-        reader.onloadend = () => resolve(reader.result as string);
-        reader.onerror = reject;
-      });
-      const base64Data = base64String.split(',')[1];
+      const base64Data = await fileToBase64(file);
 
       const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-auto-describe-image', {
         body: { base64_image_data: base64Data, mime_type: file.type }
@@ -130,17 +133,27 @@ const Refine = () => {
     const toastId = showLoading("Submitting job...");
 
     try {
-      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-comfyui', {
-        body: {
-          prompt_text: prompt,
-          image_url: sourceImageUrl,
-          invoker_user_id: session?.user?.id,
-          upscale_factor: upscaleFactor,
-          original_prompt_for_gallery: prompt,
-          source: 'refiner',
-          metadata: { source_image_url: sourceImageUrl }
-        }
-      });
+      const payload: any = {
+        prompt_text: prompt,
+        invoker_user_id: session?.user?.id,
+        upscale_factor: upscaleFactor,
+        original_prompt_for_gallery: prompt,
+        source: 'refiner',
+      };
+
+      if (sourceImageUrl.startsWith('blob:')) {
+        // It's a newly uploaded file
+        const file = uploadedFiles[0].file;
+        payload.base64_image_data = await fileToBase64(file);
+        payload.mime_type = file.type;
+        payload.metadata = { source_image_url: sourceImageUrl }; // Keep for display
+      } else {
+        // It's an existing image from a selected job
+        payload.image_url = sourceImageUrl;
+        payload.metadata = { source_image_url: sourceImageUrl };
+      }
+
+      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-comfyui', { body: payload });
 
       if (error) throw error;
       
@@ -173,69 +186,58 @@ const Refine = () => {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-1 space-y-6">
-            {selectedJob ? (
-              <Card>
-                <CardHeader>
-                  <CardTitle>{t('loadedJob')}</CardTitle>
-                  <p className="text-sm text-muted-foreground">Viewing a previous refinement job.</p>
-                </CardHeader>
-                <CardContent>
-                  <Button className="w-full" onClick={startNew}><PlusCircle className="mr-2 h-4 w-4" />{t('startNewJob')}</Button>
-                </CardContent>
-              </Card>
-            ) : (
-              <>
-                <Card>
-                  <CardHeader><CardTitle>{t('sourceImage')}</CardTitle></CardHeader>
-                  <CardContent>
-                    {sourceImageUrl ? (
-                      <SecureDisplayImage imageUrl={sourceImageUrl} onClear={startNew} showClearButton={true} />
-                    ) : (
-                      <div className="p-4 border-2 border-dashed rounded-lg text-center">
-                        <UploadCloud className="mx-auto h-8 w-8 text-muted-foreground" />
-                        <Label htmlFor="refine-upload" className="mt-2 text-sm font-medium text-primary underline cursor-pointer">{t('uploadAFile')}</Label>
-                        <p className="text-xs text-muted-foreground">{t('dragAndDrop')}</p>
-                        <Input id="refine-upload" type="file" className="hidden" accept="image/*" onChange={(e) => handleFileUpload(e.target.files)} />
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardHeader><CardTitle>{t('refinementPrompt')}</CardTitle></CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="flex items-center space-x-2">
-                      <Switch id="auto-prompt" checked={useAutoPrompt} onCheckedChange={setUseAutoPrompt} />
-                      <Label htmlFor="auto-prompt">{t('autoPrompt')}</Label>
-                    </div>
-                    {useAutoPrompt ? (
-                      <Button className="w-full" onClick={handleGeneratePrompt} disabled={isGeneratingPrompt || uploadedFiles.length === 0}>
-                        {isGeneratingPrompt ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-                        {t('generateAndRefine')}
-                      </Button>
-                    ) : (
-                      <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t('refinementPromptPlaceholder')} />
-                    )}
-                    {useAutoPrompt && prompt && <p className="text-sm p-2 bg-muted rounded-md">{prompt}</p>}
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardHeader><CardTitle>{t('upscaleSettings')}</CardTitle></CardHeader>
-                  <CardContent>
-                    <Label>{t('upscaleFactor')}: {upscaleFactor}x</Label>
-                    <Slider value={[upscaleFactor]} onValueChange={(v) => setUpscaleFactor(v[0])} min={1} max={3} step={0.1} />
-                  </CardContent>
-                </Card>
-                <Button size="lg" className="w-full" onClick={handleSubmit} disabled={isSubmitting || !sourceImageUrl || !prompt}>
-                  {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
-                  {t('refineButton')}
-                </Button>
-              </>
-            )}
+            <Card>
+              <CardHeader><CardTitle>{t('sourceImage')}</CardTitle></CardHeader>
+              <CardContent>
+                {sourceImageUrl ? (
+                  <SecureDisplayImage imageUrl={sourceImageUrl} onClear={startNew} showClearButton={true} />
+                ) : (
+                  <div className="p-4 border-2 border-dashed rounded-lg text-center">
+                    <UploadCloud className="mx-auto h-8 w-8 text-muted-foreground" />
+                    <Label htmlFor="refine-upload" className="mt-2 text-sm font-medium text-primary underline cursor-pointer">{t('uploadAFile')}</Label>
+                    <p className="text-xs text-muted-foreground">{t('dragAndDrop')}</p>
+                    <Input id="refine-upload" type="file" className="hidden" accept="image/*" onChange={(e) => handleFileUpload(e.target.files)} />
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader><CardTitle>{t('refinementPrompt')}</CardTitle></CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center space-x-2">
+                  <Switch id="auto-prompt" checked={useAutoPrompt} onCheckedChange={setUseAutoPrompt} />
+                  <Label htmlFor="auto-prompt">{t('autoPrompt')}</Label>
+                </div>
+                {useAutoPrompt ? (
+                  <Button className="w-full" onClick={handleGeneratePrompt} disabled={isGeneratingPrompt || uploadedFiles.length === 0}>
+                    {isGeneratingPrompt ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+                    {t('generateAndRefine')}
+                  </Button>
+                ) : (
+                  <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t('refinementPromptPlaceholder')} />
+                )}
+                {useAutoPrompt && prompt && <p className="text-sm p-2 bg-muted rounded-md">{prompt}</p>}
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader><CardTitle>{t('upscaleSettings')}</CardTitle></CardHeader>
+              <CardContent>
+                <Label>{t('upscaleFactor')}: {upscaleFactor}x</Label>
+                <Slider value={[upscaleFactor]} onValueChange={(v) => setUpscaleFactor(v[0])} min={1} max={3} step={0.1} />
+              </CardContent>
+            </Card>
+            <Button size="lg" className="w-full" onClick={handleSubmit} disabled={isSubmitting || !sourceImageUrl || !prompt}>
+              {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+              {t('refineButton')}
+            </Button>
           </div>
           <div className="lg:col-span-2 space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle>{t('workbench')}</CardTitle>
+                <div className="flex justify-between items-center">
+                  <CardTitle>{t('workbench')}</CardTitle>
+                  {selectedJob && <Button variant="outline" onClick={startNew}>{t('startNewJob')}</Button>}
+                </div>
                 <p className="text-sm text-muted-foreground">{t('refineWorkbenchTooltip')}</p>
               </CardHeader>
               <CardContent className="min-h-[400px]">
