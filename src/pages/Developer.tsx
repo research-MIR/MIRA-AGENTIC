@@ -203,7 +203,7 @@ const Developer = () => {
                   <Textarea id="seg-prompt" value={segPrompt} onChange={(e) => setSegPrompt(e.target.value)} />
                 </div>
                 {segPersonImageUrl && (
-                  <div className="relative w-full max-w-md mx-auto aspect-square bg-muted rounded-md overflow-hidden flex justify-center items-center">
+                  <div className="relative w-full max-w-sm mx-auto aspect-square bg-muted rounded-md overflow-hidden flex justify-center items-center">
                     <img src={segPersonImageUrl} alt="Segmentation Source" className="w-full h-full object-contain" />
                     {segmentationResult && sourceImageDimensions && (
                         <SegmentationMask 

@@ -188,8 +188,10 @@ const Refine = () => {
               <CardHeader><CardTitle>{t('sourceImage')}</CardTitle></CardHeader>
               <CardContent>
                 {sourceImageUrl ? (
-                  <div className="w-full aspect-square bg-muted rounded-md overflow-hidden flex justify-center items-center">
-                    <SecureDisplayImage imageUrl={sourceImageUrl} onClear={startNew} showClearButton={true} />
+                  <div className="max-w-sm mx-auto">
+                    <div className="w-full aspect-square bg-muted rounded-md overflow-hidden flex justify-center items-center">
+                      <SecureDisplayImage imageUrl={sourceImageUrl} onClear={startNew} showClearButton={true} />
+                    </div>
                   </div>
                 ) : (
                   <div className="p-4 border-2 border-dashed rounded-lg text-center">
