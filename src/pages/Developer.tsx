@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useSession } from "@/components/Auth/SessionContextProvider";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SegmentationMask } from "@/components/SegmentationMask";
 import { useSecureImage } from "@/hooks/useSecureImage";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 
 const SecureImageDisplay = ({ imageUrl, alt }: { imageUrl: string | null, alt: string }) => {
   const { displayUrl, isLoading, error } = useSecureImage(imageUrl);
@@ -35,6 +36,7 @@ const Developer = () => {
   const [sourceImagePublicUrl, setSourceImagePublicUrl] = useState<string | null>(null);
   const [croppedImageUrl, setCroppedImageUrl] = useState<string | null>(null);
   const [maskImageUrl, setMaskImageUrl] = useState<string | null>(null);
+  const [isCancelling, setIsCancelling] = useState(false);
 
   const segPersonImageUrl = segPersonImage ? URL.createObjectURL(segPersonImage) : null;
 
@@ -178,6 +180,22 @@ const Developer = () => {
     }
   };
 
+  const handleCancelAllJobs = async () => {
+    setIsCancelling(true);
+    const toastId = showLoading("Cancelling all active jobs...");
+    try {
+        const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-admin-cancel-all-comfy-jobs');
+        if (error) throw error;
+        dismissToast(toastId);
+        showSuccess(data.message);
+    } catch (err: any) {
+        dismissToast(toastId);
+        showError(`Failed to cancel jobs: ${err.message}`);
+    } finally {
+        setIsCancelling(false);
+    }
+  };
+
   return (
     <div className="p-4 md:p-8 h-screen overflow-y-auto">
       <header className="pb-4 mb-8 border-b">
@@ -186,6 +204,34 @@ const Developer = () => {
       </header>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         <div className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Admin Site-Wide Actions</CardTitle>
+              <CardDescription>These actions affect all users and jobs on the platform. Use with extreme caution.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="destructive">Cancel All ComfyUI Jobs</Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This will cancel ALL active ('queued' or 'processing') ComfyUI jobs for EVERY user on the platform. This action cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={handleCancelAllJobs} disabled={isCancelling}>
+                      {isCancelling && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      Yes, cancel all jobs
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </CardContent>
+          </Card>
           <Card>
             <CardHeader><CardTitle>AI Segmentation Tester (Test Environment)</CardTitle></CardHeader>
             <CardContent className="space-y-4">
