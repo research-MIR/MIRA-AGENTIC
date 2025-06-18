@@ -26,19 +26,23 @@ serve(async (req) => {
     const threshold = new Date(Date.now() - STALLED_THRESHOLD_MINUTES * 60 * 1000).toISOString();
     console.log(`ComfyUI Watchdog: Checking for jobs stalled since ${threshold}`);
 
-    console.log("ComfyUI Watchdog: Querying for stalled jobs...");
-    const { data: stalledJobs, error: queryError } = await supabase
+    console.log("ComfyUI Watchdog: Querying for the single oldest stalled job...");
+    const { data: oldestStalledJob, error: queryError } = await supabase
       .from('mira-agent-comfyui-jobs')
       .select('id')
       .in('status', ['queued', 'processing'])
-      .lt('last_polled_at', threshold);
+      .lt('last_polled_at', threshold)
+      .order('created_at', { ascending: true }) // Find the oldest
+      .limit(1) // Only get one
+      .single(); // Expect a single result or null
 
-    if (queryError) {
-      console.error("ComfyUI Watchdog: Error querying for stalled jobs:", queryError);
-      throw new Error(`Failed to query for stalled ComfyUI jobs: ${queryError.message}`);
+    // 'PGRST116' means no rows were found, which is a normal outcome and not an error.
+    if (queryError && queryError.code !== 'PGRST116') {
+      console.error("ComfyUI Watchdog: Error querying for stalled job:", queryError);
+      throw new Error(`Failed to query for stalled ComfyUI job: ${queryError.message}`);
     }
 
-    if (!stalledJobs || stalledJobs.length === 0) {
+    if (!oldestStalledJob) {
       const message = "ComfyUI Watchdog: No stalled jobs found. Check complete.";
       console.log(message);
       return new Response(JSON.stringify({ message }), {
@@ -47,20 +51,14 @@ serve(async (req) => {
       });
     }
 
-    console.log(`ComfyUI Watchdog: Found ${stalledJobs.length} stalled job(s). Re-triggering poller now...`);
+    console.log(`ComfyUI Watchdog: Found oldest stalled job ID: ${oldestStalledJob.id}. Re-triggering poller now...`);
 
-    const triggerPromises = stalledJobs.map(job => {
-      console.log(`ComfyUI Watchdog: Re-triggering poller for stalled job ID: ${job.id}`);
-      // We don't await this, just fire and forget
-      supabase.functions.invoke('MIRA-AGENT-poller-comfyui', { body: { job_id: job.id } }).catch(console.error);
-      return job.id;
-    });
+    // Asynchronously invoke the poller for the single oldest job
+    supabase.functions.invoke('MIRA-AGENT-poller-comfyui', { body: { job_id: oldestStalledJob.id } }).catch(console.error);
 
-    const triggeredIds = await Promise.all(triggerPromises);
-
-    const successMessage = `ComfyUI Watchdog: Successfully re-triggered poller for ${triggeredIds.length} stalled job(s).`;
+    const successMessage = `ComfyUI Watchdog: Successfully re-triggered poller for oldest stalled job: ${oldestStalledJob.id}.`;
     console.log(successMessage);
-    return new Response(JSON.stringify({ message: successMessage, triggered_job_ids: triggeredIds }), {
+    return new Response(JSON.stringify({ message: successMessage, triggered_job_id: oldestStalledJob.id }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });
