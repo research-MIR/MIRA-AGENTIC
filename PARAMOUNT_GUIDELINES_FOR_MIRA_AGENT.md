@@ -43,8 +43,8 @@ This is a system-level safeguard. There are no exceptions. All code, configurati
 
 ### 2.4. Exception for Trivial Tasks
 
-To optimize for speed and cost on simple, non-critical tasks, the following model is authorized for use ONLY in specific, isolated tools:
+To optimize for speed and cost on simple, non-critical tasks, the following models are authorized for use ONLY in specific, isolated tools:
 
-> **AUTHORIZED FOR TRIVIAL TASKS: `gemini-2.5-flash-preview-05-20`**
+> **AUTHORIZED FOR TRIVIAL TASKS: `gemini-2.5-flash-preview-05-20`, `gemini-2.5-flash-lite-preview-06-17`**
 
-This model can be used for tasks like auto-describing an image or generating a chat title, where the primary goal is speed and the task does not involve complex reasoning or planning. It MUST NOT be used for the main agent planner or any critical decision-making function.
+These models can be used for tasks like auto-describing an image or generating a chat title, where the primary goal is speed and the task does not involve complex reasoning or planning. They MUST NOT be used for the main agent planner or any critical decision-making function.
