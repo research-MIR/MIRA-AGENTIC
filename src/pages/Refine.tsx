@@ -41,7 +41,7 @@ const SecureDisplayImage = ({ imageUrl, onClear, showClearButton = false }: { im
       {error && <div className="w-full h-full bg-destructive/10 rounded-md flex items-center justify-center text-destructive text-sm p-2"><AlertTriangle className="h-6 w-6 mr-2" />Error loading image.</div>}
       {displayUrl && <img src={displayUrl} alt="Source for refinement" className="w-full h-full object-contain" />}
       {showClearButton && onClear && (
-        <Button variant="destructive" size="icon" className="absolute -top-2 -right-2 h-6 w-6 rounded-full" onClick={onClear}>
+        <Button variant="destructive" size="icon" className="absolute top-2 right-2 h-6 w-6 rounded-full" onClick={onClear}>
           <X className="h-4 w-4" />
         </Button>
       )}
@@ -188,7 +188,7 @@ const Refine = () => {
               <CardHeader><CardTitle>{t('sourceImage')}</CardTitle></CardHeader>
               <CardContent>
                 {sourceImageUrl ? (
-                  <div className="max-h-96 bg-muted rounded-md flex justify-center items-center">
+                  <div className="w-full aspect-square bg-muted rounded-md overflow-hidden flex justify-center items-center">
                     <SecureDisplayImage imageUrl={sourceImageUrl} onClear={startNew} showClearButton={true} />
                   </div>
                 ) : (
@@ -244,11 +244,11 @@ const Refine = () => {
                 {selectedJob ? (
                   <div className="space-y-4">
                     <div className="grid grid-cols-2 gap-4">
-                      <div className="max-h-96 bg-muted rounded-md flex justify-center items-center">
+                      <div className="w-full aspect-square bg-muted rounded-md overflow-hidden flex justify-center items-center">
                         <h3 className="font-semibold mb-2 absolute top-2 left-2 bg-background/80 px-2 py-1 rounded-full text-xs">{t('originalImage')}</h3>
                         <SecureDisplayImage imageUrl={selectedJob.metadata?.source_image_url || null} />
                       </div>
-                      <div className="max-h-96 bg-muted rounded-md flex justify-center items-center">
+                      <div className="w-full aspect-square bg-muted rounded-md overflow-hidden flex justify-center items-center">
                         <h3 className="font-semibold mb-2 absolute top-2 left-2 bg-background/80 px-2 py-1 rounded-full text-xs">{t('refinedImage')}</h3>
                         {resultImageUrl ? (
                           <SecureDisplayImage imageUrl={resultImageUrl} />
