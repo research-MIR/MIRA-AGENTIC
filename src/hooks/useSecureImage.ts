@@ -24,11 +24,12 @@ export const useSecureImage = (imageUrl: string | null | undefined) => {
         } else if (imageUrl.includes('supabase.co')) {
           const url = new URL(imageUrl);
           
-          const bucketMatch = url.pathname.match(/\/public\/([a-zA-Z0-9_-]+)\//);
-          if (!bucketMatch || !bucketMatch[1]) {
+          // More robust regex to handle URLs with or without /public/
+          const bucketMatch = url.pathname.match(/\/object\/public\/([a-zA-Z0-9_-]+)\/|\/object\/([a-zA-Z0-9_-]+)\//);
+          if (!bucketMatch) {
             throw new Error("Could not determine bucket name from Supabase URL.");
           }
-          const bucketName = bucketMatch[1];
+          const bucketName = bucketMatch[1] || bucketMatch[2];
           const pathStartIndex = url.pathname.indexOf(bucketMatch[0]);
           const storagePath = decodeURIComponent(url.pathname.substring(pathStartIndex + bucketMatch[0].length));
 

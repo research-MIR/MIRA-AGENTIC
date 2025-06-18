@@ -300,7 +300,11 @@ const ProjectDetail = () => {
           <div className="lg:col-span-2 flex flex-col gap-8 overflow-hidden">
             <Card>
               <CardHeader><CardTitle>{t('keyVisualTitle')}</CardTitle><p className="text-sm text-muted-foreground">{t('keyVisualDescription')}</p></CardHeader>
-              <CardContent><div className="aspect-square max-h-64 mx-auto bg-muted rounded-lg flex items-center justify-center overflow-hidden">{isLoadingKeyVisual ? <Skeleton className="w-full h-full" /> : keyVisualDisplayUrl ? (<img src={keyVisualDisplayUrl} alt="Latest project image" className="max-w-full max-h-full object-contain" />) : (<ImageIcon className="h-16 w-16 text-muted-foreground" />)}</div></CardContent>
+              <CardContent>
+                <div className="h-64 w-full mx-auto bg-muted rounded-lg flex items-center justify-center overflow-hidden">
+                  {isLoadingKeyVisual ? <Skeleton className="w-full h-full" /> : keyVisualDisplayUrl ? (<img src={keyVisualDisplayUrl} alt="Latest project image" className="max-w-full max-h-full object-contain" />) : (<ImageIcon className="h-16 w-16 text-muted-foreground" />)}
+                </div>
+              </CardContent>
             </Card>
             <Card className="flex-1 flex flex-col overflow-hidden">
               <CardHeader className="flex flex-row items-center justify-between">
