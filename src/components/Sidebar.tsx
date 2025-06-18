@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { NavLink, useNavigate, useParams } from "react-router-dom";
 import { Button } from "./ui/button";
 import { MessageSquare, Image, GalleryHorizontal, LogOut, HelpCircle, LogIn, Shirt, Code, Wand2, PencilRuler, Edit, Trash2, Settings, FolderPlus, Move } from "lucide-react";
@@ -18,6 +18,8 @@ import { RadioGroup, RadioGroupItem } from "./ui/radio-group";
 import { showError, showSuccess, showLoading, dismissToast } from "@/utils/toast";
 import { AddToProjectDialog } from "./Jobs/AddToProjectDialog";
 import { cn } from "@/lib/utils";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface JobHistory {
   id: string;
@@ -147,7 +149,7 @@ export const Sidebar = () => {
 
   return (
     <>
-      <aside className="w-64 bg-background border-r flex flex-col">
+      <aside className="w-64 bg-background border-r flex flex-col h-screen">
         <div className="p-4 border-b">
           <h1 className="text-2xl font-bold">MIRA</h1>
         </div>
@@ -181,55 +183,71 @@ export const Sidebar = () => {
             {t.developer}
           </NavLink>
         </nav>
-        <div className="flex-1 p-4 space-y-4 overflow-y-auto">
-          <div>
-            <h2 className="text-sm font-semibold text-muted-foreground mb-2">Projects</h2>
-            {isLoadingProjects || isLoadingJobs ? <Skeleton className="h-8 w-full" /> : 
-              <ProjectFolders 
-                projects={projects || []} 
-                allJobs={jobHistory || []} 
-                draggingOverProjectId={draggingOverProjectId}
-                onDragEnter={(projectId) => setDraggingOverProjectId(projectId)}
-                onDragLeave={() => setDraggingOverProjectId(null)}
-                onDrop={handleDropOnProject}
-              />
-            }
-          </div>
-          <div className="pt-4 border-t">
-            <div className="flex justify-between items-center mb-2">
-              <h2 className="text-sm font-semibold text-muted-foreground">Recent Chats</h2>
-              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setIsSettingsModalOpen(true)}><Settings className="h-4 w-4" /></Button>
-            </div>
-            {isLoadingJobs ? (
-              <div className="space-y-2">
-                {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}
-              </div>
-            ) : (
-              uncategorizedJobs.map(job => (
-                <div 
-                  key={job.id} 
-                  className="group relative"
-                  draggable
-                  onDragStart={(e) => e.dataTransfer.setData("application/mira-job-id", job.id)}
-                >
-                  <NavLink to={`/chat/${job.id}`} className={({ isActive }) => `block p-2 rounded-md text-sm truncate pr-24 ${isActive ? 'bg-primary text-primary-foreground font-semibold' : 'hover:bg-muted'}`}>
-                    {job.original_prompt || "Untitled Chat"}
-                  </NavLink>
-                  <div className="absolute right-1 top-1/2 -translate-y-1/2 hidden group-hover:flex items-center gap-0.5 bg-muted/80 rounded-md">
-                    <Button variant="ghost" size="icon" className="h-7 w-7" title="Add to project" onClick={(e) => { e.preventDefault(); setMovingJob(job); }}>
-                      <FolderPlus className="h-4 w-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-7 w-7" title="Rename" onClick={(e) => { e.preventDefault(); setNewName(job.original_prompt); setRenamingJob(job); }}>
-                      <Edit className="h-4 w-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-destructive/10" title="Delete" onClick={(e) => { e.preventDefault(); setDeletingJobId(job.id); }}>
-                      <Trash2 className="h-4 w-4 text-destructive/80" />
-                    </Button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
+        <div className="flex-1 flex flex-col overflow-hidden">
+            <Accordion type="multiple" defaultValue={['projects', 'recent-chats']} className="w-full flex flex-col flex-1">
+                <AccordionItem value="projects" className="border-b">
+                    <AccordionTrigger className="px-4 py-2 text-sm font-semibold text-muted-foreground hover:no-underline">Projects</AccordionTrigger>
+                    <AccordionContent>
+                        <ScrollArea className="h-48">
+                            <div className="p-2 space-y-2">
+                                {isLoadingProjects || isLoadingJobs ? <Skeleton className="h-8 w-full" /> : 
+                                <ProjectFolders 
+                                    projects={projects || []} 
+                                    allJobs={jobHistory || []} 
+                                    draggingOverProjectId={draggingOverProjectId}
+                                    onDragEnter={(projectId) => setDraggingOverProjectId(projectId)}
+                                    onDragLeave={() => setDraggingOverProjectId(null)}
+                                    onDrop={handleDropOnProject}
+                                />
+                                }
+                            </div>
+                        </ScrollArea>
+                    </AccordionContent>
+                </AccordionItem>
+                <AccordionItem value="recent-chats" className="border-none flex-1 flex flex-col">
+                    <AccordionTrigger className="px-4 py-2 hover:no-underline">
+                        <div className="flex justify-between items-center w-full">
+                            <h2 className="text-sm font-semibold text-muted-foreground">Recent Chats</h2>
+                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); setIsSettingsModalOpen(true); }}><Settings className="h-4 w-4" /></Button>
+                        </div>
+                    </AccordionTrigger>
+                    <AccordionContent className="flex-1 overflow-hidden">
+                        <ScrollArea className="h-full">
+                            <div className="p-2 space-y-1">
+                                {isLoadingJobs ? (
+                                <div className="space-y-2">
+                                    {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}
+                                </div>
+                                ) : (
+                                uncategorizedJobs.map(job => (
+                                    <div 
+                                    key={job.id} 
+                                    className="group relative"
+                                    draggable
+                                    onDragStart={(e) => e.dataTransfer.setData("application/mira-job-id", job.id)}
+                                    >
+                                    <NavLink to={`/chat/${job.id}`} className={({ isActive }) => `block p-2 rounded-md text-sm truncate pr-24 ${isActive ? 'bg-primary text-primary-foreground font-semibold' : 'hover:bg-muted'}`}>
+                                        {job.original_prompt || "Untitled Chat"}
+                                    </NavLink>
+                                    <div className="absolute right-1 top-1/2 -translate-y-1/2 hidden group-hover:flex items-center gap-0.5 bg-muted/80 rounded-md">
+                                        <Button variant="ghost" size="icon" className="h-7 w-7" title="Add to project" onClick={(e) => { e.preventDefault(); setMovingJob(job); }}>
+                                        <FolderPlus className="h-4 w-4" />
+                                        </Button>
+                                        <Button variant="ghost" size="icon" className="h-7 w-7" title="Rename" onClick={(e) => { e.preventDefault(); setNewName(job.original_prompt); setRenamingJob(job); }}>
+                                        <Edit className="h-4 w-4" />
+                                        </Button>
+                                        <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-destructive/10" title="Delete" onClick={(e) => { e.preventDefault(); setDeletingJobId(job.id); }}>
+                                        <Trash2 className="h-4 w-4 text-destructive/80" />
+                                        </Button>
+                                    </div>
+                                    </div>
+                                ))
+                                )}
+                            </div>
+                        </ScrollArea>
+                    </AccordionContent>
+                </AccordionItem>
+            </Accordion>
         </div>
         <div className="p-4 border-t space-y-2">
           <ActiveJobsTracker />
