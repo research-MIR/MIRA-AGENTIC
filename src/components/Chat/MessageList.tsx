@@ -12,6 +12,7 @@ import { useImagePreview } from "@/context/ImagePreviewContext";
 import { showSuccess } from "@/utils/toast";
 import { RefinementProposalCard } from "@/components/Responses/RefinementProposalCard";
 import { ImageChoiceProposalCard } from "@/components/Responses/ImageChoiceProposalCard";
+import { ErrorCard } from "@/components/Responses/ErrorCard";
 import { 
   ArtisanEngineResponseSchema,
   BrandAnalyzerResponseSchema,
@@ -46,6 +47,7 @@ export interface Message {
     imageChoiceProposal?: ImageChoiceProposalData;
     imageChoiceSelectedIndex?: number;
     historyIndex?: number;
+    error?: { message: string; jobId: string; };
 }
 
 const SafeComponent = ({ schema, data, Component, jobId, onRefinementComplete, onSendMessage, selectedIndex }: any) => {
@@ -101,9 +103,11 @@ export const MessageList = ({ messages, jobId, onRefinementComplete, onSendMessa
 
         return (
           <div key={key} className={`group flex items-start gap-3 ${message.from === "user" ? "justify-end" : ""}`}>
-            {message.from === 'bot' && !message.artisanResponse && !message.brandAnalysisResponse && !message.jobInProgress && !message.imageGenerationResponse && !message.creativeProcessResponse && !message.refinementProposal && !message.imageChoiceProposal && <div className="p-2 bg-primary rounded-full text-primary-foreground self-start"><Bot size={20} /></div>}
+            {message.from === 'bot' && !message.artisanResponse && !message.brandAnalysisResponse && !message.jobInProgress && !message.imageGenerationResponse && !message.creativeProcessResponse && !message.refinementProposal && !message.imageChoiceProposal && !message.error && <div className="p-2 bg-primary rounded-full text-primary-foreground self-start"><Bot size={20} /></div>}
             
-            {message.jobInProgress ? (
+            {message.error ? (
+              <ErrorCard message={message.error.message} jobId={message.error.jobId} />
+            ) : message.jobInProgress ? (
               <JobStatusCard message={message.jobInProgress.message} jobId={message.jobInProgress.jobId} />
             ) : message.creativeProcessResponse ? (
               <SafeComponent schema={CreativeProcessResponseSchema} data={message.creativeProcessResponse} Component={CreativeProcessResponse} jobId={jobId} />

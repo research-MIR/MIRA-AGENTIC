@@ -140,7 +140,7 @@ export const useChatManager = () => {
             conversationMessages.push({ from: 'bot', jobInProgress: { jobId: data.id, message } });
         } else if (data.status === 'failed') {
             const friendlyError = translateErrorMessage(data.error_message, t);
-            conversationMessages.push({ from: 'bot', text: friendlyError });
+            conversationMessages.push({ from: 'bot', error: { message: friendlyError, jobId: data.id } });
         }
         setMessages(conversationMessages);
     }, [session?.user?.id, t]);
