@@ -143,52 +143,41 @@ const Refine = () => {
     if (!prompt.trim()) return showError("Please provide a refinement prompt.");
     
     setIsSubmitting(true);
-    let toastId = showLoading("Submitting job...");
+    const toastId = showLoading("Submitting job...");
 
-    const MAX_RETRIES = 3;
-    const RETRY_DELAY = 2000; // 2 seconds
+    try {
+        const payload: any = {
+            prompt_text: prompt,
+            invoker_user_id: session?.user?.id,
+            upscale_factor: upscaleFactor,
+            original_prompt_for_gallery: prompt,
+            source: 'refiner',
+        };
 
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-        try {
-            const payload: any = {
-                prompt_text: prompt,
-                invoker_user_id: session?.user?.id,
-                upscale_factor: upscaleFactor,
-                original_prompt_for_gallery: prompt,
-                source: 'refiner',
-            };
-
-            if (sourceImageUrl.startsWith('blob:')) {
-                const file = uploadedFiles[0].file;
-                payload.base64_image_data = await fileToBase64(file);
-                payload.mime_type = file.type;
-                payload.metadata = { source_image_url: sourceImageUrl };
-            } else {
-                payload.image_url = sourceImageUrl;
-                payload.metadata = { source_image_url: sourceImageUrl };
-            }
-
-            const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-comfyui', { body: payload });
-
-            if (error) throw error;
-            
-            dismissToast(toastId);
-            showSuccess("Refinement job started! You can track its progress in the sidebar.");
-            queryClient.invalidateQueries({ queryKey: ['activeComfyJobs'] });
-            queryClient.invalidateQueries({ queryKey: ['recentRefinerJobs'] });
-            startNew();
-            setIsSubmitting(false);
-            return; // Exit the loop on success
-        } catch (err: any) {
-            dismissToast(toastId);
-            if (attempt < MAX_RETRIES) {
-                toastId = showLoading(`Submission failed. Retrying... (${attempt}/${MAX_RETRIES})`);
-                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
-            } else {
-                showError(`Job submission failed after ${MAX_RETRIES} attempts: ${err.message}`);
-                setIsSubmitting(false);
-            }
+        if (sourceImageUrl.startsWith('blob:')) {
+            const file = uploadedFiles[0].file;
+            payload.base64_image_data = await fileToBase64(file);
+            payload.mime_type = file.type;
+            payload.metadata = { source_image_url: sourceImageUrl };
+        } else {
+            payload.image_url = sourceImageUrl;
+            payload.metadata = { source_image_url: sourceImageUrl };
         }
+
+        const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-comfyui', { body: payload });
+
+        if (error) throw error;
+        
+        dismissToast(toastId);
+        showSuccess("Refinement job started! You can track its progress in the sidebar.");
+        queryClient.invalidateQueries({ queryKey: ['activeComfyJobs'] });
+        queryClient.invalidateQueries({ queryKey: ['recentRefinerJobs'] });
+        startNew();
+    } catch (err: any) {
+        dismissToast(toastId);
+        showError(`Job submission failed: ${err.message}`);
+    } finally {
+        setIsSubmitting(false);
     }
   };
 
