@@ -39,6 +39,8 @@ export const ActiveJobsTracker = () => {
       return data;
     },
     enabled: !!session?.user,
+    refetchInterval: 15000, // Refetch every 15 seconds as a fallback
+    refetchOnWindowFocus: true,
   });
 
   useEffect(() => {
