@@ -43,6 +43,8 @@ export const translations = {
     projectGalleryTitle: "Galleria Immagini",
     noProjectsTitle: "Nessun progetto ancora",
     noProjectsDescription: "Crea progetti spostando le chat al loro interno dalla barra laterale.",
+    moveToProjectDescription: "Sposta questa chat in un progetto esistente o creane uno nuovo.",
+    newProjectPlaceholder: "es. Campagna Marketing Q3",
     // Index Page
     agentInteraction: "Interazione con l'Agente",
     chooseYourModel: "1. Scegli il tuo Modello AI",
@@ -277,6 +279,8 @@ export const translations = {
     projectGalleryTitle: "Image Gallery",
     noProjectsTitle: "No projects yet",
     noProjectsDescription: "Create projects by moving chats into them from the sidebar.",
+    moveToProjectDescription: "Move this chat to an existing project or create a new one.",
+    newProjectPlaceholder: "e.g. Marketing Campaign Q3",
     // Index Page
     agentInteraction: "Agent Interaction",
     chooseYourModel: "1. Choose Your AI Model",

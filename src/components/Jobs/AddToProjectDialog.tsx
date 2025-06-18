@@ -97,7 +97,7 @@ export const AddToProjectDialog = ({ projects }: AddToProjectDialogProps) => {
         <DialogHeader>
           <DialogTitle>{t('moveToProject')}</DialogTitle>
           <DialogDescription>
-            Move this chat to an existing project or create a new one.
+            {t('moveToProjectDescription')}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-4">
@@ -124,7 +124,7 @@ export const AddToProjectDialog = ({ projects }: AddToProjectDialogProps) => {
             <div className="flex gap-2">
               <Input 
                 id="new-project-name" 
-                placeholder="e.g. Marketing Campaign Q3"
+                placeholder={t('newProjectPlaceholder')}
                 value={newProjectName}
                 onChange={(e) => setNewProjectName(e.target.value)}
                 disabled={isLoading}
