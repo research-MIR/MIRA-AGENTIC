@@ -5,7 +5,7 @@ import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Folder, MessageSquare, Image as ImageIcon, MoreVertical, Pencil, Trash2, ImagePlus, Loader2, Move, Info } from "lucide-react";
+import { Folder, MessageSquare, Image as ImageIcon, MoreVertical, Pencil, Trash2, ImagePlus, Loader2, Move, Info, X } from "lucide-react";
 import { useImagePreview } from "@/context/ImagePreviewContext";
 import { useSecureImage } from "@/hooks/useSecureImage";
 import { useLanguage } from "@/context/LanguageContext";
@@ -47,6 +47,8 @@ const ProjectDetail = () => {
   const [isImageManagerOpen, setIsImageManagerOpen] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
   const [isUpdating, setIsUpdating] = useState(false);
+  const [jobToUnassign, setJobToUnassign] = useState<string | null>(null);
+  const [jobToDelete, setJobToDelete] = useState<string | null>(null);
 
   const { data: project, isLoading: isLoadingProject } = useQuery({
     queryKey: ['project', projectId],
@@ -161,6 +163,45 @@ const ProjectDetail = () => {
 
   const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: handleDrop });
 
+  const handleConfirmUnassign = async () => {
+    if (!jobToUnassign || !session?.user) return;
+    setIsUpdating(true);
+    try {
+      const { error } = await supabase.rpc('unassign_job_from_project', { p_job_id: jobToUnassign, p_user_id: session.user.id });
+      if (error) throw error;
+      showSuccess("Chat removed from project.");
+      await Promise.all([
+        refetchJobs(),
+        queryClient.invalidateQueries({ queryKey: ['jobHistory'] }),
+        queryClient.invalidateQueries({ queryKey: ['projectPreviews'] })
+      ]);
+    } catch (err: any) {
+      showError(`Failed to remove chat: ${err.message}`);
+    } finally {
+      setIsUpdating(false);
+      setJobToUnassign(null);
+    }
+  };
+
+  const handleConfirmDeleteJob = async () => {
+    if (!jobToDelete) return;
+    setIsUpdating(true);
+    try {
+      const { error } = await supabase.rpc('delete_mira_agent_job', { p_job_id: jobToDelete });
+      if (error) throw error;
+      showSuccess("Image and its source job deleted.");
+      await Promise.all([
+        refetchJobs(),
+        queryClient.invalidateQueries({ queryKey: ['projectPreviews'] })
+      ]);
+    } catch (err: any) {
+      showError(`Failed to delete image: ${err.message}`);
+    } finally {
+      setIsUpdating(false);
+      setJobToDelete(null);
+    }
+  };
+
   if (isLoadingProject) {
     return <div className="p-8"><Skeleton className="h-12 w-1/3" /></div>;
   }
@@ -206,7 +247,22 @@ const ProjectDetail = () => {
           <div className="lg:col-span-1 flex flex-col h-full">
             <Card className="flex-1 flex flex-col">
               <CardHeader><CardTitle>{t('projectChatsTitle')} ({jobs?.length || 0})</CardTitle></CardHeader>
-              <CardContent className="flex-1 overflow-hidden"><ScrollArea className="h-full"><div className="space-y-2 pr-4">{jobs?.map(job => (<Link key={job.id} to={`/chat/${job.id}`} className="block p-2 rounded-md hover:bg-muted"><p className="font-medium truncate">{job.original_prompt || "Untitled Chat"}</p></Link>))}</div></ScrollArea></CardContent>
+              <CardContent className="flex-1 overflow-hidden">
+                <ScrollArea className="h-full">
+                  <div className="space-y-1 pr-4">
+                    {jobs?.map(job => (
+                      <div key={job.id} className="group flex items-center justify-between p-2 rounded-md hover:bg-muted">
+                        <Link to={`/chat/${job.id}`} className="truncate pr-2 flex-1">
+                          <p className="font-medium truncate">{job.original_prompt || "Untitled Chat"}</p>
+                        </Link>
+                        <Button variant="ghost" size="icon" className="h-6 w-6 opacity-0 group-hover:opacity-100" title="Remove from project" onClick={() => setJobToUnassign(job.id)}>
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+              </CardContent>
             </Card>
           </div>
           <div className="lg:col-span-2 flex flex-col gap-8 overflow-hidden">
@@ -216,7 +272,24 @@ const ProjectDetail = () => {
             </Card>
             <Card className="flex-1 flex flex-col overflow-hidden">
               <CardHeader><CardTitle>{t('projectGalleryTitle')} ({projectImages.length})</CardTitle></CardHeader>
-              <CardContent className="flex-1 overflow-hidden"><ScrollArea className="h-full"><div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 pr-4">{projectImages.map((image, index) => (<button key={image.publicUrl} onClick={() => showImage({ images: projectImages.map(img => ({ url: img.publicUrl, jobId: img.jobId })), currentIndex: index })} className="aspect-square block"><img src={image.publicUrl} alt={`Project image ${index + 1}`} className="w-full h-full object-cover rounded-md hover:opacity-80 transition-opacity" /></button>))}</div></ScrollArea></CardContent>
+              <CardContent className="flex-1 overflow-hidden">
+                <ScrollArea className="h-full">
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 pr-4">
+                    {projectImages.map((image, index) => (
+                      <div key={image.publicUrl} className="group relative">
+                        <button onClick={() => showImage({ images: projectImages.map(img => ({ url: img.publicUrl, jobId: img.jobId })), currentIndex: index })} className="aspect-square block w-full h-full">
+                          <img src={image.publicUrl} alt={`Project image ${index + 1}`} className="w-full h-full object-cover rounded-md hover:opacity-80 transition-opacity" />
+                        </button>
+                        <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Button variant="destructive" size="icon" className="h-7 w-7" title="Delete Image & Source Job" onClick={() => setJobToDelete(image.jobId)}>
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+              </CardContent>
             </Card>
           </div>
         </div>
@@ -235,6 +308,20 @@ const ProjectDetail = () => {
         <AlertDialogContent>
           <AlertDialogHeader><AlertDialogTitle>Are you sure?</AlertDialogTitle><AlertDialogDescription>This will delete the project "{project.name}". All chats within it will become unassigned. This action cannot be undone.</AlertDialogDescription></AlertDialogHeader>
           <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={handleDeleteProject} disabled={isUpdating} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">{isUpdating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Delete Project</AlertDialogAction></AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={!!jobToUnassign} onOpenChange={(open) => !open && setJobToUnassign(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader><AlertDialogTitle>Remove Chat from Project?</AlertDialogTitle><AlertDialogDescription>This will remove the chat from "{project.name}" and make it unassigned. It will not be deleted.</AlertDialogDescription></AlertDialogHeader>
+          <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={handleConfirmUnassign}>Remove</AlertDialogAction></AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={!!jobToDelete} onOpenChange={(open) => !open && setJobToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader><AlertDialogTitle>Delete Image and Source Job?</AlertDialogTitle><AlertDialogDescription>This will permanently delete the image and the job that created it. This action cannot be undone.</AlertDialogDescription></AlertDialogHeader>
+          <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={handleConfirmDeleteJob} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Delete</AlertDialogAction></AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
