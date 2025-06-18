@@ -63,13 +63,13 @@ export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => 
 
   const handleNext = useCallback((e?: React.MouseEvent) => {
     e?.stopPropagation();
-    if (!data) return;
+    if (!data || data.images.length === 0) return;
     setCurrentIndex((prev) => (prev + 1) % data.images.length);
   }, [data]);
 
   const handlePrev = useCallback((e?: React.MouseEvent) => {
     e?.stopPropagation();
-    if (!data) return;
+    if (!data || data.images.length === 0) return;
     setCurrentIndex((prev) => (prev - 1 + data.images.length) % data.images.length);
   }, [data]);
 
@@ -85,9 +85,18 @@ export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => 
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleClose, handleNext, handlePrev, data]);
 
-  if (!data) return null;
+  if (!data || !data.images || data.images.length === 0) {
+    return null;
+  }
 
   const currentImage = data.images[currentIndex];
+
+  // Add a final safeguard before trying to access properties on currentImage
+  if (!currentImage) {
+    // This can happen briefly if the data changes and currentIndex is temporarily invalid.
+    // Returning null is a safe way to handle it.
+    return null;
+  }
 
   const handleDownload = () => {
     if (!currentImage) return;
