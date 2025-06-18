@@ -21,11 +21,8 @@ serve(async (req) => {
       throw new Error("URL parameter is required.");
     }
 
-    // Initialize Supabase client with admin rights
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
 
-    // Parse the bucket and path from the public URL
-    // Example: https://<project>.supabase.co/storage/v1/object/public/<bucket>/<path/to/file.png>
     const urlObject = new URL(url);
     const pathParts = urlObject.pathname.split('/public/');
     if (pathParts.length < 2) {
@@ -39,17 +36,24 @@ serve(async (req) => {
         throw new Error(`Could not extract a bucket name or file path from the URL: ${url}`);
     }
 
-    console.log(`[ImageProxy] Downloading from bucket '${bucketName}' with path '${filePath}'`);
+    console.log(`[ImageProxyV2] Creating signed URL for bucket '${bucketName}' with path '${filePath}'`);
 
-    // Download the file directly using the Supabase SDK, which is more reliable than a public fetch
-    const { data: blob, error: downloadError } = await supabase.storage
+    // Create a short-lived signed URL to access the file securely.
+    const { data: signedUrlData, error: signedUrlError } = await supabase.storage
       .from(bucketName)
-      .download(filePath);
+      .createSignedUrl(filePath, 60); // Expires in 60 seconds
 
-    if (downloadError) {
-      throw new Error(`Supabase storage download failed: ${downloadError.message}`);
+    if (signedUrlError) {
+      throw new Error(`Failed to create signed URL: ${signedUrlError.message}`);
     }
 
+    console.log(`[ImageProxyV2] Fetching image from signed URL...`);
+    const response = await fetch(signedUrlData.signedUrl);
+    if (!response.ok) {
+        throw new Error(`Failed to fetch image from signed URL. Status: ${response.status}`);
+    }
+
+    const blob = await response.blob();
     const buffer = await blob.arrayBuffer();
     const base64 = encodeBase64(buffer);
     
@@ -59,7 +63,7 @@ serve(async (req) => {
     });
 
   } catch (error) {
-    console.error("[ImageProxy] Error:", error);
+    console.error("[ImageProxyV2] Error:", error);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,
