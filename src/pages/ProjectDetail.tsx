@@ -61,8 +61,10 @@ const ProjectDetail = () => {
     queryKey: ["projectPreviews", session?.user?.id],
     queryFn: async () => {
       if (!session?.user) return [];
+      console.log("[ProjectsPage] Fetching project previews...");
       const { data, error } = await supabase.rpc('get_project_previews', { p_user_id: session.user.id });
       if (error) throw error;
+      console.log("[ProjectsPage] Fetched previews:", data);
       return data;
     },
     enabled: !!session?.user,
@@ -273,11 +275,11 @@ const ProjectDetail = () => {
                 <ScrollArea className="h-full">
                   <div className="space-y-1 pr-4">
                     {jobs?.map(job => (
-                      <div key={job.id} className="group flex items-center justify-between p-2 rounded-md hover:bg-muted">
-                        <Link to={`/chat/${job.id}`} className="flex-1 truncate pr-2">
-                          <span className="font-medium text-sm">{job.original_prompt || "Untitled Chat"}</span>
+                      <div key={job.id} className="group relative">
+                        <Link to={`/chat/${job.id}`} className="block p-2 rounded-md hover:bg-muted">
+                          <span className="font-medium text-sm truncate block">{job.original_prompt || "Untitled Chat"}</span>
                         </Link>
-                        <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="absolute right-1 top-1/2 -translate-y-1/2 z-10 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none group-hover:pointer-events-auto">
                           <Button variant="ghost" size="icon" className="h-7 w-7" title="Remove from project" onClick={(e) => { e.preventDefault(); setJobToUnassign(job.id); }}>
                             <X className="h-4 w-4" />
                           </Button>
