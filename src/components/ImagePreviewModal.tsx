@@ -91,7 +91,10 @@ export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => 
 
   const currentImage = data.images[currentIndex];
 
+  // Add a final safeguard before trying to access properties on currentImage
   if (!currentImage) {
+    // This can happen briefly if the data changes and currentIndex is temporarily invalid.
+    // Returning null is a safe way to handle it.
     return null;
   }
 
@@ -109,14 +112,19 @@ export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => 
     let toastId = showLoading("Analyzing image to create prompt...");
     
     try {
-      const { data: proxyData, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-image-download', {
-        body: { url: currentImage.url }
+      const imageResponse = await fetch(currentImage.url);
+      if (!imageResponse.ok) throw new Error("Failed to fetch image for analysis.");
+      const imageBlob = await imageResponse.blob();
+      const reader = new FileReader();
+      reader.readAsDataURL(imageBlob);
+      const base64String = await new Promise<string>((resolve, reject) => {
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
       });
-      if (proxyError) throw proxyError;
-      if (!proxyData.base64 || !proxyData.mimeType) throw new Error("Image proxy failed to return data.");
+      const base64Data = base64String.split(',')[1];
 
       const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-auto-describe-image', {
-        body: { base64_image_data: proxyData.base64, mime_type: proxyData.mimeType }
+        body: { base64_image_data: base64Data, mime_type: imageBlob.type }
       });
       if (promptError) throw promptError;
       const autoPrompt = promptData.auto_prompt;
