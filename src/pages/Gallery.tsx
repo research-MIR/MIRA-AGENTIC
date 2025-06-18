@@ -63,6 +63,7 @@ const Gallery = () => {
         }
       }
     }
+    console.log('[Gallery.tsx] Computed allImages:', images);
     return Array.from(new Map(images.map(item => [item.url, item])).values());
   }, [jobs]);
 
@@ -84,7 +85,10 @@ const Gallery = () => {
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
         {images.map((image, index) => (
           <div key={image.url} className="group relative aspect-square">
-            <button onClick={() => showImage({ images, currentIndex: index })} className="w-full h-full">
+            <button onClick={() => {
+              console.log(`[Gallery.tsx] Image clicked. Index: ${index}, URL: ${image.url}`);
+              showImage({ images, currentIndex: index })
+            }} className="w-full h-full">
               <img src={image.url} alt={`Generated image ${index + 1}`} className="w-full h-full object-cover rounded-md" />
             </button>
             <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity rounded-b-md">

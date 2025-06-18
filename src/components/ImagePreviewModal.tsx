@@ -25,11 +25,14 @@ export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => 
   const [currentImage, setCurrentImage] = useState<PreviewImage | null>(null);
 
   useEffect(() => {
+    console.log('[ImagePreviewModal] Modal received data:', data);
     if (!api || !data) return;
 
     const handleSelect = () => {
       const selectedIndex = api.selectedScrollSnap();
-      setCurrentImage(data.images[selectedIndex]);
+      const currentImg = data.images[selectedIndex];
+      setCurrentImage(currentImg);
+      console.log(`[ImagePreviewModal] Image selected. Index: ${selectedIndex}, URL: ${currentImg?.url}`);
     };
 
     api.on("select", handleSelect);
