@@ -55,6 +55,11 @@ export const translations = {
     remove: "Rimuovi",
     removeChatFromProjectTitle: "Rimuovere la Chat dal Progetto?",
     removeChatFromProjectDescription: "Questo rimuoverà la chat da \"{projectName}\". Non verrà eliminata.",
+    settings: "Impostazioni",
+    manageYourAccount: "Gestisci il tuo account e le preferenze.",
+    accountInformation: "Informazioni Account",
+    yourAccountDetails: "I dettagli del tuo account.",
+    emailAddress: "Indirizzo Email",
     // Index Page
     agentInteraction: "Interazione con l'Agente",
     chooseYourModel: "1. Scegli il tuo Modello AI",
@@ -301,6 +306,11 @@ export const translations = {
     remove: "Remove",
     removeChatFromProjectTitle: "Remove Chat from Project?",
     removeChatFromProjectDescription: "This will remove the chat from \"{projectName}\". It will not be deleted.",
+    settings: "Settings",
+    manageYourAccount: "Manage your account and preferences.",
+    accountInformation: "Account Information",
+    yourAccountDetails: "Your account details.",
+    emailAddress: "Email Address",
     // Index Page
     agentInteraction: "Agent Interaction",
     chooseYourModel: "1. Choose Your AI Model",

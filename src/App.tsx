@@ -14,6 +14,7 @@ import Refine from "./pages/Refine";
 import Editor from "./pages/Editor";
 import Projects from "./pages/Projects";
 import ProjectDetail from "./pages/ProjectDetail";
+import Settings from "./pages/Settings";
 import { useSession } from "./components/Auth/SessionContextProvider.tsx";
 import { useLanguage } from "./context/LanguageContext.tsx";
 import { useOnboardingTour } from "./context/OnboardingTourContext.tsx";
@@ -91,6 +92,7 @@ const App = () => {
             <Route path="/editor" element={<Editor />} />
             <Route path="/projects" element={<Projects />} />
             <Route path="/projects/:projectId" element={<ProjectDetail />} />
+            <Route path="/settings" element={<Settings />} />
             
             <Route element={<DevProtectedRoute />}>
               <Route path="/developer" element={<Developer />} />
