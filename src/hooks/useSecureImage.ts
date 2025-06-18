@@ -8,6 +8,8 @@ export const useSecureImage = (imageUrl: string | null | undefined) => {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let objectUrl: string | null = null;
+
     const loadImage = async () => {
       if (!imageUrl) {
         setDisplayUrl(null);
@@ -18,15 +20,41 @@ export const useSecureImage = (imageUrl: string | null | undefined) => {
       setError(null);
 
       try {
-        // If it's a local blob or data URL, use it directly.
         if (imageUrl.startsWith('data:image') || imageUrl.startsWith('blob:')) {
           setDisplayUrl(imageUrl);
-        // If it's a Supabase URL, trust it and use it directly.
-        // The RLS policies on the bucket should allow public access if the URL is valid.
-        } else if (imageUrl.includes('supabase.co')) {
-          setDisplayUrl(imageUrl);
+          return;
+        }
+        
+        if (imageUrl.includes('supabase.co')) {
+          const url = new URL(imageUrl);
+          const pathSegments = url.pathname.split('/');
+          
+          const objectIndex = pathSegments.indexOf('object');
+          if (objectIndex === -1 || objectIndex + 2 > pathSegments.length) {
+            throw new Error("Invalid Supabase URL format. Cannot find 'object' segment.");
+          }
+          
+          const bucketName = pathSegments[objectIndex + 2];
+          const pathStartIndex = url.pathname.indexOf(bucketName) + bucketName.length + 1;
+          const storagePath = decodeURIComponent(url.pathname.substring(pathStartIndex));
+
+          if (!bucketName || !storagePath) {
+            throw new Error(`Could not parse bucket or path from URL: ${imageUrl}`);
+          }
+
+          const { data, error: downloadError } = await supabase.storage
+            .from(bucketName)
+            .download(storagePath);
+
+          if (downloadError) {
+            throw new Error(`Failed to download image: ${downloadError.message}`);
+          }
+
+          objectUrl = URL.createObjectURL(data);
+          setDisplayUrl(objectUrl);
+
         } else {
-          // For any other external URLs, use the proxy to fetch it securely.
+          // Fallback for any other external URLs via proxy
           const { data, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-image-download', { body: { url: imageUrl } });
           if (proxyError) throw new Error(`Proxy failed: ${proxyError.message}`);
           if (data.base64 && data.mimeType) {
@@ -36,6 +64,7 @@ export const useSecureImage = (imageUrl: string | null | undefined) => {
           }
         }
       } catch (err: any) {
+        console.error("useSecureImage error:", err);
         setError(err.message);
         setDisplayUrl(null);
       } finally {
@@ -45,6 +74,11 @@ export const useSecureImage = (imageUrl: string | null | undefined) => {
 
     loadImage();
 
+    return () => {
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
   }, [imageUrl, supabase]);
 
   return { displayUrl, isLoading, error };
