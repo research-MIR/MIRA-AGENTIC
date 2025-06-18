@@ -5,14 +5,14 @@ import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Folder, MessageSquare, Image as ImageIcon, MoreVertical, Pencil, Trash2, ImagePlus, Loader2, Move, Info, X, Star } from "lucide-react";
+import { Folder, MessageSquare, Image as ImageIcon, MoreVertical, Pencil, Trash2, ImagePlus, Loader2, Move, Info, X, Star, ListMinus } from "lucide-react";
 import { useImagePreview } from "@/context/ImagePreviewContext";
 import { useSecureImage } from "@/hooks/useSecureImage";
 import { useLanguage } from "@/context/LanguageContext";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -52,19 +52,18 @@ const ProjectDetail = () => {
   const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
   const [isDeleteAlertOpen, setIsDeleteAlertOpen] = useState(false);
   const [isImageManagerOpen, setIsImageManagerOpen] = useState(false);
+  const [isManageChatsModalOpen, setIsManageChatsModalOpen] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
   const [isUpdating, setIsUpdating] = useState(false);
-  const [jobToUnassign, setJobToUnassign] = useState<string | null>(null);
   const [jobToDelete, setJobToDelete] = useState<string | null>(null);
+  const [jobBeingRemoved, setJobBeingRemoved] = useState<string | null>(null);
 
   const { data: allProjects, isLoading: isLoadingProject } = useQuery<ProjectPreview[]>({
     queryKey: ["projectPreviews", session?.user?.id],
     queryFn: async () => {
       if (!session?.user) return [];
-      console.log("[ProjectsPage] Fetching project previews...");
       const { data, error } = await supabase.rpc('get_project_previews', { p_user_id: session.user.id });
       if (error) throw error;
-      console.log("[ProjectsPage] Fetched previews:", data);
       return data;
     },
     enabled: !!session?.user,
@@ -177,11 +176,11 @@ const ProjectDetail = () => {
 
   const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: handleDrop });
 
-  const handleConfirmUnassign = async () => {
-    if (!jobToUnassign || !session?.user) return;
-    setIsUpdating(true);
+  const handleRemoveChat = async (jobId: string) => {
+    if (!session?.user) return;
+    setJobBeingRemoved(jobId);
     try {
-      const { error } = await supabase.rpc('unassign_job_from_project', { p_job_id: jobToUnassign, p_user_id: session.user.id });
+      const { error } = await supabase.rpc('unassign_job_from_project', { p_job_id: jobId, p_user_id: session.user.id });
       if (error) throw error;
       showSuccess("Chat removed from project.");
       await Promise.all([
@@ -192,8 +191,7 @@ const ProjectDetail = () => {
     } catch (err: any) {
       showError(`Failed to remove chat: ${err.message}`);
     } finally {
-      setIsUpdating(false);
-      setJobToUnassign(null);
+      setJobBeingRemoved(null);
     }
   };
 
@@ -270,29 +268,20 @@ const ProjectDetail = () => {
           )}
           <div className="lg:col-span-1 flex flex-col h-full">
             <Card className="flex-1 flex flex-col">
-              <CardHeader><CardTitle>{t('projectChatsTitle')} ({jobs?.length || 0})</CardTitle></CardHeader>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <CardTitle>{t('projectChatsTitle')} ({jobs?.length || 0})</CardTitle>
+                <Button variant="outline" size="sm" onClick={() => setIsManageChatsModalOpen(true)}>
+                  <ListMinus className="h-4 w-4 mr-2" />
+                  Manage
+                </Button>
+              </CardHeader>
               <CardContent className="flex-1 overflow-hidden">
                 <ScrollArea className="h-full">
                   <div className="space-y-1 pr-4">
                     {jobs?.map(job => (
-                      <div key={job.id} className="flex items-center justify-between p-2 rounded-md hover:bg-muted">
-                        <Link to={`/chat/${job.id}`} className="flex-1 truncate pr-2">
-                          <span className="font-medium text-sm">{job.original_prompt || "Untitled Chat"}</span>
-                        </Link>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-7 w-7">
-                              <MoreVertical className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onSelect={() => setJobToUnassign(job.id)} className="text-destructive">
-                              <X className="mr-2 h-4 w-4" />
-                              Remove from Project
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
+                      <Link key={job.id} to={`/chat/${job.id}`} className="block p-2 rounded-md hover:bg-muted">
+                        <span className="font-medium text-sm truncate block">{job.original_prompt || "Untitled Chat"}</span>
+                      </Link>
                     ))}
                   </div>
                 </ScrollArea>
@@ -351,12 +340,29 @@ const ProjectDetail = () => {
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={!!jobToUnassign} onOpenChange={(open) => !open && setJobToUnassign(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader><AlertDialogTitle>Remove Chat from Project?</AlertDialogTitle><AlertDialogDescription>This will remove the chat from "{project.project_name}" and make it unassigned. It will not be deleted.</AlertDialogDescription></AlertDialogHeader>
-          <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={handleConfirmUnassign}>Remove</AlertDialogAction></AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <Dialog open={isManageChatsModalOpen} onOpenChange={setIsManageChatsModalOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Manage Chats in "{project.project_name}"</DialogTitle>
+            <DialogDescription>Remove chats from this project. They will not be deleted, only unassigned.</DialogDescription>
+          </DialogHeader>
+          <ScrollArea className="max-h-[60vh] my-4">
+            <div className="space-y-2 pr-4">
+              {jobs?.map(job => (
+                <div key={job.id} className="flex items-center justify-between p-2 rounded-md hover:bg-muted">
+                  <span className="text-sm truncate pr-2">{job.original_prompt || "Untitled Chat"}</span>
+                  <Button variant="destructive" size="sm" onClick={() => handleRemoveChat(job.id)} disabled={jobBeingRemoved === job.id}>
+                    {jobBeingRemoved === job.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </ScrollArea>
+          <DialogFooter>
+            <Button onClick={() => setIsManageChatsModalOpen(false)}>Done</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={!!jobToDelete} onOpenChange={(open) => !open && setJobToDelete(null)}>
         <AlertDialogContent>
