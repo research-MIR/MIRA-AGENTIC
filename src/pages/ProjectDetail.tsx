@@ -275,15 +275,23 @@ const ProjectDetail = () => {
                 <ScrollArea className="h-full">
                   <div className="space-y-1 pr-4">
                     {jobs?.map(job => (
-                      <div key={job.id} className="group relative">
-                        <Link to={`/chat/${job.id}`} className="block p-2 rounded-md hover:bg-muted">
-                          <span className="font-medium text-sm truncate block">{job.original_prompt || "Untitled Chat"}</span>
+                      <div key={job.id} className="flex items-center justify-between p-2 rounded-md hover:bg-muted">
+                        <Link to={`/chat/${job.id}`} className="flex-1 truncate pr-2">
+                          <span className="font-medium text-sm">{job.original_prompt || "Untitled Chat"}</span>
                         </Link>
-                        <div className="absolute right-1 top-1/2 -translate-y-1/2 z-10 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none group-hover:pointer-events-auto">
-                          <Button variant="ghost" size="icon" className="h-7 w-7" title="Remove from project" onClick={(e) => { e.preventDefault(); setJobToUnassign(job.id); }}>
-                            <X className="h-4 w-4" />
-                          </Button>
-                        </div>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-7 w-7">
+                              <MoreVertical className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onSelect={() => setJobToUnassign(job.id)} className="text-destructive">
+                              <X className="mr-2 h-4 w-4" />
+                              Remove from Project
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </div>
                     ))}
                   </div>
