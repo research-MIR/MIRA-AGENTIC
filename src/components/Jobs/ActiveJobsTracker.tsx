@@ -27,6 +27,7 @@ export const ActiveJobsTracker = () => {
     queryKey: ['activeComfyJobs', session?.user?.id],
     queryFn: async () => {
       if (!session?.user) return [];
+      console.log('[ActiveJobsTracker] Polling for active jobs...'); // Added log for verification
       const { data, error } = await supabase
         .from('mira-agent-comfyui-jobs')
         .select('*')
