@@ -5,7 +5,7 @@ import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Folder, MessageSquare, Image as ImageIcon, MoreVertical, Pencil, Trash2, ImagePlus, Loader2, Move } from "lucide-react";
+import { Folder, MessageSquare, Image as ImageIcon, MoreVertical, Pencil, Trash2, ImagePlus, Loader2, Move, Info } from "lucide-react";
 import { useImagePreview } from "@/context/ImagePreviewContext";
 import { useSecureImage } from "@/hooks/useSecureImage";
 import { useLanguage } from "@/context/LanguageContext";
@@ -48,7 +48,7 @@ const ProjectDetail = () => {
   const [newProjectName, setNewProjectName] = useState("");
   const [isUpdating, setIsUpdating] = useState(false);
 
-  const { data: project, isLoading: isLoadingProject, refetch: refetchProject } = useQuery({
+  const { data: project, isLoading: isLoadingProject } = useQuery({
     queryKey: ['project', projectId],
     queryFn: async () => {
       if (!projectId) return null;
@@ -171,8 +171,8 @@ const ProjectDetail = () => {
 
   return (
     <>
-      <div className="p-4 md:p-8 h-screen flex flex-col" {...dropzoneProps}>
-        <header className="pb-4 mb-8 border-b shrink-0 flex justify-between items-center">
+      <div className={cn("p-4 md:p-8 h-screen flex flex-col transition-all", isDraggingOver && "ring-2 ring-primary ring-offset-4 ring-offset-background rounded-lg")} {...dropzoneProps}>
+        <header className="pb-4 mb-4 border-b shrink-0 flex justify-between items-center">
           <h1 className="text-3xl font-bold flex items-center gap-3">
             {isDraggingOver ? <Move className="h-8 w-8 text-primary" /> : <Folder className="h-8 w-8 text-primary" />}
             {project.name}
@@ -188,6 +188,14 @@ const ProjectDetail = () => {
             </DropdownMenu>
           </div>
         </header>
+
+        <Alert className="mb-8 shrink-0">
+          <Info className="h-4 w-4" />
+          <AlertTitle>{t('howProjectsWork')}</AlertTitle>
+          <AlertDescription>
+            {t('projectDetailDropInfo')}
+          </AlertDescription>
+        </Alert>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 flex-1 overflow-hidden relative">
           {(isUpdating || isLoadingJobs) && (

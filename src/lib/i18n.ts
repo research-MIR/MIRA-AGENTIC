@@ -47,6 +47,7 @@ export const translations = {
     newProjectPlaceholder: "es. Campagna Marketing Q3",
     howProjectsWork: "Come Funzionano i Progetti",
     projectsDragDropInfo: "Per organizzare il tuo lavoro, trascina una chat dalla barra laterale e rilasciala su una scheda progetto. Puoi anche passare il mouse su una chat per trovare il pulsante 'Sposta nel Progetto'.",
+    projectDetailDropInfo: "Puoi aggiungere altre chat a questo progetto trascinandole dalla barra laterale e rilasciandole in un punto qualsiasi di questa pagina.",
     // Index Page
     agentInteraction: "Interazione con l'Agente",
     chooseYourModel: "1. Scegli il tuo Modello AI",
@@ -285,6 +286,7 @@ export const translations = {
     newProjectPlaceholder: "e.g. Marketing Campaign Q3",
     howProjectsWork: "How Projects Work",
     projectsDragDropInfo: "To organize your work, drag a chat from the sidebar and drop it onto a project card. You can also hover over a chat to find the 'Add to Project' button.",
+    projectDetailDropInfo: "You can add more chats to this project by dragging them from the sidebar and dropping them anywhere on this page.",
     // Index Page
     agentInteraction: "Agent Interaction",
     chooseYourModel: "1. Choose Your AI Model",
