@@ -112,7 +112,20 @@ const Gallery = () => {
     const toastId = showLoading(`Queuing ${selectedImages.size} images for x${factor} upscale...`);
     const promises = Array.from(selectedImages).map(async (url) => {
       try {
-        const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-auto-describe-image', { body: { image_url: url } });
+        const imageResponse = await fetch(url);
+        if (!imageResponse.ok) throw new Error(`Failed to fetch image for analysis: ${url}`);
+        const imageBlob = await imageResponse.blob();
+        const reader = new FileReader();
+        reader.readAsDataURL(imageBlob);
+        const base64String = await new Promise<string>((resolve, reject) => {
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.onerror = reject;
+        });
+        const base64Data = base64String.split(',')[1];
+
+        const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-auto-describe-image', { 
+          body: { base64_image_data: base64Data, mime_type: imageBlob.type } 
+        });
         if (error) throw error;
         const autoPrompt = data.auto_prompt;
         const { error: queueError } = await supabase.functions.invoke('MIRA-AGENT-proxy-comfyui', {
