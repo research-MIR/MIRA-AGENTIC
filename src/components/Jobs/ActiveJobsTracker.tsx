@@ -42,6 +42,8 @@ export const ActiveJobsTracker = () => {
   });
 
   useEffect(() => {
+    if (!session?.user?.id) return;
+
     const channel = supabase.channel('comfyui-jobs-tracker')
       .on<ComfyJob>(
         'postgres_changes',
@@ -59,9 +61,10 @@ export const ActiveJobsTracker = () => {
             }
           }
           
-          // Invalidate the query to force all components to refetch the list of active jobs
-          queryClient.invalidateQueries({ queryKey: ['activeComfyJobs', session?.user?.id] });
-          queryClient.invalidateQueries({ queryKey: ['generatedImages'] });
+          // Invalidate queries to force refetch across the app
+          queryClient.invalidateQueries({ queryKey: ['activeComfyJobs'] });
+          queryClient.invalidateQueries({ queryKey: ['galleryJobs'] });
+          queryClient.invalidateQueries({ queryKey: ['recentRefinerJobs'] });
         }
       )
       .subscribe();

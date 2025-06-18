@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useRef } from "react";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,6 +18,7 @@ import { useGeneratorStore } from "@/store/generatorStore";
 import { GeneratorJobThumbnail } from "@/components/Jobs/GeneratorJobThumbnail";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { RealtimeChannel } from "@supabase/supabase-js";
 
 const FileUploader = ({ onFileSelect, children, multiple = false }: { onFileSelect: (files: FileList | null) => void, children: React.ReactNode, multiple?: boolean }) => {
   const inputRef = React.useRef<HTMLInputElement>(null);
@@ -30,16 +31,51 @@ const FileUploader = ({ onFileSelect, children, multiple = false }: { onFileSele
 };
 
 const Generator = () => {
-  const { session } = useSession();
+  const { session, supabase } = useSession();
   const { t } = useLanguage();
   const { showImage } = useImagePreview();
   const state = useGeneratorStore();
+  const channelRef = useRef<RealtimeChannel | null>(null);
 
   useEffect(() => {
     if (session?.user) {
       state.fetchRecentJobs(session.user.id);
     }
   }, [session?.user, state.fetchRecentJobs]);
+
+  useEffect(() => {
+    if (!session?.user?.id) return;
+
+    const channel = supabase
+      .channel(`direct-generator-jobs-tracker-${session.user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'mira-agent-jobs',
+          filter: `user_id=eq.${session.user.id}`,
+        },
+        (payload) => {
+          const job = payload.new as any;
+          if (job?.context?.source === 'direct_generator') {
+            console.log('[GeneratorPage] Realtime update for direct generator job received, refetching...');
+            state.fetchRecentJobs(session.user!.id);
+          }
+        }
+      )
+      .subscribe();
+
+    channelRef.current = channel;
+
+    return () => {
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+    };
+  }, [supabase, session?.user?.id, state.fetchRecentJobs]);
+
 
   const handleGenerate = async () => {
     if (!session?.user) return;
