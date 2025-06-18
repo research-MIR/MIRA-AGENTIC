@@ -51,7 +51,7 @@ export const downloadImage = async (url: string, filename: string) => {
   }
 };
 
-export const optimizeImage = (file: File, quality = 0.92): Promise<File> => {
+export const optimizeImage = (file: File, quality = 0.9): Promise<File> => {
   return new Promise((resolve, reject) => {
     const originalSize = file.size;
     const MAX_DIMENSION = 1440;
@@ -91,16 +91,16 @@ export const optimizeImage = (file: File, quality = 0.92): Promise<File> => {
               return reject(new Error('Canvas toBlob failed'));
             }
             const originalName = file.name.substring(0, file.name.lastIndexOf('.')) || file.name;
-            const newFile = new File([blob], `${originalName}.png`, {
-              type: 'image/png',
+            const newFile = new File([blob], `${originalName}.webp`, {
+              type: 'image/webp',
               lastModified: Date.now(),
             });
             
-            console.log(`[ImageOptimizer] Optimized ${file.name} to PNG: ${formatBytes(originalSize)} -> ${formatBytes(newFile.size)}`);
+            console.log(`[ImageOptimizer] Optimized ${file.name} to WebP: ${formatBytes(originalSize)} -> ${formatBytes(newFile.size)}`);
 
             resolve(newFile);
           },
-          'image/png',
+          'image/webp',
           quality
         );
       };
