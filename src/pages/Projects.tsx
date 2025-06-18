@@ -4,8 +4,8 @@ import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Folder, MessageSquare, Image as ImageIcon, Plus, Move, ImagePlus } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Folder, MessageSquare, Image as ImageIcon, Plus, Move, ImagePlus, Info } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
 import { useLanguage } from "@/context/LanguageContext";
 import { useSecureImage } from "@/hooks/useSecureImage";
 import { Button } from "@/components/ui/button";
@@ -79,6 +79,7 @@ const Projects = () => {
   const { supabase, session } = useSession();
   const { t } = useLanguage();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
@@ -166,6 +167,14 @@ const Projects = () => {
           </Dialog>
         </header>
         
+        <Alert className="mb-8">
+          <Info className="h-4 w-4" />
+          <AlertTitle>{t('howProjectsWork')}</AlertTitle>
+          <AlertDescription>
+            {t('projectsDragDropInfo')}
+          </AlertDescription>
+        </Alert>
+
         {isLoading ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
             {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-56 w-full" />)}
