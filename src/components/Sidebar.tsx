@@ -180,7 +180,7 @@ export const Sidebar = () => {
                           key={job.id} 
                           className="group relative"
                           draggable
-                          onDragStart={(e) => e.dataTransfer.setData('text/plain', job.id)}
+                          onDragStart={(e) => e.dataTransfer.setData('application/json', JSON.stringify(job))}
                         >
                           <NavLink to={`/chat/${job.id}`} className={({ isActive }) => `flex items-center justify-between p-2 rounded-md text-sm ${isActive ? 'bg-primary text-primary-foreground font-semibold' : 'hover:bg-muted'}`}>
                               <span className="truncate pr-1">{job.original_prompt || "Untitled Chat"}</span>

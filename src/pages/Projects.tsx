@@ -4,7 +4,7 @@ import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Folder, MessageSquare, Image as ImageIcon, Plus, Move } from "lucide-react";
+import { Folder, MessageSquare, Image as ImageIcon, Plus, Move, ImagePlus } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useLanguage } from "@/context/LanguageContext";
 import { useSecureImage } from "@/hooks/useSecureImage";
@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { showError, showSuccess, showLoading, dismissToast } from "@/utils/toast";
 import { cn } from "@/lib/utils";
+import { ProjectImageManagerModal } from "@/components/ProjectImageManagerModal";
 
 interface ProjectPreview {
   project_id: string;
@@ -22,12 +23,13 @@ interface ProjectPreview {
   latest_image_url: string | null;
 }
 
-const ProjectCard = ({ project, onDrop, onDragEnter, onDragLeave, isBeingDraggedOver }: { 
+const ProjectCard = ({ project, onDrop, onDragEnter, onDragLeave, isBeingDraggedOver, onManageImages }: { 
   project: ProjectPreview,
   onDrop: (projectId: string, e: React.DragEvent) => void,
   onDragEnter: (projectId: string) => void,
   onDragLeave: () => void,
-  isBeingDraggedOver: boolean
+  isBeingDraggedOver: boolean,
+  onManageImages: (project: ProjectPreview) => void
 }) => {
   const { displayUrl, isLoading } = useSecureImage(project.latest_image_url);
 
@@ -37,8 +39,11 @@ const ProjectCard = ({ project, onDrop, onDragEnter, onDragLeave, isBeingDragged
       onDragOver={(e) => e.preventDefault()}
       onDragEnter={() => onDragEnter(project.project_id)}
       onDragLeave={onDragLeave}
-      className={cn("rounded-lg transition-all", isBeingDraggedOver && "ring-2 ring-primary ring-offset-2 ring-offset-background")}
+      className={cn("rounded-lg transition-all relative group", isBeingDraggedOver && "ring-2 ring-primary ring-offset-2 ring-offset-background")}
     >
+      <Button variant="secondary" size="icon" className="absolute top-2 right-2 z-10 h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => { e.preventDefault(); onManageImages(project); }}>
+        <ImagePlus className="h-4 w-4" />
+      </Button>
       <Link to={`/projects/${project.project_id}`}>
         <Card className="hover:border-primary transition-colors h-full flex flex-col">
           <CardHeader className="p-4">
@@ -78,15 +83,14 @@ const Projects = () => {
   const [newProjectName, setNewProjectName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [draggingOverProjectId, setDraggingOverProjectId] = useState<string | null>(null);
+  const [managingProject, setManagingProject] = useState<ProjectPreview | null>(null);
 
   const { data: projects, isLoading, error } = useQuery<ProjectPreview[]>({
     queryKey: ["projectPreviews", session?.user?.id],
     queryFn: async () => {
       if (!session?.user) return [];
-      console.log("[ProjectsPage] Fetching project previews...");
       const { data, error } = await supabase.rpc('get_project_previews', { p_user_id: session.user.id });
       if (error) throw error;
-      console.log("[ProjectsPage] Fetched previews:", data);
       return data;
     },
     enabled: !!session?.user,
@@ -112,15 +116,20 @@ const Projects = () => {
   const handleDrop = async (projectId: string, e: React.DragEvent) => {
     e.preventDefault();
     setDraggingOverProjectId(null);
-    const jobIdToMove = e.dataTransfer.getData('text/plain');
-    if (!jobIdToMove) return;
+    const jobDataString = e.dataTransfer.getData('application/json');
+    if (!jobDataString) return;
 
-    const toastId = showLoading("Moving chat...");
+    const jobData = JSON.parse(jobDataString);
+    const toastId = showLoading(`Moving "${jobData.original_prompt}"...`);
+    
     try {
-      const { error } = await supabase.rpc('update_job_project', { p_job_id: jobIdToMove, p_project_id: projectId });
+      const { error } = await supabase.rpc('update_job_project', { p_job_id: jobData.id, p_project_id: projectId });
       if (error) throw error;
+      
+      const projectName = projects?.find(p => p.project_id === projectId)?.project_name || 'project';
       dismissToast(toastId);
-      showSuccess("Chat moved to project.");
+      showSuccess(`Moved "${jobData.original_prompt}" to ${projectName}.`);
+      
       queryClient.invalidateQueries({ queryKey: ['jobHistory'] });
       queryClient.invalidateQueries({ queryKey: ['projectPreviews'] });
     } catch (err: any) {
@@ -130,60 +139,70 @@ const Projects = () => {
   };
 
   return (
-    <div className="p-4 md:p-8 h-screen overflow-y-auto">
-      <header className="pb-4 mb-8 border-b flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-bold">{t.projectsTitle}</h1>
-          <p className="text-muted-foreground">{t.projectsDescription}</p>
-        </div>
-        <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
-          <DialogTrigger asChild>
-            <Button><Plus className="h-4 w-4 mr-2" />{t.newProject}</Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader><DialogTitle>{t.createNewProject}</DialogTitle></DialogHeader>
-            <div className="grid gap-4 py-4">
-              <Label htmlFor="project-name">{t.name}</Label>
-              <Input id="project-name" value={newProjectName} onChange={(e) => setNewProjectName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleCreateProject()} />
-            </div>
-            <DialogFooter>
-              <Button variant="ghost" onClick={() => setIsModalOpen(false)}>{t.cancel}</Button>
-              <Button onClick={handleCreateProject} disabled={isCreating || !newProjectName.trim()}>{isCreating ? "Creating..." : t.createProject}</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </header>
-      
-      {isLoading ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-          {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-56 w-full" />)}
-        </div>
-      ) : error ? (
-        <Alert variant="destructive">
-          <AlertTitle>Error</AlertTitle>
-          <AlertDescription>{error.message}</AlertDescription>
-        </Alert>
-      ) : projects && projects.length > 0 ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-          {projects.map(project => (
-            <ProjectCard 
-              key={project.project_id} 
-              project={project} 
-              onDrop={handleDrop}
-              onDragEnter={setDraggingOverProjectId}
-              onDragLeave={() => setDraggingOverProjectId(null)}
-              isBeingDraggedOver={draggingOverProjectId === project.project_id}
-            />
-          ))}
-        </div>
-      ) : (
-        <div className="text-center py-16">
-          <Folder className="mx-auto h-16 w-16 text-muted-foreground" />
-          <h2 className="mt-4 text-xl font-semibold">{t.noProjectsTitle}</h2>
-          <p className="mt-2 text-muted-foreground">{t.noProjectsDescription}</p>
-        </div>
+    <>
+      <div className="p-4 md:p-8 h-screen overflow-y-auto">
+        <header className="pb-4 mb-8 border-b flex justify-between items-center">
+          <div>
+            <h1 className="text-3xl font-bold">{t.projectsTitle}</h1>
+            <p className="text-muted-foreground">{t.projectsDescription}</p>
+          </div>
+          <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
+            <DialogTrigger asChild>
+              <Button><Plus className="h-4 w-4 mr-2" />{t.newProject}</Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader><DialogTitle>{t.createNewProject}</DialogTitle></DialogHeader>
+              <div className="grid gap-4 py-4">
+                <Label htmlFor="project-name">{t.name}</Label>
+                <Input id="project-name" value={newProjectName} onChange={(e) => setNewProjectName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleCreateProject()} />
+              </div>
+              <DialogFooter>
+                <Button variant="ghost" onClick={() => setIsModalOpen(false)}>{t.cancel}</Button>
+                <Button onClick={handleCreateProject} disabled={isCreating || !newProjectName.trim()}>{isCreating ? "Creating..." : t.createProject}</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </header>
+        
+        {isLoading ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+            {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-56 w-full" />)}
+          </div>
+        ) : error ? (
+          <Alert variant="destructive">
+            <AlertTitle>Error</AlertTitle>
+            <AlertDescription>{error.message}</AlertDescription>
+          </Alert>
+        ) : projects && projects.length > 0 ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+            {projects.map(project => (
+              <ProjectCard 
+                key={project.project_id} 
+                project={project} 
+                onDrop={handleDrop}
+                onDragEnter={setDraggingOverProjectId}
+                onDragLeave={() => setDraggingOverProjectId(null)}
+                isBeingDraggedOver={draggingOverProjectId === project.project_id}
+                onManageImages={setManagingProject}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-16">
+            <Folder className="mx-auto h-16 w-16 text-muted-foreground" />
+            <h2 className="mt-4 text-xl font-semibold">{t.noProjectsTitle}</h2>
+            <p className="mt-2 text-muted-foreground">{t.noProjectsDescription}</p>
+          </div>
+        )}
+      </div>
+      {managingProject && (
+        <ProjectImageManagerModal 
+          project={managingProject}
+          isOpen={!!managingProject}
+          onClose={() => setManagingProject(null)}
+        />
       )}
-    </div>
+    </>
   );
 };
 
