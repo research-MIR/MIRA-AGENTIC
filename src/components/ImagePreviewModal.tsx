@@ -118,8 +118,8 @@ export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => 
           <Carousel setApi={setApi} opts={{ startIndex: data.currentIndex, loop: true }}>
             <CarouselContent>
               {data.images.map((image, index) => (
-                <CarouselItem key={index}>
-                  <img src={image.url} alt="Preview" className="max-h-[90vh] w-full object-contain rounded-md" />
+                <CarouselItem key={index} className="flex items-center justify-center">
+                  <img src={image.url} alt="Preview" className="max-h-[90vh] w-auto h-auto max-w-full rounded-md" />
                 </CarouselItem>
               ))}
             </CarouselContent>

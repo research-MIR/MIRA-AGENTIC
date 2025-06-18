@@ -17,7 +17,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { showError, showSuccess, showLoading, dismissToast } from "@/utils/toast";
 import { ProjectImageManagerModal } from "@/components/ProjectImageManagerModal";
-import { useDropzone } from "@/hooks/useDropzone";
 import { cn } from "@/lib/utils";
 import { ShareProjectModal } from "@/components/ShareProjectModal";
 
@@ -150,32 +149,6 @@ const ProjectDetail = () => {
     }
   };
 
-  const handleDrop = async (e: React.DragEvent) => {
-    e.preventDefault();
-    const jobDataString = e.dataTransfer.getData('application/json');
-    if (!jobDataString || !projectId) return;
-    const jobData = JSON.parse(jobDataString);
-    if (jobData.project_id === projectId) return;
-
-    setIsUpdating(true);
-    try {
-      const { error } = await supabase.rpc('update_job_project', { p_job_id: jobData.id, p_project_id: projectId });
-      if (error) throw error;
-      showSuccess(`Moved "${jobData.original_prompt}" to ${project?.project_name}.`);
-      await Promise.all([
-        refetchJobs(),
-        queryClient.invalidateQueries({ queryKey: ['jobHistory'] }),
-        queryClient.invalidateQueries({ queryKey: ['projectPreviews'] })
-      ]);
-    } catch (err: any) {
-      showError(`Failed to move chat: ${err.message}`);
-    } finally {
-      setIsUpdating(false);
-    }
-  };
-
-  const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: handleDrop });
-
   const handleRemoveChat = async (jobId: string) => {
     if (!session?.user) return;
     setJobBeingRemoved(jobId);
@@ -239,10 +212,10 @@ const ProjectDetail = () => {
 
   return (
     <div className="h-full">
-      <div className={cn("p-4 md:p-8 h-full flex flex-col transition-all", isDraggingOver && "ring-2 ring-primary ring-offset-4 ring-offset-background rounded-lg")} {...dropzoneProps}>
+      <div className="p-4 md:p-8 h-full flex flex-col transition-all">
         <header className="pb-4 mb-4 border-b shrink-0 flex justify-between items-center">
           <h1 className="text-3xl font-bold flex items-center gap-3">
-            {isDraggingOver ? <Move className="h-8 w-8 text-primary" /> : <Folder className="h-8 w-8 text-primary" />}
+            <Folder className="h-8 w-8 text-primary" />
             {project.project_name}
           </h1>
           <div className="flex items-center gap-2">
@@ -347,7 +320,7 @@ const ProjectDetail = () => {
         <AlertDialogContent>
           <AlertDialogHeader><AlertDialogTitle>Are you sure?</AlertDialogTitle><AlertDialogDescription>This will delete the project "{project.project_name}". All chats within it will become unassigned. This action cannot be undone.</AlertDialogDescription></AlertDialogHeader>
           <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={handleDeleteProject} disabled={isUpdating} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">{isUpdating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Delete Project</AlertDialogAction></AlertDialogFooter>
-        </AlertDialogContent>
+        </DialogContent>
       </AlertDialog>
 
       <Dialog open={isManageChatsModalOpen} onOpenChange={setIsManageChatsModalOpen}>
