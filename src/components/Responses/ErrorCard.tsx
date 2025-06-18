@@ -16,19 +16,62 @@ export const ErrorCard = ({ message, jobId }: ErrorCardProps) => {
 
   const handleRetry = async () => {
     setIsRetrying(true);
-    const toastId = showLoading("Forcing agent to continue...");
+    const toastId = showLoading("Retrying...");
     try {
-      // This re-invokes the worker, which will pick up from the last state.
-      const { error } = await supabase.functions.invoke('MIRA-AGENT-master-worker', {
+      // 1. Fetch the job to get the last known history
+      const { data: job, error: fetchError } = await supabase
+        .from('mira-agent-jobs')
+        .select('context')
+        .eq('id', jobId)
+        .single();
+      
+      if (fetchError) throw fetchError;
+
+      const history = job.context?.history || [];
+      
+      // 2. Find and remove the last model turn (the failed tool call)
+      // This forces the agent to re-plan from the previous state.
+      let lastModelTurnIndex = -1;
+      for (let i = history.length - 1; i >= 0; i--) {
+        if (history[i].role === 'model') {
+          lastModelTurnIndex = i;
+          break;
+        }
+      }
+
+      let newHistory = history;
+      if (lastModelTurnIndex !== -1) {
+        newHistory = history.slice(0, lastModelTurnIndex);
+      }
+
+      // 3. Update the job with the corrected history and set status to processing
+      const { error: updateError } = await supabase
+        .from('mira-agent-jobs')
+        .update({ 
+          status: 'processing', 
+          error_message: null,
+          context: { ...job.context, history: newHistory }
+        })
+        .eq('id', jobId);
+
+      if (updateError) throw updateError;
+
+      // 4. Directly invoke the worker to ensure a fast response.
+      // The UI will update via the realtime subscription from the update above.
+      const { error: invokeError } = await supabase.functions.invoke('MIRA-AGENT-master-worker', {
         body: { job_id: jobId }
       });
-      if (error) throw error;
-      showSuccess("Agent re-triggered successfully.");
-      // The UI will update automatically via the realtime subscription.
-    } catch (err: any) {
-      showError(`Failed to re-trigger agent: ${err.message}`);
-    } finally {
+      if (invokeError) {
+          // This is not critical, the watchdog will pick it up. Just log it.
+          console.warn(`Direct invocation failed, watchdog will handle it: ${invokeError.message}`);
+      }
+
       dismissToast(toastId);
+      showSuccess("Retrying from last step...");
+    } catch (err: any) {
+      dismissToast(toastId);
+      showError(`Failed to retry: ${err.message}`);
+    } finally {
       setIsRetrying(false);
     }
   };
