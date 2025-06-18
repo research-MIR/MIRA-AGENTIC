@@ -38,7 +38,7 @@ const ImageWithLoader = ({ imageUrl }: { imageUrl: string }) => {
   }
 
   return (
-    <img src={displayUrl} alt="Preview" className="max-h-[90vh] w-full object-contain rounded-md" />
+    <img src={displayUrl} alt="Preview" className="max-h-[90vh] w-auto h-auto max-w-full object-contain rounded-md" />
   );
 };
 
@@ -53,7 +53,6 @@ export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => 
   useEffect(() => {
     if (!data) return;
     if (!api) {
-      // Handle the case where there's only one image and the carousel API might not be needed
       if (data.images.length > 0) {
         setCurrentImage(data.images[data.currentIndex]);
       }
@@ -67,7 +66,7 @@ export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => 
     };
 
     api.on("select", handleSelect);
-    handleSelect(); // Set initial image
+    handleSelect();
 
     return () => {
       api.off("select", handleSelect);
@@ -90,7 +89,6 @@ export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => 
     let toastId = showLoading("Analyzing image to create prompt...");
     
     try {
-      // Step 1: Fetch the image blob and convert to base64 for auto-prompting
       const imageResponse = await fetch(currentImage.url);
       if (!imageResponse.ok) throw new Error("Failed to fetch image for analysis.");
       const imageBlob = await imageResponse.blob();
@@ -102,7 +100,6 @@ export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => 
       });
       const base64Data = base64String.split(',')[1];
 
-      // Step 2: Get the auto-generated prompt
       const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-auto-describe-image', {
         body: { base64_image_data: base64Data, mime_type: imageBlob.type }
       });
@@ -113,11 +110,10 @@ export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => 
       dismissToast(toastId);
       toastId = showLoading(`Submitting x${factor} upscale job...`);
 
-      // Step 3: Queue the job in ComfyUI using the existing proxy
       const { error: queueError } = await supabase.functions.invoke('MIRA-AGENT-proxy-comfyui', {
         body: {
           prompt_text: autoPrompt,
-          image_url: currentImage.url, // Pass the original URL to the proxy
+          image_url: currentImage.url,
           invoker_user_id: session.user.id,
           upscale_factor: factor,
           original_prompt_for_gallery: `Upscaled from job ${currentImage.jobId || 'gallery'}`
@@ -141,14 +137,14 @@ export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => 
 
   return (
     <Dialog open={!!data} onOpenChange={(isOpen) => !isOpen && onClose()}>
-      <DialogContent className="max-w-3xl w-full p-2">
+      <DialogContent className="max-w-2xl w-full p-2">
         <DialogTitle className="sr-only">Image Preview</DialogTitle>
         <DialogDescription className="sr-only">A larger view of the selected image. You can download or upscale it from the button in the top right corner.</DialogDescription>
         <div className="relative">
           <Carousel setApi={setApi} opts={{ startIndex: data.currentIndex, loop: true }}>
             <CarouselContent>
               {data.images.map((image, index) => (
-                <CarouselItem key={index}>
+                <CarouselItem key={index} className="flex items-center justify-center">
                   <ImageWithLoader imageUrl={image.url} />
                 </CarouselItem>
               ))}
