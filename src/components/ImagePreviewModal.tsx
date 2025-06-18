@@ -1,15 +1,13 @@
-import { useState, useEffect } from "react";
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Download, Wand2, Loader2, AlertTriangle } from "lucide-react";
+import { Download, Wand2, Loader2, AlertTriangle, X, ChevronLeft, ChevronRight } from "lucide-react";
 import { downloadImage } from "@/lib/utils";
 import { useSession } from "./Auth/SessionContextProvider";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { useLanguage } from "@/context/LanguageContext";
 import { useQueryClient } from "@tanstack/react-query";
-import { type PreviewData, type PreviewImage } from "@/context/ImagePreviewContext";
-import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious, type CarouselApi } from "@/components/ui/carousel";
+import { type PreviewData } from "@/context/ImagePreviewContext";
 import { useSecureImage } from "@/hooks/useSecureImage";
 
 interface ImagePreviewModalProps {
@@ -41,7 +39,7 @@ const ImageWithLoader = ({ imageUrl }: { imageUrl: string }) => {
     <img
       src={displayUrl}
       alt="Preview"
-      className="max-h-[90vh] max-w-full object-contain rounded-md"
+      className="max-h-[90vh] max-w-[90vw] object-contain rounded-md"
     />
   );
 };
@@ -51,45 +49,45 @@ export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => 
   const { t } = useLanguage();
   const [isUpscaling, setIsUpscaling] = useState(false);
   const queryClient = useQueryClient();
-  const [api, setApi] = useState<CarouselApi>();
-  const [currentImage, setCurrentImage] = useState<PreviewImage | null>(null);
+  const [currentIndex, setCurrentIndex] = useState(0);
 
   useEffect(() => {
-    if (!api) return;
-
-    // When the modal opens (data becomes available), reinitialize the carousel
-    // after a short delay to allow the dialog animation to finish.
-    // This ensures the carousel calculates its dimensions correctly.
     if (data) {
-      const timer = setTimeout(() => api.reInit(), 50);
-      return () => clearTimeout(timer);
+      setCurrentIndex(data.currentIndex);
     }
-  }, [api, data]);
+  }, [data]);
+
+  const handleClose = useCallback(() => {
+    onClose();
+  }, [onClose]);
+
+  const handleNext = useCallback((e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (!data) return;
+    setCurrentIndex((prev) => (prev + 1) % data.images.length);
+  }, [data]);
+
+  const handlePrev = useCallback((e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (!data) return;
+    setCurrentIndex((prev) => (prev - 1 + data.images.length) % data.images.length);
+  }, [data]);
 
   useEffect(() => {
-    if (!data) return;
-    if (!api) {
-      if (data.images.length > 0) {
-        setCurrentImage(data.images[data.currentIndex]);
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') handleClose();
+      if (data && data.images.length > 1) {
+        if (e.key === 'ArrowRight') handleNext();
+        if (e.key === 'ArrowLeft') handlePrev();
       }
-      return;
-    }
-
-    const handleSelect = () => {
-      const selectedIndex = api.selectedScrollSnap();
-      const currentImg = data.images[selectedIndex];
-      setCurrentImage(currentImg);
     };
-
-    api.on("select", handleSelect);
-    handleSelect();
-
-    return () => {
-      api.off("select", handleSelect);
-    };
-  }, [api, data]);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleClose, handleNext, handlePrev, data]);
 
   if (!data) return null;
+
+  const currentImage = data.images[currentIndex];
 
   const handleDownload = () => {
     if (!currentImage) return;
@@ -152,53 +150,47 @@ export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => 
   };
 
   return (
-    <Dialog open={!!data} onOpenChange={(isOpen) => !isOpen && onClose()}>
-      <DialogContent className="max-w-2xl w-full p-2">
-        <DialogTitle className="sr-only">Image Preview</DialogTitle>
-        <DialogDescription className="sr-only">A larger view of the selected image. You can download or upscale it from the button in the top right corner.</DialogDescription>
-        <div className="relative">
-          <Carousel setApi={setApi} opts={{ startIndex: data.currentIndex, loop: true }}>
-            <CarouselContent>
-              {data.images.map((image, index) => (
-                <CarouselItem key={index} className="flex items-center justify-center basis-full shrink-0">
-                  <ImageWithLoader imageUrl={image.url} />
-                </CarouselItem>
-              ))}
-            </CarouselContent>
-            {data.images.length > 1 && (
-              <>
-                <CarouselPrevious className="absolute left-2 top-1/2 -translate-y-1/2" />
-                <CarouselNext className="absolute right-2 top-1/2 -translate-y-1/2" />
-              </>
-            )}
-          </Carousel>
-          <div className="absolute top-4 right-4">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="secondary" size="icon" disabled={!currentImage}>
-                  {isUpscaling ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
-                  <span className="sr-only">Image Actions</span>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={handleDownload} disabled={!currentImage}>
-                  <Download className="mr-2 h-4 w-4" />
-                  {t('download')}
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => handleUpscale(1.5)} disabled={isUpscaling || !currentImage}>
-                  {t('upscaleAndDownload')} x1.5
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => handleUpscale(2)} disabled={isUpscaling || !currentImage}>
-                  {t('upscaleAndDownload')} x2
-                </DropdownMenuItem>
-                 <DropdownMenuItem onSelect={() => handleUpscale(3)} disabled={isUpscaling || !currentImage}>
-                  {t('upscaleAndDownload')} x3
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
+    <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 animate-in fade-in-0" onClick={handleClose}>
+      {/* Main content area that stops propagation */}
+      <div className="relative" onClick={(e) => e.stopPropagation()}>
+        <ImageWithLoader imageUrl={currentImage.url} />
+      </div>
+
+      {/* Action Buttons */}
+      <div className="absolute top-4 right-4 flex gap-2">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="secondary" size="icon" disabled={!currentImage}>
+              {isUpscaling ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
+              <span className="sr-only">Image Actions</span>
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onSelect={handleDownload} disabled={!currentImage}>
+              <Download className="mr-2 h-4 w-4" />
+              {t('download')}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => handleUpscale(1.5)} disabled={isUpscaling || !currentImage}>
+              {t('upscaleAndDownload')} x1.5
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => handleUpscale(2)} disabled={isUpscaling || !currentImage}>
+              {t('upscaleAndDownload')} x2
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => handleUpscale(3)} disabled={isUpscaling || !currentImage}>
+              {t('upscaleAndDownload')} x3
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <Button variant="secondary" size="icon" onClick={handleClose}><X className="h-4 w-4" /></Button>
+      </div>
+
+      {/* Navigation Buttons */}
+      {data.images.length > 1 && (
+        <>
+          <Button variant="secondary" size="icon" className="absolute left-4 top-1/2 -translate-y-1/2" onClick={handlePrev}><ChevronLeft className="h-6 w-6" /></Button>
+          <Button variant="secondary" size="icon" className="absolute right-4 top-1/2 -translate-y-1/2" onClick={handleNext}><ChevronRight className="h-6 w-6" /></Button>
+        </>
+      )}
+    </div>
   );
 };
