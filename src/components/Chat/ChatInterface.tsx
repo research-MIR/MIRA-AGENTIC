@@ -11,6 +11,7 @@ import { useFileUpload } from "@/hooks/useFileUpload";
 export const ChatInterface = () => {
   const {
     jobId,
+    jobData,
     messages,
     chatTitle,
     isJobRunning,
@@ -71,6 +72,7 @@ export const ChatInterface = () => {
       
       <ChatHeader
         jobId={jobId}
+        jobData={jobData}
         chatTitle={chatTitle}
         isOwner={isOwner}
         onDeleteChat={deleteChat}

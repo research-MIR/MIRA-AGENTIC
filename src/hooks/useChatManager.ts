@@ -263,6 +263,7 @@ export const useChatManager = () => {
 
     return {
         jobId,
+        jobData,
         messages,
         chatTitle,
         isJobRunning,

@@ -16,6 +16,8 @@ import { Label } from "./ui/label";
 import { RadioGroup, RadioGroupItem } from "./ui/radio-group";
 import { showError, showSuccess, showLoading, dismissToast } from "@/utils/toast";
 import { AddToProjectDialog } from "./Jobs/AddToProjectDialog";
+import { useModalStore } from "@/store/modalStore";
+import { ProjectFolders } from "./ProjectFolders";
 
 interface JobHistory {
   id: string;
@@ -35,13 +37,14 @@ export const Sidebar = () => {
   const { t } = useLanguage();
   const { startTour } = useOnboardingTour();
   const queryClient = useQueryClient();
+  const { openMoveToProjectModal } = useModalStore();
 
   const [renamingJob, setRenamingJob] = useState<JobHistory | null>(null);
   const [deletingJobId, setDeletingJobId] = useState<string | null>(null);
-  const [movingJob, setMovingJob] = useState<JobHistory | null>(null);
   const [newName, setNewName] = useState("");
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [sortOrder, setSortOrder] = useState<'created_at' | 'updated_at'>('updated_at');
+  const [draggingOverProjectId, setDraggingOverProjectId] = useState<string | null>(null);
 
   const { data: projects } = useQuery<Project[]>({
     queryKey: ['projects', session?.user?.id],
@@ -62,7 +65,6 @@ export const Sidebar = () => {
         .from("mira-agent-jobs")
         .select("id, original_prompt, project_id, context")
         .eq("user_id", session.user.id)
-        .or('context->>source.eq.agent,context->>source.eq.agent_branch,context->>source.is.null')
         .order(sortOrder, { ascending: false });
       if (error) throw new Error(error.message);
       return data as JobHistory[];
@@ -121,7 +123,26 @@ export const Sidebar = () => {
     setIsSettingsModalOpen(false);
   };
 
-  const recentChats = jobHistory?.slice(0, 20) || [];
+  const handleDrop = async (projectId: string, e: React.DragEvent) => {
+    e.preventDefault();
+    setDraggingOverProjectId(null);
+    const jobIdToMove = e.dataTransfer.getData('text/plain');
+    if (!jobIdToMove) return;
+
+    const toastId = showLoading("Moving chat...");
+    try {
+      const { error } = await supabase.rpc('update_job_project', { p_job_id: jobIdToMove, p_project_id: projectId });
+      if (error) throw error;
+      dismissToast(toastId);
+      showSuccess("Chat moved to project.");
+      queryClient.invalidateQueries({ queryKey: ['jobHistory'] });
+    } catch (err: any) {
+      dismissToast(toastId);
+      showError(`Failed to move chat: ${err.message}`);
+    }
+  };
+
+  const unassignedChats = jobHistory?.filter(job => !job.project_id) || [];
 
   return (
     <>
@@ -164,7 +185,17 @@ export const Sidebar = () => {
           </NavLink>
         </nav>
         <div className="flex-1 flex flex-col overflow-hidden">
-            <div className="flex justify-between items-center w-full px-4 pt-2 pb-2">
+            <div className="px-2">
+              <ProjectFolders 
+                projects={projects || []}
+                allJobs={jobHistory || []}
+                draggingOverProjectId={draggingOverProjectId}
+                onDragEnter={setDraggingOverProjectId}
+                onDragLeave={() => setDraggingOverProjectId(null)}
+                onDrop={handleDrop}
+              />
+            </div>
+            <div className="flex justify-between items-center w-full px-4 pt-4 pb-2">
                 <h2 className="text-sm font-semibold text-muted-foreground">Recent Chats</h2>
                 <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); setIsSettingsModalOpen(true); }}><Settings className="h-4 w-4" /></Button>
             </div>
@@ -175,25 +206,27 @@ export const Sidebar = () => {
                         {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}
                     </div>
                     ) : (
-                    recentChats.map(job => (
+                    unassignedChats.map(job => (
                         <div 
-                        key={job.id} 
-                        className="group relative"
+                          key={job.id} 
+                          className="group relative"
+                          draggable
+                          onDragStart={(e) => e.dataTransfer.setData('text/plain', job.id)}
                         >
-                        <NavLink to={`/chat/${job.id}`} className={({ isActive }) => `flex items-center justify-between p-2 rounded-md text-sm ${isActive ? 'bg-primary text-primary-foreground font-semibold' : 'hover:bg-muted'}`}>
-                            <span className="truncate pr-1">{job.original_prompt || "Untitled Chat"}</span>
-                        </NavLink>
-                        <div className="absolute right-1 top-1/2 -translate-y-1/2 z-10 flex items-center gap-0.5 rounded-md bg-muted/80 opacity-0 transition-opacity group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto">
-                            <Button variant="ghost" size="icon" className="h-7 w-7" title="Add to project" onClick={(e) => { e.preventDefault(); setMovingJob(job); }}>
-                            <FolderPlus className="h-4 w-4" />
-                            </Button>
-                            <Button variant="ghost" size="icon" className="h-7 w-7" title="Rename" onClick={(e) => { e.preventDefault(); setNewName(job.original_prompt); setRenamingJob(job); }}>
-                            <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-destructive/10" title="Delete" onClick={(e) => { e.preventDefault(); setDeletingJobId(job.id); }}>
-                            <Trash2 className="h-4 w-4 text-destructive/80" />
-                            </Button>
-                        </div>
+                          <NavLink to={`/chat/${job.id}`} className={({ isActive }) => `flex items-center justify-between p-2 rounded-md text-sm ${isActive ? 'bg-primary text-primary-foreground font-semibold' : 'hover:bg-muted'}`}>
+                              <span className="truncate pr-1">{job.original_prompt || "Untitled Chat"}</span>
+                          </NavLink>
+                          <div className="absolute right-1 top-1/2 -translate-y-1/2 z-10 flex items-center gap-0.5 rounded-md bg-muted/80 opacity-0 transition-opacity group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto">
+                              <Button variant="ghost" size="icon" className="h-7 w-7" title="Add to project" onClick={(e) => { e.preventDefault(); openMoveToProjectModal(job); }}>
+                              <FolderPlus className="h-4 w-4" />
+                              </Button>
+                              <Button variant="ghost" size="icon" className="h-7 w-7" title="Rename" onClick={(e) => { e.preventDefault(); setNewName(job.original_prompt); setRenamingJob(job); }}>
+                              <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-destructive/10" title="Delete" onClick={(e) => { e.preventDefault(); setDeletingJobId(job.id); }}>
+                              <Trash2 className="h-4 w-4 text-destructive/80" />
+                              </Button>
+                          </div>
                         </div>
                     ))
                     )}
@@ -220,12 +253,7 @@ export const Sidebar = () => {
         </div>
       </aside>
 
-      <AddToProjectDialog 
-        job={movingJob}
-        projects={projects || []}
-        isOpen={!!movingJob}
-        onClose={() => setMovingJob(null)}
-      />
+      <AddToProjectDialog projects={projects || []} />
 
       <Dialog open={!!renamingJob} onOpenChange={(open) => !open && setRenamingJob(null)}>
         <DialogContent>

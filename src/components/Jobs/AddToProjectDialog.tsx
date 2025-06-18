@@ -10,53 +10,51 @@ import { showError, showSuccess, showLoading, dismissToast } from '@/utils/toast
 import { useLanguage } from '@/context/LanguageContext';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
+import { useModalStore } from '@/store/modalStore';
 
 interface Project {
   id: string;
   name: string;
 }
 
-interface Job {
-  id: string;
-}
-
 interface AddToProjectDialogProps {
-  job: Job | null;
   projects: Project[];
-  isOpen: boolean;
-  onClose: () => void;
 }
 
-export const AddToProjectDialog = ({ job, projects, isOpen, onClose }: AddToProjectDialogProps) => {
+export const AddToProjectDialog = ({ projects }: AddToProjectDialogProps) => {
   const { supabase, session } = useSession();
   const queryClient = useQueryClient();
   const { t } = useLanguage();
+  const { isMoveToProjectModalOpen, movingJob, closeMoveToProjectModal } = useModalStore();
+
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [isMoving, setIsMoving] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
 
   useEffect(() => {
-    if (!isOpen) {
+    if (!isMoveToProjectModalOpen) {
       setSelectedProjectId(null);
       setNewProjectName('');
       setIsMoving(false);
       setIsCreating(false);
     }
-  }, [isOpen]);
+  }, [isMoveToProjectModalOpen]);
 
   const handleMoveToProject = async () => {
-    if (!job || !selectedProjectId) return;
+    if (!movingJob || !selectedProjectId) return;
     setIsMoving(true);
     try {
       const { error } = await supabase
         .from('mira-agent-jobs')
         .update({ project_id: selectedProjectId })
-        .eq('id', job.id);
+        .eq('id', movingJob.id);
       if (error) throw error;
       showSuccess("Chat moved to project.");
       queryClient.invalidateQueries({ queryKey: ['jobHistory'] });
-      onClose();
+      queryClient.invalidateQueries({ queryKey: ['projectPreviews'] });
+      queryClient.invalidateQueries({ queryKey: ['projectJobs', selectedProjectId] });
+      closeMoveToProjectModal();
     } catch (err: any) {
       showError(`Failed to move chat: ${err.message}`);
     } finally {
@@ -65,7 +63,7 @@ export const AddToProjectDialog = ({ job, projects, isOpen, onClose }: AddToProj
   };
 
   const handleCreateAndMove = async () => {
-    if (!job || !newProjectName.trim() || !session?.user) return;
+    if (!movingJob || !newProjectName.trim() || !session?.user) return;
     setIsCreating(true);
     const toastId = showLoading("Creating project...");
     try {
@@ -84,7 +82,7 @@ export const AddToProjectDialog = ({ job, projects, isOpen, onClose }: AddToProj
       const { error: moveError } = await supabase
         .from('mira-agent-jobs')
         .update({ project_id: newProject.id })
-        .eq('id', job.id);
+        .eq('id', movingJob.id);
       
       if (moveError) throw moveError;
 
@@ -92,7 +90,8 @@ export const AddToProjectDialog = ({ job, projects, isOpen, onClose }: AddToProj
       showSuccess(`Chat moved to new project "${newProjectName.trim()}".`);
       queryClient.invalidateQueries({ queryKey: ['projects'] });
       queryClient.invalidateQueries({ queryKey: ['jobHistory'] });
-      onClose();
+      queryClient.invalidateQueries({ queryKey: ['projectPreviews'] });
+      closeMoveToProjectModal();
 
     } catch (err: any) {
       dismissToast(toastId);
@@ -103,7 +102,7 @@ export const AddToProjectDialog = ({ job, projects, isOpen, onClose }: AddToProj
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
+    <Dialog open={isMoveToProjectModalOpen} onOpenChange={closeMoveToProjectModal}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{t.moveToProject}</DialogTitle>
@@ -145,7 +144,7 @@ export const AddToProjectDialog = ({ job, projects, isOpen, onClose }: AddToProj
           </div>
         </div>
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>{t.cancel}</Button>
+          <Button variant="ghost" onClick={closeMoveToProjectModal}>{t.cancel}</Button>
           <Button onClick={handleMoveToProject} disabled={isMoving || !selectedProjectId}>
             {isMoving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             {t.move}
