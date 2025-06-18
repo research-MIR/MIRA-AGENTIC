@@ -7,10 +7,12 @@ import {
 } from "@/components/ui/dialog";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Loader2, X } from "lucide-react";
+import { Loader2, X, RefreshCw } from "lucide-react";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { useQueryClient } from "@tanstack/react-query";
 import { showError } from "@/utils/toast";
+import { useState } from "react";
+import { cn } from "@/lib/utils";
 
 interface ComfyJob {
   id: string;
@@ -27,8 +29,9 @@ interface ActiveJobsModalProps {
 }
 
 export const ActiveJobsModal = ({ isOpen, onClose, jobs }: ActiveJobsModalProps) => {
-  const { supabase } = useSession();
+  const { supabase, session } = useSession();
   const queryClient = useQueryClient();
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const handleCancelJob = async (jobId: string) => {
     try {
@@ -40,14 +43,28 @@ export const ActiveJobsModal = ({ isOpen, onClose, jobs }: ActiveJobsModalProps)
     }
   };
 
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await queryClient.invalidateQueries({ queryKey: ['activeComfyJobs', session?.user?.id] });
+    // A short delay to give visual feedback
+    setTimeout(() => setIsRefreshing(false), 500);
+  };
+
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Active Background Jobs</DialogTitle>
-          <DialogDescription>
-            These jobs are running in the background. Your results will be downloaded automatically when complete.
-          </DialogDescription>
+          <div className="flex justify-between items-center">
+            <div>
+              <DialogTitle>Active Background Jobs</DialogTitle>
+              <DialogDescription>
+                These jobs are running in the background. Your results will be downloaded automatically when complete.
+              </DialogDescription>
+            </div>
+            <Button variant="outline" size="icon" onClick={handleRefresh} disabled={isRefreshing}>
+              <RefreshCw className={cn("h-4 w-4", isRefreshing && "animate-spin")} />
+            </Button>
+          </div>
         </DialogHeader>
         <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
           {jobs.length > 0 ? jobs.map((job) => (
