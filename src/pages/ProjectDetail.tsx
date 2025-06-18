@@ -5,7 +5,7 @@ import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Folder, MessageSquare, Image as ImageIcon, MoreVertical, Pencil, Trash2, ImagePlus, Loader2, Move, Info, X } from "lucide-react";
+import { Folder, MessageSquare, Image as ImageIcon, MoreVertical, Pencil, Trash2, ImagePlus, Loader2, Move, Info, X, Star } from "lucide-react";
 import { useImagePreview } from "@/context/ImagePreviewContext";
 import { useSecureImage } from "@/hooks/useSecureImage";
 import { useLanguage } from "@/context/LanguageContext";
@@ -34,6 +34,13 @@ interface ImageResult {
   jobId: string;
 }
 
+interface ProjectPreview {
+  project_id: string;
+  project_name: string;
+  chat_count: number;
+  latest_image_url: string | null;
+}
+
 const ProjectDetail = () => {
   const { projectId } = useParams();
   const { supabase, session } = useSession();
@@ -50,17 +57,24 @@ const ProjectDetail = () => {
   const [jobToUnassign, setJobToUnassign] = useState<string | null>(null);
   const [jobToDelete, setJobToDelete] = useState<string | null>(null);
 
-  const { data: project, isLoading: isLoadingProject } = useQuery({
-    queryKey: ['project', projectId],
+  const { data: allProjects, isLoading: isLoadingProject } = useQuery<ProjectPreview[]>({
+    queryKey: ["projectPreviews", session?.user?.id],
     queryFn: async () => {
-      if (!projectId) return null;
-      const { data, error } = await supabase.from('projects').select('name').eq('id', projectId).single();
+      if (!session?.user) return [];
+      const { data, error } = await supabase.rpc('get_project_previews', { p_user_id: session.user.id });
       if (error) throw error;
-      setNewProjectName(data.name);
       return data;
     },
-    enabled: !!projectId,
+    enabled: !!session?.user,
   });
+
+  const project = useMemo(() => allProjects?.find(p => p.project_id === projectId), [allProjects, projectId]);
+
+  useEffect(() => {
+    if (project) {
+      setNewProjectName(project.project_name);
+    }
+  }, [project]);
 
   const { data: jobs, isLoading: isLoadingJobs, refetch: refetchJobs } = useQuery<Job[]>({
     queryKey: ['projectJobs', projectId],
@@ -99,8 +113,7 @@ const ProjectDetail = () => {
     return Array.from(new Map(allImages.map(item => [item.publicUrl, item])).values());
   }, [jobs]);
 
-  const latestImageUrl = projectImages.length > 0 ? projectImages[0].publicUrl : null;
-  const { displayUrl: latestImageDisplayUrl, isLoading: isLoadingLatestImage } = useSecureImage(latestImageUrl);
+  const { displayUrl: keyVisualDisplayUrl, isLoading: isLoadingKeyVisual } = useSecureImage(project?.latest_image_url);
 
   const handleRenameProject = async () => {
     if (!newProjectName.trim() || !projectId) return;
@@ -109,7 +122,6 @@ const ProjectDetail = () => {
       const { error } = await supabase.from('projects').update({ name: newProjectName }).eq('id', projectId);
       if (error) throw error;
       showSuccess("Project renamed.");
-      await queryClient.invalidateQueries({ queryKey: ['project', projectId] });
       await queryClient.invalidateQueries({ queryKey: ['projectPreviews'] });
       setIsRenameModalOpen(false);
     } catch (err: any) {
@@ -148,7 +160,7 @@ const ProjectDetail = () => {
     try {
       const { error } = await supabase.rpc('update_job_project', { p_job_id: jobData.id, p_project_id: projectId });
       if (error) throw error;
-      showSuccess(`Moved "${jobData.original_prompt}" to ${project?.name}.`);
+      showSuccess(`Moved "${jobData.original_prompt}" to ${project?.project_name}.`);
       await Promise.all([
         refetchJobs(),
         queryClient.invalidateQueries({ queryKey: ['jobHistory'] }),
@@ -202,6 +214,21 @@ const ProjectDetail = () => {
     }
   };
 
+  const handleSetKeyVisual = async (imageUrl: string) => {
+    if (!projectId) return;
+    const toastId = showLoading("Setting key visual...");
+    try {
+      const { error } = await supabase.rpc('set_project_key_visual', { p_project_id: projectId, p_image_url: imageUrl });
+      if (error) throw error;
+      dismissToast(toastId);
+      showSuccess("Key visual updated.");
+      await queryClient.invalidateQueries({ queryKey: ['projectPreviews'] });
+    } catch (err: any) {
+      dismissToast(toastId);
+      showError(`Failed to set key visual: ${err.message}`);
+    }
+  };
+
   if (isLoadingProject) {
     return <div className="p-8"><Skeleton className="h-12 w-1/3" /></div>;
   }
@@ -216,26 +243,21 @@ const ProjectDetail = () => {
         <header className="pb-4 mb-4 border-b shrink-0 flex justify-between items-center">
           <h1 className="text-3xl font-bold flex items-center gap-3">
             {isDraggingOver ? <Move className="h-8 w-8 text-primary" /> : <Folder className="h-8 w-8 text-primary" />}
-            {project.name}
+            {project.project_name}
           </h1>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={() => setIsImageManagerOpen(true)}><ImagePlus className="h-4 w-4 mr-2" />Add Images</Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild><Button variant="ghost" size="icon"><MoreVertical className="h-4 w-4" /></Button></DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => setIsRenameModalOpen(true)}><Pencil className="mr-2 h-4 w-4" />Rename</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => setIsDeleteAlertOpen(true)} className="text-destructive"><Trash2 className="mr-2 h-4 w-4" />Delete</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild><Button variant="ghost" size="icon"><MoreVertical className="h-4 w-4" /></Button></DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => setIsRenameModalOpen(true)}><Pencil className="mr-2 h-4 w-4" />Rename</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setIsDeleteAlertOpen(true)} className="text-destructive"><Trash2 className="mr-2 h-4 w-4" />Delete</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </header>
 
         <Alert className="mb-8 shrink-0">
           <Info className="h-4 w-4" />
           <AlertTitle>{t('howProjectsWork')}</AlertTitle>
-          <AlertDescription>
-            {t('projectDetailDropInfo')}
-          </AlertDescription>
+          <AlertDescription>{t('projectDetailDropInfo')}</AlertDescription>
         </Alert>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 flex-1 overflow-hidden relative">
@@ -268,10 +290,13 @@ const ProjectDetail = () => {
           <div className="lg:col-span-2 flex flex-col gap-8 overflow-hidden">
             <Card>
               <CardHeader><CardTitle>{t('keyVisualTitle')}</CardTitle><p className="text-sm text-muted-foreground">{t('keyVisualDescription')}</p></CardHeader>
-              <CardContent><div className="aspect-square max-h-64 mx-auto bg-muted rounded-lg flex items-center justify-center overflow-hidden">{isLoadingLatestImage ? <Skeleton className="w-full h-full" /> : latestImageDisplayUrl ? (<img src={latestImageDisplayUrl} alt="Latest project image" className="w-full h-full object-contain" />) : (<ImageIcon className="h-16 w-16 text-muted-foreground" />)}</div></CardContent>
+              <CardContent><div className="aspect-square max-h-64 mx-auto bg-muted rounded-lg flex items-center justify-center overflow-hidden">{isLoadingKeyVisual ? <Skeleton className="w-full h-full" /> : keyVisualDisplayUrl ? (<img src={keyVisualDisplayUrl} alt="Latest project image" className="w-full h-full object-contain" />) : (<ImageIcon className="h-16 w-16 text-muted-foreground" />)}</div></CardContent>
             </Card>
             <Card className="flex-1 flex flex-col overflow-hidden">
-              <CardHeader><CardTitle>{t('projectGalleryTitle')} ({projectImages.length})</CardTitle></CardHeader>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <CardTitle>{t('projectGalleryTitle')} ({projectImages.length})</CardTitle>
+                <Button variant="outline" size="sm" onClick={() => setIsImageManagerOpen(true)}><ImagePlus className="h-4 w-4 mr-2" />Add Images</Button>
+              </CardHeader>
               <CardContent className="flex-1 overflow-hidden">
                 <ScrollArea className="h-full">
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 pr-4">
@@ -280,7 +305,10 @@ const ProjectDetail = () => {
                         <button onClick={() => showImage({ images: projectImages.map(img => ({ url: img.publicUrl, jobId: img.jobId })), currentIndex: index })} className="aspect-square block w-full h-full">
                           <img src={image.publicUrl} alt={`Project image ${index + 1}`} className="w-full h-full object-cover rounded-md hover:opacity-80 transition-opacity" />
                         </button>
-                        <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col gap-1">
+                          <Button variant="secondary" size="icon" className="h-7 w-7" title="Set as Key Visual" onClick={() => handleSetKeyVisual(image.publicUrl)}>
+                            <Star className="h-4 w-4" />
+                          </Button>
                           <Button variant="destructive" size="icon" className="h-7 w-7" title="Delete Image & Source Job" onClick={() => setJobToDelete(image.jobId)}>
                             <Trash2 className="h-4 w-4" />
                           </Button>
@@ -306,14 +334,14 @@ const ProjectDetail = () => {
 
       <AlertDialog open={isDeleteAlertOpen} onOpenChange={setIsDeleteAlertOpen}>
         <AlertDialogContent>
-          <AlertDialogHeader><AlertDialogTitle>Are you sure?</AlertDialogTitle><AlertDialogDescription>This will delete the project "{project.name}". All chats within it will become unassigned. This action cannot be undone.</AlertDialogDescription></AlertDialogHeader>
+          <AlertDialogHeader><AlertDialogTitle>Are you sure?</AlertDialogTitle><AlertDialogDescription>This will delete the project "{project.project_name}". All chats within it will become unassigned. This action cannot be undone.</AlertDialogDescription></AlertDialogHeader>
           <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={handleDeleteProject} disabled={isUpdating} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">{isUpdating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Delete Project</AlertDialogAction></AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
       <AlertDialog open={!!jobToUnassign} onOpenChange={(open) => !open && setJobToUnassign(null)}>
         <AlertDialogContent>
-          <AlertDialogHeader><AlertDialogTitle>Remove Chat from Project?</AlertDialogTitle><AlertDialogDescription>This will remove the chat from "{project.name}" and make it unassigned. It will not be deleted.</AlertDialogDescription></AlertDialogHeader>
+          <AlertDialogHeader><AlertDialogTitle>Remove Chat from Project?</AlertDialogTitle><AlertDialogDescription>This will remove the chat from "{project.project_name}" and make it unassigned. It will not be deleted.</AlertDialogDescription></AlertDialogHeader>
           <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={handleConfirmUnassign}>Remove</AlertDialogAction></AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -325,7 +353,7 @@ const ProjectDetail = () => {
         </AlertDialogContent>
       </AlertDialog>
 
-      {project && <ProjectImageManagerModal project={{ project_id: projectId!, project_name: project.name }} isOpen={isImageManagerOpen} onClose={() => setIsImageManagerOpen(false)} />}
+      {project && <ProjectImageManagerModal project={{ project_id: projectId!, project_name: project.project_name }} isOpen={isImageManagerOpen} onClose={() => setIsImageManagerOpen(false)} />}
     </>
   );
 };
