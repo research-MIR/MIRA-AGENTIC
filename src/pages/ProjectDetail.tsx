@@ -272,7 +272,7 @@ const ProjectDetail = () => {
                 <CardTitle>{t('projectChatsTitle')} ({jobs?.length || 0})</CardTitle>
                 <Button variant="outline" size="sm" onClick={() => setIsManageChatsModalOpen(true)}>
                   <ListMinus className="h-4 w-4 mr-2" />
-                  Manage
+                  {t('manageChats')}
                 </Button>
               </CardHeader>
               <CardContent className="flex-1 overflow-hidden">
@@ -343,8 +343,8 @@ const ProjectDetail = () => {
       <Dialog open={isManageChatsModalOpen} onOpenChange={setIsManageChatsModalOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Manage Chats in "{project.project_name}"</DialogTitle>
-            <DialogDescription>Remove chats from this project. They will not be deleted, only unassigned.</DialogDescription>
+            <DialogTitle>{t('manageChatsInProject').replace('{projectName}', project.project_name)}</DialogTitle>
+            <DialogDescription>{t('manageChatsDescription')}</DialogDescription>
           </DialogHeader>
           <ScrollArea className="max-h-[60vh] my-4">
             <div className="space-y-2 pr-4">
@@ -359,7 +359,7 @@ const ProjectDetail = () => {
             </div>
           </ScrollArea>
           <DialogFooter>
-            <Button onClick={() => setIsManageChatsModalOpen(false)}>Done</Button>
+            <Button onClick={() => setIsManageChatsModalOpen(false)}>{t('done')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
