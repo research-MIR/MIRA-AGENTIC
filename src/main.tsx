@@ -21,15 +21,15 @@ createRoot(document.getElementById("root")!).render(
       <SessionContextProvider>
         <LanguageProvider>
           <QueryClientProvider client={queryClient}>
-            <OnboardingTourProvider>
-              <ImagePreviewProvider modal={(data, onClose) => <ImagePreviewModal data={data} onClose={onClose} />}>
-                <TooltipProvider>
-                  <Toaster />
-                  <Sonner position="top-right" />
-                  <App />
-                </TooltipProvider>
-              </ImagePreviewProvider>
-            </OnboardingTourProvider>
+            <ImagePreviewProvider modal={(data, onClose) => <ImagePreviewModal data={data} onClose={onClose} />}>
+              <OnboardingTourProvider>
+                  <TooltipProvider>
+                    <Toaster />
+                    <Sonner position="top-right" />
+                    <App />
+                  </TooltipProvider>
+              </OnboardingTourProvider>
+            </ImagePreviewProvider>
           </QueryClientProvider>
         </LanguageProvider>
       </SessionContextProvider>
