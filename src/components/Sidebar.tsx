@@ -184,7 +184,7 @@ export const Sidebar = () => {
                         <NavLink to={`/chat/${job.id}`} className={({ isActive }) => `block p-2 rounded-md text-sm truncate pr-24 ${isActive ? 'bg-primary text-primary-foreground font-semibold' : 'hover:bg-muted'}`}>
                             {job.original_prompt || "Untitled Chat"}
                         </NavLink>
-                        <div className="absolute right-1 top-1/2 -translate-y-1/2 hidden group-hover:flex items-center gap-0.5 bg-muted/80 rounded-md">
+                        <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5 rounded-md bg-muted/80 opacity-0 transition-opacity group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto">
                             <Button variant="ghost" size="icon" className="h-7 w-7" title="Add to project" onClick={(e) => { e.preventDefault(); setMovingJob(job); }}>
                             <FolderPlus className="h-4 w-4" />
                             </Button>
