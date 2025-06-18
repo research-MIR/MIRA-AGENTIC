@@ -203,7 +203,7 @@ const Developer = () => {
                   <Textarea id="seg-prompt" value={segPrompt} onChange={(e) => setSegPrompt(e.target.value)} />
                 </div>
                 {segPersonImageUrl && (
-                  <div className="relative w-full max-w-md mx-auto max-h-96 bg-muted rounded-md overflow-hidden flex justify-center items-center">
+                  <div className="relative w-full max-w-md mx-auto max-h-96 bg-muted rounded-md flex justify-center items-center">
                     <img src={segPersonImageUrl} alt="Segmentation Source" className="w-full h-full object-contain" />
                     {segmentationResult && sourceImageDimensions && (
                         <SegmentationMask 
@@ -228,7 +228,7 @@ const Developer = () => {
                                     className="mt-1 h-48 font-mono text-xs"
                                 />
                             </div>
-                            <div className="max-h-96 bg-muted rounded-md overflow-hidden flex justify-center items-center">
+                            <div className="max-h-96 bg-muted rounded-md flex justify-center items-center">
                                 <Label>Corresponding Mask</Label>
                                 <SecureImageDisplay imageUrl={maskImageUrl} alt="Segmentation Mask" />
                             </div>
@@ -242,7 +242,7 @@ const Developer = () => {
                 {croppedImageUrl && (
                   <div className="space-y-4 pt-4 border-t">
                     <h3 className="font-semibold">Crop Result</h3>
-                    <div className="max-h-96 bg-muted rounded-md overflow-hidden flex justify-center items-center">
+                    <div className="max-h-96 bg-muted rounded-md flex justify-center items-center">
                       <SecureImageDisplay imageUrl={croppedImageUrl} alt="Cropped Result" />
                     </div>
                   </div>
