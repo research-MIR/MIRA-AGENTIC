@@ -49,8 +49,35 @@ export const ActiveJobsTracker = () => {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'mira-agent-comfyui-jobs', filter: `user_id=eq.${session?.user?.id}` },
         (payload) => {
-          console.log('[ActiveJobsTracker] Realtime event received:', payload.eventType);
+          console.log('[ActiveJobsTracker] Realtime event received:', payload.eventType, payload.new.id);
           const updatedJob = payload.new as ComfyJob;
+
+          // Imperatively update the active jobs query cache
+          queryClient.setQueryData(['activeComfyJobs', session.user.id], (oldData: ComfyJob[] | undefined) => {
+            const existingJobs = oldData || [];
+            if (updatedJob.status === 'complete' || updatedJob.status === 'failed') {
+              return existingJobs.filter(job => job.id !== updatedJob.id);
+            }
+            const jobIndex = existingJobs.findIndex(job => job.id === updatedJob.id);
+            if (jobIndex !== -1) {
+              const newJobs = [...existingJobs];
+              newJobs[jobIndex] = updatedJob;
+              return newJobs;
+            }
+            return [updatedJob, ...existingJobs];
+          });
+
+          // Imperatively update the recent jobs query cache (for Refine page)
+          queryClient.setQueryData(['recentRefinerJobs', session.user.id], (oldData: ComfyJob[] | undefined) => {
+            const existingJobs = oldData || [];
+            const jobIndex = existingJobs.findIndex(job => job.id === updatedJob.id);
+            if (jobIndex !== -1) {
+              const newJobs = [...existingJobs];
+              newJobs[jobIndex] = updatedJob;
+              return newJobs;
+            }
+            return [updatedJob, ...existingJobs];
+          });
           
           if (payload.eventType === 'UPDATE' && (updatedJob.status === 'complete' || updatedJob.status === 'failed')) {
             if (updatedJob.status === 'complete' && updatedJob.final_result?.publicUrl) {
@@ -61,10 +88,7 @@ export const ActiveJobsTracker = () => {
             }
           }
           
-          // Invalidate queries to force refetch across the app
-          queryClient.invalidateQueries({ queryKey: ['activeComfyJobs'] });
           queryClient.invalidateQueries({ queryKey: ['galleryJobs'] });
-          queryClient.invalidateQueries({ queryKey: ['recentRefinerJobs'] });
         }
       )
       .subscribe();
