@@ -164,13 +164,13 @@ export const Sidebar = () => {
             {t.developer}
           </NavLink>
         </nav>
-        <div className="flex-1 flex flex-col px-2">
-            <div className="flex justify-between items-center w-full p-2">
+        <div className="flex-1 flex flex-col">
+            <div className="flex justify-between items-center w-full px-4 pt-2 pb-2">
                 <h2 className="text-sm font-semibold text-muted-foreground">Recent Chats</h2>
                 <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); setIsSettingsModalOpen(true); }}><Settings className="h-4 w-4" /></Button>
             </div>
             <ScrollArea className="flex-1">
-                <div className="p-2 space-y-1">
+                <div className="px-2 pb-2 space-y-1">
                     {isLoadingJobs ? (
                     <div className="space-y-2">
                         {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}
