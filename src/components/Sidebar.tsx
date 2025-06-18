@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { NavLink, useNavigate, useParams } from "react-router-dom";
 import { Button } from "./ui/button";
-import { MessageSquare, Image, GalleryHorizontal, LogOut, HelpCircle, LogIn, Shirt, Code, Wand2, PencilRuler, Edit, Trash2, Settings, FolderPlus, Move, LayoutGrid } from "lucide-react";
+import { MessageSquare, Image, GalleryHorizontal, LogOut, HelpCircle, LogIn, Shirt, Code, Wand2, PencilRuler, Edit, Trash2, Settings, FolderPlus, LayoutGrid } from "lucide-react";
 import { useSession } from "./Auth/SessionContextProvider";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -10,7 +10,7 @@ import { useLanguage } from "@/context/LanguageContext";
 import { useOnboardingTour } from "@/context/OnboardingTourContext";
 import { ActiveJobsTracker } from "@/components/Jobs/ActiveJobsTracker";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { RadioGroup, RadioGroupItem } from "./ui/radio-group";
