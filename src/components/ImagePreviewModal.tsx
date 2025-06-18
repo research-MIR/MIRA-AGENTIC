@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Download, Wand2, Loader2, AlertTriangle } from "lucide-react";
+import { Download, Wand2, Loader2 } from "lucide-react";
 import { downloadImage } from "@/lib/utils";
 import { useSession } from "./Auth/SessionContextProvider";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
@@ -10,37 +10,11 @@ import { useLanguage } from "@/context/LanguageContext";
 import { useQueryClient } from "@tanstack/react-query";
 import { type PreviewData, type PreviewImage } from "@/context/ImagePreviewContext";
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious, type CarouselApi } from "@/components/ui/carousel";
-import { useSecureImage } from "@/hooks/useSecureImage";
 
 interface ImagePreviewModalProps {
   data: PreviewData | null;
   onClose: () => void;
 }
-
-const ImageWithLoader = ({ imageUrl }: { imageUrl: string }) => {
-  const { displayUrl, isLoading, error } = useSecureImage(imageUrl);
-
-  if (isLoading) {
-    return (
-      <div className="w-full h-full flex items-center justify-center bg-muted rounded-md min-h-[50vh]">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
-
-  if (error || !displayUrl) {
-    return (
-      <div className="w-full h-full flex items-center justify-center bg-destructive/10 rounded-md text-destructive text-sm p-4 min-h-[50vh]">
-        <AlertTriangle className="h-5 w-5 mr-2" />
-        Error loading image.
-      </div>
-    );
-  }
-
-  return (
-    <img src={displayUrl} alt="Preview" className="max-h-[90vh] w-full object-contain rounded-md" />
-  );
-};
 
 export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => {
   const { supabase, session } = useSession();
@@ -53,7 +27,6 @@ export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => 
   useEffect(() => {
     if (!data) return;
     if (!api) {
-      // Handle the case where there's only one image and the carousel API might not be needed
       if (data.images.length > 0) {
         setCurrentImage(data.images[data.currentIndex]);
       }
@@ -67,7 +40,7 @@ export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => 
     };
 
     api.on("select", handleSelect);
-    handleSelect(); // Set initial image
+    handleSelect();
 
     return () => {
       api.off("select", handleSelect);
@@ -90,7 +63,6 @@ export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => 
     let toastId = showLoading("Analyzing image to create prompt...");
     
     try {
-      // Step 1: Fetch the image blob and convert to base64 for auto-prompting
       const imageResponse = await fetch(currentImage.url);
       if (!imageResponse.ok) throw new Error("Failed to fetch image for analysis.");
       const imageBlob = await imageResponse.blob();
@@ -102,7 +74,6 @@ export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => 
       });
       const base64Data = base64String.split(',')[1];
 
-      // Step 2: Get the auto-generated prompt
       const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-auto-describe-image', {
         body: { base64_image_data: base64Data, mime_type: imageBlob.type }
       });
@@ -113,11 +84,10 @@ export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => 
       dismissToast(toastId);
       toastId = showLoading(`Submitting x${factor} upscale job...`);
 
-      // Step 3: Queue the job in ComfyUI using the existing proxy
       const { error: queueError } = await supabase.functions.invoke('MIRA-AGENT-proxy-comfyui', {
         body: {
           prompt_text: autoPrompt,
-          image_url: currentImage.url, // Pass the original URL to the proxy
+          image_url: currentImage.url,
           invoker_user_id: session.user.id,
           upscale_factor: factor,
           original_prompt_for_gallery: `Upscaled from job ${currentImage.jobId || 'gallery'}`
@@ -149,7 +119,7 @@ export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => 
             <CarouselContent>
               {data.images.map((image, index) => (
                 <CarouselItem key={index}>
-                  <ImageWithLoader imageUrl={image.url} />
+                  <img src={image.url} alt="Preview" className="max-h-[90vh] w-full object-contain rounded-md" />
                 </CarouselItem>
               ))}
             </CarouselContent>

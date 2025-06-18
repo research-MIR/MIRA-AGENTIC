@@ -1,24 +1,27 @@
-import { useState, useMemo } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useSession } from "@/components/Auth/SessionContextProvider";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Loader2, Image as ImageIcon, Sparkles, Wand2, UploadCloud, X, PlusCircle, AlertTriangle, CheckCircle } from "lucide-react";
+import { Loader2, Image as ImageIcon, Sparkles, Wand2, UploadCloud, X, PlusCircle, AlertTriangle, CheckCircle, Settings } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { useFileUpload } from "@/hooks/useFileUpload";
 import { ImageCompareModal } from "@/components/ImageCompareModal";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
-import { cn } from "@/lib/utils";
+import { cn, sanitizeFilename } from "@/lib/utils";
 import { RecentJobThumbnail } from "@/components/Jobs/RecentJobThumbnail";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useSecureImage } from "@/hooks/useSecureImage";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSession } from "@/components/Auth/SessionContextProvider";
+import { RealtimeChannel } from "@supabase/supabase-js";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { optimizeImage } from "@/lib/utils";
 
 interface VtoPipelineJob {
   id: string;
@@ -30,25 +33,6 @@ interface VtoPipelineJob {
     source_image_url?: string;
   };
 }
-
-const SecureDisplayImage = ({ imageUrl, onClear, showClearButton = false }: { imageUrl: string | null, onClear?: () => void, showClearButton?: boolean }) => {
-  const { displayUrl, isLoading, error } = useSecureImage(imageUrl);
-
-  if (!imageUrl) return null;
-
-  return (
-    <div className="relative w-full h-full">
-      {isLoading && <Skeleton className="w-full h-full" />}
-      {error && <div className="w-full h-full bg-destructive/10 rounded-md flex items-center justify-center text-destructive text-sm p-2"><AlertTriangle className="h-6 w-6 mr-2" />Error loading image.</div>}
-      {displayUrl && <img src={displayUrl} alt="Source for refinement" className="w-full h-full object-contain" />}
-      {showClearButton && onClear && (
-        <Button variant="destructive" size="icon" className="absolute top-2 right-2 h-6 w-6 rounded-full" onClick={onClear}>
-          <X className="h-4 w-4" />
-        </Button>
-      )}
-    </div>
-  );
-};
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -195,10 +179,13 @@ const Refine = () => {
               <CardHeader><CardTitle>{t('sourceImage')}</CardTitle></CardHeader>
               <CardContent>
                 {sourceImageUrl ? (
-                  <div className="max-w-sm mx-auto">
+                  <div className="max-w-sm mx-auto relative">
                     <div className="w-full aspect-square bg-muted rounded-md overflow-hidden flex justify-center items-center">
-                      <SecureDisplayImage imageUrl={sourceImageUrl} onClear={startNew} showClearButton={true} />
+                      <img src={sourceImageUrl} alt="Source for refinement" className="w-full h-full object-contain" />
                     </div>
+                    <Button variant="destructive" size="icon" className="absolute top-2 right-2 h-6 w-6 rounded-full" onClick={startNew}>
+                      <X className="h-4 w-4" />
+                    </Button>
                   </div>
                 ) : (
                   <div className="p-4 border-2 border-dashed rounded-lg text-center">
@@ -274,12 +261,12 @@ const Refine = () => {
                     <div className="grid grid-cols-2 gap-4">
                       <div className="w-full aspect-square bg-muted rounded-md overflow-hidden flex justify-center items-center">
                         <h3 className="font-semibold mb-2 absolute top-2 left-2 bg-background/80 px-2 py-1 rounded-full text-xs">{t('originalImage')}</h3>
-                        <SecureDisplayImage imageUrl={selectedJob.metadata?.source_image_url || null} />
+                        {selectedJob.metadata?.source_image_url && <img src={selectedJob.metadata.source_image_url} alt="Original" className="w-full h-full object-contain" />}
                       </div>
                       <div className="w-full aspect-square bg-muted rounded-md overflow-hidden flex justify-center items-center">
                         <h3 className="font-semibold mb-2 absolute top-2 left-2 bg-background/80 px-2 py-1 rounded-full text-xs">{t('refinedImage')}</h3>
                         {resultImageUrl ? (
-                          <SecureDisplayImage imageUrl={resultImageUrl} />
+                          <img src={resultImageUrl} alt="Refined" className="w-full h-full object-contain" />
                         ) : (
                           <div className="w-full h-full flex flex-col items-center justify-center text-muted-foreground">
                             <Loader2 className="h-8 w-8 animate-spin" />

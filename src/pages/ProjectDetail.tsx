@@ -7,7 +7,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Folder, MessageSquare, Image as ImageIcon, MoreVertical, Pencil, Trash2, ImagePlus, Loader2, Move, Info, X, Star, ListMinus, Share2 } from "lucide-react";
 import { useImagePreview } from "@/context/ImagePreviewContext";
-import { useSecureImage } from "@/hooks/useSecureImage";
 import { useLanguage } from "@/context/LanguageContext";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
@@ -116,8 +115,6 @@ const ProjectDetail = () => {
     }
     return Array.from(new Map(allImages.map(item => [item.publicUrl, item])).values());
   }, [jobs]);
-
-  const { displayUrl: keyVisualDisplayUrl, isLoading: isLoadingKeyVisual } = useSecureImage(project?.latest_image_url);
 
   const handleRenameProject = async () => {
     if (!newProjectName.trim() || !projectId) return;
@@ -302,7 +299,7 @@ const ProjectDetail = () => {
               <CardHeader><CardTitle>{t('keyVisualTitle')}</CardTitle><p className="text-sm text-muted-foreground">{t('keyVisualDescription')}</p></CardHeader>
               <CardContent>
                 <div className="h-64 w-full flex items-center justify-center bg-muted rounded-lg overflow-hidden">
-                  {isLoadingKeyVisual ? <Skeleton className="w-full h-full" /> : keyVisualDisplayUrl ? (<img src={keyVisualDisplayUrl} alt="Latest project image" className="max-w-full max-h-full object-contain" />) : (<ImageIcon className="h-16 w-16 text-muted-foreground" />)}
+                  {project.latest_image_url ? (<img src={project.latest_image_url} alt="Latest project image" className="max-w-full max-h-full object-contain" />) : (<ImageIcon className="h-16 w-16 text-muted-foreground" />)}
                 </div>
               </CardContent>
             </Card>
@@ -376,7 +373,7 @@ const ProjectDetail = () => {
             <Button onClick={() => setIsManageChatsModalOpen(false)}>{t('done')}</Button>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
+      </AlertDialog>
 
       <AlertDialog open={!!jobToDelete} onOpenChange={(open) => !open && setJobToDelete(null)}>
         <AlertDialogContent>
