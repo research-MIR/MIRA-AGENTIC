@@ -137,7 +137,7 @@ const Projects = () => {
     }
   };
 
-  const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: handleDrop });
+  const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: () => {} });
 
   return (
     <div className="h-full" {...dropzoneProps}>
