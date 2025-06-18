@@ -6,7 +6,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Folder, MessageSquare, Image as ImageIcon, MoreVertical, Pencil, Trash2, ImagePlus, Loader2, Move, Info, X, Star, ListMinus, Share2 } from "lucide-react";
-import { useImagePreview } from "@/context/ImagePreviewContext";
 import { useSecureImage } from "@/hooks/useSecureImage";
 import { useLanguage } from "@/context/LanguageContext";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -46,7 +45,6 @@ interface ProjectPreview {
 const ProjectDetail = () => {
   const { projectId } = useParams();
   const { supabase, session } = useSession();
-  const { showImage } = useImagePreview();
   const { t } = useLanguage();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -316,9 +314,9 @@ const ProjectDetail = () => {
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 pr-4">
                     {projectImages.map((image, index) => (
                       <div key={image.publicUrl} className="group relative">
-                        <button onClick={() => showImage({ images: projectImages.map(img => ({ url: img.publicUrl, jobId: img.jobId })), currentIndex: index })} className="aspect-square block w-full h-full">
-                          <img src={image.publicUrl} alt={`Project image ${index + 1}`} className="w-full h-full object-cover rounded-md hover:opacity-80 transition-opacity" />
-                        </button>
+                        <div className="aspect-square block w-full h-full">
+                          <img src={image.publicUrl} alt={`Project image ${index + 1}`} className="w-full h-full object-cover rounded-md" />
+                        </div>
                         <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col gap-1">
                           <Button variant="secondary" size="icon" className="h-7 w-7" title="Set as Key Visual" onClick={() => handleSetKeyVisual(image.publicUrl)}>
                             <Star className="h-4 w-4" />
