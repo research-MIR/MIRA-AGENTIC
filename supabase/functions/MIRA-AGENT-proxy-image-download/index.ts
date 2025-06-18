@@ -1,6 +1,5 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -36,34 +35,24 @@ serve(async (req) => {
         throw new Error(`Could not extract a bucket name or file path from the URL: ${url}`);
     }
 
-    console.log(`[ImageProxyV2] Creating signed URL for bucket '${bucketName}' with path '${filePath}'`);
+    console.log(`[ImageProxyV3] Creating signed URL for bucket '${bucketName}' with path '${filePath}'`);
 
     // Create a short-lived signed URL to access the file securely.
-    const { data: signedUrlData, error: signedUrlError } = await supabase.storage
+    const { data, error } = await supabase.storage
       .from(bucketName)
-      .createSignedUrl(filePath, 60); // Expires in 60 seconds
+      .createSignedUrl(filePath, 300); // Create a URL valid for 5 minutes
 
-    if (signedUrlError) {
-      throw new Error(`Failed to create signed URL: ${signedUrlError.message}`);
+    if (error) {
+      throw error;
     }
 
-    console.log(`[ImageProxyV2] Fetching image from signed URL...`);
-    const response = await fetch(signedUrlData.signedUrl);
-    if (!response.ok) {
-        throw new Error(`Failed to fetch image from signed URL. Status: ${response.status}`);
-    }
-
-    const blob = await response.blob();
-    const buffer = await blob.arrayBuffer();
-    const base64 = encodeBase64(buffer);
-    
-    return new Response(JSON.stringify({ base64, mimeType: blob.type }), {
+    return new Response(JSON.stringify({ signedUrl: data.signedUrl }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });
 
   } catch (error) {
-    console.error("[ImageProxyV2] Error:", error);
+    console.error("[ImageProxyV3] Error:", error);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,

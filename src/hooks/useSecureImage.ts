@@ -14,31 +14,25 @@ export const useSecureImage = (imageUrl: string | null | undefined) => {
         return;
       }
       
-      console.log(`[useSecureImage] Received URL: ${imageUrl}`);
       setIsLoading(true);
       setError(null);
 
       try {
         // If it's already a data URL or a local blob, just use it directly.
         if (imageUrl.startsWith('data:image') || imageUrl.startsWith('blob:')) {
-          console.log("[useSecureImage] Handling local data/blob URL directly.");
           setDisplayUrl(imageUrl);
         } else {
-          // For ANY other URL (Supabase or external), use our reliable server-side proxy.
-          console.log("[useSecureImage] Using proxy to fetch image.");
+          // For all other URLs, get a secure, short-lived signed URL from our proxy.
           const { data: proxyData, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-image-download', { body: { url: imageUrl } });
           
           if (proxyError) {
-            console.error(`[useSecureImage] Proxy error for URL "${imageUrl}":`, proxyError);
             throw new Error(`Proxy failed: ${proxyError.message}`);
           }
           
-          if (proxyData.base64 && proxyData.mimeType) {
-            const dataUrl = `data:${proxyData.mimeType};base64,${proxyData.base64}`;
-            setDisplayUrl(dataUrl);
-            console.log(`[useSecureImage] Successfully created data URL from proxy.`);
+          if (proxyData.signedUrl) {
+            setDisplayUrl(proxyData.signedUrl);
           } else {
-            throw new Error("Proxy did not return valid image data.");
+            throw new Error("Proxy did not return a signed URL.");
           }
         }
       } catch (err: any) {
