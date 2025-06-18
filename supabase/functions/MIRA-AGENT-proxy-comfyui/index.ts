@@ -95,15 +95,15 @@ const workflowTemplate = `
       "cfg": 1,
       "sampler_name": "euler",
       "scheduler": "normal",
-      "denoise": 0.10,
+      "denoise": 0.14,
       "mode_type": "Linear",
       "tile_width": 1024,
       "tile_height": 1024,
       "mask_blur": 64,
-      "tile_padding": 256,
+      "tile_padding": 512,
       "seam_fix_mode": "None",
-      "seam_fix_denoise": 1,
-      "seam_fix_width": 64,
+      "seam_fix_denoise": 0.4000000000000001,
+      "seam_fix_width": 0,
       "seam_fix_mask_blur": 8,
       "seam_fix_padding": 16,
       "force_uniform_tiles": true,
@@ -209,7 +209,7 @@ const workflowTemplate = `
   "415": {
     "inputs": {
       "lora_name": "IDunnohowtonameLora.safetensors",
-      "strength_model": 0.25000000000000006,
+      "strength_model": 0.4000000000000001,
       "model": [
         "414",
         0
@@ -304,7 +304,7 @@ const workflowTemplate = `
   "423": {
     "inputs": {
       "dishonesty_factor": -0.020000000000000004,
-      "start_percent": 0.28,
+      "start_percent": 0.3600000000000001,
       "end_percent": 0.9500000000000002,
       "sampler": [
         "422",
@@ -320,7 +320,7 @@ const workflowTemplate = `
     "inputs": {
       "scheduler": "sgm_uniform",
       "steps": 20,
-      "denoise": 0.30000000000000004,
+      "denoise": 0.15000000000000002,
       "model": [
         "418",
         0
@@ -334,7 +334,7 @@ const workflowTemplate = `
   "430": {
     "inputs": {
       "images": [
-        "442",
+        "432",
         0
       ]
     },
@@ -347,7 +347,7 @@ const workflowTemplate = `
     "inputs": {
       "filename_prefix": "Output",
       "images": [
-        "442",
+        "432",
         0
       ]
     },
@@ -367,14 +367,14 @@ const workflowTemplate = `
       "cfg": 1,
       "sampler_name": "euler",
       "scheduler": "normal",
-      "denoise": 0.10000000000000004,
+      "denoise": 0.17000000000000004,
       "mode_type": "Linear",
       "tile_width": 1024,
       "tile_height": 1024,
       "mask_blur": 64,
-      "tile_padding": 256,
+      "tile_padding": 512,
       "seam_fix_mode": "None",
-      "seam_fix_denoise": 1,
+      "seam_fix_denoise": 0.4000000000000001,
       "seam_fix_width": 64,
       "seam_fix_mask_blur": 8,
       "seam_fix_padding": 16,
@@ -429,56 +429,6 @@ const workflowTemplate = `
     "class_type": "MathExpression|pysssss",
     "_meta": {
       "title": "Math Expression 🐍"
-    }
-  },
-  "440": {
-    "inputs": {
-      "method": "hard",
-      "type": "median",
-      "intensity": 2,
-      "images": [
-        "432",
-        0
-      ]
-    },
-    "class_type": "Image Sharpen FS",
-    "_meta": {
-      "title": "Image Sharpen FS"
-    }
-  },
-  "441": {
-    "inputs": {
-      "density": 1,
-      "intensity": 1,
-      "highlights": 1,
-      "supersample_factor": 8,
-      "repeats": 1,
-      "image": [
-        "432",
-        0
-      ]
-    },
-    "class_type": "Film Grain",
-    "_meta": {
-      "title": "Film Grain"
-    }
-  },
-  "442": {
-    "inputs": {
-      "mode": "soft_light",
-      "blend_percentage": 0.05000000000000001,
-      "image_a": [
-        "440",
-        0
-      ],
-      "image_b": [
-        "441",
-        0
-      ]
-    },
-    "class_type": "Image Blending Mode",
-    "_meta": {
-      "title": "Image Blending Mode"
     }
   }
 }
