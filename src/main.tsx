@@ -17,9 +17,9 @@ const queryClient = new QueryClient();
 
 createRoot(document.getElementById("root")!).render(
   <BrowserRouter>
-    <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-      <SessionContextProvider>
-        <LanguageProvider>
+    <LanguageProvider>
+      <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+        <SessionContextProvider>
           <QueryClientProvider client={queryClient}>
             <ImagePreviewProvider modal={(data, onClose) => <ImagePreviewModal data={data} onClose={onClose} />}>
               <OnboardingTourProvider>
@@ -31,8 +31,8 @@ createRoot(document.getElementById("root")!).render(
               </OnboardingTourProvider>
             </ImagePreviewProvider>
           </QueryClientProvider>
-        </LanguageProvider>
-      </SessionContextProvider>
-    </ThemeProvider>
+        </SessionContextProvider>
+      </ThemeProvider>
+    </LanguageProvider>
   </BrowserRouter>
 );
