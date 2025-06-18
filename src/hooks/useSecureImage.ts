@@ -8,7 +8,6 @@ export const useSecureImage = (imageUrl: string | null | undefined) => {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    let objectUrl: string | null = null;
     const loadImage = async () => {
       if (!imageUrl) {
         setDisplayUrl(null);
@@ -22,24 +21,33 @@ export const useSecureImage = (imageUrl: string | null | undefined) => {
         if (imageUrl.startsWith('data:image') || imageUrl.startsWith('blob:')) {
           setDisplayUrl(imageUrl);
         } else if (imageUrl.includes('supabase.co')) {
+          // This is a Supabase URL. Instead of downloading, we will reconstruct the public URL
+          // to ensure it's correct, even if the stored one is malformed.
           const url = new URL(imageUrl);
+          const pathSegments = url.pathname.split('/');
           
-          // More robust regex to handle URLs with or without /public/
-          const bucketMatch = url.pathname.match(/\/object\/public\/([a-zA-Z0-9_-]+)\/|\/object\/([a-zA-Z0-9_-]+)\//);
-          if (!bucketMatch) {
-            throw new Error("Could not determine bucket name from Supabase URL.");
+          // Find the bucket name, which is typically after 'object' or 'object/public'
+          const objectIndex = pathSegments.indexOf('object');
+          if (objectIndex === -1 || objectIndex + 2 > pathSegments.length) {
+            throw new Error("Invalid Supabase URL format.");
           }
-          const bucketName = bucketMatch[1] || bucketMatch[2];
-          const pathStartIndex = url.pathname.indexOf(bucketMatch[0]);
-          const storagePath = decodeURIComponent(url.pathname.substring(pathStartIndex + bucketMatch[0].length));
+          
+          // The bucket is the segment after 'public' or 'object'
+          const bucketName = pathSegments[objectIndex + 1] === 'public' ? pathSegments[objectIndex + 2] : pathSegments[objectIndex + 1];
+          const pathStartIndex = url.pathname.indexOf(bucketName) + bucketName.length + 1;
+          const storagePath = decodeURIComponent(url.pathname.substring(pathStartIndex));
 
-          const { data, error } = await supabase.storage.from(bucketName).download(storagePath);
-          if (error) {
-            throw error;
+          const { data } = supabase.storage.from(bucketName).getPublicUrl(storagePath);
+          
+          if (!data.publicUrl) {
+            throw new Error("Could not generate public URL for the image.");
           }
-          objectUrl = URL.createObjectURL(data);
-          setDisplayUrl(objectUrl);
+          
+          // Use the newly generated, guaranteed-correct public URL
+          setDisplayUrl(data.publicUrl);
+
         } else {
+          // Fallback for any other external URLs
           const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-image-download', { body: { url: imageUrl } });
           if (error) throw new Error(`Proxy failed: ${error.message}`);
           if (data.base64 && data.mimeType) {
@@ -58,11 +66,6 @@ export const useSecureImage = (imageUrl: string | null | undefined) => {
 
     loadImage();
 
-    return () => {
-      if (objectUrl) {
-        URL.revokeObjectURL(objectUrl);
-      }
-    };
   }, [imageUrl, supabase]);
 
   return { displayUrl, isLoading, error };

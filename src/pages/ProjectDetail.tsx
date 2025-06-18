@@ -301,7 +301,7 @@ const ProjectDetail = () => {
             <Card>
               <CardHeader><CardTitle>{t('keyVisualTitle')}</CardTitle><p className="text-sm text-muted-foreground">{t('keyVisualDescription')}</p></CardHeader>
               <CardContent>
-                <div className="h-64 w-full mx-auto bg-muted rounded-lg flex items-center justify-center overflow-hidden">
+                <div className="h-64 w-full flex items-center justify-center bg-muted rounded-lg overflow-hidden">
                   {isLoadingKeyVisual ? <Skeleton className="w-full h-full" /> : keyVisualDisplayUrl ? (<img src={keyVisualDisplayUrl} alt="Latest project image" className="max-w-full max-h-full object-contain" />) : (<ImageIcon className="h-16 w-16 text-muted-foreground" />)}
                 </div>
               </CardContent>
