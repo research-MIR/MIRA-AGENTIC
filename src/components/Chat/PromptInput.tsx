@@ -16,7 +16,7 @@ interface PromptInputProps {
   onSendMessage: () => void;
   onFileUpload: (files: FileList | null) => Promise<UploadedFile[]>;
   uploadedFiles: UploadedFile[];
-  onRemoveFile: (path: string) => void;
+  onRemoveFile: (index: number) => void;
   isJobRunning: boolean;
   isSending: boolean;
 }
@@ -74,8 +74,8 @@ export const PromptInput = ({
         {uploadedFiles.length > 0 && (
           <div className="absolute right-2 top-2 flex items-center gap-2 bg-muted p-1 rounded-md text-sm max-w-[50%]">
             <div className="flex gap-2 overflow-x-auto p-1">
-              {uploadedFiles.map((file) => (
-                <div key={file.path} className="relative flex-shrink-0">
+              {uploadedFiles.map((file, index) => (
+                <div key={`${file.name}-${index}`} className="relative flex-shrink-0">
                   {file.isImage ? (
                     <img src={file.previewUrl} alt="Preview" className="h-6 w-6 rounded object-cover" />
                   ) : (
@@ -85,7 +85,7 @@ export const PromptInput = ({
                   )}
                   <button
                     type="button"
-                    onClick={() => onRemoveFile(file.path)}
+                    onClick={() => onRemoveFile(index)}
                     className="absolute -top-1 -right-1 bg-destructive text-destructive-foreground rounded-full p-0.5 h-4 w-4 flex items-center justify-center"
                   >
                     <X className="h-2 w-2" />

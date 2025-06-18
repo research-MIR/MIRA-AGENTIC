@@ -34,10 +34,16 @@ serve(async (req) => {
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
     console.log("[CreateJob] Handling new job creation.");
-    if (!prompt) throw new Error("A 'prompt' is required for new jobs.");
+    if (!prompt && (!storagePaths || storagePaths.length === 0)) {
+      throw new Error("A prompt or at least one file is required to start a new chat.");
+    }
     if (!userId) throw new Error("A 'userId' is required for new jobs.");
 
-    const userParts: Part[] = [{ text: prompt }];
+    const userParts: Part[] = [];
+    if (prompt) {
+        userParts.push({ text: prompt });
+    }
+    
     const userProvidedAssets: any[] = [];
 
     if (storagePaths && Array.isArray(storagePaths)) {
@@ -61,7 +67,7 @@ serve(async (req) => {
     const { data: newJob, error: createError } = await supabase
       .from('mira-agent-jobs')
       .insert({ 
-          original_prompt: prompt, 
+          original_prompt: prompt || "Image Analysis",
           status: 'processing',
           user_id: userId,
           context: { 
