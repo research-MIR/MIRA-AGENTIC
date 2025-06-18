@@ -17,6 +17,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { useGeneratorStore } from "@/store/generatorStore";
 import { GeneratorJobThumbnail } from "@/components/Jobs/GeneratorJobThumbnail";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 
 const FileUploader = ({ onFileSelect, children }: { onFileSelect: (files: FileList | null) => void, children: React.ReactNode }) => {
   const inputRef = React.useRef<HTMLInputElement>(null);
@@ -174,10 +175,14 @@ const Generator = () => {
               ) : selectedJob?.final_result?.images ? (
                 <div className="space-y-4">
                   {state.finalPromptUsed && (
-                    <div className="p-2 bg-muted rounded-md">
-                      <p className="text-xs font-semibold">{t('finalPromptUsed')}:</p>
-                      <p className="text-sm">{state.finalPromptUsed}</p>
-                    </div>
+                    <Accordion type="single" collapsible>
+                      <AccordionItem value="item-1">
+                        <AccordionTrigger>{t('finalPromptUsed')}</AccordionTrigger>
+                        <AccordionContent>
+                          <p className="text-sm p-2 bg-muted rounded-md">{state.finalPromptUsed}</p>
+                        </AccordionContent>
+                      </AccordionItem>
+                    </Accordion>
                   )}
                   <div className="grid grid-cols-2 gap-4">
                     {selectedJob.final_result.images.map((image: any, index: number) => (

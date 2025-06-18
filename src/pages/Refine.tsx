@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Loader2, Image as ImageIcon, Sparkles, Wand2, UploadCloud, X, PlusCircle } from "lucide-react";
+import { Loader2, Image as ImageIcon, Sparkles, Wand2, UploadCloud, X, PlusCircle, AlertTriangle } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { useFileUpload } from "@/hooks/useFileUpload";
@@ -17,6 +17,7 @@ import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { RecentJobThumbnail } from "@/components/Jobs/RecentJobThumbnail";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useSecureImage } from "@/hooks/useSecureImage";
 
 interface VtoPipelineJob {
   id: string;
@@ -28,6 +29,23 @@ interface VtoPipelineJob {
     source_image_url?: string;
   };
 }
+
+const SourceImageDisplay = ({ imageUrl, onClear }: { imageUrl: string | null, onClear: () => void }) => {
+  const { displayUrl, isLoading, error } = useSecureImage(imageUrl);
+
+  if (!imageUrl) return null;
+
+  return (
+    <div className="relative">
+      {isLoading && <Skeleton className="w-full aspect-square" />}
+      {error && <div className="w-full aspect-square bg-destructive/10 rounded-md flex items-center justify-center text-destructive text-sm p-2"><AlertTriangle className="h-6 w-6 mr-2" />Error loading image.</div>}
+      {displayUrl && <img src={displayUrl} alt="Source for refinement" className="rounded-md w-full" />}
+      <Button variant="destructive" size="icon" className="absolute -top-2 -right-2 h-6 w-6 rounded-full" onClick={onClear}>
+        <X className="h-4 w-4" />
+      </Button>
+    </div>
+  );
+};
 
 const Refine = () => {
   const { supabase, session } = useSession();
@@ -103,7 +121,7 @@ const Refine = () => {
   };
 
   const handleSubmit = async () => {
-    if (uploadedFiles.length === 0) return showError("Please upload an image to refine.");
+    if (!sourceImageUrl) return showError("Please upload or select an image to refine.");
     if (!prompt.trim()) return showError("Please provide a refinement prompt.");
     
     setIsSubmitting(true);
@@ -113,7 +131,7 @@ const Refine = () => {
       const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-comfyui', {
         body: {
           prompt_text: prompt,
-          image_url: sourceImageUrl, // The proxy will handle fetching this
+          image_url: sourceImageUrl,
           invoker_user_id: session?.user?.id,
           upscale_factor: upscaleFactor,
           original_prompt_for_gallery: prompt,
@@ -157,12 +175,7 @@ const Refine = () => {
               <CardHeader><CardTitle>{t('sourceImage')}</CardTitle></CardHeader>
               <CardContent>
                 {sourceImageUrl ? (
-                  <div className="relative">
-                    <img src={sourceImageUrl} alt="Source for refinement" className="rounded-md w-full" />
-                    <Button variant="destructive" size="icon" className="absolute -top-2 -right-2 h-6 w-6 rounded-full" onClick={startNew}>
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
+                  <SourceImageDisplay imageUrl={sourceImageUrl} onClear={startNew} />
                 ) : (
                   <div className="p-4 border-2 border-dashed rounded-lg text-center">
                     <UploadCloud className="mx-auto h-8 w-8 text-muted-foreground" />
@@ -218,12 +231,12 @@ const Refine = () => {
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <h3 className="font-semibold mb-2">{t('originalImage')}</h3>
-                        <img src={selectedJob.metadata?.source_image_url} alt="Original" className="rounded-md" />
+                        <SourceImageDisplay imageUrl={selectedJob.metadata?.source_image_url || null} onClear={() => {}} />
                       </div>
                       <div>
                         <h3 className="font-semibold mb-2">{t('refinedImage')}</h3>
                         {resultImageUrl ? (
-                          <img src={resultImageUrl} alt="Refined" className="rounded-md" />
+                          <SourceImageDisplay imageUrl={resultImageUrl} onClear={() => {}} />
                         ) : (
                           <div className="aspect-square bg-muted rounded-md flex flex-col items-center justify-center text-muted-foreground">
                             <Loader2 className="h-8 w-8 animate-spin" />
