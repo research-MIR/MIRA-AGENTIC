@@ -19,12 +19,13 @@ export const useSecureImage = (imageUrl: string | null | undefined) => {
       setError(null);
 
       try {
-        if (imageUrl.startsWith('data:image')) {
+        if (imageUrl.startsWith('data:image') || imageUrl.startsWith('blob:')) {
+          // Handle local data URLs (base64 or blob) directly
           setDisplayUrl(imageUrl);
         } else if (imageUrl.includes('supabase.co')) {
+          // Handle Supabase storage URLs
           const url = new URL(imageUrl);
           
-          // Dynamically find bucket name from URL path
           const bucketMatch = url.pathname.match(/\/public\/([a-zA-Z0-9_-]+)\//);
           if (!bucketMatch || !bucketMatch[1]) {
             throw new Error("Could not determine bucket name from Supabase URL.");
@@ -38,7 +39,7 @@ export const useSecureImage = (imageUrl: string | null | undefined) => {
           objectUrl = URL.createObjectURL(data);
           setDisplayUrl(objectUrl);
         } else {
-          // Use the proxy for external URLs
+          // Use the proxy for any other external URLs
           const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-image-download', { body: { url: imageUrl } });
           if (error) throw new Error(`Proxy failed: ${error.message}`);
           if (data.base64 && data.mimeType) {
