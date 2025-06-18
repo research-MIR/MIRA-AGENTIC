@@ -121,7 +121,7 @@ serve(async (req) => {
   console.log(`[Poller][${job_id}] Invoked to check status.`);
 
   try {
-    // Mark the job as being polled right now to prevent watchdog conflicts
+    // HEARTBEAT: Mark the job as being polled right now to prevent watchdog conflicts
     await supabase.from('mira-agent-comfyui-jobs').update({ last_polled_at: new Date().toISOString() }).eq('id', job_id);
 
     const { data: job, error: fetchError } = await supabase
