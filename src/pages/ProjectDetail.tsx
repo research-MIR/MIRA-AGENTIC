@@ -7,6 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Folder, MessageSquare, Image as ImageIcon, MoreVertical, Pencil, Trash2, ImagePlus, Loader2, Move, Info, X, Star, ListMinus, Share2 } from "lucide-react";
 import { useImagePreview } from "@/context/ImagePreviewContext";
+import { useSecureImage } from "@/hooks/useSecureImage";
 import { useLanguage } from "@/context/LanguageContext";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
@@ -17,6 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { showError, showSuccess, showLoading, dismissToast } from "@/utils/toast";
 import { ProjectImageManagerModal } from "@/components/ProjectImageManagerModal";
+import { useDropzone } from "@/hooks/useDropzone";
 import { cn } from "@/lib/utils";
 import { ShareProjectModal } from "@/components/ShareProjectModal";
 
@@ -115,6 +117,8 @@ const ProjectDetail = () => {
     return Array.from(new Map(allImages.map(item => [item.publicUrl, item])).values());
   }, [jobs]);
 
+  const { displayUrl: keyVisualDisplayUrl, isLoading: isLoadingKeyVisual } = useSecureImage(project?.latest_image_url);
+
   const handleRenameProject = async () => {
     if (!newProjectName.trim() || !projectId) return;
     setIsUpdating(true);
@@ -148,6 +152,32 @@ const ProjectDetail = () => {
       setIsDeleteAlertOpen(false);
     }
   };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    const jobDataString = e.dataTransfer.getData('application/json');
+    if (!jobDataString || !projectId) return;
+    const jobData = JSON.parse(jobDataString);
+    if (jobData.project_id === projectId) return;
+
+    setIsUpdating(true);
+    try {
+      const { error } = await supabase.rpc('update_job_project', { p_job_id: jobData.id, p_project_id: projectId });
+      if (error) throw error;
+      showSuccess(`Moved "${jobData.original_prompt}" to ${project?.project_name}.`);
+      await Promise.all([
+        refetchJobs(),
+        queryClient.invalidateQueries({ queryKey: ['jobHistory'] }),
+        queryClient.invalidateQueries({ queryKey: ['projectPreviews'] })
+      ]);
+    } catch (err: any) {
+      showError(`Failed to move chat: ${err.message}`);
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: handleDrop });
 
   const handleRemoveChat = async (jobId: string) => {
     if (!session?.user) return;
@@ -211,11 +241,11 @@ const ProjectDetail = () => {
   }
 
   return (
-    <div className="h-full">
-      <div className="p-4 md:p-8 h-full flex flex-col transition-all">
+    <>
+      <div className={cn("p-4 md:p-8 h-screen flex flex-col transition-all", isDraggingOver && "ring-2 ring-primary ring-offset-4 ring-offset-background rounded-lg")} {...dropzoneProps}>
         <header className="pb-4 mb-4 border-b shrink-0 flex justify-between items-center">
           <h1 className="text-3xl font-bold flex items-center gap-3">
-            <Folder className="h-8 w-8 text-primary" />
+            {isDraggingOver ? <Move className="h-8 w-8 text-primary" /> : <Folder className="h-8 w-8 text-primary" />}
             {project.project_name}
           </h1>
           <div className="flex items-center gap-2">
@@ -272,7 +302,7 @@ const ProjectDetail = () => {
               <CardHeader><CardTitle>{t('keyVisualTitle')}</CardTitle><p className="text-sm text-muted-foreground">{t('keyVisualDescription')}</p></CardHeader>
               <CardContent>
                 <div className="h-64 w-full flex items-center justify-center bg-muted rounded-lg overflow-hidden">
-                  {project.latest_image_url ? (<img src={project.latest_image_url} alt="Latest project image" className="max-w-full max-h-full object-contain" />) : (<ImageIcon className="h-16 w-16 text-muted-foreground" />)}
+                  {isLoadingKeyVisual ? <Skeleton className="w-full h-full" /> : keyVisualDisplayUrl ? (<img src={keyVisualDisplayUrl} alt="Latest project image" className="max-w-full max-h-full object-contain" />) : (<ImageIcon className="h-16 w-16 text-muted-foreground" />)}
                 </div>
               </CardContent>
             </Card>
@@ -307,6 +337,7 @@ const ProjectDetail = () => {
         </div>
       </div>
 
+      {/* Modals and Dialogs */}
       <ShareProjectModal project={project} isOpen={isShareModalOpen} onClose={() => setIsShareModalOpen(false)} />
       <Dialog open={isRenameModalOpen} onOpenChange={setIsRenameModalOpen}>
         <DialogContent>
@@ -320,7 +351,7 @@ const ProjectDetail = () => {
         <AlertDialogContent>
           <AlertDialogHeader><AlertDialogTitle>Are you sure?</AlertDialogTitle><AlertDialogDescription>This will delete the project "{project.project_name}". All chats within it will become unassigned. This action cannot be undone.</AlertDialogDescription></AlertDialogHeader>
           <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={handleDeleteProject} disabled={isUpdating} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">{isUpdating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Delete Project</AlertDialogAction></AlertDialogFooter>
-        </DialogContent>
+        </AlertDialogContent>
       </AlertDialog>
 
       <Dialog open={isManageChatsModalOpen} onOpenChange={setIsManageChatsModalOpen}>
@@ -355,7 +386,7 @@ const ProjectDetail = () => {
       </AlertDialog>
 
       {project && <ProjectImageManagerModal project={{ project_id: projectId!, project_name: project.project_name }} isOpen={isImageManagerOpen} onClose={() => setIsImageManagerOpen(false)} />}
-    </div>
+    </>
   );
 };
 

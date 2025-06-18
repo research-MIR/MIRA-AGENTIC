@@ -9,7 +9,18 @@ import { Loader2, AlertTriangle } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SegmentationMask } from "@/components/SegmentationMask";
+import { useSecureImage } from "@/hooks/useSecureImage";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+
+const SecureImageDisplay = ({ imageUrl, alt }: { imageUrl: string | null, alt: string }) => {
+  const { displayUrl, isLoading, error } = useSecureImage(imageUrl);
+
+  if (isLoading) return <div className="w-full h-full bg-muted rounded-md flex items-center justify-center"><Loader2 className="h-6 w-6 animate-spin" /></div>;
+  if (error) return <div className="w-full h-full bg-destructive/10 rounded-md flex items-center justify-center text-destructive text-sm p-2">Error loading image: {error}</div>;
+  if (!displayUrl) return null;
+
+  return <img src={displayUrl} alt={alt} className="w-full h-full object-contain" />;
+};
 
 const Developer = () => {
   const { supabase, session } = useSession();
@@ -34,6 +45,42 @@ const Developer = () => {
       if (segPersonImageUrl) URL.revokeObjectURL(segPersonImageUrl);
     };
   }, [segPersonImageUrl]);
+
+  useEffect(() => {
+    if (segmentationResult && segmentationResult[0]?.mask && sourceImageDimensions) {
+      const maskItem = segmentationResult[0];
+      const base64Data = maskItem.mask;
+      const imageUrl = base64Data.startsWith('data:image') ? base64Data : `data:image/png;base64,${base64Data}`;
+
+      const maskImg = new Image();
+      maskImg.onload = () => {
+        const [y0, x0, y1, x1] = maskItem.box_2d;
+        const absX0 = Math.floor((x0 / 1000) * sourceImageDimensions.width);
+        const absY0 = Math.floor((y0 / 1000) * sourceImageDimensions.height);
+        const bboxWidth = Math.ceil(((x1 - x0) / 1000) * sourceImageDimensions.width);
+        const bboxHeight = Math.ceil(((y1 - y0) / 1000) * sourceImageDimensions.height);
+
+        if (bboxWidth < 1 || bboxHeight < 1) return;
+
+        const resizedMaskCanvas = document.createElement('canvas');
+        resizedMaskCanvas.width = bboxWidth;
+        resizedMaskCanvas.height = bboxHeight;
+        const resizedCtx = resizedMaskCanvas.getContext('2d');
+        if (!resizedCtx) return;
+        resizedCtx.drawImage(maskImg, 0, 0, bboxWidth, bboxHeight);
+
+        const fullCanvas = document.createElement('canvas');
+        fullCanvas.width = sourceImageDimensions.width;
+        fullCanvas.height = sourceImageDimensions.height;
+        const fullCtx = fullCanvas.getContext('2d');
+        if (!fullCtx) return;
+        
+        fullCtx.drawImage(resizedMaskCanvas, absX0, absY0);
+        setMaskImageUrl(fullCanvas.toDataURL());
+      };
+      maskImg.src = imageUrl;
+    }
+  }, [segmentationResult, sourceImageDimensions]);
 
   const handlePersonImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -229,7 +276,7 @@ const Developer = () => {
                             </div>
                             <div className="max-h-96 bg-muted rounded-md overflow-hidden flex justify-center items-center">
                                 <Label>Corresponding Mask</Label>
-                                {maskImageUrl && <img src={maskImageUrl} alt="Segmentation Mask" />}
+                                <SecureImageDisplay imageUrl={maskImageUrl} alt="Segmentation Mask" />
                             </div>
                         </div>
                         <Button onClick={handleCropTest} disabled={isCropping}>
@@ -242,7 +289,7 @@ const Developer = () => {
                   <div className="space-y-4 pt-4 border-t">
                     <h3 className="font-semibold">Crop Result</h3>
                     <div className="max-h-96 bg-muted rounded-md overflow-hidden flex justify-center items-center">
-                      <img src={croppedImageUrl} alt="Cropped Result" className="max-w-full max-h-full object-contain" />
+                      <SecureImageDisplay imageUrl={croppedImageUrl} alt="Cropped Result" />
                     </div>
                   </div>
                 )}
