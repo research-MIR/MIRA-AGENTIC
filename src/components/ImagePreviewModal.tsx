@@ -55,6 +55,18 @@ export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => 
   const [currentImage, setCurrentImage] = useState<PreviewImage | null>(null);
 
   useEffect(() => {
+    if (!api) return;
+
+    // When the modal opens (data becomes available), reinitialize the carousel
+    // after a short delay to allow the dialog animation to finish.
+    // This ensures the carousel calculates its dimensions correctly.
+    if (data) {
+      const timer = setTimeout(() => api.reInit(), 50);
+      return () => clearTimeout(timer);
+    }
+  }, [api, data]);
+
+  useEffect(() => {
     if (!data) return;
     if (!api) {
       if (data.images.length > 0) {
@@ -133,7 +145,7 @@ export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => 
 
     } catch (err: any) {
       dismissToast(toastId);
-      showError(`Upscale failed: ${err.message}`);
+      showError(`Failed to upscale: ${err.message}`);
     } finally {
       setIsUpscaling(false);
     }
