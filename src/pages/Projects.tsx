@@ -4,7 +4,7 @@ import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Folder, MessageSquare, Image as ImageIcon, Plus } from "lucide-react";
+import { Folder, MessageSquare, Image as ImageIcon, Plus, Move } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useLanguage } from "@/context/LanguageContext";
 import { useSecureImage } from "@/hooks/useSecureImage";
@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogT
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { showError, showSuccess, showLoading, dismissToast } from "@/utils/toast";
+import { cn } from "@/lib/utils";
 
 interface ProjectPreview {
   project_id: string;
@@ -21,37 +22,51 @@ interface ProjectPreview {
   latest_image_url: string | null;
 }
 
-const ProjectCard = ({ project }: { project: ProjectPreview }) => {
+const ProjectCard = ({ project, onDrop, onDragEnter, onDragLeave, isBeingDraggedOver }: { 
+  project: ProjectPreview,
+  onDrop: (projectId: string, e: React.DragEvent) => void,
+  onDragEnter: (projectId: string) => void,
+  onDragLeave: () => void,
+  isBeingDraggedOver: boolean
+}) => {
   const { displayUrl, isLoading } = useSecureImage(project.latest_image_url);
 
   return (
-    <Link to={`/projects/${project.project_id}`}>
-      <Card className="hover:border-primary transition-colors h-full flex flex-col">
-        <CardHeader className="p-4">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Folder className="h-5 w-5 text-primary" />
-            <span className="truncate">{project.project_name}</span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="p-4 pt-0 flex-1">
-          <div className="aspect-[4/3] bg-muted rounded-md flex items-center justify-center overflow-hidden">
-            {isLoading ? (
-              <Skeleton className="w-full h-full" />
-            ) : displayUrl ? (
-              <img src={displayUrl} alt={project.project_name} className="w-full h-full object-cover" />
-            ) : (
-              <ImageIcon className="h-10 w-10 text-muted-foreground" />
-            )}
-          </div>
-        </CardContent>
-        <CardFooter className="p-4 pt-0">
-          <div className="text-xs text-muted-foreground flex items-center gap-2">
-            <MessageSquare className="h-3 w-3" />
-            <span>{project.chat_count} {project.chat_count === 1 ? 'chat' : 'chats'}</span>
-          </div>
-        </CardFooter>
-      </Card>
-    </Link>
+    <div
+      onDrop={(e) => onDrop(project.project_id, e)}
+      onDragOver={(e) => e.preventDefault()}
+      onDragEnter={() => onDragEnter(project.project_id)}
+      onDragLeave={onDragLeave}
+      className={cn("rounded-lg transition-all", isBeingDraggedOver && "ring-2 ring-primary ring-offset-2 ring-offset-background")}
+    >
+      <Link to={`/projects/${project.project_id}`}>
+        <Card className="hover:border-primary transition-colors h-full flex flex-col">
+          <CardHeader className="p-4">
+            <CardTitle className="flex items-center gap-2 text-base">
+              {isBeingDraggedOver ? <Move className="h-5 w-5 text-primary" /> : <Folder className="h-5 w-5 text-primary" />}
+              <span className="truncate">{project.project_name}</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-4 pt-0 flex-1">
+            <div className="aspect-[4/3] bg-muted rounded-md flex items-center justify-center overflow-hidden">
+              {isLoading ? (
+                <Skeleton className="w-full h-full" />
+              ) : displayUrl ? (
+                <img src={displayUrl} alt={project.project_name} className="w-full h-full object-cover" />
+              ) : (
+                <ImageIcon className="h-10 w-10 text-muted-foreground" />
+              )}
+            </div>
+          </CardContent>
+          <CardFooter className="p-4 pt-0">
+            <div className="text-xs text-muted-foreground flex items-center gap-2">
+              <MessageSquare className="h-3 w-3" />
+              <span>{project.chat_count} {project.chat_count === 1 ? 'chat' : 'chats'}</span>
+            </div>
+          </CardFooter>
+        </Card>
+      </Link>
+    </div>
   );
 };
 
@@ -62,6 +77,7 @@ const Projects = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
+  const [draggingOverProjectId, setDraggingOverProjectId] = useState<string | null>(null);
 
   const { data: projects, isLoading, error } = useQuery<ProjectPreview[]>({
     queryKey: ["projectPreviews", session?.user?.id],
@@ -90,6 +106,26 @@ const Projects = () => {
       showError(`Failed to create project: ${err.message}`);
     } finally {
       setIsCreating(false);
+    }
+  };
+
+  const handleDrop = async (projectId: string, e: React.DragEvent) => {
+    e.preventDefault();
+    setDraggingOverProjectId(null);
+    const jobIdToMove = e.dataTransfer.getData('text/plain');
+    if (!jobIdToMove) return;
+
+    const toastId = showLoading("Moving chat...");
+    try {
+      const { error } = await supabase.rpc('update_job_project', { p_job_id: jobIdToMove, p_project_id: projectId });
+      if (error) throw error;
+      dismissToast(toastId);
+      showSuccess("Chat moved to project.");
+      queryClient.invalidateQueries({ queryKey: ['jobHistory'] });
+      queryClient.invalidateQueries({ queryKey: ['projectPreviews'] });
+    } catch (err: any) {
+      dismissToast(toastId);
+      showError(`Failed to move chat: ${err.message}`);
     }
   };
 
@@ -129,7 +165,16 @@ const Projects = () => {
         </Alert>
       ) : projects && projects.length > 0 ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-          {projects.map(project => <ProjectCard key={project.project_id} project={project} />)}
+          {projects.map(project => (
+            <ProjectCard 
+              key={project.project_id} 
+              project={project} 
+              onDrop={handleDrop}
+              onDragEnter={setDraggingOverProjectId}
+              onDragLeave={() => setDraggingOverProjectId(null)}
+              isBeingDraggedOver={draggingOverProjectId === project.project_id}
+            />
+          ))}
         </div>
       ) : (
         <div className="text-center py-16">

@@ -17,7 +17,6 @@ import { RadioGroup, RadioGroupItem } from "./ui/radio-group";
 import { showError, showSuccess, showLoading, dismissToast } from "@/utils/toast";
 import { AddToProjectDialog } from "./Jobs/AddToProjectDialog";
 import { useModalStore } from "@/store/modalStore";
-import { ProjectFolders } from "./ProjectFolders";
 
 interface JobHistory {
   id: string;
@@ -44,7 +43,6 @@ export const Sidebar = () => {
   const [newName, setNewName] = useState("");
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [sortOrder, setSortOrder] = useState<'created_at' | 'updated_at'>('updated_at');
-  const [draggingOverProjectId, setDraggingOverProjectId] = useState<string | null>(null);
 
   const { data: projects } = useQuery<Project[]>({
     queryKey: ['projects', session?.user?.id],
@@ -123,25 +121,6 @@ export const Sidebar = () => {
     setIsSettingsModalOpen(false);
   };
 
-  const handleDrop = async (projectId: string, e: React.DragEvent) => {
-    e.preventDefault();
-    setDraggingOverProjectId(null);
-    const jobIdToMove = e.dataTransfer.getData('text/plain');
-    if (!jobIdToMove) return;
-
-    const toastId = showLoading("Moving chat...");
-    try {
-      const { error } = await supabase.rpc('update_job_project', { p_job_id: jobIdToMove, p_project_id: projectId });
-      if (error) throw error;
-      dismissToast(toastId);
-      showSuccess("Chat moved to project.");
-      queryClient.invalidateQueries({ queryKey: ['jobHistory'] });
-    } catch (err: any) {
-      dismissToast(toastId);
-      showError(`Failed to move chat: ${err.message}`);
-    }
-  };
-
   const unassignedChats = jobHistory?.filter(job => !job.project_id) || [];
 
   return (
@@ -185,16 +164,6 @@ export const Sidebar = () => {
           </NavLink>
         </nav>
         <div className="flex-1 flex flex-col overflow-hidden">
-            <div className="px-2">
-              <ProjectFolders 
-                projects={projects || []}
-                allJobs={jobHistory || []}
-                draggingOverProjectId={draggingOverProjectId}
-                onDragEnter={setDraggingOverProjectId}
-                onDragLeave={() => setDraggingOverProjectId(null)}
-                onDrop={handleDrop}
-              />
-            </div>
             <div className="flex justify-between items-center w-full px-4 pt-4 pb-2">
                 <h2 className="text-sm font-semibold text-muted-foreground">Recent Chats</h2>
                 <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); setIsSettingsModalOpen(true); }}><Settings className="h-4 w-4" /></Button>
