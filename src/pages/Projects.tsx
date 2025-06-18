@@ -67,8 +67,8 @@ const Projects = () => {
   return (
     <div className="p-4 md:p-8 h-screen overflow-y-auto">
       <header className="pb-4 mb-8 border-b">
-        <h1 className="text-3xl font-bold">Projects</h1>
-        <p className="text-muted-foreground">Organize your work into projects.</p>
+        <h1 className="text-3xl font-bold">{t.projectsTitle}</h1>
+        <p className="text-muted-foreground">{t.projectsDescription}</p>
       </header>
       
       {isLoading ? (
@@ -87,8 +87,8 @@ const Projects = () => {
       ) : (
         <div className="text-center py-16">
           <Folder className="mx-auto h-16 w-16 text-muted-foreground" />
-          <h2 className="mt-4 text-xl font-semibold">No projects yet</h2>
-          <p className="mt-2 text-muted-foreground">Create projects by moving chats into them from the sidebar.</p>
+          <h2 className="mt-4 text-xl font-semibold">{t.noProjectsTitle}</h2>
+          <p className="mt-2 text-muted-foreground">{t.noProjectsDescription}</p>
         </div>
       )}
     </div>

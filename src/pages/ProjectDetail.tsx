@@ -8,6 +8,8 @@ import { Folder, MessageSquare, Image as ImageIcon } from "lucide-react";
 import { useImagePreview } from "@/context/ImagePreviewContext";
 import { useSecureImage } from "@/hooks/useSecureImage";
 import { useMemo } from "react";
+import { useLanguage } from "@/context/LanguageContext";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface Job {
   id: string;
@@ -26,6 +28,7 @@ const ProjectDetail = () => {
   const { projectId } = useParams();
   const { supabase, session } = useSession();
   const { showImage } = useImagePreview();
+  const { t } = useLanguage();
 
   const { data: project, isLoading: isLoadingProject } = useQuery({
     queryKey: ['project', projectId],
@@ -74,10 +77,12 @@ const ProjectDetail = () => {
     return (
       <div className="p-8 space-y-6">
         <Skeleton className="h-12 w-1/3" />
-        <Skeleton className="h-64 w-full" />
-        <div className="grid grid-cols-3 gap-6">
-          <Skeleton className="h-96 w-full" />
-          <Skeleton className="h-96 w-full col-span-2" />
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <Skeleton className="h-96 w-full lg:col-span-1" />
+          <div className="lg:col-span-2 space-y-6">
+            <Skeleton className="h-64 w-full" />
+            <Skeleton className="h-96 w-full" />
+          </div>
         </div>
       </div>
     );
@@ -88,53 +93,59 @@ const ProjectDetail = () => {
   }
 
   return (
-    <div className="p-4 md:p-8 h-screen overflow-y-auto">
-      <header className="pb-4 mb-8 border-b">
+    <div className="p-4 md:p-8 h-screen flex flex-col">
+      <header className="pb-4 mb-8 border-b shrink-0">
         <h1 className="text-3xl font-bold flex items-center gap-3">
           <Folder className="h-8 w-8 text-primary" />
           {project.name}
         </h1>
       </header>
 
-      <Card className="mb-8">
-        <CardHeader><CardTitle>Key Visual</CardTitle></CardHeader>
-        <CardContent>
-          <div className="aspect-video bg-muted rounded-lg flex items-center justify-center overflow-hidden">
-            {isLoadingLatestImage ? <Skeleton className="w-full h-full" /> : latestImageDisplayUrl ? (
-              <img src={latestImageDisplayUrl} alt="Latest project image" className="w-full h-full object-contain" />
-            ) : (
-              <ImageIcon className="h-24 w-24 text-muted-foreground" />
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-1">
-          <Card>
-            <CardHeader><CardTitle>Chats ({jobs?.length || 0})</CardTitle></CardHeader>
-            <CardContent>
-              <div className="space-y-2 max-h-96 overflow-y-auto">
-                {jobs?.map(job => (
-                  <Link key={job.id} to={`/chat/${job.id}`} className="block p-2 rounded-md hover:bg-muted">
-                    <p className="font-medium truncate">{job.original_prompt || "Untitled Chat"}</p>
-                  </Link>
-                ))}
-              </div>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 flex-1 overflow-hidden">
+        <div className="lg:col-span-1 flex flex-col h-full">
+          <Card className="flex-1 flex flex-col">
+            <CardHeader><CardTitle>{t.projectChatsTitle} ({jobs?.length || 0})</CardTitle></CardHeader>
+            <CardContent className="flex-1 overflow-hidden">
+              <ScrollArea className="h-full">
+                <div className="space-y-2 pr-4">
+                  {jobs?.map(job => (
+                    <Link key={job.id} to={`/chat/${job.id}`} className="block p-2 rounded-md hover:bg-muted">
+                      <p className="font-medium truncate">{job.original_prompt || "Untitled Chat"}</p>
+                    </Link>
+                  ))}
+                </div>
+              </ScrollArea>
             </CardContent>
           </Card>
         </div>
-        <div className="lg:col-span-2">
+        <div className="lg:col-span-2 flex flex-col gap-8 overflow-hidden">
           <Card>
-            <CardHeader><CardTitle>Image Gallery ({projectImages.length})</CardTitle></CardHeader>
+            <CardHeader>
+              <CardTitle>{t.keyVisualTitle}</CardTitle>
+              <p className="text-sm text-muted-foreground">{t.keyVisualDescription}</p>
+            </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 max-h-[60vh] overflow-y-auto">
-                {projectImages.map((image, index) => (
-                  <button key={image.publicUrl} onClick={() => showImage({ images: projectImages, currentIndex: index })} className="aspect-square block">
-                    <img src={image.publicUrl} alt={`Project image ${index + 1}`} className="w-full h-full object-cover rounded-md hover:opacity-80 transition-opacity" />
-                  </button>
-                ))}
+              <div className="aspect-video bg-muted rounded-lg flex items-center justify-center overflow-hidden">
+                {isLoadingLatestImage ? <Skeleton className="w-full h-full" /> : latestImageDisplayUrl ? (
+                  <img src={latestImageDisplayUrl} alt="Latest project image" className="w-full h-full object-contain" />
+                ) : (
+                  <ImageIcon className="h-24 w-24 text-muted-foreground" />
+                )}
               </div>
+            </CardContent>
+          </Card>
+          <Card className="flex-1 flex flex-col overflow-hidden">
+            <CardHeader><CardTitle>{t.projectGalleryTitle} ({projectImages.length})</CardTitle></CardHeader>
+            <CardContent className="flex-1 overflow-hidden">
+              <ScrollArea className="h-full">
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 pr-4">
+                  {projectImages.map((image, index) => (
+                    <button key={image.publicUrl} onClick={() => showImage({ images: projectImages, currentIndex: index })} className="aspect-square block">
+                      <img src={image.publicUrl} alt={`Project image ${index + 1}`} className="w-full h-full object-cover rounded-md hover:opacity-80 transition-opacity" />
+                    </button>
+                  ))}
+                </div>
+              </ScrollArea>
             </CardContent>
           </Card>
         </div>
