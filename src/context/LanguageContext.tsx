@@ -1,17 +1,15 @@
 import { createContext, useContext, useState, ReactNode, useCallback } from 'react';
+import { translations } from '@/lib/i18n';
 
 type Language = 'it' | 'en';
 
 interface LanguageContextType {
   language: Language;
   setLanguage: (lang: Language) => void;
-  t: Record<string, string>;
+  t: (key: string) => string;
 }
 
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
-
-// Import translations directly here
-import { translations } from '@/lib/i18n';
 
 export const useLanguage = () => {
   const context = useContext(LanguageContext);
@@ -22,13 +20,16 @@ export const useLanguage = () => {
 };
 
 export const LanguageProvider = ({ children }: { children: ReactNode }) => {
-  const [language, setLanguage] = useState<Language>('it'); // Default to Italian
+  const [language, setLanguage] = useState<Language>('it');
 
   const handleSetLanguage = useCallback((lang: Language) => {
     setLanguage(lang);
   }, []);
 
-  const t = translations[language];
+  const t = useCallback((key: string): string => {
+    const translationSet = translations[language] as Record<string, string>;
+    return translationSet[key] || key;
+  }, [language]);
 
   const value = { language, setLanguage: handleSetLanguage, t };
 

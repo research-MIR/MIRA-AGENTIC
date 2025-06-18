@@ -21,17 +21,17 @@ const HueSaturationControls = ({ settings, onUpdate }: { settings: HueSaturation
   return (
     <div className="space-y-4">
       <div>
-        <Label>{t.hue}</Label>
+        <Label>{t('hue')}</Label>
         <Slider value={[settings.hue]} onValueChange={(v) => onUpdate({ hue: v[0] })} min={-180} max={180} step={1} />
         <p className="text-xs text-center text-muted-foreground">{settings.hue}</p>
       </div>
       <div>
-        <Label>{t.saturation}</Label>
+        <Label>{t('saturation')}</Label>
         <Slider value={[settings.saturation * 100]} onValueChange={(v) => onUpdate({ saturation: v[0] / 100 })} min={0} max={200} step={1} />
         <p className="text-xs text-center text-muted-foreground">{(settings.saturation * 100 - 100).toFixed(0)}%</p>
       </div>
       <div>
-        <Label>{t.lightness}</Label>
+        <Label>{t('lightness')}</Label>
         <Slider value={[settings.lightness * 100]} onValueChange={(v) => onUpdate({ lightness: v[0] / 100 })} min={-100} max={100} step={1} />
         <p className="text-xs text-center text-muted-foreground">{(settings.lightness * 100).toFixed(0)}%</p>
       </div>
@@ -44,7 +44,7 @@ const LevelsControls = ({ settings, onUpdate }: { settings: LevelsSettings, onUp
   return (
     <div className="space-y-4">
       <div>
-        <Label>{t.inputLevels}</Label>
+        <Label>{t('inputLevels')}</Label>
         <div className="h-24 bg-muted rounded-md my-2 flex items-center justify-center text-sm text-muted-foreground relative p-2">
           <div className="w-full h-full bg-gradient-to-r from-black via-gray-500 to-white opacity-50"></div>
         </div>
@@ -54,7 +54,7 @@ const LevelsControls = ({ settings, onUpdate }: { settings: LevelsSettings, onUp
         </div>
       </div>
       <div>
-        <Label>{t.outputLevels}</Label>
+        <Label>{t('outputLevels')}</Label>
         <div className="h-8 bg-gradient-to-r from-black to-white rounded-md my-2"></div>
         <Slider value={[settings.outputShadow, settings.outputHighlight]} onValueChange={(v) => onUpdate({ outputShadow: v[0], outputHighlight: v[1] })} min={0} max={255} step={1} />
       </div>
@@ -125,7 +125,7 @@ const CurvesControls = ({ settings, onUpdate }: { settings: CurvesSettings, onUp
         </Select>
       </div>
       <div>
-        <Label>{t.curves}</Label>
+        <Label>{t('curves')}</Label>
         <div 
           ref={graphRef}
           className="aspect-square bg-muted rounded-md my-2 relative cursor-crosshair"
@@ -180,32 +180,32 @@ const NoiseControls = ({ settings, onUpdate }: { settings: NoiseSettings, onUpda
   return (
     <div className="space-y-4">
       <div>
-        <Label>{t.scale}</Label>
+        <Label>{t('scale')}</Label>
         <Slider value={[settings.scale]} onValueChange={(v) => onUpdate({ scale: v[0] })} min={1} max={500} step={1} />
         <p className="text-xs text-center text-muted-foreground">{settings.scale}</p>
       </div>
       <div>
-        <Label>{t.octaves}</Label>
+        <Label>{t('octaves')}</Label>
         <Slider value={[settings.octaves]} onValueChange={(v) => onUpdate({ octaves: v[0] })} min={1} max={8} step={1} />
         <p className="text-xs text-center text-muted-foreground">{settings.octaves}</p>
       </div>
       <div>
-        <Label>{t.persistence}</Label>
+        <Label>{t('persistence')}</Label>
         <Slider value={[settings.persistence]} onValueChange={(v) => onUpdate({ persistence: v[0] })} min={0.1} max={1} step={0.05} />
         <p className="text-xs text-center text-muted-foreground">{settings.persistence.toFixed(2)}</p>
       </div>
       <div>
-        <Label>{t.lacunarity}</Label>
+        <Label>{t('lacunarity')}</Label>
         <Slider value={[settings.lacunarity]} onValueChange={(v) => onUpdate({ lacunarity: v[0] })} min={1.0} max={4.0} step={0.1} />
         <p className="text-xs text-center text-muted-foreground">{settings.lacunarity.toFixed(1)}</p>
       </div>
       <div className="flex items-center justify-between">
-        <Label>{t.monochromatic}</Label>
+        <Label>{t('monochromatic')}</Label>
         <Switch checked={settings.monochromatic} onCheckedChange={(checked) => onUpdate({ monochromatic: checked })} />
       </div>
       <Button variant="outline" size="sm" className="w-full" onClick={() => onUpdate({ seed: Math.random() })}>
         <RefreshCw className="mr-2 h-4 w-4" />
-        {t.newSeed}
+        {t('newSeed')}
       </Button>
     </div>
   );
@@ -239,9 +239,9 @@ export const AdjustmentPanel = ({ selectedLayer, onUpdateLayer }: AdjustmentPane
   if (!selectedLayer) {
     return (
       <Card>
-        <CardHeader><CardTitle>{t.adjustments}</CardTitle></CardHeader>
+        <CardHeader><CardTitle>{t('adjustments')}</CardTitle></CardHeader>
         <CardContent>
-          <p className="text-sm text-muted-foreground">{t.selectLayerToEdit}</p>
+          <p className="text-sm text-muted-foreground">{t('selectLayerToEdit')}</p>
         </CardContent>
       </Card>
     );
@@ -262,7 +262,7 @@ export const AdjustmentPanel = ({ selectedLayer, onUpdateLayer }: AdjustmentPane
       case 'noise':
         return <NoiseControls settings={selectedLayer.settings as NoiseSettings} onUpdate={handleUpdate} />;
       default:
-        return <p className="text-sm text-muted-foreground">{t.noControls}</p>;
+        return <p className="text-sm text-muted-foreground">{t('noControls')}</p>;
     }
   };
 

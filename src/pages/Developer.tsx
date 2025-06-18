@@ -181,8 +181,8 @@ const Developer = () => {
   return (
     <div className="p-4 md:p-8 h-screen overflow-y-auto">
       <header className="pb-4 mb-8 border-b">
-        <h1 className="text-3xl font-bold">{t.developerTools}</h1>
-        <p className="text-muted-foreground">{t.developerToolsDescription}</p>
+        <h1 className="text-3xl font-bold">{t('developerTools')}</h1>
+        <p className="text-muted-foreground">{t('developerToolsDescription')}</p>
       </header>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         <div className="space-y-4">

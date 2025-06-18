@@ -159,10 +159,10 @@ const Editor = () => {
     const defaultMask: Mask = { imageData: new ImageData(1, 1), enabled: true };
     const commonProps = { id: `layer-${Date.now()}`, visible: true, opacity: 1, blendMode: 'overlay' as BlendMode, mask: defaultMask };
     switch (type) {
-      case 'hue-saturation': newLayer = { ...commonProps, name: t.hueSaturation, type, settings: { hue: 0, saturation: 1, lightness: 0 } }; break;
-      case 'levels': newLayer = { ...commonProps, name: t.levels, type, settings: { inputShadow: 0, inputMidtone: 1, inputHighlight: 255, outputShadow: 0, outputHighlight: 255 } }; break;
-      case 'curves': newLayer = { ...commonProps, name: t.curves, type, settings: { channel: 'rgb', points: [{ x: 0, y: 0 }, { x: 255, y: 255 }] } }; break;
-      case 'noise': newLayer = { ...commonProps, name: "Noise", type, opacity: 0.2, settings: { type: 'perlin', scale: 100, octaves: 3, persistence: 0.5, lacunarity: 2.0, seed: Math.random(), monochromatic: true } }; break;
+      case 'hue-saturation': newLayer = { ...commonProps, name: t('hueSaturation'), type, settings: { hue: 0, saturation: 1, lightness: 0 } }; break;
+      case 'levels': newLayer = { ...commonProps, name: t('levels'), type, settings: { inputShadow: 0, inputMidtone: 1, inputHighlight: 255, outputShadow: 0, outputHighlight: 255 } }; break;
+      case 'curves': newLayer = { ...commonProps, name: t('curves'), type, settings: { channel: 'rgb', points: [{ x: 0, y: 0 }, { x: 255, y: 255 }] } }; break;
+      case 'noise': newLayer = { ...commonProps, name: t('noise'), type, opacity: 0.2, settings: { type: 'perlin', scale: 100, octaves: 3, persistence: 0.5, lacunarity: 2.0, seed: Math.random(), monochromatic: true } }; break;
     }
     setLayers(prev => [newLayer, ...prev]);
     setSelectedLayerId(newLayer.id);
@@ -173,54 +173,66 @@ const Editor = () => {
   const updateLayerBlendMode = (layerId: string, blendMode: BlendMode) => setLayers(layers => layers.map(l => l.id === layerId ? { ...l, blendMode } : l));
   const toggleLayerVisibility = (layerId: string) => setLayers(layers => layers.map(l => l.id === layerId ? { ...l, visible: !l.visible } : l));
   const deleteLayer = (layerId: string) => { setLayers(layers => layers.filter(l => l.id !== layerId)); if (selectedLayerId === layerId) setSelectedLayerId(null); };
-  const reorderLayers = (sourceIndex: number, destIndex: number) => { const items = Array.from(layers); const [reorderedItem] = items.splice(sourceIndex, 1); items.splice(destIndex, 0, reorderedItem); setLayers(items); };
-
-  const selectedLayer = layers.find(l => l.id === selectedLayerId) as AdjustmentLayer | undefined;
+  const reorderLayers = (sourceIndex: number, destIndex: number) => {
+    setLayers(prevLayers => {
+      const result = Array.from(prevLayers);
+      const [removed] = result.splice(sourceIndex, 1);
+      result.splice(destIndex, 0, removed);
+      return result;
+    });
+  };
 
   return (
-    <div className="flex flex-col h-screen bg-background">
-      <header className="p-4 border-b flex justify-between items-center shrink-0">
-        <div>
-          <h1 className="text-2xl font-bold">{t.imageEditor}</h1>
-          <p className="text-muted-foreground text-sm">{t.imageEditorDescription}</p>
-        </div>
+    <div className="h-screen flex flex-col">
+      <header className="border-b p-2 flex justify-between items-center shrink-0">
+        <h1 className="text-xl font-bold">{t('imageEditor')}</h1>
         <div className="flex items-center gap-2">
           <LanguageSwitcher />
           <ThemeToggle />
         </div>
       </header>
-      <div className="flex flex-1 overflow-hidden">
-        <div className="w-80 flex flex-col bg-background border-r">
-          <div className="flex-1 p-4 space-y-6 overflow-y-auto">
-            <LayerPanel layers={layers} selectedLayerId={selectedLayerId} onSelectLayer={setSelectedLayerId} onAddLayer={addLayer} onToggleVisibility={toggleLayerVisibility} onDeleteLayer={deleteLayer} onReorderLayers={reorderLayers} onUpdateOpacity={updateLayerOpacity} onUpdateBlendMode={updateLayerBlendMode} />
-            <AdjustmentPanel selectedLayer={selectedLayer} onUpdateLayer={updateLayer} />
-          </div>
-        </div>
-        <main ref={mainContainerRef} className="flex-1 flex items-center justify-center bg-muted/40 relative" {...dropzoneProps}>
-          <div className={cn("absolute inset-0 transition-colors", isDraggingOver && "bg-primary/10 border-4 border-dashed border-primary rounded-lg")}>
-            {baseImage ? (
-              <canvas
-                ref={canvasRef}
-                className={cn("absolute top-0 left-0", isSpacePressed ? "cursor-grab" : "", isPanning ? "cursor-grabbing" : "")}
+      <div className="flex-1 flex overflow-hidden">
+        <aside className="w-80 border-r p-4 space-y-4 overflow-y-auto">
+          <LayerPanel 
+            layers={layers}
+            selectedLayerId={selectedLayerId}
+            onSelectLayer={setSelectedLayerId}
+            onAddLayer={addLayer}
+            onToggleVisibility={toggleLayerVisibility}
+            onDeleteLayer={deleteLayer}
+            onReorderLayers={reorderLayers}
+            onUpdateOpacity={updateLayerOpacity}
+            onUpdateBlendMode={updateLayerBlendMode}
+          />
+          <AdjustmentPanel 
+            selectedLayer={layers.find(l => l.id === selectedLayerId) as AdjustmentLayer | undefined}
+            onUpdateLayer={updateLayer}
+          />
+        </aside>
+        <main ref={mainContainerRef} className="flex-1 bg-muted/20 relative flex items-center justify-center overflow-hidden">
+          {baseImage ? (
+            <>
+              <canvas 
+                ref={canvasRef} 
+                className={cn(isSpacePressed ? 'cursor-grab' : 'cursor-crosshair', isPanning && 'cursor-grabbing')}
+                onWheel={handleWheel}
                 onMouseDown={handleMouseDown}
                 onMouseMove={handleMouseMove}
                 onMouseUp={handleMouseUp}
-                onMouseLeave={handleMouseUp}
-                onWheel={handleWheel}
               />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center">
-                <div className="text-center text-muted-foreground">
-                  <ImageIcon className="mx-auto h-24 w-24 mb-4" />
-                  <h2 className="text-xl font-semibold">{t.imageEditor}</h2>
-                  <p className="mb-4">{t.uploadToStart}</p>
-                  <Button onClick={() => fileInputRef.current?.click()}><UploadCloud className="mr-2 h-4 w-4" />{t.uploadImage}</Button>
-                  <Input ref={fileInputRef} type="file" className="hidden" accept="image/*" onChange={(e) => e.target.files && handleImageUpload(e.target.files[0])} />
-                </div>
+              <ViewportControls zoom={zoom} onZoomChange={setZoom} onFitToView={fitToView} />
+            </>
+          ) : (
+            <div {...dropzoneProps} className={cn("w-full h-full flex items-center justify-center p-8", isDraggingOver && "bg-primary/10")}>
+              <div className="text-center p-8 border-2 border-dashed rounded-lg">
+                <UploadCloud className="mx-auto h-12 w-12 text-muted-foreground" />
+                <h3 className="mt-4 text-lg font-medium">{t('uploadToStart')}</h3>
+                <p className="mt-1 text-sm text-muted-foreground">{t('dragAndDrop')}</p>
+                <Button className="mt-4" onClick={() => fileInputRef.current?.click()}>{t('uploadImage')}</Button>
+                <Input ref={fileInputRef} type="file" className="hidden" accept="image/*" onChange={(e) => e.target.files && handleImageUpload(e.target.files[0])} />
               </div>
-            )}
-          </div>
-          {baseImage && <ViewportControls zoom={zoom} setZoom={setZoom} fitToView={fitToView} />}
+            </div>
+          )}
         </main>
       </div>
     </div>

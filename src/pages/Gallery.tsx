@@ -1,205 +1,131 @@
+import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { ImageOff, View } from "lucide-react";
-import { useImagePreview } from "@/context/ImagePreviewContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Image as ImageIcon, Bot, Wand2, Code } from "lucide-react";
+import { useImagePreview } from "@/context/ImagePreviewContext";
+import { useLanguage } from "@/context/LanguageContext";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
-import { ThemeToggle } from "@/components/ThemeToggle";
-import { useLanguage } from "@/context/LanguageContext";
-import { LanguageSwitcher } from "@/components/LanguageSwitcher";
-import { useMemo } from "react";
 
 interface ImageResult {
-  publicUrl: string;
-  storagePath: string;
+  url: string;
   jobId: string;
-  source: 'direct_generator' | 'agent' | 'refiner';
+  source: string;
+}
+
+interface Job {
+  id: string;
+  final_result: any;
+  context: any;
 }
 
 const Gallery = () => {
   const { supabase, session } = useSession();
   const { showImage } = useImagePreview();
-  const navigate = useNavigate();
   const { t } = useLanguage();
+  const navigate = useNavigate();
 
-  const fetchGeneratedImages = async (): Promise<ImageResult[]> => {
-    if (!session?.user) return [];
-    console.log("[Gallery V3] Fetching jobs from Supabase...");
-    const { data: jobs, error } = await supabase
-      .from("mira-agent-jobs")
-      .select("id, final_result, context")
-      .eq("user_id", session.user.id)
-      .eq("status", "complete")
-      .order("created_at", { ascending: false });
-
-    if (error) throw new Error(error.message);
-
-    console.log(`[Gallery V3] Fetched ${jobs.length} raw jobs from DB.`);
-    const allImages: ImageResult[] = [];
-
-    for (const job of jobs) {
-        const source = job.context?.source || 'agent';
-        
-        // Case 1: Images are directly in the final_result (Direct Generator, simple agent responses)
-        if (job.final_result?.isImageGeneration && Array.isArray(job.final_result.images)) {
-            console.log(`[Gallery V3][${job.id}] Found ${job.final_result.images.length} images in final_result.`);
-            for (const image of job.final_result.images) {
-                allImages.push({ ...image, jobId: job.id, source });
-            }
-        }
-
-        // Case 2: Images are buried in the history (complex agent conversations)
-        if (job.context?.history) {
-            for (const turn of job.context.history) {
-                if (turn.role === 'function' && turn.parts[0]?.functionResponse?.response?.isImageGeneration) {
-                    const imagesInTurn = turn.parts[0].functionResponse.response.images;
-                    if (Array.isArray(imagesInTurn)) {
-                        console.log(`[Gallery V3][${job.id}] Found ${imagesInTurn.length} images in a history turn.`);
-                        for (const image of imagesInTurn) {
-                            // Avoid duplicates if the image is already in the list from final_result
-                            if (!allImages.some(existing => existing.publicUrl === image.publicUrl)) {
-                                allImages.push({ ...image, jobId: job.id, source });
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
-    // Remove duplicates - sometimes the same image can be in history and final_result
-    const uniqueImages = Array.from(new Map(allImages.map(item => [item.publicUrl, item])).values());
-
-    console.log(`[Gallery V3] Finished processing. Found a total of ${uniqueImages.length} unique images.`);
-    return uniqueImages;
-  };
-
-  const { data: allImages, isLoading, error } = useQuery<ImageResult[]>({
-    queryKey: ["generatedImages", session?.user?.id],
-    queryFn: fetchGeneratedImages,
+  const { data: jobs, isLoading, error } = useQuery<Job[]>({
+    queryKey: ['galleryJobs', session?.user?.id],
+    queryFn: async () => {
+      if (!session?.user) return [];
+      const { data, error } = await supabase.from('mira-agent-jobs').select('id, final_result, context').eq('user_id', session.user.id).order('created_at', { ascending: false });
+      if (error) throw error;
+      return data;
+    },
     enabled: !!session?.user,
   });
 
-  const { agentImages, directImages, refinedImages } = useMemo(() => {
-    if (!allImages) {
-      return { agentImages: [], directImages: [], refinedImages: [] };
+  const allImages = useMemo((): ImageResult[] => {
+    if (!jobs) return [];
+    const images: ImageResult[] = [];
+    for (const job of jobs) {
+      const source = job.context?.source || 'agent';
+      const jobImages = (job.final_result?.images || job.final_result?.final_generation_result?.response?.images || []);
+      for (const img of jobImages) {
+        if (img.publicUrl) images.push({ url: img.publicUrl, jobId: job.id, source });
+      }
+      if (job.context?.history) {
+        for (const turn of job.context.history) {
+          if (turn.role === 'function' && turn.parts[0]?.functionResponse?.response?.isImageGeneration) {
+            const imagesInTurn = turn.parts[0].functionResponse.response.images;
+            if (Array.isArray(imagesInTurn)) {
+              for (const image of imagesInTurn) {
+                if (!images.some(existing => existing.url === image.publicUrl)) {
+                  images.push({ url: image.publicUrl, jobId: job.id, source });
+                }
+              }
+            }
+          }
+        }
+      }
     }
-    const agent = allImages.filter(img => img.source === 'agent');
-    const direct = allImages.filter(img => img.source === 'direct_generator');
-    const refined = allImages.filter(img => img.source === 'refiner');
-    return { agentImages: agent, directImages: direct, refinedImages: refined };
-  }, [allImages]);
+    return Array.from(new Map(images.map(item => [item.url, item])).values());
+  }, [jobs]);
 
-  const renderImageList = (imageList: ImageResult[] | undefined) => {
-    if (!imageList || imageList.length === 0) {
+  const agentImages = useMemo(() => allImages.filter(img => img.source === 'agent' || img.source === 'agent_branch'), [allImages]);
+  const directImages = useMemo(() => allImages.filter(img => img.source === 'direct_generator'), [allImages]);
+  const refinedImages = useMemo(() => allImages.filter(img => img.source === 'refiner'), [allImages]);
+
+  const renderImageGrid = (images: ImageResult[]) => {
+    if (images.length === 0) {
       return (
-        <div className="text-center text-muted-foreground col-span-full mt-8">
-          <p>{t.noImagesYet}</p>
+        <div className="text-center py-16">
+          <ImageIcon className="mx-auto h-16 w-16 text-muted-foreground" />
+          <h2 className="mt-4 text-xl font-semibold">{t('noImagesYet')}</h2>
+          <p className="mt-2 text-muted-foreground">{t('noImagesDescription')}</p>
         </div>
       );
     }
-
-    return imageList.map((image, index) => (
-        <div key={`${image.jobId}-${index}`} className="relative group aspect-square">
-          <img
-            src={image.publicUrl}
-            alt={`Generated by job ${image.jobId}`}
-            className="w-full h-full object-cover rounded-lg cursor-pointer"
-            onClick={() => showImage({ 
-                images: imageList.map(img => ({ url: img.publicUrl, jobId: img.jobId })),
-                currentIndex: index 
-            })}
-          />
-          {image.source === 'agent' && (
-            <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-              <Button variant="secondary" onClick={() => navigate(`/chat/${image.jobId}`)}>
-                <View className="mr-2 h-4 w-4" /> {t.viewChat}
-              </Button>
+    return (
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+        {images.map((image, index) => (
+          <div key={image.url} className="group relative aspect-square">
+            <button onClick={() => showImage({ images, currentIndex: index })} className="w-full h-full">
+              <img src={image.url} alt={`Generated image ${index + 1}`} className="w-full h-full object-cover rounded-md" />
+            </button>
+            <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity rounded-b-md">
+              <Button size="sm" variant="secondary" className="w-full" onClick={() => navigate(`/chat/${image.jobId}`)}>{t('viewChat')}</Button>
             </div>
-          )}
-        </div>
-      )
+          </div>
+        ))}
+      </div>
     );
   };
 
   return (
     <div className="p-4 md:p-8 h-screen overflow-y-auto">
-      <header className="pb-4 mb-8 border-b flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-bold">{t.resultsGallery}</h1>
-          <p className="text-muted-foreground">{t.galleryDescription}</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <LanguageSwitcher />
-          <ThemeToggle />
-        </div>
+      <header className="pb-4 mb-8 border-b">
+        <h1 className="text-3xl font-bold">{t('resultsGallery')}</h1>
+        <p className="text-muted-foreground">{t('galleryDescription')}</p>
       </header>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>
-            <Tabs defaultValue="all" className="w-full">
-              <TabsList>
-                <TabsTrigger value="all">{t.galleryTabsAll}</TabsTrigger>
-                <TabsTrigger value="agent">{t.galleryTabsAgent}</TabsTrigger>
-                <TabsTrigger value="direct">{t.galleryTabsDirect}</TabsTrigger>
-                <TabsTrigger value="refined">{t.galleryTabsRefined}</TabsTrigger>
-              </TabsList>
-              <TabsContent value="all">
-                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mt-4">
-                  {isLoading ? (
-                    [...Array(12)].map((_, i) => <Skeleton key={i} className="aspect-square w-full" />)
-                  ) : allImages && allImages.length > 0 ? (
-                    renderImageList(allImages)
-                  ) : (
-                    <div className="col-span-full">
-                      <Alert>
-                        <ImageOff className="h-4 w-4" />
-                        <AlertTitle>{t.noImagesYet}</AlertTitle>
-                        <AlertDescription>{t.noImagesDescription}</AlertDescription>
-                      </Alert>
-                    </div>
-                  )}
-                </div>
-              </TabsContent>
-              <TabsContent value="agent">
-                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mt-4">
-                  {isLoading ? (
-                    [...Array(6)].map((_, i) => <Skeleton key={i} className="aspect-square w-full" />)
-                  ) : (
-                    renderImageList(agentImages)
-                  )}
-                </div>
-              </TabsContent>
-              <TabsContent value="direct">
-                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mt-4">
-                  {isLoading ? (
-                    [...Array(6)].map((_, i) => <Skeleton key={i} className="aspect-square w-full" />)
-                  ) : (
-                    renderImageList(directImages)
-                  )}
-                </div>
-              </TabsContent>
-              <TabsContent value="refined">
-                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mt-4">
-                  {isLoading ? (
-                    [...Array(6)].map((_, i) => <Skeleton key={i} className="aspect-square w-full" />)
-                  ) : (
-                    renderImageList(refinedImages)
-                  )}
-                </div>
-              </TabsContent>
-            </Tabs>
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {error && <Alert variant="destructive">Error loading images: {error.message}</Alert>}
-        </CardContent>
-      </Card>
+      
+      {isLoading ? (
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+          {[...Array(12)].map((_, i) => <Skeleton key={i} className="aspect-square w-full" />)}
+        </div>
+      ) : error ? (
+        <Alert variant="destructive">
+          <AlertTitle>Error</AlertTitle>
+          <AlertDescription>{error.message}</AlertDescription>
+        </Alert>
+      ) : (
+        <Tabs defaultValue="all" className="w-full">
+          <TabsList className="grid w-full grid-cols-4 mb-4">
+            <TabsTrigger value="all"><ImageIcon className="mr-2 h-4 w-4" />{t('galleryTabsAll')}</TabsTrigger>
+            <TabsTrigger value="agent"><Bot className="mr-2 h-4 w-4" />{t('galleryTabsAgent')}</TabsTrigger>
+            <TabsTrigger value="direct"><Code className="mr-2 h-4 w-4" />{t('galleryTabsDirect')}</TabsTrigger>
+            <TabsTrigger value="refined"><Wand2 className="mr-2 h-4 w-4" />{t('galleryTabsRefined')}</TabsTrigger>
+          </TabsList>
+          <TabsContent value="all">{renderImageGrid(allImages)}</TabsContent>
+          <TabsContent value="agent">{renderImageGrid(agentImages)}</TabsContent>
+          <TabsContent value="direct">{renderImageGrid(directImages)}</TabsContent>
+          <TabsContent value="refined">{renderImageGrid(refinedImages)}</TabsContent>
+        </Tabs>
+      )}
     </div>
   );
 };

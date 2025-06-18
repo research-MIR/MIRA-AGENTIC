@@ -7,7 +7,6 @@ import { downloadImage } from "@/lib/utils";
 import { useSession } from "./Auth/SessionContextProvider";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { useLanguage } from "@/context/LanguageContext";
-import { translations } from "@/lib/i18n";
 import { useQueryClient } from "@tanstack/react-query";
 import { type PreviewData, type PreviewImage } from "@/context/ImagePreviewContext";
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious, type CarouselApi } from "@/components/ui/carousel";
@@ -19,8 +18,7 @@ interface ImagePreviewModalProps {
 
 export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => {
   const { supabase, session } = useSession();
-  const { language } = useLanguage();
-  const t = translations[language];
+  const { t } = useLanguage();
   const [isUpscaling, setIsUpscaling] = useState(false);
   const queryClient = useQueryClient();
   const [api, setApi] = useState<CarouselApi>();
@@ -139,16 +137,16 @@ export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => 
               <DropdownMenuContent align="end">
                 <DropdownMenuItem onSelect={handleDownload} disabled={!currentImage}>
                   <Download className="mr-2 h-4 w-4" />
-                  {t.download}
+                  {t('download')}
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => handleUpscale(1.5)} disabled={isUpscaling || !currentImage}>
-                  {t.upscaleAndDownload} x1.5
+                  {t('upscaleAndDownload')} x1.5
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => handleUpscale(2)} disabled={isUpscaling || !currentImage}>
-                  {t.upscaleAndDownload} x2
+                  {t('upscaleAndDownload')} x2
                 </DropdownMenuItem>
                  <DropdownMenuItem onSelect={() => handleUpscale(3)} disabled={isUpscaling || !currentImage}>
-                  {t.upscaleAndDownload} x3
+                  {t('upscaleAndDownload')} x3
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

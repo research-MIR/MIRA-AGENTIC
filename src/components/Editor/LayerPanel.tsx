@@ -63,31 +63,31 @@ export const LayerPanel = ({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{t.layers}</CardTitle>
+        <CardTitle>{t('layers')}</CardTitle>
       </CardHeader>
       <CardContent>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button className="w-full">
-              <Plus className="mr-2 h-4 w-4" /> {t.addAdjustment}
+              <Plus className="mr-2 h-4 w-4" /> {t('addAdjustment')}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent className="w-64">
             <DropdownMenuItem onSelect={() => onAddLayer('noise')}>
               <Sparkles className="mr-2 h-4 w-4" />
-              <span>{t.addNoise}</span>
+              <span>{t('addNoise')}</span>
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => onAddLayer('levels')}>
               <SlidersHorizontal className="mr-2 h-4 w-4" />
-              <span>{t.addLevels}</span>
+              <span>{t('addLevels')}</span>
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => onAddLayer('curves')}>
               <Spline className="mr-2 h-4 w-4" />
-              <span>{t.addCurves}</span>
+              <span>{t('addCurves')}</span>
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => onAddLayer('hue-saturation')}>
               <Droplets className="mr-2 h-4 w-4" />
-              <span>{t.addSaturation}</span>
+              <span>{t('addSaturation')}</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -143,7 +143,7 @@ export const LayerPanel = ({
               </div>
             </div>
           ))}
-          {layers.length === 0 && <p className="text-xs text-center text-muted-foreground py-2">{t.noLayers}</p>}
+          {layers.length === 0 && <p className="text-xs text-center text-muted-foreground py-2">{t('noLayers')}</p>}
         </div>
       </CardContent>
     </Card>

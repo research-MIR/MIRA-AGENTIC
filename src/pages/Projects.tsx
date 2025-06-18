@@ -89,8 +89,10 @@ const Projects = () => {
     queryKey: ["projectPreviews", session?.user?.id],
     queryFn: async () => {
       if (!session?.user) return [];
+      console.log("[ProjectsPage] Fetching project previews...");
       const { data, error } = await supabase.rpc('get_project_previews', { p_user_id: session.user.id });
       if (error) throw error;
+      console.log("[ProjectsPage] Fetched previews:", data);
       return data;
     },
     enabled: !!session?.user,
@@ -143,22 +145,22 @@ const Projects = () => {
       <div className="p-4 md:p-8 h-screen overflow-y-auto">
         <header className="pb-4 mb-8 border-b flex justify-between items-center">
           <div>
-            <h1 className="text-3xl font-bold">{t.projectsTitle}</h1>
-            <p className="text-muted-foreground">{t.projectsDescription}</p>
+            <h1 className="text-3xl font-bold">{t('projectsTitle')}</h1>
+            <p className="text-muted-foreground">{t('projectsDescription')}</p>
           </div>
           <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
             <DialogTrigger asChild>
-              <Button><Plus className="h-4 w-4 mr-2" />{t.newProject}</Button>
+              <Button><Plus className="h-4 w-4 mr-2" />{t('newProject')}</Button>
             </DialogTrigger>
             <DialogContent>
-              <DialogHeader><DialogTitle>{t.createNewProject}</DialogTitle></DialogHeader>
+              <DialogHeader><DialogTitle>{t('createNewProject')}</DialogTitle></DialogHeader>
               <div className="grid gap-4 py-4">
-                <Label htmlFor="project-name">{t.name}</Label>
+                <Label htmlFor="project-name">{t('name')}</Label>
                 <Input id="project-name" value={newProjectName} onChange={(e) => setNewProjectName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleCreateProject()} />
               </div>
               <DialogFooter>
-                <Button variant="ghost" onClick={() => setIsModalOpen(false)}>{t.cancel}</Button>
-                <Button onClick={handleCreateProject} disabled={isCreating || !newProjectName.trim()}>{isCreating ? "Creating..." : t.createProject}</Button>
+                <Button variant="ghost" onClick={() => setIsModalOpen(false)}>{t('cancel')}</Button>
+                <Button onClick={handleCreateProject} disabled={isCreating || !newProjectName.trim()}>{isCreating ? "Creating..." : t('createProject')}</Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
@@ -190,8 +192,8 @@ const Projects = () => {
         ) : (
           <div className="text-center py-16">
             <Folder className="mx-auto h-16 w-16 text-muted-foreground" />
-            <h2 className="mt-4 text-xl font-semibold">{t.noProjectsTitle}</h2>
-            <p className="mt-2 text-muted-foreground">{t.noProjectsDescription}</p>
+            <h2 className="mt-4 text-xl font-semibold">{t('noProjectsTitle')}</h2>
+            <p className="mt-2 text-muted-foreground">{t('noProjectsDescription')}</p>
           </div>
         )}
       </div>

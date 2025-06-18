@@ -133,35 +133,35 @@ export const Sidebar = () => {
         <nav className="p-4 space-y-2">
           <NavLink id="chat-nav-link" to="/chat" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
             <MessageSquare size={20} />
-            {t.agentChat}
+            {t('agentChat')}
           </NavLink>
           <NavLink id="projects-nav-link" to="/projects" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
             <LayoutGrid size={20} />
-            {t.projectsTitle}
+            {t('projectsTitle')}
           </NavLink>
           <NavLink id="generator-nav-link" to="/generator" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
             <Image size={20} />
-            {t.generator}
+            {t('generator')}
           </NavLink>
           <NavLink id="refine-nav-link" to="/refine" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
             <Wand2 size={20} />
-            {t.refineAndUpscale}
+            {t('refineAndUpscale')}
           </NavLink>
           <NavLink id="editor-nav-link" to="/editor" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
             <PencilRuler size={20} />
-            {t.imageEditor}
+            {t('imageEditor')}
           </NavLink>
           <NavLink id="virtual-try-on-nav-link" to="/virtual-try-on" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
             <Shirt size={20} />
-            {t.virtualTryOn}
+            {t('virtualTryOn')}
           </NavLink>
           <NavLink id="gallery-nav-link" to="/gallery" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
             <GalleryHorizontal size={20} />
-            {t.gallery}
+            {t('gallery')}
           </NavLink>
           <NavLink id="developer-nav-link" to="/developer" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
             <Code size={20} />
-            {t.developer}
+            {t('developer')}
           </NavLink>
         </nav>
         <div className="flex-1 flex flex-col overflow-hidden">
@@ -207,17 +207,17 @@ export const Sidebar = () => {
           <ActiveJobsTracker />
           <Button variant="ghost" className="w-full justify-start gap-2" onClick={handleRestartTour}>
             <HelpCircle size={20} />
-            {t.restartOnboarding}
+            {t('restartOnboarding')}
           </Button>
           {session ? (
             <Button variant="ghost" className="w-full justify-start gap-2" onClick={handleLogout}>
               <LogOut size={20} />
-              {t.logout}
+              {t('logout')}
             </Button>
           ) : (
             <Button variant="ghost" className="w-full justify-start gap-2" onClick={() => navigate("/login")}>
               <LogIn size={20} />
-              {t.login}
+              {t('login')}
             </Button>
           )}
         </div>
@@ -239,26 +239,26 @@ export const Sidebar = () => {
       <AlertDialog open={!!deletingJobId} onOpenChange={(open) => !open && setDeletingJobId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader><AlertDialogTitle>Are you sure?</AlertDialogTitle><AlertDialogDescription>This action cannot be undone. This will permanently delete this chat's history.</AlertDialogDescription></AlertDialogHeader>
-          <AlertDialogFooter><AlertDialogCancel onClick={() => setDeletingJobId(null)}>Cancel</AlertDialogCancel><AlertDialogAction onClick={handleDelete}>Delete</AlertDialogAction></AlertDialogFooter>
+          <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={handleDelete}>Delete</AlertDialogAction></AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
       <Dialog open={isSettingsModalOpen} onOpenChange={setIsSettingsModalOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Chat Settings</DialogTitle>
-            <DialogDescription>Manage how your chat history is displayed.</DialogDescription>
+            <DialogTitle>{t('chatSettings')}</DialogTitle>
+            <DialogDescription>{t('manageChatHistory')}</DialogDescription>
           </DialogHeader>
           <div className="py-4">
-            <Label>Sort Chats By</Label>
+            <Label>{t('sortChatsBy')}</Label>
             <RadioGroup defaultValue={sortOrder} onValueChange={(value: 'created_at' | 'updated_at') => handleSortChange(value)} className="mt-2">
               <div className="flex items-center space-x-2">
                 <RadioGroupItem value="updated_at" id="sort-updated" />
-                <Label htmlFor="sort-updated">Last Updated</Label>
+                <Label htmlFor="sort-updated">{t('lastUpdated')}</Label>
               </div>
               <div className="flex items-center space-x-2">
                 <RadioGroupItem value="created_at" id="sort-created" />
-                <Label htmlFor="sort-created">Creation Date</Label>
+                <Label htmlFor="sort-created">{t('creationDate')}</Label>
               </div>
             </RadioGroup>
           </div>

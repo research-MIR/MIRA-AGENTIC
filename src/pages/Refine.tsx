@@ -1,410 +1,275 @@
-import { useState, useMemo, useCallback, useEffect } from "react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
-import { useSession } from "@/components/Auth/SessionContextProvider";
-import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
-import { Skeleton } from "@/components/ui/skeleton";
-import { UploadCloud, Wand2, Loader2, GitCompareArrows, X } from "lucide-react";
-import { ThemeToggle } from "@/components/ThemeToggle";
-import { LanguageSwitcher } from "@/components/LanguageSwitcher";
-import { useLanguage } from "@/context/LanguageContext";
-import { useImagePreview } from "@/context/ImagePreviewContext";
-import { Slider } from "@/components/ui/slider";
-import { ImageCompareModal } from "@/components/ImageCompareModal";
+import { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSession } from "@/components/Auth/SessionContextProvider";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Loader2, Image as ImageIcon, Sparkles, Wand2, UploadCloud, X, CheckCircle } from "lucide-react";
+import { useLanguage } from "@/context/LanguageContext";
+import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
+import { useFileUpload } from "@/hooks/useFileUpload";
+import { ImageCompareModal } from "@/components/ImageCompareModal";
+import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
-import { useDropzone } from "@/hooks/useDropzone";
 import { cn } from "@/lib/utils";
-import { RealtimeChannel } from "@supabase/supabase-js";
-import { RecentJobThumbnail } from "@/components/Jobs/RecentJobThumbnail";
 
-interface ComfyJob {
+interface Job {
   id: string;
-  status: 'queued' | 'processing' | 'complete' | 'failed';
-  final_result?: { publicUrl: string, storagePath: string };
-  error_message?: string;
-  metadata?: {
-    source_image_url?: string;
-    prompt?: string;
-  };
+  status: string;
+  final_result: any;
+  original_prompt: string;
+  context: any;
 }
 
 const Refine = () => {
   const { supabase, session } = useSession();
   const { t } = useLanguage();
-  const { showImage } = useImagePreview();
   const queryClient = useQueryClient();
-  
-  const [selectedJob, setSelectedJob] = useState<ComfyJob | null>(null);
-  const [prompt, setPrompt] = useState("");
-  const [sourceImageFile, setSourceImageFile] = useState<File | null>(null);
-  const [upscaleFactor, setUpscaleFactor] = useState(1.4);
-  const [isAutoPromptEnabled, setIsAutoPromptEnabled] = useState(true);
-  const [isQueueing, setIsQueueing] = useState(false);
-  const [isLoadingAutoPrompt, setIsLoadingAutoPrompt] = useState(false);
-  const [isCompareModalOpen, setIsCompareModalOpen] = useState(false);
-  const [originalDimensions, setOriginalDimensions] = useState<{ width: number; height: number } | null>(null);
-  const [displaySourceImageUrl, setDisplaySourceImageUrl] = useState<string | null>(null);
+  const { uploadedFiles, setUploadedFiles, handleFileUpload, removeFile } = useFileUpload();
 
-  const { data: recentJobs, isLoading: isLoadingRecentJobs } = useQuery<ComfyJob[]>({
-    queryKey: ['recentRefinementJobs', session?.user?.id],
+  const [prompt, setPrompt] = useState("");
+  const [upscaleFactor, setUpscaleFactor] = useState(1.5);
+  const [useAutoPrompt, setUseAutoPrompt] = useState(true);
+  
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
+  const [activeJob, setActiveJob] = useState<Job | null>(null);
+  const [isCompareModalOpen, setIsCompareModalOpen] = useState(false);
+
+  const { data: recentJobs, isLoading: isLoadingRecent } = useQuery<Job[]>({
+    queryKey: ['recentRefinerJobs', session?.user?.id],
     queryFn: async () => {
       if (!session?.user) return [];
       const { data, error } = await supabase
-        .from('mira-agent-comfyui-jobs')
-        .select('*')
+        .from('mira-agent-jobs')
+        .select('id, status, final_result, original_prompt, context')
+        .eq('context->>source', 'refiner')
         .eq('user_id', session.user.id)
-        .eq('metadata->>source', 'refiner')
         .order('created_at', { ascending: false })
-        .limit(10);
+        .limit(5);
       if (error) throw error;
       return data;
     },
     enabled: !!session?.user,
   });
 
-  // Realtime listener for the currently selected job
-  useEffect(() => {
-    if (!selectedJob || !supabase || (selectedJob.status !== 'queued' && selectedJob.status !== 'processing')) {
-      return;
-    }
-
-    const channel: RealtimeChannel = supabase.channel(`refine-job-tracker-${selectedJob.id}`)
-      .on<ComfyJob>(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'mira-agent-comfyui-jobs', filter: `id=eq.${selectedJob.id}` },
-        (payload) => {
-          console.log(`[RefinePage] Realtime update for selected job ${selectedJob.id}:`, payload.new);
-          setSelectedJob(payload.new as ComfyJob);
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [selectedJob, supabase]);
-
-  // Effect to securely fetch and display the source image for a selected job
-  useEffect(() => {
-    let objectUrl: string | null = null;
-    
-    const cleanup = () => {
-      if (objectUrl) {
-        URL.revokeObjectURL(objectUrl);
-        console.log(`[RefinePage] Cleanup: Revoked object URL: ${objectUrl}`);
-      }
-    };
-
-    const fetchSourceImage = async () => {
-      // Clear the previous image URL immediately to prevent rendering a revoked blob
-      setDisplaySourceImageUrl(null);
-      console.log('[RefinePage] Effect run: Cleared display source image URL.');
-
-      if (selectedJob?.metadata?.source_image_url) {
-        const sourceUrl = selectedJob.metadata.source_image_url;
-        console.log(`[RefinePage] Attempting to load source image from URL: ${sourceUrl}`);
-        
-        try {
-          const url = new URL(sourceUrl);
-          const pathParts = url.pathname.split('/mira-agent-user-uploads/');
-          if (pathParts.length < 2) throw new Error("Could not parse storage path from URL.");
-          
-          const storagePath = pathParts[1];
-          console.log(`[RefinePage] Parsed storage path: ${storagePath}`);
-
-          const { data: blob, error } = await supabase.storage
-            .from('mira-agent-user-uploads')
-            .download(storagePath);
-
-          if (error) throw error;
-          
-          console.log(`[RefinePage] Successfully downloaded image blob. Size: ${blob.size} bytes.`);
-          objectUrl = URL.createObjectURL(blob);
-          setDisplaySourceImageUrl(objectUrl);
-          console.log(`[RefinePage] Created and set new object URL for display: ${objectUrl}`);
-
-        } catch (err) {
-          console.error(`[RefinePage] Failed to load source image for job ${selectedJob.id}:`, err);
-          showError("Failed to load source image. Check console for details.");
-          setDisplaySourceImageUrl(null);
-        }
-      }
-    };
-
-    fetchSourceImage();
-
-    return cleanup;
-  }, [selectedJob]);
-
-  const newJobSourceImageUrl = useMemo(() => {
-    if (sourceImageFile) return URL.createObjectURL(sourceImageFile);
+  const sourceImageUrl = useMemo(() => {
+    if (activeJob) return activeJob.context?.source_image_url;
+    if (uploadedFiles.length > 0) return uploadedFiles[0].previewUrl;
     return null;
-  }, [sourceImageFile]);
+  }, [activeJob, uploadedFiles]);
 
-  const finalSourceImageUrl = selectedJob ? displaySourceImageUrl : newJobSourceImageUrl;
+  const resultImageUrl = useMemo(() => {
+    return activeJob?.final_result?.images?.[0]?.publicUrl;
+  }, [activeJob]);
 
-  const resetToNewJobState = () => {
-    setSelectedJob(null);
-    setSourceImageFile(null);
-    setPrompt("");
-    setOriginalDimensions(null);
-  };
-
-  const handleFileChange = useCallback((files: FileList | null) => {
-    const file = files?.[0];
-    if (file) {
-      if (file.type.startsWith('video/') || file.type === 'image/avif') {
-        showError("Unsupported file type. AVIF and video formats are not allowed.");
-        return;
-      }
-      resetToNewJobState();
-      setSourceImageFile(file);
-
-      const reader = new FileReader();
-      reader.onload = (event) => {
-          const img = new Image();
-          img.onload = () => {
-              setOriginalDimensions({ width: img.width, height: img.height });
-              if (isAutoPromptEnabled) {
-                handleAutoPrompt(event.target?.result as string, file.type);
-              }
-          };
-          img.src = event.target?.result as string;
-      };
-      reader.readAsDataURL(file);
-    }
-  }, [isAutoPromptEnabled]);
-
-  const { isDraggingOver, dropzoneProps } = useDropzone({ onDrop: handleFileChange });
-
-  const handleAutoPrompt = async (dataUrl: string, mimeType: string) => {
-    setIsLoadingAutoPrompt(true);
-    const toastId = showLoading("Analyzing image to create prompt...");
+  const handleGeneratePrompt = async () => {
+    if (uploadedFiles.length === 0) return showError("Please upload an image first.");
+    setIsGeneratingPrompt(true);
+    const toastId = showLoading("Generating prompt from image...");
     try {
-      const base64 = dataUrl.split(',')[1];
+      const file = uploadedFiles[0].file;
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      const base64String = await new Promise<string>((resolve, reject) => {
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
+      });
+      const base64Data = base64String.split(',')[1];
+
       const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-auto-describe-image', {
-        body: { base64_image_data: base64, mime_type: mimeType }
+        body: { base64_image_data: base64Data, mime_type: file.type }
       });
       if (error) throw error;
       setPrompt(data.auto_prompt);
       dismissToast(toastId);
+      showSuccess("Prompt generated!");
     } catch (err: any) {
       dismissToast(toastId);
-      showError(`Auto-prompt failed: ${err.message}`);
+      showError(`Failed to generate prompt: ${err.message}`);
     } finally {
-      setIsLoadingAutoPrompt(false);
+      setIsGeneratingPrompt(false);
     }
   };
 
-  const handleRefine = async () => {
-    if (!sourceImageFile) return showError("Please upload a source image to start a new job.");
-    if (!prompt.trim()) return showError("Please enter a refinement prompt.");
-    if (!session?.user) return showError("You must be logged in to use this feature.");
-
-    setIsQueueing(true);
-    const toastId = showLoading(t.sendingJob);
+  const handleSubmit = async () => {
+    if (uploadedFiles.length === 0) return showError("Please upload an image to refine.");
+    if (!prompt.trim()) return showError("Please provide a refinement prompt.");
+    
+    setIsSubmitting(true);
+    const toastId = showLoading("Uploading image and submitting job...");
 
     try {
-      const formData = new FormData();
-      formData.append('image', sourceImageFile);
-      formData.append('prompt_text', prompt);
-      formData.append('invoker_user_id', session.user.id);
-      formData.append('upscale_factor', String(upscaleFactor));
-      formData.append('source', 'refiner');
+      const { path } = await uploadedFiles[0].upload(supabase, 'mira-agent-user-uploads');
+      const { data: { publicUrl } } = supabase.storage.from('mira-agent-user-uploads').getPublicUrl(path);
 
       const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-comfyui', {
-        body: formData
+        body: {
+          prompt_text: prompt,
+          image_url: publicUrl,
+          invoker_user_id: session?.user?.id,
+          upscale_factor: upscaleFactor,
+          original_prompt_for_gallery: prompt,
+          source: 'refiner',
+          context: { source_image_url: publicUrl }
+        }
       });
 
       if (error) throw error;
       
       dismissToast(toastId);
-      showSuccess("Refinement job queued! It will appear in your history shortly.");
-      
-      resetToNewJobState();
-      queryClient.invalidateQueries({ queryKey: ['recentRefinementJobs'] });
-
+      showSuccess("Refinement job started! You can track its progress in the sidebar.");
+      setActiveJob(data.job);
+      queryClient.invalidateQueries({ queryKey: ['activeComfyJobs'] });
+      queryClient.invalidateQueries({ queryKey: ['recentRefinerJobs'] });
     } catch (err: any) {
-      showError(`Error: ${err.message}`);
-      console.error("[Refine] Error:", err);
       dismissToast(toastId);
+      showError(`Job submission failed: ${err.message}`);
     } finally {
-      setIsQueueing(false);
+      setIsSubmitting(false);
     }
   };
 
-  const handleJobSelect = (job: ComfyJob) => {
-    setSelectedJob(job);
-    setSourceImageFile(null);
-    setPrompt(job.metadata?.prompt || "");
-    setOriginalDimensions(null);
-  };
-
-  const renderJobResult = (job: ComfyJob) => {
-    switch (job.status) {
-      case 'queued':
-      case 'processing':
-        return <div className="flex items-center justify-center h-full text-muted-foreground"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> {t.inProgress}</div>;
-      case 'complete':
-        return job.final_result?.publicUrl ? (
-          <button onClick={() => showImage({ images: [{ url: job.final_result!.publicUrl }], currentIndex: 0 })} className="block w-full h-full">
-            <img src={job.final_result.publicUrl} alt="Refined by ComfyUI" className="rounded-lg aspect-square object-contain w-full hover:opacity-80 transition-opacity" />
-          </button>
-        ) : <p>{t.jobCompletedNoUrl}</p>;
-      case 'failed':
-        return <p className="text-destructive text-sm p-2">{t.jobFailed}: {job.error_message}</p>;
-      default:
-        return null;
-    }
+  const startNew = () => {
+    setActiveJob(null);
+    setUploadedFiles([]);
+    setPrompt("");
   };
 
   return (
     <>
       <div className="p-4 md:p-8 h-screen overflow-y-auto">
-        <header className="pb-4 mb-8 border-b flex justify-between items-center">
-          <div>
-            <h1 className="text-3xl font-bold">{t.refineAndUpscale}</h1>
-            <p className="text-muted-foreground">{t.refinePageDescription}</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <LanguageSwitcher />
-            <ThemeToggle />
-          </div>
+        <header className="pb-4 mb-8 border-b">
+          <h1 className="text-3xl font-bold">{t('refineAndUpscale')}</h1>
+          <p className="text-muted-foreground">{t('refinePageDescription')}</p>
         </header>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Left Column: Controls */}
           <div className="lg:col-span-1 space-y-6">
+            <Card>
+              <CardHeader><CardTitle>{t('sourceImage')}</CardTitle></CardHeader>
+              <CardContent>
+                {sourceImageUrl ? (
+                  <div className="relative">
+                    <img src={sourceImageUrl} alt="Source for refinement" className="rounded-md w-full" />
+                    <Button variant="destructive" size="icon" className="absolute -top-2 -right-2 h-6 w-6 rounded-full" onClick={() => { setUploadedFiles([]); setActiveJob(null); }}>
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="p-4 border-2 border-dashed rounded-lg text-center">
+                    <UploadCloud className="mx-auto h-8 w-8 text-muted-foreground" />
+                    <Label htmlFor="refine-upload" className="mt-2 text-sm font-medium text-primary underline cursor-pointer">{t('uploadAFile')}</Label>
+                    <p className="text-xs text-muted-foreground">{t('dragAndDrop')}</p>
+                    <Input id="refine-upload" type="file" className="hidden" accept="image/*" onChange={(e) => handleFileUpload(e.target.files)} />
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader><CardTitle>{t('refinementPrompt')}</CardTitle></CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center space-x-2">
+                  <Switch id="auto-prompt" checked={useAutoPrompt} onCheckedChange={setUseAutoPrompt} />
+                  <Label htmlFor="auto-prompt">{t('autoPrompt')}</Label>
+                </div>
+                {useAutoPrompt ? (
+                  <Button className="w-full" onClick={handleGeneratePrompt} disabled={isGeneratingPrompt || uploadedFiles.length === 0}>
+                    {isGeneratingPrompt ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+                    {t('generateAndRefine')}
+                  </Button>
+                ) : (
+                  <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t('refinementPromptPlaceholder')} />
+                )}
+                {useAutoPrompt && prompt && <p className="text-sm p-2 bg-muted rounded-md">{prompt}</p>}
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader><CardTitle>{t('upscaleSettings')}</CardTitle></CardHeader>
+              <CardContent>
+                <Label>{t('upscaleFactor')}: {upscaleFactor}x</Label>
+                <Slider value={[upscaleFactor]} onValueChange={(v) => setUpscaleFactor(v[0])} min={1} max={3} step={0.1} />
+              </CardContent>
+            </Card>
+            <Button size="lg" className="w-full" onClick={handleSubmit} disabled={isSubmitting || !sourceImageUrl || !prompt}>
+              {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+              {t('refineButton')}
+            </Button>
+          </div>
+          <div className="lg:col-span-2 space-y-6">
             <Card>
               <CardHeader>
                 <div className="flex justify-between items-center">
-                  <CardTitle>{selectedJob ? t.loadedJob : t.startNewJob}</CardTitle>
-                  {selectedJob && (
-                    <Button variant="outline" size="sm" onClick={resetToNewJobState}>
-                      <X className="h-4 w-4 mr-2" />
-                      {t.newJob}
-                    </Button>
-                  )}
+                  <CardTitle>{t('workbench')}</CardTitle>
+                  {activeJob && <Button variant="outline" onClick={startNew}>{t('startNewJob')}</Button>}
                 </div>
+                <p className="text-sm text-muted-foreground">{t('refineWorkbenchTooltip')}</p>
               </CardHeader>
-              <CardContent {...dropzoneProps} className={cn("p-4 border-2 border-dashed rounded-lg transition-colors", isDraggingOver && "border-primary bg-primary/10")}>
-                <Input id="source-image-upload" type="file" accept="image/*" onChange={(e) => handleFileChange(e.target.files)} className="hidden" />
-                <Label htmlFor="source-image-upload" className="cursor-pointer flex flex-col items-center justify-center text-center text-muted-foreground">
-                  <UploadCloud className="h-12 w-12 mb-4" />
-                  <p>{t.uploadHelper}</p>
-                </Label>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader><CardTitle>{t.refinementPrompt}</CardTitle></CardHeader>
-              <CardContent>
-                <div className="flex items-center justify-between mb-4">
-                  <Label htmlFor="auto-prompt-switch" className="flex flex-col space-y-1">
-                    <span>{t.autoPrompt}</span>
-                    <span className="font-normal leading-snug text-muted-foreground text-sm">
-                      {t.autoPromptDescription}
-                    </span>
-                  </Label>
-                  <Switch id="auto-prompt-switch" checked={isAutoPromptEnabled} onCheckedChange={setIsAutoPromptEnabled} disabled={!!selectedJob} />
-                </div>
-                <Textarea id="prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t.refinementPromptPlaceholder} rows={4} disabled={isLoadingAutoPrompt || !!selectedJob} />
-                {isLoadingAutoPrompt && <p className="text-sm text-muted-foreground mt-2 flex items-center"><Loader2 className="mr-2 h-4 w-4 animate-spin" />Analyzing...</p>}
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader><CardTitle>{t.upscaleSettings}</CardTitle></CardHeader>
-              <CardContent>
-                  <div className="space-y-2">
-                      <Label>{t.upscaleFactor}: {upscaleFactor.toFixed(1)}x</Label>
-                      <Slider value={[upscaleFactor]} onValueChange={(value) => setUpscaleFactor(value[0])} min={1} max={4} step={0.1} disabled={!!selectedJob} />
-                      {originalDimensions && (
-                          <p className="text-sm text-muted-foreground text-center">
-                              {originalDimensions.width}x{originalDimensions.height} → 
-                              {' '}{Math.round(originalDimensions.width * upscaleFactor)}x{Math.round(originalDimensions.height * upscaleFactor)}
-                          </p>
-                      )}
-                  </div>
-              </CardContent>
-            </Card>
-            <Button onClick={handleRefine} disabled={isQueueing || !sourceImageFile} className="w-full">
-              {isQueueing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
-              {t.queueRefinementJob}
-            </Button>
-          </div>
-
-          {/* Right Column: Workbench */}
-          <div className="lg:col-span-2">
-            <Card className="min-h-[60vh]">
-              <CardHeader>
-                <CardTitle>{t.workbench}</CardTitle>
-                <p className="text-sm text-muted-foreground pt-1">{t.refineWorkbenchTooltip}</p>
-              </CardHeader>
-              <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                      <h3 className="font-semibold mb-2 text-center">{t.originalImage}</h3>
-                      <div className="aspect-square bg-muted rounded-lg flex items-center justify-center">
-                        {finalSourceImageUrl ? (
-                            <button onClick={() => showImage({ images: [{ url: finalSourceImageUrl }], currentIndex: 0 })} className="block w-full h-full">
-                                <img src={finalSourceImageUrl} alt="Original" className="rounded-lg aspect-square object-contain w-full hover:opacity-80 transition-opacity" />
-                            </button>
+              <CardContent className="min-h-[400px]">
+                {activeJob ? (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <h3 className="font-semibold mb-2">{t('originalImage')}</h3>
+                        <img src={activeJob.context.source_image_url} alt="Original" className="rounded-md" />
+                      </div>
+                      <div>
+                        <h3 className="font-semibold mb-2">{t('refinedImage')}</h3>
+                        {resultImageUrl ? (
+                          <img src={resultImageUrl} alt="Refined" className="rounded-md" />
                         ) : (
-                            <div className="text-center text-muted-foreground p-4">
-                                <UploadCloud className="h-12 w-12 mb-4 mx-auto" />
-                                <p>{t.uploadOrSelect}</p>
-                            </div>
+                          <div className="aspect-square bg-muted rounded-md flex flex-col items-center justify-center text-muted-foreground">
+                            <Loader2 className="h-8 w-8 animate-spin" />
+                            <p className="mt-2 text-sm">{t('inProgress')}</p>
+                          </div>
                         )}
                       </div>
+                    </div>
+                    {resultImageUrl && (
+                      <Button className="w-full" onClick={() => setIsCompareModalOpen(true)}>{t('compareResults')}</Button>
+                    )}
                   </div>
-                  <div>
-                      <h3 className="font-semibold mb-2 text-center">{t.refinedImage}</h3>
-                      <div className="aspect-square bg-muted rounded-lg flex items-center justify-center">
-                          {selectedJob ? renderJobResult(selectedJob) : <p className="text-muted-foreground text-center p-4">{t.resultWillAppear}</p>}
-                      </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+                    <ImageIcon className="h-16 w-16" />
+                    <p className="mt-4 text-center">{t('uploadOrSelect')}</p>
                   </div>
+                )}
               </CardContent>
             </Card>
-            {selectedJob?.status === 'complete' && selectedJob?.final_result?.publicUrl && (
-              <Button onClick={() => setIsCompareModalOpen(true)} className="mt-4 w-full">
-                <GitCompareArrows className="mr-2 h-4 w-4" />
-                {t.compareResults}
-              </Button>
-            )}
+            <Card>
+              <CardHeader><CardTitle>{t('recentRefinements')}</CardTitle></CardHeader>
+              <CardContent>
+                {isLoadingRecent ? <Skeleton className="h-24 w-full" /> : recentJobs && recentJobs.length > 0 ? (
+                  <div className="space-y-2">
+                    {recentJobs.map(job => (
+                      <div key={job.id} className="flex items-center justify-between p-2 rounded-md hover:bg-muted">
+                        <div className="flex items-center gap-2">
+                          {job.status === 'complete' ? <CheckCircle className="h-4 w-4 text-green-500" /> : <Loader2 className="h-4 w-4 animate-spin" />}
+                          <p className="text-sm truncate pr-4">{job.original_prompt}</p>
+                        </div>
+                        <Button variant="ghost" size="sm" onClick={() => setActiveJob(job)}>Load</Button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">{t('noRecentJobs')}</p>
+                )}
+              </CardContent>
+            </Card>
           </div>
         </div>
-
-        {/* History at the bottom */}
-        <Card className="mt-8">
-          <CardHeader><CardTitle>{t.recentRefinements}</CardTitle></CardHeader>
-          <CardContent>
-            {isLoadingRecentJobs ? (
-              <div className="flex gap-4"><Skeleton className="h-24 w-24" /><Skeleton className="h-24 w-24" /><Skeleton className="h-24 w-24" /></div>
-            ) : recentJobs && recentJobs.length > 0 ? (
-              <div className="flex gap-4 overflow-x-auto pb-2">
-                {recentJobs.map(job => (
-                  <RecentJobThumbnail
-                    key={job.id}
-                    job={job}
-                    onClick={() => handleJobSelect(job)}
-                    isSelected={selectedJob?.id === job.id}
-                  />
-                ))}
-              </div>
-            ) : (
-              <p className="text-muted-foreground">{t.noImagesDescription}</p>
-            )}
-          </CardContent>
-        </Card>
       </div>
-      {selectedJob && selectedJob.metadata?.source_image_url && selectedJob.final_result?.publicUrl && (
-        <ImageCompareModal
+      {isCompareModalOpen && sourceImageUrl && resultImageUrl && (
+        <ImageCompareModal 
           isOpen={isCompareModalOpen}
           onClose={() => setIsCompareModalOpen(false)}
-          beforeUrl={selectedJob.metadata.source_image_url}
-          afterUrl={selectedJob.final_result.publicUrl}
+          beforeUrl={sourceImageUrl}
+          afterUrl={resultImageUrl}
         />
       )}
     </>

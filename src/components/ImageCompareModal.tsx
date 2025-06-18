@@ -90,9 +90,9 @@ export const ImageCompareModal = ({ isOpen, onClose, beforeUrl, afterUrl }: Imag
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-5xl p-4">
         <DialogHeader>
-          <DialogTitle>{t.compareBeforeAfter}</DialogTitle>
+          <DialogTitle>{t('compareBeforeAfter')}</DialogTitle>
           <DialogDescription>
-            {t.compareDescription}
+            {t('compareDescription')}
           </DialogDescription>
         </DialogHeader>
         <div

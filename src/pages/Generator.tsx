@@ -1,293 +1,290 @@
-import { useState, useEffect, useRef, useMemo } from "react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
-import { ModelSelector } from "@/components/ModelSelector";
+import { useState, useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
-import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
-import { Sparkles, Wand2, UploadCloud, X, GalleryHorizontal, PlusCircle } from "lucide-react";
-import { ThemeToggle } from "@/components/ThemeToggle";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useLanguage } from "@/context/LanguageContext";
-import { LanguageSwitcher } from "@/components/LanguageSwitcher";
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Switch } from "@/components/ui/switch";
-import { useDropzone } from "@/hooks/useDropzone";
-import { cn } from "@/lib/utils";
-import { useNavigate } from "react-router-dom";
-import { GeneratorJobThumbnail } from "@/components/Jobs/GeneratorJobThumbnail";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { RealtimeChannel } from "@supabase/supabase-js";
-import { useGeneratorStore } from "@/store/generatorStore";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Loader2, Image as ImageIcon, Sparkles, Wand2, Info } from "lucide-react";
+import { useLanguage } from "@/context/LanguageContext";
+import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
+import { ModelSelector } from "@/components/ModelSelector";
+import { useImagePreview } from "@/context/ImagePreviewContext";
+import { FileDropzone } from "@/components/FileDropzone";
+import { useFileUpload } from "@/hooks/useFileUpload";
+import { Link } from "react-router-dom";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
-interface AspectRatioOption {
-    label: string;
-    size: string;
+interface Job {
+  id: string;
+  status: string;
+  final_result: any;
+  original_prompt: string;
 }
-
-const aspectRatioOptions: Record<string, AspectRatioOption> = {
-    "1024x1024": { label: "Square (1:1)", size: "1024x1024" },
-    "768x1408": { label: "Portrait (9:16)", size: "768x1408" },
-    "1408x768": { label: "Landscape (16:9)", size: "1408x768" },
-    "1280x896": { label: "Landscape (4:3)", size: "1280x896" },
-    "896x1280": { label: "Portrait (3:4)", size: "896x1280" },
-};
-
-const ImageUploader = ({ onFileSelect, title, t, imageUrl, onClear }: { onFileSelect: (files: FileList | null) => void, title: string, t: any, imageUrl: string | null, onClear: () => void }) => {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: onFileSelect });
-
-  if (!imageUrl) {
-    return (
-      <div 
-        {...dropzoneProps}
-        className={cn("flex aspect-square justify-center items-center rounded-lg border border-dashed border-border px-6 py-4 transition-colors cursor-pointer", isDraggingOver && "border-primary bg-primary/10")}
-        onClick={() => inputRef.current?.click()}
-      >
-        <div className="text-center pointer-events-none">
-          <UploadCloud className="mx-auto h-8 w-8 text-muted-foreground" />
-          <p className="mt-2 flex text-sm leading-6 text-muted-foreground">
-            <span className="relative rounded-md bg-background font-semibold text-primary">{title}</span>
-          </p>
-        </div>
-        <Input ref={inputRef} type="file" className="hidden" accept="image/*" onChange={(e) => onFileSelect(e.target.files)} />
-      </div>
-    );
-  }
-
-  return (
-    <div className="relative aspect-square">
-      <img src={imageUrl} alt={title} className="w-full h-full object-cover rounded-md" />
-      <Button variant="destructive" size="icon" className="absolute top-1 right-1 h-6 w-6 z-10" onClick={onClear}>
-        <X className="h-4 w-4" />
-      </Button>
-    </div>
-  );
-};
 
 const Generator = () => {
   const { supabase, session } = useSession();
   const { t } = useLanguage();
-  const navigate = useNavigate();
-  const channelRef = useRef<RealtimeChannel | null>(null);
+  const queryClient = useQueryClient();
+  const { showImage } = useImagePreview();
+  const { uploadedFiles, setUploadedFiles, handleFileUpload, removeFile, isDragging, setIsDragging } = useFileUpload();
 
-  const {
-    prompt, negativePrompt, numImages, seed, selectedModelId, aspectRatio,
-    styleReferenceFile, garmentReferenceFiles, isHelperEnabled, isLoading,
-    finalPromptUsed, recentJobs, selectedJobId, isFetchingJobs,
-    setField, reset, handleFileSelect, removeGarmentFile, clearStyleFile,
-    fetchRecentJobs, selectJob, generate
-  } = useGeneratorStore();
+  const [prompt, setPrompt] = useState("");
+  const [negativePrompt, setNegativePrompt] = useState("");
+  const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
+  const [aspectRatio, setAspectRatio] = useState("1:1");
+  const [numImages, setNumImages] = useState(1);
+  const [seed, setSeed] = useState("");
+  const [useTwoStage, setUseTwoStage] = useState(true);
+  const [useAIPromptHelper, setUseAIPromptHelper] = useState(false);
 
-  const styleReferenceImageUrl = useMemo(() => styleReferenceFile ? URL.createObjectURL(styleReferenceFile) : null, [styleReferenceFile]);
-  const garmentReferenceImageUrls = useMemo(() => garmentReferenceFiles.map(file => URL.createObjectURL(file)), [garmentReferenceFiles]);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [jobResult, setJobResult] = useState<Job | null>(null);
 
-  useEffect(() => {
-    if (session?.user) {
-      fetchRecentJobs(session.user.id);
-    }
-  }, [session?.user, fetchRecentJobs]);
+  const { data: recentJobs, isLoading: isLoadingRecent } = useQuery<Job[]>({
+    queryKey: ['recentGeneratorJobs', session?.user?.id],
+    queryFn: async () => {
+      if (!session?.user) return [];
+      const { data, error } = await supabase
+        .from('mira-agent-jobs')
+        .select('id, status, final_result, original_prompt')
+        .eq('context->>source', 'direct_generator')
+        .eq('user_id', session.user.id)
+        .order('created_at', { ascending: false })
+        .limit(5);
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!session?.user,
+  });
 
-  useEffect(() => {
-    if (!session?.user?.id) {
-      console.log("[Generator Realtime] No user session, skipping subscription.");
+  const handleGenerate = async () => {
+    if (!prompt.trim() || !selectedModelId) {
+      showError("Please provide a prompt and select a model.");
       return;
     }
-    const userId = session.user.id;
-    console.log(`[Generator Realtime] Setting up subscription for user: ${userId}`);
+    setIsGenerating(true);
+    setJobResult(null);
+    const toastId = showLoading("Submitting generation job...");
 
-    const channel = supabase.channel(`direct-generator-jobs-tracker-${userId}`)
-      .on(
-        'postgres_changes', 
-        { event: '*', schema: 'public', table: 'mira-agent-jobs' }, // REMOVED filter
-        (payload) => {
-          console.log('[Generator Realtime] Received payload:', payload);
-          const job = payload.new as any;
-          // Client-side filtering
-          if (job?.user_id === userId && job?.context?.source === 'direct_generator') {
-            console.log(`[Generator Realtime] Job ${job.id} matches user and source. Fetching recent jobs.`);
-            fetchRecentJobs(userId);
-          } else {
-            console.log(`[Generator Realtime] Job update received, but it's not for this user or not from the direct generator. Ignoring.`);
-          }
+    try {
+      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-direct-generator', {
+        body: {
+          prompt,
+          negative_prompt: negativePrompt,
+          model_id: selectedModelId,
+          aspect_ratio: aspectRatio,
+          num_images: numImages,
+          seed: seed ? parseInt(seed) : undefined,
+          use_two_stage: useTwoStage,
+          use_ai_prompt_helper: useAIPromptHelper,
+          reference_image_paths: uploadedFiles.map(f => f.path),
+          invoker_user_id: session?.user?.id,
         }
-      )
-      .subscribe((status, err) => {
-          if (status === 'SUBSCRIBED') {
-              console.log(`[Generator Realtime] Successfully subscribed to channel for user ${userId}!`);
-          }
-          if (status === 'CHANNEL_ERROR') {
-              console.error('[Generator Realtime] Subscription failed:', err);
-          }
-          if (status === 'TIMED_OUT') {
-              console.warn('[Generator Realtime] Subscription timed out.');
-          }
       });
+
+      if (error) throw error;
       
-    channelRef.current = channel;
-
-    return () => {
-      if (channelRef.current) {
-        console.log(`[Generator Realtime] Cleaning up and removing channel for user ${userId}.`);
-        supabase.removeChannel(channelRef.current);
-        channelRef.current = null;
-      }
-    };
-  }, [supabase, session?.user?.id, fetchRecentJobs]);
-
-  useEffect(() => {
-    return () => {
-      if (styleReferenceImageUrl) URL.revokeObjectURL(styleReferenceImageUrl);
-      garmentReferenceImageUrls.forEach(url => URL.revokeObjectURL(url));
-    };
-  }, [styleReferenceImageUrl, garmentReferenceImageUrls]);
-
-  const handleGenerateClick = async () => {
-    if (!session?.user) return;
-    const toastId = showLoading("Warming up the engines...");
-    const result = await generate(session.user.id);
-    dismissToast(toastId);
-    if (result.success) {
-      showSuccess(result.message);
-    } else {
-      showError(result.message);
+      dismissToast(toastId);
+      showSuccess("Generation complete!");
+      setJobResult(data.job);
+      queryClient.invalidateQueries({ queryKey: ['recentGeneratorJobs'] });
+    } catch (err: any) {
+      dismissToast(toastId);
+      showError(`Generation failed: ${err.message}`);
+    } finally {
+      setIsGenerating(false);
     }
   };
 
+  const loadJob = (job: Job) => {
+    setJobResult(job);
+    setPrompt(job.original_prompt);
+  };
+
+  const startNewJob = () => {
+    setJobResult(null);
+    setPrompt("");
+    setNegativePrompt("");
+    setUploadedFiles([]);
+  };
+
   return (
-    <div className="p-4 md:p-8 h-screen overflow-y-auto">
-      <header className="pb-4 mb-8 border-b flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-bold">{t.imageGenerator}</h1>
-          <p className="text-muted-foreground">{t.generatorIntro}</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <LanguageSwitcher />
-          <ThemeToggle />
-        </div>
+    <div className="p-4 md:p-8 h-screen overflow-y-auto relative" onDragEnter={() => setIsDragging(true)}>
+      {isDragging && <FileDropzone onDrop={handleFileUpload} onDragStateChange={setIsDragging} />}
+      <header className="pb-4 mb-8 border-b">
+        <h1 className="text-3xl font-bold">{t('imageGenerator')}</h1>
+        <p className="text-muted-foreground">{t('generatorDescription')}</p>
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-1 space-y-6">
-          <Card id="generator-prompt-card">
-            <CardHeader>
-              <div className="flex justify-between items-center">
-                <CardTitle>{selectedJobId ? t.loadedJob : t.newGeneration}</CardTitle>
-                {selectedJobId && <Button variant="outline" size="sm" onClick={reset}><PlusCircle className="h-4 w-4 mr-2" />{t.newJob}</Button>}
+          <Card>
+            <CardHeader><CardTitle>{t('generatorIntro')}</CardTitle></CardHeader>
+          </Card>
+          <Card>
+            <CardHeader><CardTitle>{t('describeYourImage')}</CardTitle></CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <Label htmlFor="prompt">{t('prompt')}</Label>
+                <Textarea id="prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t('promptPlaceholderGenerator')} />
               </div>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <div>
-                  <Label htmlFor="prompt">{t.prompt}</Label>
-                  <Textarea id="prompt" value={prompt} onChange={(e) => setField('prompt', e.target.value)} placeholder={t.promptPlaceholderGenerator} rows={6} />
-                </div>
-                <div>
-                  <Label htmlFor="negative-prompt">{t.negativePrompt}</Label>
-                  <Textarea id="negative-prompt" value={negativePrompt} onChange={(e) => setField('negativePrompt', e.target.value)} placeholder={t.negativePromptPlaceholder} rows={3} />
-                </div>
-                <Accordion type="single" collapsible className="w-full">
-                  <AccordionItem value="item-1">
-                    <AccordionTrigger>{t.referenceImagesOptional}</AccordionTrigger>
-                    <AccordionContent className="space-y-4 pt-4">
-                      <ImageUploader onFileSelect={(files) => handleFileSelect('garment', files)} title={t.garmentReference} t={t} imageUrl={null} onClear={() => {}} />
-                      {garmentReferenceImageUrls.length > 0 && (
-                        <div className="grid grid-cols-3 gap-2">
-                          {garmentReferenceImageUrls.map((url, index) => (
-                            <div key={index} className="relative">
-                              <img src={url} alt={`Garment ${index + 1}`} className="w-full h-24 object-cover rounded-md" />
-                              <Button variant="destructive" size="icon" className="absolute top-1 right-1 h-6 w-6" onClick={() => removeGarmentFile(index)}><X className="h-4 w-4" /></Button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      <ImageUploader onFileSelect={(files) => handleFileSelect('style', files)} title={t.styleReference} t={t} imageUrl={styleReferenceImageUrl} onClear={clearStyleFile} />
-                    </AccordionContent>
-                  </AccordionItem>
-                </Accordion>
+              <div>
+                <Label htmlFor="negative-prompt">{t('negativePrompt')}</Label>
+                <Textarea id="negative-prompt" value={negativePrompt} onChange={(e) => setNegativePrompt(e.target.value)} placeholder={t('negativePromptPlaceholder')} />
               </div>
             </CardContent>
           </Card>
-        </div>
-
-        <div className="lg:col-span-1 space-y-6">
-          <Card id="generator-settings-card">
-            <CardHeader><CardTitle>{t.configureSettings}</CardTitle></CardHeader>
+          <Card>
+            <CardHeader><CardTitle>{t('referenceImagesOptional')}</CardTitle></CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex items-center justify-between rounded-lg border p-3 shadow-sm">
-                <div className="space-y-0.5">
-                  <Label>{t.aiPromptHelper}</Label>
-                  <p className="text-[0.8rem] text-muted-foreground">{t.aiPromptHelperDescription}</p>
-                </div>
-                <Switch checked={isHelperEnabled} onCheckedChange={(checked) => setField('isHelperEnabled', checked)} />
+              <div className="flex items-center space-x-2">
+                <Switch id="ai-prompt-helper" checked={useAIPromptHelper} onCheckedChange={setUseAIPromptHelper} disabled={uploadedFiles.length === 0} />
+                <Label htmlFor="ai-prompt-helper">{t('aiPromptHelper')}</Label>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild><Info className="h-4 w-4 text-muted-foreground" /></TooltipTrigger>
+                    <TooltipContent><p>{t('aiPromptHelperDescription')}</p></TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
+              <div className="p-4 border-2 border-dashed rounded-lg text-center">
+                <ImageIcon className="mx-auto h-8 w-8 text-muted-foreground" />
+                <Label htmlFor="file-upload-generator" className="mt-2 text-sm font-medium text-primary underline cursor-pointer">{t('uploadFiles')}</Label>
+                <p className="text-xs text-muted-foreground">{t('dragAndDrop')}</p>
+                <Input id="file-upload-generator" type="file" multiple className="hidden" onChange={(e) => handleFileUpload(e.target.files)} />
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {uploadedFiles.map((file, index) => (
+                  <div key={index} className="relative">
+                    <img src={file.previewUrl} alt={file.file.name} className="w-16 h-16 object-cover rounded-md" />
+                    <Button variant="destructive" size="icon" className="absolute -top-2 -right-2 h-5 w-5 rounded-full" onClick={() => removeFile(index)}>
+                      <span className="text-xs">X</span>
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader><CardTitle>{t('configureSettings')}</CardTitle></CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center space-x-2">
+                <Switch id="two-stage" checked={useTwoStage} onCheckedChange={setUseTwoStage} />
+                <Label htmlFor="two-stage">{t('twoStageRefinement')}</Label>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild><Info className="h-4 w-4 text-muted-foreground" /></TooltipTrigger>
+                    <TooltipContent><p>{t('twoStageRefinementDescription')}</p></TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
               </div>
               <div>
-                <Label>{t.model}</Label>
-                <ModelSelector selectedModelId={selectedModelId} onModelChange={(val) => setField('selectedModelId', val)} />
-              </div>
-              <div>
-                <Label>{t.aspectRatio}</Label>
-                <Select value={aspectRatio} onValueChange={(val) => setField('aspectRatio', val)}>
-                  <SelectTrigger><SelectValue placeholder="Select aspect ratio..." /></SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(aspectRatioOptions).map(([value, { label }]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                <Label>{t('model')}</Label>
+                <ModelSelector selectedModelId={selectedModelId} onModelChange={setSelectedModelId} />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label htmlFor="num-images">{t.images}</Label>
-                  <Input id="num-images" type="number" value={numImages} onChange={(e) => setField('numImages', Math.max(1, parseInt(e.target.value, 10)))} min="1" max="8" />
+                  <Label htmlFor="aspect-ratio">{t('aspectRatio')}</Label>
+                  <Select value={aspectRatio} onValueChange={setAspectRatio}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="1:1">1:1</SelectItem>
+                      <SelectItem value="16:9">16:9</SelectItem>
+                      <SelectItem value="9:16">9:16</SelectItem>
+                      <SelectItem value="4:3">4:3</SelectItem>
+                      <SelectItem value="3:4">3:4</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div>
-                  <Label htmlFor="seed">{t.seed}</Label>
-                  <Input id="seed" type="number" placeholder="Random" value={seed || ''} onChange={(e) => setField('seed', e.target.value ? parseInt(e.target.value, 10) : undefined)} />
+                  <Label htmlFor="num-images">{t('images')}</Label>
+                  <Select value={String(numImages)} onValueChange={(v) => setNumImages(Number(v))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="1">1</SelectItem>
+                      <SelectItem value="2">2</SelectItem>
+                      <SelectItem value="4">4</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
+              </div>
+              <div>
+                <Label htmlFor="seed">{t('seed')}</Label>
+                <Input id="seed" type="number" value={seed} onChange={(e) => setSeed(e.target.value)} placeholder="e.g. 12345" />
               </div>
             </CardContent>
           </Card>
-          <Button onClick={handleGenerateClick} disabled={isLoading} className="w-full">
-            {isLoading ? <Wand2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
-            {t.generate}
+          <Button size="lg" className="w-full" onClick={handleGenerate} disabled={isGenerating}>
+            {isGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+            {t('generate')}
           </Button>
         </div>
-
-        <div className="lg:col-span-1">
-          <Card className="min-h-[60vh]">
-            <CardHeader><CardTitle>{t.results}</CardTitle></CardHeader>
+        <div className="lg:col-span-2 space-y-6">
+          <Card>
+            <CardHeader>
+              <div className="flex justify-between items-center">
+                <CardTitle>{t('results')}</CardTitle>
+                {jobResult && <Button variant="outline" onClick={startNewJob}>{t('newGeneration')}</Button>}
+              </div>
+            </CardHeader>
             <CardContent>
-              {finalPromptUsed && (
-                <div className="mb-4">
-                  <Label>{t.finalPromptUsed}</Label>
-                  <Textarea readOnly value={finalPromptUsed} className="mt-1 h-24 font-mono text-xs" />
+              {isGenerating ? (
+                <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
+                  <Loader2 className="h-12 w-12 animate-spin" />
+                  <p className="mt-4">Generating your vision...</p>
+                </div>
+              ) : jobResult?.final_result?.images ? (
+                <div className="space-y-4">
+                  {jobResult.final_result.final_prompt_used && (
+                    <div className="p-2 bg-muted rounded-md">
+                      <p className="text-xs font-semibold">{t('finalPromptUsed')}:</p>
+                      <p className="text-sm">{jobResult.final_result.final_prompt_used}</p>
+                    </div>
+                  )}
+                  <div className="grid grid-cols-2 gap-4">
+                    {jobResult.final_result.images.map((image: any, index: number) => (
+                      <div key={index} className="relative group">
+                        <img src={image.publicUrl} alt={`Generated image ${index + 1}`} className="rounded-md w-full" />
+                        <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Button onClick={() => showImage({ images: jobResult.final_result.images.map((img: any) => ({ url: img.publicUrl, jobId: jobResult.id })), currentIndex: index })}>View</Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
+                  <ImageIcon className="h-12 w-12" />
+                  <p className="mt-4">{t('resultsPlaceholder')}</p>
                 </div>
               )}
-              <div className="flex flex-col items-center justify-center text-center text-muted-foreground h-64">
-                <Sparkles className="h-12 w-12 mb-4" />
-                <p>{t.galleryPlaceholder}</p>
-                <Button variant="outline" className="mt-4" onClick={() => navigate('/gallery')}><GalleryHorizontal className="mr-2 h-4 w-4" />{t.goToGallery}</Button>
-              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader><CardTitle>{t('recentGenerations')}</CardTitle></CardHeader>
+            <CardContent>
+              {isLoadingRecent ? <Skeleton className="h-24 w-full" /> : recentJobs && recentJobs.length > 0 ? (
+                <div className="space-y-2">
+                  {recentJobs.map(job => (
+                    <div key={job.id} className="flex items-center justify-between p-2 rounded-md hover:bg-muted">
+                      <p className="text-sm truncate pr-4">{job.original_prompt}</p>
+                      <Button variant="ghost" size="sm" onClick={() => loadJob(job)}>Load</Button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">{t('noRecentJobs')}</p>
+              )}
             </CardContent>
           </Card>
         </div>
       </div>
-
-      <Card className="mt-8">
-        <CardHeader><CardTitle>{t.recentGenerations}</CardTitle></CardHeader>
-        <CardContent>
-          {isFetchingJobs ? (
-            <div className="flex gap-4"><Skeleton className="h-24 w-24" /><Skeleton className="h-24 w-24" /><Skeleton className="h-24 w-24" /></div>
-          ) : recentJobs && recentJobs.length > 0 ? (
-            <div className="flex gap-4 overflow-x-auto pb-2">
-              {recentJobs.map(job => <GeneratorJobThumbnail key={job.id} job={job} onClick={() => selectJob(job)} isSelected={selectedJobId === job.id} />)}
-            </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center text-center text-muted-foreground h-24"><p>{t.noRecentJobs}</p></div>
-          )}
-        </CardContent>
-      </Card>
     </div>
   );
 };

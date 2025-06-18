@@ -53,7 +53,7 @@ export const RefinementProposalCard = ({ data, onRefinementComplete }: Props) =>
     }
   };
 
-  const titleText = (data.summary && t[data.summary as keyof typeof t]) || data.summary;
+  const titleText = (data.summary && t(data.summary)) || data.summary;
 
   return (
     <Card className="max-w-2xl w-full bg-secondary/50">
@@ -80,7 +80,7 @@ export const RefinementProposalCard = ({ data, onRefinementComplete }: Props) =>
                 ) : (
                   <Wand2 className="mr-2 h-4 w-4" />
                 )}
-                {t.refineButtonLabel}
+                {t('refineButtonLabel')}
               </Button>
             </div>
           ))}

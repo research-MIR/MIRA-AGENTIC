@@ -39,7 +39,7 @@ export const ControlPanel = ({
         </div>
         <div id="designer-mode-switch" className="flex items-center space-x-2">
           <Switch id="designer-mode" checked={isDesignerMode} onCheckedChange={onDesignerModeChange} />
-          <Label htmlFor="designer-mode">{t.designerMode}</Label>
+          <Label htmlFor="designer-mode">{t('designerMode')}</Label>
         </div>
         <div id="ratio-mode-select" className="flex items-center gap-2">
           <Label className="text-sm font-medium">Ratio:</Label>
@@ -73,7 +73,7 @@ export const ControlPanel = ({
               <Info className="h-4 w-4 text-muted-foreground cursor-help" />
             </TooltipTrigger>
             <TooltipContent>
-              <p>{t.refinerSuggestion}</p>
+              <p>{t('refinerSuggestion')}</p>
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
