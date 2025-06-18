@@ -63,7 +63,7 @@ export const Sidebar = () => {
         .from("mira-agent-jobs")
         .select("id, original_prompt, project_id, context")
         .eq("user_id", session.user.id)
-        .not('context->>source', 'in', '("direct_generator","refiner","project_upload","project_gallery_add")')
+        .or(`context->>source.not.in.("direct_generator","refiner","project_upload","project_gallery_add"),context->>source.is.null`)
         .order(sortOrder, { ascending: false });
       if (error) throw new Error(error.message);
       return data as JobHistory[];
