@@ -7,8 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Loader2, Image as ImageIcon, Sparkles, Wand2, UploadCloud, X, CheckCircle } from "lucide-react";
+import { Loader2, Image as ImageIcon, Sparkles, Wand2, UploadCloud, X, PlusCircle } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { useFileUpload } from "@/hooks/useFileUpload";
@@ -16,13 +15,18 @@ import { ImageCompareModal } from "@/components/ImageCompareModal";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
+import { RecentJobThumbnail } from "@/components/Jobs/RecentJobThumbnail";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
-interface Job {
+interface VtoPipelineJob {
   id: string;
-  status: string;
-  final_result: any;
-  original_prompt: string;
-  context: any;
+  status: 'queued' | 'processing' | 'complete' | 'failed';
+  final_result?: {
+    publicUrl: string;
+  };
+  metadata?: {
+    source_image_url?: string;
+  };
 }
 
 const Refine = () => {
@@ -37,35 +41,37 @@ const Refine = () => {
   
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
-  const [activeJob, setActiveJob] = useState<Job | null>(null);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [isCompareModalOpen, setIsCompareModalOpen] = useState(false);
 
-  const { data: recentJobs, isLoading: isLoadingRecent } = useQuery<Job[]>({
+  const { data: recentJobs, isLoading: isLoadingRecent } = useQuery<VtoPipelineJob[]>({
     queryKey: ['recentRefinerJobs', session?.user?.id],
     queryFn: async () => {
       if (!session?.user) return [];
       const { data, error } = await supabase
-        .from('mira-agent-jobs')
-        .select('id, status, final_result, original_prompt, context')
-        .eq('context->>source', 'refiner')
+        .from('mira-agent-comfyui-jobs')
+        .select('id, status, final_result, metadata')
+        .eq('metadata->>source', 'refiner')
         .eq('user_id', session.user.id)
         .order('created_at', { ascending: false })
-        .limit(5);
+        .limit(10);
       if (error) throw error;
       return data;
     },
     enabled: !!session?.user,
   });
 
+  const selectedJob = useMemo(() => recentJobs?.find(j => j.id === selectedJobId), [recentJobs, selectedJobId]);
+
   const sourceImageUrl = useMemo(() => {
-    if (activeJob) return activeJob.context?.source_image_url;
+    if (selectedJob) return selectedJob.metadata?.source_image_url;
     if (uploadedFiles.length > 0) return uploadedFiles[0].previewUrl;
     return null;
-  }, [activeJob, uploadedFiles]);
+  }, [selectedJob, uploadedFiles]);
 
   const resultImageUrl = useMemo(() => {
-    return activeJob?.final_result?.images?.[0]?.publicUrl;
-  }, [activeJob]);
+    return selectedJob?.status === 'complete' ? selectedJob.final_result?.publicUrl : null;
+  }, [selectedJob]);
 
   const handleGeneratePrompt = async () => {
     if (uploadedFiles.length === 0) return showError("Please upload an image first.");
@@ -101,21 +107,18 @@ const Refine = () => {
     if (!prompt.trim()) return showError("Please provide a refinement prompt.");
     
     setIsSubmitting(true);
-    const toastId = showLoading("Uploading image and submitting job...");
+    const toastId = showLoading("Submitting job...");
 
     try {
-      const { path } = await uploadedFiles[0].upload(supabase, 'mira-agent-user-uploads');
-      const { data: { publicUrl } } = supabase.storage.from('mira-agent-user-uploads').getPublicUrl(path);
-
       const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-comfyui', {
         body: {
           prompt_text: prompt,
-          image_url: publicUrl,
+          image_url: sourceImageUrl, // The proxy will handle fetching this
           invoker_user_id: session?.user?.id,
           upscale_factor: upscaleFactor,
           original_prompt_for_gallery: prompt,
           source: 'refiner',
-          context: { source_image_url: publicUrl }
+          metadata: { source_image_url: sourceImageUrl }
         }
       });
 
@@ -123,9 +126,9 @@ const Refine = () => {
       
       dismissToast(toastId);
       showSuccess("Refinement job started! You can track its progress in the sidebar.");
-      setActiveJob(data.job);
       queryClient.invalidateQueries({ queryKey: ['activeComfyJobs'] });
       queryClient.invalidateQueries({ queryKey: ['recentRefinerJobs'] });
+      startNew();
     } catch (err: any) {
       dismissToast(toastId);
       showError(`Job submission failed: ${err.message}`);
@@ -135,7 +138,7 @@ const Refine = () => {
   };
 
   const startNew = () => {
-    setActiveJob(null);
+    setSelectedJobId(null);
     setUploadedFiles([]);
     setPrompt("");
   };
@@ -156,7 +159,7 @@ const Refine = () => {
                 {sourceImageUrl ? (
                   <div className="relative">
                     <img src={sourceImageUrl} alt="Source for refinement" className="rounded-md w-full" />
-                    <Button variant="destructive" size="icon" className="absolute -top-2 -right-2 h-6 w-6 rounded-full" onClick={() => { setUploadedFiles([]); setActiveJob(null); }}>
+                    <Button variant="destructive" size="icon" className="absolute -top-2 -right-2 h-6 w-6 rounded-full" onClick={startNew}>
                       <X className="h-4 w-4" />
                     </Button>
                   </div>
@@ -205,17 +208,17 @@ const Refine = () => {
               <CardHeader>
                 <div className="flex justify-between items-center">
                   <CardTitle>{t('workbench')}</CardTitle>
-                  {activeJob && <Button variant="outline" onClick={startNew}>{t('startNewJob')}</Button>}
+                  {selectedJob && <Button variant="outline" onClick={startNew}>{t('startNewJob')}</Button>}
                 </div>
                 <p className="text-sm text-muted-foreground">{t('refineWorkbenchTooltip')}</p>
               </CardHeader>
               <CardContent className="min-h-[400px]">
-                {activeJob ? (
+                {selectedJob ? (
                   <div className="space-y-4">
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <h3 className="font-semibold mb-2">{t('originalImage')}</h3>
-                        <img src={activeJob.context.source_image_url} alt="Original" className="rounded-md" />
+                        <img src={selectedJob.metadata?.source_image_url} alt="Original" className="rounded-md" />
                       </div>
                       <div>
                         <h3 className="font-semibold mb-2">{t('refinedImage')}</h3>
@@ -245,17 +248,18 @@ const Refine = () => {
               <CardHeader><CardTitle>{t('recentRefinements')}</CardTitle></CardHeader>
               <CardContent>
                 {isLoadingRecent ? <Skeleton className="h-24 w-full" /> : recentJobs && recentJobs.length > 0 ? (
-                  <div className="space-y-2">
-                    {recentJobs.map(job => (
-                      <div key={job.id} className="flex items-center justify-between p-2 rounded-md hover:bg-muted">
-                        <div className="flex items-center gap-2">
-                          {job.status === 'complete' ? <CheckCircle className="h-4 w-4 text-green-500" /> : <Loader2 className="h-4 w-4 animate-spin" />}
-                          <p className="text-sm truncate pr-4">{job.original_prompt}</p>
-                        </div>
-                        <Button variant="ghost" size="sm" onClick={() => setActiveJob(job)}>Load</Button>
-                      </div>
-                    ))}
-                  </div>
+                  <ScrollArea className="h-32">
+                    <div className="flex gap-4 pb-2">
+                      {recentJobs.map(job => (
+                        <RecentJobThumbnail
+                          key={job.id}
+                          job={job}
+                          onClick={() => setSelectedJobId(job.id)}
+                          isSelected={selectedJobId === job.id}
+                        />
+                      ))}
+                    </div>
+                  </ScrollArea>
                 ) : (
                   <p className="text-sm text-muted-foreground">{t('noRecentJobs')}</p>
                 )}

@@ -4,10 +4,12 @@ import { showError, showSuccess, showLoading, dismissToast } from '@/utils/toast
 import { optimizeImage, sanitizeFilename } from '@/lib/utils';
 
 export interface UploadedFile {
+  file: File; // Added the file object itself
   name: string;
   path: string;
   previewUrl: string;
   isImage: boolean;
+  upload: (supabase: any, bucket: string) => Promise<{ path: string, publicUrl: string }>;
 }
 
 export const useFileUpload = () => {
@@ -35,45 +37,40 @@ export const useFileUpload = () => {
 
     if (validFiles.length === 0) return [];
 
-    const optimizationToastId = showLoading(`Optimizing ${validFiles.length} file(s)...`);
-    
-    try {
-      const optimizationPromises = validFiles.map(file => 
-        file.type.startsWith('image/') ? optimizeImage(file) : Promise.resolve(file)
-      );
-      const optimizedFiles = await Promise.all(optimizationPromises);
-      dismissToast(optimizationToastId);
-
-      const uploadToastId = showLoading(`Uploading ${optimizedFiles.length} file(s)...`);
+    const newFiles: UploadedFile[] = validFiles.map(file => {
+      const isImage = file.type.startsWith('image/');
+      const previewUrl = isImage ? URL.createObjectURL(file) : '';
       
-      const uploadPromises = optimizedFiles.map(file => {
-        const sanitized = sanitizeFilename(file.name);
-        const filePath = `${session?.user.id}/${Date.now()}-${sanitized}`;
-        return supabase.storage.from('mira-agent-user-uploads').upload(filePath, file).then(({ error }) => {
+      const upload = async (supabaseClient: any, bucket: string) => {
+        const toastId = showLoading(`Uploading ${file.name}...`);
+        try {
+          const optimizedFile = await optimizeImage(file);
+          const sanitized = sanitizeFilename(optimizedFile.name);
+          const filePath = `${session?.user.id}/${Date.now()}-${sanitized}`;
+          const { error } = await supabaseClient.storage.from(bucket).upload(filePath, optimizedFile);
           if (error) throw error;
-          const isImage = file.type.startsWith('image/');
-          const previewUrl = isImage ? URL.createObjectURL(file) : '';
-          return { name: file.name, path: filePath, previewUrl, isImage };
-        });
-      });
+          const { data: { publicUrl } } = supabaseClient.storage.from(bucket).getPublicUrl(filePath);
+          dismissToast(toastId);
+          return { path: filePath, publicUrl };
+        } catch (err: any) {
+          dismissToast(toastId);
+          showError(`Upload failed for ${file.name}: ${err.message}`);
+          throw err;
+        }
+      };
 
-      const newFiles = await Promise.all(uploadPromises);
-      setUploadedFiles(prev => [...prev, ...newFiles]);
-      dismissToast(uploadToastId);
-      showSuccess(`${newFiles.length} file(s) uploaded successfully!`);
-      return newFiles;
+      return { file, name: file.name, path: '', previewUrl, isImage, upload };
+    });
 
-    } catch (error: any) {
-      dismissToast(optimizationToastId);
-      showError("Upload failed: " + error.message);
-      return [];
-    }
-  }, [session, supabase]);
+    setUploadedFiles(prev => [...prev, ...newFiles]);
+    return newFiles;
 
-  const removeFile = (path: string) => {
-    setUploadedFiles(files => files.filter(f => {
-      if (f.path === path) {
-        if (f.isImage) URL.revokeObjectURL(f.previewUrl);
+  }, [session]);
+
+  const removeFile = (indexToRemove: number) => {
+    setUploadedFiles(files => files.filter((file, index) => {
+      if (index === indexToRemove) {
+        if (file.isImage) URL.revokeObjectURL(file.previewUrl);
         return false;
       }
       return true;
