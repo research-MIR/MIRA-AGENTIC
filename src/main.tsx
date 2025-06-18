@@ -25,7 +25,7 @@ createRoot(document.getElementById("root")!).render(
               <OnboardingTourProvider>
                   <TooltipProvider>
                     <Toaster />
-                    <Sonner position="top-right" />
+                    <Sonner position="bottom-right" />
                     <App />
                   </TooltipProvider>
               </OnboardingTourProvider>
