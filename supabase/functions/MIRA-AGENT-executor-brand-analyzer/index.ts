@@ -57,6 +57,7 @@ serve(async (req) => {
       case 'complete': {
         console.log(`[BrandAnalyzer][${job_id}] Sub-plan complete. Reporting back to Master Worker.`);
         const finalReport = {
+            isBrandAnalysis: true,
             brand_name: brandName,
             website_analysis: {
                 url: brandAnalyzerState.website_url,
