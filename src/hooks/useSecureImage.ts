@@ -42,17 +42,27 @@ export const useSecureImage = (imageUrl: string | null | undefined) => {
             throw new Error(`Could not parse bucket or path from URL: ${imageUrl}`);
           }
 
-          const { data, error: downloadError } = await supabase.storage
-            .from(bucketName)
-            .download(storagePath);
+          const MAX_RETRIES = 3;
+          const RETRY_DELAY = 1000; // 1 second
 
-          if (downloadError) {
-            throw new Error(`Failed to download image: ${downloadError.message}`);
+          for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+            const { data, error: downloadError } = await supabase.storage
+              .from(bucketName)
+              .download(storagePath);
+
+            if (!downloadError) {
+              objectUrl = URL.createObjectURL(data);
+              setDisplayUrl(objectUrl);
+              return; // Success, exit the function
+            }
+
+            if (attempt < MAX_RETRIES) {
+              console.warn(`[useSecureImage] Failed to download ${storagePath} (attempt ${attempt}/${MAX_RETRIES}). Retrying in ${RETRY_DELAY}ms...`);
+              await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+            } else {
+              throw new Error(`Failed to download image after ${MAX_RETRIES} attempts: ${downloadError.message}`);
+            }
           }
-
-          objectUrl = URL.createObjectURL(data);
-          setDisplayUrl(objectUrl);
-
         } else {
           // Fallback for any other external URLs via proxy
           const { data, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-image-download', { body: { url: imageUrl } });
