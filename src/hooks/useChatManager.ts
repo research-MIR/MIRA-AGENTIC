@@ -199,10 +199,14 @@ export const useChatManager = () => {
         }
         setIsSending(true);
         try {
+            const uploadPromises = files.map(file => file.upload(supabase, 'mira-agent-user-uploads'));
+            const uploadedFileResults = await Promise.all(uploadPromises);
+            const storagePaths = uploadedFileResults.map(result => result.path);
+
             const payload = { 
                 jobId, 
                 prompt: text, 
-                storagePaths: files.map(f => f.path), 
+                storagePaths,
                 userId: session?.user.id, 
                 ...jobSettings,
                 language, 
@@ -223,6 +227,9 @@ export const useChatManager = () => {
         } catch (err: any) {
             showError(translateErrorMessage(err.message, t));
             setIsSending(false);
+            if (!isSilent) {
+                setMessages(prev => prev.slice(0, -1));
+            }
         }
     }, [jobId, session, jobSettings, language, supabase, navigate, queryClient, t]);
 
