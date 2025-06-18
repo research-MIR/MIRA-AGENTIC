@@ -141,7 +141,7 @@ export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => 
 
   return (
     <Dialog open={!!data} onOpenChange={(isOpen) => !isOpen && onClose()}>
-      <DialogContent className="max-w-4xl w-full p-2">
+      <DialogContent className="max-w-3xl w-full p-2">
         <DialogTitle className="sr-only">Image Preview</DialogTitle>
         <DialogDescription className="sr-only">A larger view of the selected image. You can download or upscale it from the button in the top right corner.</DialogDescription>
         <div className="relative">
