@@ -4,7 +4,7 @@ import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Image as ImageIcon, Bot, Wand2, Code, CheckCircle, Plus, Folder, MoreVertical, X } from "lucide-react";
+import { Image as ImageIcon, Bot, Wand2, Code, CheckCircle, Plus, Folder, MoreVertical, X, Download } from "lucide-react";
 import { useImagePreview } from "@/context/ImagePreviewContext";
 import { useLanguage } from "@/context/LanguageContext";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { showError, showSuccess, showLoading, dismissToast } from "@/utils/toast";
+import JSZip from 'jszip';
 
 interface ImageResult {
   url: string;
@@ -46,6 +47,7 @@ const Gallery = () => {
   const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
   const [targetProjectId, setTargetProjectId] = useState<string | null>(null);
+  const [isDownloading, setIsDownloading] = useState(false);
 
   const { data: jobs, isLoading, error } = useQuery<Job[]>({
     queryKey: ['galleryJobs', session?.user?.id],
@@ -183,6 +185,53 @@ const Gallery = () => {
     setSelectedImages(new Set());
   };
 
+  const handleBulkDownload = async () => {
+    if (selectedImages.size === 0) return;
+    setIsDownloading(true);
+    const toastId = showLoading(`Preparing ${selectedImages.size} images for download...`);
+    
+    try {
+      const zip = new JSZip();
+      const imagePromises = Array.from(selectedImages).map(async (url) => {
+        try {
+          const response = await fetch(url);
+          if (!response.ok) return null;
+          const blob = await response.blob();
+          const filename = url.split('/').pop() || 'image.png';
+          zip.file(filename, blob);
+        } catch (e) {
+          console.error(`Failed to fetch ${url}`, e);
+        }
+      });
+
+      await Promise.all(imagePromises);
+
+      dismissToast(toastId);
+      showLoading("Zipping files...");
+
+      const content = await zip.generateAsync({ type: "blob" });
+      
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(content);
+      link.download = `mira-gallery-export-${Date.now()}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(link.href);
+
+      dismissToast(toastId);
+      showSuccess("Download started!");
+      setIsSelectMode(false);
+      setSelectedImages(new Set());
+
+    } catch (err: any) {
+      dismissToast(toastId);
+      showError(`Failed to create zip file: ${err.message}`);
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
   const renderImageGrid = (images: ImageResult[]) => {
     if (images.length === 0) {
       return (
@@ -263,6 +312,10 @@ const Gallery = () => {
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 w-auto bg-background border rounded-lg shadow-2xl p-2 flex items-center gap-4 z-50">
           <p className="text-sm font-medium px-2">{selectedImages.size} selected</p>
           <Button variant="outline" onClick={() => setIsProjectModalOpen(true)}><Folder className="mr-2 h-4 w-4" />Add to Project</Button>
+          <Button variant="outline" onClick={handleBulkDownload} disabled={isDownloading}>
+            {isDownloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+            Download as ZIP
+          </Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button><Wand2 className="mr-2 h-4 w-4" />Upscale</Button>
