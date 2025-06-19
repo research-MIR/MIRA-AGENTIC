@@ -16,11 +16,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label";
 import { showError, showSuccess, showLoading, dismissToast } from "@/utils/toast";
 import JSZip from 'jszip';
+import { Badge } from "@/components/ui/badge";
 
 interface ImageResult {
   url: string;
   jobId: string;
   source: string;
+  createdAt: string;
 }
 
 interface Job {
@@ -29,6 +31,7 @@ interface Job {
   context: any;
   original_prompt: string;
   project_id: string | null;
+  created_at: string;
 }
 
 interface Project {
@@ -37,6 +40,12 @@ interface Project {
 }
 
 const PAGE_SIZE = 30;
+
+const NewBadge = () => (
+  <div className="absolute top-2 left-2 z-10">
+    <Badge>NEW</Badge>
+  </div>
+);
 
 const Gallery = () => {
   const { supabase, session } = useSession();
@@ -68,7 +77,7 @@ const Gallery = () => {
       
       let query = supabase
         .from('mira-agent-jobs')
-        .select('id, final_result, context, original_prompt, project_id')
+        .select('id, final_result, context, original_prompt, project_id, created_at')
         .eq('user_id', session.user.id)
         .order('created_at', { ascending: false })
         .range(from, to);
@@ -120,7 +129,7 @@ const Gallery = () => {
       const source = job.context?.source || 'agent';
       const jobImages = (job.final_result?.images || job.final_result?.final_generation_result?.response?.images || []);
       for (const img of jobImages) {
-        if (img.publicUrl) images.push({ url: img.publicUrl, jobId: job.id, source });
+        if (img.publicUrl) images.push({ url: img.publicUrl, jobId: job.id, source, createdAt: job.created_at });
       }
       if (job.context?.history) {
         for (const turn of job.context.history) {
@@ -129,7 +138,7 @@ const Gallery = () => {
             if (Array.isArray(imagesInTurn)) {
               for (const image of imagesInTurn) {
                 if (!images.some(existing => existing.url === image.publicUrl)) {
-                  images.push({ url: image.publicUrl, jobId: job.id, source });
+                  images.push({ url: image.publicUrl, jobId: job.id, source, createdAt: job.created_at });
                 }
               }
             }
@@ -288,12 +297,18 @@ const Gallery = () => {
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
         {images.map((image, index) => {
           const isSelected = selectedImages.has(image.url);
+          const imageDate = new Date(image.createdAt);
+          const now = new Date();
+          const hoursAgo = (now.getTime() - imageDate.getTime()) / (1000 * 60 * 60);
+          const isNew = hoursAgo < 4;
+
           return (
             <div
               key={image.url}
               className="group relative aspect-square cursor-pointer"
               onClick={() => isSelectMode ? toggleSelection(image.url) : showImage({ images, currentIndex: index })}
             >
+              {isNew && <NewBadge />}
               <img src={image.url} alt={`Generated image ${index + 1}`} className={cn("w-full h-full object-cover rounded-md transition-transform", isSelectMode && "group-hover:scale-95")} />
               {isSelectMode && (
                 <div className={cn("absolute inset-0 rounded-md flex items-center justify-center transition-all", isSelected ? "bg-primary/60" : "bg-black/50 opacity-0 group-hover:opacity-100")}>
