@@ -4,7 +4,7 @@ import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Image as ImageIcon, Bot, Wand2, Code, CheckCircle, Plus, Folder, MoreVertical, X, Download } from "lucide-react";
+import { Image as ImageIcon, Bot, Wand2, Code, CheckCircle, Plus, Folder, MoreVertical, X, Download, Loader2 } from "lucide-react";
 import { useImagePreview } from "@/context/ImagePreviewContext";
 import { useLanguage } from "@/context/LanguageContext";
 import { Button } from "@/components/ui/button";
