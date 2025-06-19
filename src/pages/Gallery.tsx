@@ -60,7 +60,7 @@ const Gallery = () => {
     isFetchingNextPage 
   } = useInfiniteQuery<Job[]>({
     queryKey: ['galleryJobs', session?.user?.id],
-    queryFn: async ({ pageParam = 0 }) => {
+    queryFn: async ({ pageParam }) => {
       if (!session?.user) return [];
       const from = pageParam * PAGE_SIZE;
       const to = from + PAGE_SIZE - 1;
@@ -73,10 +73,16 @@ const Gallery = () => {
         .range(from, to);
         
       if (error) throw error;
-      return data;
+      return data || []; // Ensure we always return an array
     },
+    initialPageParam: 0,
     getNextPageParam: (lastPage, allPages) => {
-      return lastPage.length === PAGE_SIZE ? allPages.length : undefined;
+      // If the last page has fewer items than PAGE_SIZE, it's the last page.
+      if (!lastPage || lastPage.length < PAGE_SIZE) {
+        return undefined;
+      }
+      // Otherwise, the next page number is the current number of pages.
+      return allPages.length;
     },
     enabled: !!session?.user,
   });
