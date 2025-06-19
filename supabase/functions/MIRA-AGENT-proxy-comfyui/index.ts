@@ -77,7 +77,7 @@ const workflowTemplate = `
   },
   "404": {
     "inputs": {
-      "image": "1749818990465_1.png"
+      "image": "489107a8-dfd4-49f3-a32d-d7699aef2d52.jpg"
     },
     "class_type": "LoadImage",
     "_meta": {
@@ -90,7 +90,7 @@ const workflowTemplate = `
         "437",
         1
       ],
-      "seed": 726166149269589,
+      "seed": 82060634998716,
       "steps": 20,
       "cfg": 1,
       "sampler_name": "euler",
@@ -157,7 +157,7 @@ const workflowTemplate = `
   },
   "410": {
     "inputs": {
-      "value": 2.0000000000000004
+      "value": 1.5000000000000004
     },
     "class_type": "FloatConstant",
     "_meta": {
@@ -209,7 +209,7 @@ const workflowTemplate = `
   "415": {
     "inputs": {
       "lora_name": "IDunnohowtonameLora.safetensors",
-      "strength_model": 0.4000000000000001,
+      "strength_model": 0.4700000000000001,
       "model": [
         "414",
         0
@@ -223,7 +223,7 @@ const workflowTemplate = `
   "416": {
     "inputs": {
       "lora_name": "42lux-UltimateAtHome-flux-highresfix.safetensors",
-      "strength_model": 0.7800000000000001,
+      "strength_model": 0.9800000000000002,
       "model": [
         "412",
         0
@@ -303,8 +303,8 @@ const workflowTemplate = `
   },
   "423": {
     "inputs": {
-      "dishonesty_factor": -0.020000000000000004,
-      "start_percent": 0.3600000000000001,
+      "dishonesty_factor": -0.010000000000000002,
+      "start_percent": 0.4600000000000001,
       "end_percent": 0.9500000000000002,
       "sampler": [
         "422",
@@ -319,8 +319,8 @@ const workflowTemplate = `
   "424": {
     "inputs": {
       "scheduler": "sgm_uniform",
-      "steps": 20,
-      "denoise": 0.15000000000000002,
+      "steps": 10,
+      "denoise": 0.19000000000000003,
       "model": [
         "418",
         0
@@ -362,7 +362,7 @@ const workflowTemplate = `
         "437",
         1
       ],
-      "seed": 519457467250056,
+      "seed": 839614371047984,
       "steps": 20,
       "cfg": 1,
       "sampler_name": "euler",
@@ -409,7 +409,7 @@ const workflowTemplate = `
         0
       ],
       "custom_sigmas": [
-        "424",
+        "444",
         0
       ]
     },
@@ -429,6 +429,21 @@ const workflowTemplate = `
     "class_type": "MathExpression|pysssss",
     "_meta": {
       "title": "Math Expression 🐍"
+    }
+  },
+  "444": {
+    "inputs": {
+      "scheduler": "sgm_uniform",
+      "steps": 10,
+      "denoise": 0.33000000000000007,
+      "model": [
+        "418",
+        0
+      ]
+    },
+    "class_type": "BasicScheduler",
+    "_meta": {
+      "title": "BasicScheduler"
     }
   }
 }
