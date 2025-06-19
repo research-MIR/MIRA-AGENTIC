@@ -1,5 +1,5 @@
 import { useState, useMemo, Fragment } from "react";
-import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -36,7 +36,7 @@ interface Project {
   name: string;
 }
 
-const PAGE_SIZE = 30; // Load 30 jobs at a time
+const PAGE_SIZE = 30;
 
 const Gallery = () => {
   const { supabase, session } = useSession();
@@ -45,6 +45,7 @@ const Gallery = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
+  const [activeTab, setActiveTab] = useState('all');
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
@@ -59,30 +60,42 @@ const Gallery = () => {
     isFetching, 
     isFetchingNextPage 
   } = useInfiniteQuery<Job[]>({
-    queryKey: ['galleryJobs', session?.user?.id],
+    queryKey: ['galleryJobs', session?.user?.id, activeTab],
     queryFn: async ({ pageParam = 0 }) => {
       if (!session?.user) return [];
       const from = pageParam * PAGE_SIZE;
       const to = from + PAGE_SIZE - 1;
       
-      const { data, error } = await supabase
+      let query = supabase
         .from('mira-agent-jobs')
         .select('id, final_result, context, original_prompt, project_id')
         .eq('user_id', session.user.id)
         .order('created_at', { ascending: false })
         .range(from, to);
+
+      switch (activeTab) {
+        case 'agent':
+          query = query.in('context->>source', ['agent', 'agent_branch']);
+          break;
+        case 'direct':
+          query = query.eq('context->>source', 'direct_generator');
+          break;
+        case 'refined':
+          query = query.eq('context->>source', 'refiner');
+          break;
+        case 'all':
+        default:
+          // No additional filter needed for 'all'
+          break;
+      }
         
+      const { data, error } = await query;
       if (error) throw error;
-      return data || []; // Ensure we always return an array
+      return data || [];
     },
     initialPageParam: 0,
     getNextPageParam: (lastPage, allPages) => {
-      // If the last page has fewer items than PAGE_SIZE, it's the last page.
-      if (!lastPage || lastPage.length < PAGE_SIZE) {
-        return undefined;
-      }
-      // Otherwise, the next page number is the current number of pages.
-      return allPages.length;
+      return lastPage.length === PAGE_SIZE ? allPages.length : undefined;
     },
     enabled: !!session?.user,
   });
@@ -312,29 +325,27 @@ const Gallery = () => {
           </Button>
         </header>
         
-        {isFetching && !isFetchingNextPage ? (
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-            {[...Array(12)].map((_, i) => <Skeleton key={i} className="aspect-square w-full" />)}
-          </div>
-        ) : error ? (
-          <Alert variant="destructive">
-            <AlertTitle>Error</AlertTitle>
-            <AlertDescription>{error.message}</AlertDescription>
-          </Alert>
-        ) : (
-          <Tabs defaultValue="all" className="w-full">
-            <TabsList className="grid w-full grid-cols-4 mb-4">
-              <TabsTrigger value="all"><ImageIcon className="mr-2 h-4 w-4" />{t('galleryTabsAll')}</TabsTrigger>
-              <TabsTrigger value="agent"><Bot className="mr-2 h-4 w-4" />{t('galleryTabsAgent')}</TabsTrigger>
-              <TabsTrigger value="direct"><Code className="mr-2 h-4 w-4" />{t('galleryTabsDirect')}</TabsTrigger>
-              <TabsTrigger value="refined"><Wand2 className="mr-2 h-4 w-4" />{t('galleryTabsRefined')}</TabsTrigger>
-            </TabsList>
-            <TabsContent value="all">{renderImageGrid(allImages)}</TabsContent>
-            <TabsContent value="agent">{renderImageGrid(allImages.filter(img => img.source === 'agent' || img.source === 'agent_branch'))}</TabsContent>
-            <TabsContent value="direct">{renderImageGrid(allImages.filter(img => img.source === 'direct_generator'))}</TabsContent>
-            <TabsContent value="refined">{renderImageGrid(allImages.filter(img => img.source === 'refiner'))}</TabsContent>
-          </Tabs>
-        )}
+        <Tabs defaultValue="all" className="w-full" onValueChange={setActiveTab}>
+          <TabsList className="grid w-full grid-cols-4 mb-4">
+            <TabsTrigger value="all"><ImageIcon className="mr-2 h-4 w-4" />{t('galleryTabsAll')}</TabsTrigger>
+            <TabsTrigger value="agent"><Bot className="mr-2 h-4 w-4" />{t('galleryTabsAgent')}</TabsTrigger>
+            <TabsTrigger value="direct"><Code className="mr-2 h-4 w-4" />{t('galleryTabsDirect')}</TabsTrigger>
+            <TabsTrigger value="refined"><Wand2 className="mr-2 h-4 w-4" />{t('galleryTabsRefined')}</TabsTrigger>
+          </TabsList>
+          
+          {isFetching && !isFetchingNextPage ? (
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+              {[...Array(12)].map((_, i) => <Skeleton key={i} className="aspect-square w-full" />)}
+            </div>
+          ) : error ? (
+            <Alert variant="destructive">
+              <AlertTitle>Error</AlertTitle>
+              <AlertDescription>{error.message}</AlertDescription>
+            </Alert>
+          ) : (
+            renderImageGrid(allImages)
+          )}
+        </Tabs>
         
         <div className="flex justify-center mt-8">
           {hasNextPage && (
