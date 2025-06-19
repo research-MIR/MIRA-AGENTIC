@@ -1,5 +1,5 @@
-import { useState, useMemo } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState, useMemo, Fragment } from "react";
+import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -36,6 +36,8 @@ interface Project {
   name: string;
 }
 
+const PAGE_SIZE = 30; // Load 30 jobs at a time
+
 const Gallery = () => {
   const { supabase, session } = useSession();
   const { showImage } = useImagePreview();
@@ -49,16 +51,37 @@ const Gallery = () => {
   const [targetProjectId, setTargetProjectId] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
 
-  const { data: jobs, isLoading, error } = useQuery<Job[]>({
+  const { 
+    data, 
+    error, 
+    fetchNextPage, 
+    hasNextPage, 
+    isFetching, 
+    isFetchingNextPage 
+  } = useInfiniteQuery<Job[]>({
     queryKey: ['galleryJobs', session?.user?.id],
-    queryFn: async () => {
+    queryFn: async ({ pageParam = 0 }) => {
       if (!session?.user) return [];
-      const { data, error } = await supabase.from('mira-agent-jobs').select('id, final_result, context, original_prompt, project_id').eq('user_id', session.user.id).order('created_at', { ascending: false });
+      const from = pageParam * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
+      
+      const { data, error } = await supabase
+        .from('mira-agent-jobs')
+        .select('id, final_result, context, original_prompt, project_id')
+        .eq('user_id', session.user.id)
+        .order('created_at', { ascending: false })
+        .range(from, to);
+        
       if (error) throw error;
       return data;
     },
+    getNextPageParam: (lastPage, allPages) => {
+      return lastPage.length === PAGE_SIZE ? allPages.length : undefined;
+    },
     enabled: !!session?.user,
   });
+
+  const jobs = useMemo(() => data?.pages.flatMap(page => page) ?? [], [data]);
 
   const { data: projects } = useQuery<Project[]>({
     queryKey: ['projects', session?.user?.id],
@@ -233,7 +256,7 @@ const Gallery = () => {
   };
 
   const renderImageGrid = (images: ImageResult[]) => {
-    if (images.length === 0) {
+    if (images.length === 0 && !isFetching) {
       return (
         <div className="text-center py-16">
           <ImageIcon className="mx-auto h-16 w-16 text-muted-foreground" />
@@ -283,7 +306,7 @@ const Gallery = () => {
           </Button>
         </header>
         
-        {isLoading ? (
+        {isFetching && !isFetchingNextPage ? (
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
             {[...Array(12)].map((_, i) => <Skeleton key={i} className="aspect-square w-full" />)}
           </div>
@@ -306,6 +329,14 @@ const Gallery = () => {
             <TabsContent value="refined">{renderImageGrid(allImages.filter(img => img.source === 'refiner'))}</TabsContent>
           </Tabs>
         )}
+        
+        <div className="flex justify-center mt-8">
+          {hasNextPage && (
+            <Button onClick={() => fetchNextPage()} disabled={isFetchingNextPage}>
+              {isFetchingNextPage ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading more...</> : 'Load More'}
+            </Button>
+          )}
+        </div>
       </div>
 
       {isSelectMode && selectedImages.size > 0 && (
