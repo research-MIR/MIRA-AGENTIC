@@ -1,5 +1,5 @@
 import { useState, useMemo, Fragment } from "react";
-import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -60,7 +60,7 @@ const Gallery = () => {
     isFetchingNextPage 
   } = useInfiniteQuery<Job[]>({
     queryKey: ['galleryJobs', session?.user?.id],
-    queryFn: async ({ pageParam }) => {
+    queryFn: async ({ pageParam = 0 }) => {
       if (!session?.user) return [];
       const from = pageParam * PAGE_SIZE;
       const to = from + PAGE_SIZE - 1;
