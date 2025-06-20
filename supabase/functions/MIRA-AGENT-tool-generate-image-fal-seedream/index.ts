@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { fal } from 'npm:@fal-ai/client@1.5.0';
-import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
+import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -68,7 +68,6 @@ serve(async (req) => {
         aspect_ratio: size || "1:1",
         num_images: finalImageCount,
         seed: seed ? Number(seed) : undefined,
-        // Note: guidance_scale and negative_prompt are not supported by this model's API schema.
     };
 
     console.log(`[SeedDreamTool][${requestId}] Calling fal-ai/bytedance/seedream/v3/text-to-image with payload:`, falInput);
@@ -98,7 +97,7 @@ serve(async (req) => {
         await supabaseAdmin.storage.from(GENERATED_IMAGES_BUCKET).upload(filePath, imageBuffer, { contentType: mimeType, upsert: true });
         const { data: { publicUrl } } = supabaseAdmin.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
         
-        const base64Data = btoa(String.fromCharCode(...new Uint8Array(imageBuffer)));
+        const base64Data = encodeBase64(imageBuffer);
         const description = await describeImage(base64Data, mimeType);
 
         return { storagePath: filePath, publicUrl, description };
