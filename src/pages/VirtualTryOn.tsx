@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
-import { UploadCloud, Wand2, Loader2, Image as ImageIcon, X, PlusCircle, CheckCircle, AlertTriangle, Settings, Trash2, Brush, Sparkles } from "lucide-react";
+import { UploadCloud, Wand2, Loader2, Image as ImageIcon, X, PlusCircle, AlertTriangle, Sparkles } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
 import { cn } from "@/lib/utils";
 import { useDropzone } from "@/hooks/useDropzone";
@@ -14,9 +14,9 @@ import { RealtimeChannel } from "@supabase/supabase-js";
 import { useSecureImage } from "@/hooks/useSecureImage";
 import { useImagePreview } from "@/context/ImagePreviewContext";
 import { Label } from "@/components/ui/label";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { optimizeImage, sanitizeFilename } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 
 interface BitStudioJob {
   id: string;
@@ -59,9 +59,10 @@ const VirtualTryOn = () => {
   const [garmentImageFile, setGarmentImageFile] = useState<File | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
-  const [mode, setMode] = useState<'base' | 'pro'>('base');
   const [prompt, setPrompt] = useState("");
   const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
+  const [isAutoPromptEnabled, setIsAutoPromptEnabled] = useState(true);
+  const [promptReady, setPromptReady] = useState(false);
   const channelRef = useRef<RealtimeChannel | null>(null);
 
   const { data: recentJobs, isLoading: isLoadingRecentJobs } = useQuery<BitStudioJob[]>({
@@ -109,12 +110,12 @@ const VirtualTryOn = () => {
     return publicUrl;
   };
 
-  const handleGeneratePrompt = async () => {
-    if (!personImageFile || !garmentImageFile) {
-      showError("Please upload both images to generate a prompt.");
+  const handleGeneratePrompt = useCallback(async () => {
+    if (!personImageFile || !garmentImageFile || !session?.user) {
       return;
     }
     setIsGeneratingPrompt(true);
+    setPromptReady(false);
     const toastId = showLoading("Generating detailed prompt...");
     try {
       const person_image_url = await uploadFile(personImageFile, 'person');
@@ -126,6 +127,7 @@ const VirtualTryOn = () => {
 
       if (error) throw error;
       setPrompt(data.final_prompt);
+      setPromptReady(true);
       dismissToast(toastId);
       showSuccess("Prompt generated!");
     } catch (err: any) {
@@ -134,7 +136,13 @@ const VirtualTryOn = () => {
     } finally {
       setIsGeneratingPrompt(false);
     }
-  };
+  }, [personImageFile, garmentImageFile, session, supabase]);
+
+  useEffect(() => {
+    if (personImageFile && garmentImageFile && isAutoPromptEnabled) {
+      handleGeneratePrompt();
+    }
+  }, [personImageFile, garmentImageFile, isAutoPromptEnabled, handleGeneratePrompt]);
 
   const handleTryOn = async () => {
     if (!personImageFile || !garmentImageFile) {
@@ -161,8 +169,7 @@ const VirtualTryOn = () => {
           person_image_url,
           garment_image_url,
           user_id: session.user.id,
-          mode
-          // Note: The prompt is not passed here as the proxy doesn't support it yet.
+          mode: 'base'
         }
       });
 
@@ -188,6 +195,7 @@ const VirtualTryOn = () => {
     setGarmentImageFile(null);
     setSelectedJobId(null);
     setPrompt("");
+    setPromptReady(false);
   };
 
   const renderJobResult = (job: BitStudioJob) => {
@@ -203,6 +211,8 @@ const VirtualTryOn = () => {
     );
   };
 
+  const isTryOnDisabled = isLoading || !personImageFile || !garmentImageFile || (isAutoPromptEnabled ? !promptReady : !prompt.trim());
+
   return (
     <div className="p-4 md:p-8 h-screen overflow-y-auto">
       <header className="pb-4 mb-8 border-b"><h1 className="text-3xl font-bold">{t('virtualTryOn')}</h1></header>
@@ -216,25 +226,21 @@ const VirtualTryOn = () => {
             </CardContent>
           </Card>
           <Card>
-            <CardHeader><CardTitle>2. Generate Prompt (Optional)</CardTitle></CardHeader>
-            <CardContent className="space-y-4">
-              <Button onClick={handleGeneratePrompt} disabled={isGeneratingPrompt || !personImageFile || !garmentImageFile} className="w-full">
-                {isGeneratingPrompt ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-                Auto-Generate Prompt
-              </Button>
-              <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="A detailed prompt will appear here..." rows={4} />
+            <CardHeader>
+              <div className="flex justify-between items-center">
+                <CardTitle>2. Prompt</CardTitle>
+                <div className="flex items-center space-x-2">
+                  <Label htmlFor="auto-prompt" className="text-sm text-muted-foreground">Auto-Generate</Label>
+                  <Switch id="auto-prompt" checked={isAutoPromptEnabled} onCheckedChange={setIsAutoPromptEnabled} />
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="A detailed prompt will appear here..." rows={4} disabled={isAutoPromptEnabled} />
+              {isGeneratingPrompt && <div className="flex items-center text-sm text-muted-foreground"><Loader2 className="mr-2 h-4 w-4 animate-spin" />Generating prompt...</div>}
             </CardContent>
           </Card>
-          <Card>
-            <CardHeader><CardTitle>3. Select Mode</CardTitle></CardHeader>
-            <CardContent>
-              <RadioGroup value={mode} onValueChange={(v) => setMode(v as 'base' | 'pro')} className="space-y-2">
-                <div className="flex items-center space-x-2"><RadioGroupItem value="base" id="mode-base" /><Label htmlFor="mode-base">Base</Label></div>
-                <div className="flex items-center space-x-2"><RadioGroupItem value="pro" id="mode-pro" disabled /><Label htmlFor="mode-pro">Pro (Coming Soon)</Label></div>
-              </RadioGroup>
-            </CardContent>
-          </Card>
-          <Button onClick={handleTryOn} disabled={isLoading || !personImageFile || !garmentImageFile} className="w-full">
+          <Button onClick={handleTryOn} disabled={isTryOnDisabled} className="w-full">
             {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
             Start Virtual Try-On
           </Button>
