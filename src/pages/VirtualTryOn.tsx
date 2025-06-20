@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
-import { UploadCloud, Wand2, Loader2, Image as ImageIcon, X, PlusCircle, CheckCircle, AlertTriangle, Settings, Trash2, Brush } from "lucide-react";
+import { UploadCloud, Wand2, Loader2, Image as ImageIcon, X, PlusCircle, CheckCircle, AlertTriangle, Settings, Trash2, Brush, Sparkles } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
 import { cn } from "@/lib/utils";
 import { useDropzone } from "@/hooks/useDropzone";
@@ -16,6 +16,7 @@ import { useImagePreview } from "@/context/ImagePreviewContext";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { optimizeImage, sanitizeFilename } from "@/lib/utils";
+import { Textarea } from "@/components/ui/textarea";
 
 interface BitStudioJob {
   id: string;
@@ -52,13 +53,15 @@ const VirtualTryOn = () => {
   const { supabase, session } = useSession();
   const { t } = useLanguage();
   const queryClient = useQueryClient();
-  const { showImagePreview } = useImagePreview();
+  const { showImage } = useImagePreview();
   
   const [personImageFile, setPersonImageFile] = useState<File | null>(null);
   const [garmentImageFile, setGarmentImageFile] = useState<File | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [mode, setMode] = useState<'base' | 'pro'>('base');
+  const [prompt, setPrompt] = useState("");
+  const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
   const channelRef = useRef<RealtimeChannel | null>(null);
 
   const { data: recentJobs, isLoading: isLoadingRecentJobs } = useQuery<BitStudioJob[]>({
@@ -87,6 +90,52 @@ const VirtualTryOn = () => {
   const personImageUrl = useMemo(() => personImageFile ? URL.createObjectURL(personImageFile) : null, [personImageFile]);
   const garmentImageUrl = useMemo(() => garmentImageFile ? URL.createObjectURL(garmentImageFile) : null, [garmentImageFile]);
 
+  const uploadFile = async (file: File, type: 'person' | 'garment') => {
+    if (!session?.user) throw new Error("User session not found.");
+    const optimizedFile = await optimizeImage(file);
+    const sanitizedName = sanitizeFilename(optimizedFile.name);
+    const filePath = `${session.user.id}/vto-source/${type}-${Date.now()}-${sanitizedName}`;
+    
+    const { error } = await supabase.storage
+      .from('mira-agent-user-uploads')
+      .upload(filePath, optimizedFile);
+    
+    if (error) throw new Error(`Failed to upload ${type} image: ${error.message}`);
+    
+    const { data: { publicUrl } } = supabase.storage
+      .from('mira-agent-user-uploads')
+      .getPublicUrl(filePath);
+      
+    return publicUrl;
+  };
+
+  const handleGeneratePrompt = async () => {
+    if (!personImageFile || !garmentImageFile) {
+      showError("Please upload both images to generate a prompt.");
+      return;
+    }
+    setIsGeneratingPrompt(true);
+    const toastId = showLoading("Generating detailed prompt...");
+    try {
+      const person_image_url = await uploadFile(personImageFile, 'person');
+      const garment_image_url = await uploadFile(garmentImageFile, 'garment');
+
+      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-prompt-helper', {
+        body: { person_image_url, garment_image_url }
+      });
+
+      if (error) throw error;
+      setPrompt(data.final_prompt);
+      dismissToast(toastId);
+      showSuccess("Prompt generated!");
+    } catch (err: any) {
+      dismissToast(toastId);
+      showError(`Failed to generate prompt: ${err.message}`);
+    } finally {
+      setIsGeneratingPrompt(false);
+    }
+  };
+
   const handleTryOn = async () => {
     if (!personImageFile || !garmentImageFile) {
       showError("Please upload both a person and a garment image.");
@@ -98,30 +147,9 @@ const VirtualTryOn = () => {
     }
 
     setIsLoading(true);
-    const toastId = showLoading("Preparing images...");
+    const toastId = showLoading("Uploading images...");
 
     try {
-      const uploadFile = async (file: File, type: 'person' | 'garment') => {
-        const optimizedFile = await optimizeImage(file);
-        const sanitizedName = sanitizeFilename(optimizedFile.name);
-        const filePath = `${session.user.id}/vto-source/${type}-${Date.now()}-${sanitizedName}`;
-        
-        const { error } = await supabase.storage
-          .from('mira-agent-user-uploads')
-          .upload(filePath, optimizedFile);
-        
-        if (error) throw new Error(`Failed to upload ${type} image: ${error.message}`);
-        
-        const { data: { publicUrl } } = supabase.storage
-          .from('mira-agent-user-uploads')
-          .getPublicUrl(filePath);
-          
-        return publicUrl;
-      };
-
-      dismissToast(toastId);
-      showLoading("Uploading images...");
-
       const person_image_url = await uploadFile(personImageFile, 'person');
       const garment_image_url = await uploadFile(garmentImageFile, 'garment');
 
@@ -134,6 +162,7 @@ const VirtualTryOn = () => {
           garment_image_url,
           user_id: session.user.id,
           mode
+          // Note: The prompt is not passed here as the proxy doesn't support it yet.
         }
       });
 
@@ -158,12 +187,13 @@ const VirtualTryOn = () => {
     setPersonImageFile(null);
     setGarmentImageFile(null);
     setSelectedJobId(null);
+    setPrompt("");
   };
 
   const renderJobResult = (job: BitStudioJob) => {
     if (job.status === 'failed') return <p className="text-destructive text-sm p-2">Job failed: {job.error_message}</p>;
     if (job.status === 'complete' && job.final_image_url) {
-      return <SecureImageDisplay imageUrl={job.final_image_url} alt="Final Result" onClick={() => showImagePreview(job.final_image_url!)} />;
+      return <SecureImageDisplay imageUrl={job.final_image_url} alt="Final Result" onClick={() => showImage(job.final_image_url!)} />;
     }
     return (
       <div className="text-center text-muted-foreground">
@@ -181,12 +211,22 @@ const VirtualTryOn = () => {
           <Card>
             <CardHeader><div className="flex justify-between items-center"><CardTitle>{selectedJobId ? "Selected Job" : "1. Upload Images"}</CardTitle>{selectedJobId && <Button variant="outline" size="sm" onClick={resetForm}><PlusCircle className="h-4 w-4 mr-2" />New</Button>}</div></CardHeader>
             <CardContent className="grid grid-cols-2 gap-4">
-              {selectedJob ? <SecureImageDisplay imageUrl={selectedJob.source_person_image_url} alt="Person" onClick={() => showImagePreview(selectedJob.source_person_image_url)} /> : <ImageUploader onFileSelect={setPersonImageFile} title="Person Image" imageUrl={personImageUrl} onClear={() => setPersonImageFile(null)} />}
-              {selectedJob ? <SecureImageDisplay imageUrl={selectedJob.source_garment_image_url} alt="Garment" onClick={() => showImagePreview(selectedJob.source_garment_image_url)} /> : <ImageUploader onFileSelect={setGarmentImageFile} title="Garment Image" imageUrl={garmentImageUrl} onClear={() => setGarmentImageFile(null)} />}
+              {selectedJob ? <SecureImageDisplay imageUrl={selectedJob.source_person_image_url} alt="Person" onClick={() => showImage(selectedJob.source_person_image_url)} /> : <ImageUploader onFileSelect={setPersonImageFile} title="Person Image" imageUrl={personImageUrl} onClear={() => setPersonImageFile(null)} />}
+              {selectedJob ? <SecureImageDisplay imageUrl={selectedJob.source_garment_image_url} alt="Garment" onClick={() => showImage(selectedJob.source_garment_image_url)} /> : <ImageUploader onFileSelect={setGarmentImageFile} title="Garment Image" imageUrl={garmentImageUrl} onClear={() => setGarmentImageFile(null)} />}
             </CardContent>
           </Card>
           <Card>
-            <CardHeader><CardTitle>2. Select Mode</CardTitle></CardHeader>
+            <CardHeader><CardTitle>2. Generate Prompt (Optional)</CardTitle></CardHeader>
+            <CardContent className="space-y-4">
+              <Button onClick={handleGeneratePrompt} disabled={isGeneratingPrompt || !personImageFile || !garmentImageFile} className="w-full">
+                {isGeneratingPrompt ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+                Auto-Generate Prompt
+              </Button>
+              <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="A detailed prompt will appear here..." rows={4} />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader><CardTitle>3. Select Mode</CardTitle></CardHeader>
             <CardContent>
               <RadioGroup value={mode} onValueChange={(v) => setMode(v as 'base' | 'pro')} className="space-y-2">
                 <div className="flex items-center space-x-2"><RadioGroupItem value="base" id="mode-base" /><Label htmlFor="mode-base">Base</Label></div>
@@ -220,7 +260,7 @@ const VirtualTryOn = () => {
                           alt="Recent job" 
                           onClick={(e) => {
                             e.stopPropagation();
-                            if (urlToPreview) showImagePreview(urlToPreview);
+                            if (urlToPreview) showImage(urlToPreview);
                           }}
                         />
                       </button>
