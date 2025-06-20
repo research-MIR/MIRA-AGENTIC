@@ -15,8 +15,7 @@ import { useSecureImage } from "@/hooks/useSecureImage";
 import { useImagePreview } from "@/context/ImagePreviewContext";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Textarea } from "@/components/ui/textarea";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { optimizeImage, sanitizeFilename } from "@/lib/utils";
 
 interface BitStudioJob {
   id: string;
@@ -88,7 +87,70 @@ const VirtualTryOn = () => {
   const garmentImageUrl = useMemo(() => garmentImageFile ? URL.createObjectURL(garmentImageFile) : null, [garmentImageFile]);
 
   const handleTryOn = async () => {
-    showError("This feature is temporarily disabled while we resolve a backend issue.");
+    if (!personImageFile || !garmentImageFile) {
+      showError("Please upload both a person and a garment image.");
+      return;
+    }
+    if (!session?.user) {
+      showError("You must be logged in to use this feature.");
+      return;
+    }
+
+    setIsLoading(true);
+    const toastId = showLoading("Preparing images...");
+
+    try {
+      const uploadFile = async (file: File, type: 'person' | 'garment') => {
+        const optimizedFile = await optimizeImage(file);
+        const sanitizedName = sanitizeFilename(optimizedFile.name);
+        const filePath = `${session.user.id}/vto-source/${type}-${Date.now()}-${sanitizedName}`;
+        
+        const { error } = await supabase.storage
+          .from('mira-agent-user-uploads')
+          .upload(filePath, optimizedFile);
+        
+        if (error) throw new Error(`Failed to upload ${type} image: ${error.message}`);
+        
+        const { data: { publicUrl } } = supabase.storage
+          .from('mira-agent-user-uploads')
+          .getPublicUrl(filePath);
+          
+        return publicUrl;
+      };
+
+      dismissToast(toastId);
+      showLoading("Uploading images...");
+
+      const person_image_url = await uploadFile(personImageFile, 'person');
+      const garment_image_url = await uploadFile(garmentImageFile, 'garment');
+
+      dismissToast(toastId);
+      showLoading("Starting Virtual Try-On job...");
+
+      const { data, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
+        body: {
+          person_image_url,
+          garment_image_url,
+          user_id: session.user.id,
+          mode
+        }
+      });
+
+      if (proxyError) throw proxyError;
+
+      dismissToast(toastId);
+      showSuccess("Virtual Try-On job started! You can track its progress in the 'Recent Jobs' section.");
+      
+      queryClient.invalidateQueries({ queryKey: ['bitstudioJobs', session.user.id] });
+      
+      resetForm();
+
+    } catch (err: any) {
+      dismissToast(toastId);
+      showError(err.message);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const resetForm = () => {
@@ -127,25 +189,14 @@ const VirtualTryOn = () => {
             <CardContent>
               <RadioGroup value={mode} onValueChange={(v) => setMode(v as 'base' | 'pro')} className="space-y-2">
                 <div className="flex items-center space-x-2"><RadioGroupItem value="base" id="mode-base" /><Label htmlFor="mode-base">Base</Label></div>
-                <div className="flex items-center space-x-2"><RadioGroupItem value="pro" id="mode-pro" /><Label htmlFor="mode-pro">Pro (Inpainting)</Label></div>
+                <div className="flex items-center space-x-2"><RadioGroupItem value="pro" id="mode-pro" disabled /><Label htmlFor="mode-pro">Pro (Coming Soon)</Label></div>
               </RadioGroup>
             </CardContent>
           </Card>
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div className="w-full">
-                  <Button onClick={handleTryOn} disabled={true} className="w-full">
-                    <Wand2 className="mr-2 h-4 w-4" />
-                    Start Virtual Try-On
-                  </Button>
-                </div>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>This feature is temporarily disabled.</p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          <Button onClick={handleTryOn} disabled={isLoading || !personImageFile || !garmentImageFile} className="w-full">
+            {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+            Start Virtual Try-On
+          </Button>
         </div>
         <div className="lg:col-span-2">
           <Card className="min-h-[60vh]">
