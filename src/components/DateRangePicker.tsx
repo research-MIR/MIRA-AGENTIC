@@ -18,6 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { useLanguage } from "@/context/LanguageContext"
 
 interface DateRangePickerProps extends React.HTMLAttributes<HTMLDivElement> {
   date: DateRange | undefined;
@@ -29,6 +30,7 @@ export function DateRangePicker({
   date,
   setDate,
 }: DateRangePickerProps) {
+  const { t } = useLanguage();
 
   const handlePresetChange = (value: string) => {
     const now = new Date();
@@ -81,7 +83,7 @@ export function DateRangePicker({
                 format(date.from, "LLL dd, y")
               )
             ) : (
-              <span>Pick a date range</span>
+              <span>{t('filterPickDateRange')}</span>
             )}
           </Button>
         </PopoverTrigger>
@@ -89,15 +91,15 @@ export function DateRangePicker({
           <div className="flex items-center border-b p-2">
             <Select onValueChange={handlePresetChange}>
               <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Select a preset" />
+                <SelectValue placeholder={t('filterSelectPreset')} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All time</SelectItem>
-                <SelectItem value="today">Today</SelectItem>
-                <SelectItem value="yesterday">Yesterday</SelectItem>
-                <SelectItem value="last7">Last 7 days</SelectItem>
-                <SelectItem value="last30">Last 30 days</SelectItem>
-                <SelectItem value="this_month">This month</SelectItem>
+                <SelectItem value="all">{t('filterPresetAllTime')}</SelectItem>
+                <SelectItem value="today">{t('filterPresetToday')}</SelectItem>
+                <SelectItem value="yesterday">{t('filterPresetYesterday')}</SelectItem>
+                <SelectItem value="last7">{t('filterPresetLast7')}</SelectItem>
+                <SelectItem value="last30">{t('filterPresetLast30')}</SelectItem>
+                <SelectItem value="this_month">{t('filterPresetThisMonth')}</SelectItem>
               </SelectContent>
             </Select>
           </div>

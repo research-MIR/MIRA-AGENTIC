@@ -383,32 +383,32 @@ const Gallery = () => {
         
         <div className="flex flex-wrap gap-4 mb-6 pb-4 border-b">
           <div className="flex items-center gap-2">
-            <Label htmlFor="project-filter">Project:</Label>
+            <Label htmlFor="project-filter">{t('filterProject')}</Label>
             <Select value={selectedProjectId} onValueChange={setSelectedProjectId}>
               <SelectTrigger id="project-filter" className="w-[180px]">
-                <SelectValue placeholder="Filter by project..." />
+                <SelectValue placeholder={t('filterByProjectPlaceholder')} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Projects</SelectItem>
-                <SelectItem value="unassigned">Unassigned</SelectItem>
+                <SelectItem value="all">{t('filterAllProjects')}</SelectItem>
+                <SelectItem value="unassigned">{t('filterUnassigned')}</SelectItem>
                 {projects?.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
           <div className="flex items-center gap-2">
-            <Label htmlFor="sort-order">Sort by:</Label>
+            <Label htmlFor="sort-order">{t('filterSortBy')}</Label>
             <Select value={sortOrder} onValueChange={(v) => setSortOrder(v as any)}>
               <SelectTrigger id="sort-order" className="w-[180px]">
-                <SelectValue placeholder="Sort by..." />
+                <SelectValue placeholder={t('filterSortByPlaceholder')} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="created_at">Newest</SelectItem>
-                <SelectItem value="updated_at">Last Updated</SelectItem>
+                <SelectItem value="created_at">{t('filterSortNewest')}</SelectItem>
+                <SelectItem value="updated_at">{t('filterSortLastUpdated')}</SelectItem>
               </SelectContent>
             </Select>
           </div>
           <div className="flex items-center gap-2">
-            <Label htmlFor="date-filter">Date:</Label>
+            <Label htmlFor="date-filter">{t('filterDate')}</Label>
             <DateRangePicker date={dateRange} setDate={setDateRange} />
           </div>
         </div>
