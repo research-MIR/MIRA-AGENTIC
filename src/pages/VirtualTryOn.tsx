@@ -18,7 +18,6 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { optimizeImage } from "@/lib/utils";
 
 interface BitStudioJob {
   id: string;
@@ -74,7 +73,6 @@ const MaskCanvas = ({ imageUrl, onMaskChange }: { imageUrl: string, onMaskChange
 
   const draw = (e: React.MouseEvent | React.TouchEvent) => {
     if (!isDrawing) return;
-    e.preventDefault();
     const ctx = canvasRef.current?.getContext('2d');
     if (!ctx) return;
     const { x, y } = getCoords(e);
@@ -88,7 +86,7 @@ const MaskCanvas = ({ imageUrl, onMaskChange }: { imageUrl: string, onMaskChange
 
   const stopDrawing = () => {
     const canvas = canvasRef.current;
-    if (!canvas || !isDrawing) return;
+    if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.closePath();
@@ -97,10 +95,11 @@ const MaskCanvas = ({ imageUrl, onMaskChange }: { imageUrl: string, onMaskChange
   };
 
   return (
-    <div className="relative w-full aspect-square bg-muted rounded-md flex items-center justify-center">
+    <div className="relative w-full h-full">
+      <img src={imageUrl} alt="Person to mask" className="w-full h-full object-contain" />
       <canvas
         ref={canvasRef}
-        className="cursor-crosshair"
+        className="absolute top-0 left-0 w-full h-full cursor-crosshair"
         onMouseDown={startDrawing}
         onMouseMove={draw}
         onMouseUp={stopDrawing}
@@ -187,12 +186,9 @@ const VirtualTryOn = () => {
     setIsLoading(true);
     const toastId = showLoading("Preparing your virtual try-on...");
     try {
-      const optimizedPersonFile = await optimizeImage(personImageFile);
-      const optimizedGarmentFile = await optimizeImage(garmentImageFile);
-
       const [person_image_data, garment_image_data] = await Promise.all([
-        fileToBase64(optimizedPersonFile),
-        fileToBase64(optimizedGarmentFile)
+        fileToBase64(personImageFile),
+        fileToBase64(garmentImageFile)
       ]);
       
       const payload: any = {
