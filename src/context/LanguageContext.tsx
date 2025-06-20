@@ -6,7 +6,7 @@ type Language = 'it' | 'en';
 interface LanguageContextType {
   language: Language;
   setLanguage: (lang: Language) => void;
-  t: (key: string) => string;
+  t: (key: string, replacements?: Record<string, string | number>) => string;
 }
 
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
@@ -26,9 +26,18 @@ export const LanguageProvider = ({ children }: { children: ReactNode }) => {
     setLanguage(lang);
   }, []);
 
-  const t = useCallback((key: string): string => {
+  const t = useCallback((key: string, replacements?: Record<string, string | number>): string => {
     const translationSet = translations[language] as Record<string, string>;
-    return translationSet[key] || key;
+    let translation = translationSet[key] || key;
+
+    if (replacements) {
+      Object.keys(replacements).forEach(rKey => {
+        const regex = new RegExp(`\\{${rKey}\\}`, 'g');
+        translation = translation.replace(regex, String(replacements[rKey]));
+      });
+    }
+
+    return translation;
   }, [language]);
 
   const value = { language, setLanguage: handleSetLanguage, t };

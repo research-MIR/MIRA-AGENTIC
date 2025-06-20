@@ -209,6 +209,7 @@ export const translations = {
     generating: "Generazione in corso...",
     promptReady: "Prompt Pronto",
     viewGeneratedPrompt: "Visualizza Prompt Generato",
+    generatePrompt: "Genera Prompt",
     // Refinement Flow
     refinementCompleteTitle: "Ecco l'immagine rifinita. Cosa vuoi fare ora?",
     refinementFurther: "Ecco l'immagine ulteriormente rifinita. Vuoi continuare?",
@@ -472,6 +473,7 @@ export const translations = {
     generating: "Generating...",
     promptReady: "Prompt Ready",
     viewGeneratedPrompt: "View Generated Prompt",
+    generatePrompt: "Generate Prompt",
     // Refinement Flow
     refinementCompleteTitle: "Here is the refined image. What would you like to do next?",
     refinementFurther: "Here is the further refined image. Would you like to continue?",
@@ -502,7 +504,7 @@ export const translations = {
     saturation: "Saturation",
     hueSaturation: "Hue/Saturation",
     levels: "Levels",
-    curves: "Curves",
+    curves: "Curve",
     inputLevels: "Input Levels",
     outputLevels: "Output Levels",
     shadows: "Shadows",

@@ -68,6 +68,7 @@ const Refine = () => {
   const { uploadedFiles, setUploadedFiles, handleFileUpload, removeFile } = useFileUpload();
   const [batchFiles, setBatchFiles] = useState<UploadedFile[]>([]);
   const batchInputRef = useRef<HTMLInputElement>(null);
+  const singleInputRef = useRef<HTMLInputElement>(null);
 
   const [prompt, setPrompt] = useState("");
   const [upscaleFactor, setUpscaleFactor] = useState(1.5);
@@ -225,7 +226,8 @@ const Refine = () => {
     setIsSubmitting(false);
   };
 
-  const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: (e) => handleFileUpload(e.dataTransfer.files, true).then(setBatchFiles) });
+  const { dropzoneProps: batchDropzoneProps, isDraggingOver: isDraggingOverBatch } = useDropzone({ onDrop: (e) => handleFileUpload(e.dataTransfer.files, true).then(setBatchFiles) });
+  const { dropzoneProps: singleDropzoneProps, isDraggingOver: isDraggingOverSingle } = useDropzone({ onDrop: (e) => handleFileUpload(e.dataTransfer.files) });
 
   return (
     <>
@@ -253,11 +255,11 @@ const Refine = () => {
                         </div>
                       </div>
                     ) : (
-                      <div className="p-4 border-2 border-dashed rounded-lg text-center">
+                      <div {...singleDropzoneProps} onClick={() => singleInputRef.current?.click()} className={cn("p-4 border-2 border-dashed rounded-lg text-center cursor-pointer hover:border-primary transition-colors", isDraggingOverSingle && "border-primary bg-primary/10")}>
                         <UploadCloud className="mx-auto h-8 w-8 text-muted-foreground" />
-                        <Label htmlFor="refine-upload" className="mt-2 text-sm font-medium text-primary underline cursor-pointer">{t('uploadAFile')}</Label>
+                        <p className="mt-2 text-sm font-medium">{t('uploadAFile')}</p>
                         <p className="text-xs text-muted-foreground">{t('dragAndDrop')}</p>
-                        <Input id="refine-upload" type="file" className="hidden" accept="image/*" onChange={(e) => handleFileUpload(e.target.files)} />
+                        <Input ref={singleInputRef} id="refine-upload" type="file" className="hidden" accept="image/*" onChange={(e) => handleFileUpload(e.target.files)} />
                       </div>
                     )}
                   </CardContent>
@@ -382,7 +384,7 @@ const Refine = () => {
                 <Card>
                   <CardHeader><CardTitle>{t('uploadImages')}</CardTitle></CardHeader>
                   <CardContent>
-                    <div {...dropzoneProps} onClick={() => batchInputRef.current?.click()} className={cn("p-6 border-2 border-dashed rounded-lg text-center cursor-pointer hover:border-primary transition-colors", isDraggingOver && "border-primary bg-primary/10")}>
+                    <div {...batchDropzoneProps} onClick={() => batchInputRef.current?.click()} className={cn("p-6 border-2 border-dashed rounded-lg text-center cursor-pointer hover:border-primary transition-colors", isDraggingOverBatch && "border-primary bg-primary/10")}>
                       <UploadCloud className="mx-auto h-12 w-12 text-muted-foreground" />
                       <p className="mt-2 font-semibold">{t('uploadMultipleImages')}</p>
                       <p className="text-xs text-muted-foreground">{t('dragOrClick')}</p>
