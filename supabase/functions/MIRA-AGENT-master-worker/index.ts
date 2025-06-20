@@ -363,8 +363,25 @@ serve(async (req) => {
 
     } else if (call.name === 'generate_image') {
         console.log(`[MasterWorker][${currentJobId}] Dispatching to text-to-image generator...`);
-        const finalModelId = currentContext.selectedModelId;
-        if (!finalModelId) throw new Error("Cannot generate image without a selected model in the job context.");
+        let finalModelId = currentContext.selectedModelId;
+
+        if (!finalModelId) {
+            console.warn(`[MasterWorker][${currentJobId}] No model selected in job context. Fetching default model from database.`);
+            const { data: defaultModel, error: modelError } = await supabase
+                .from('mira-agent-models')
+                .select('model_id_string')
+                .eq('is_default', true)
+                .limit(1)
+                .single();
+            
+            if (modelError || !defaultModel) {
+                console.error(`[MasterWorker][${currentJobId}] Failed to fetch default model:`, modelError);
+                throw new Error("Cannot generate image: No model was selected and no default model could be found.");
+            }
+            
+            finalModelId = defaultModel.model_id_string;
+            console.log(`[MasterWorker][${currentJobId}] Using default model: ${finalModelId}`);
+        }
         
         const { data: modelDetails } = await supabase.from('mira-agent-models').select('provider').eq('model_id_string', finalModelId).single();
         const provider = modelDetails?.provider.toLowerCase().replace(/\s/g, '-') || 'google';
