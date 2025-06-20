@@ -101,9 +101,21 @@ serve(async (req) => {
             resolution: "standard"
         })
       });
-      if (!response.ok) throw new Error(await response.text());
-      const result = await response.json();
+      
+      const resultText = await response.text();
+      console.log(`[BitStudioProxy] Raw response from /virtual-try-on: ${resultText}`);
+
+      if (!response.ok) {
+          throw new Error(`BitStudio API Error: ${response.status} - ${resultText}`);
+      }
+      const result = JSON.parse(resultText);
+
+      if (!Array.isArray(result) || result.length === 0 || !result[0].id) {
+        console.error("[BitStudioProxy] Invalid response format from BitStudio VTO endpoint. Full response:", result);
+        throw new Error("Received an invalid or empty response from the virtual try-on service.");
+      }
       taskId = result[0].id;
+
     } else { // Pro mode
       const maskBlob = new Blob([decodeBase64(mask_image_data)], { type: 'image/png' });
       const maskImageId = await uploadToBitStudio(maskBlob, 'inpaint-mask', `mask_${jobId}.png`);
@@ -114,8 +126,19 @@ serve(async (req) => {
         headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ mask_image_id: maskImageId, reference_image_id: garmentImageId, prompt })
       });
-      if (!response.ok) throw new Error(await response.text());
-      const result = await response.json();
+      
+      const resultText = await response.text();
+      console.log(`[BitStudioProxy] Raw response from /inpaint: ${resultText}`);
+
+      if (!response.ok) {
+          throw new Error(`BitStudio API Error (inpaint): ${response.status} - ${resultText}`);
+      }
+      const result = JSON.parse(resultText);
+
+      if (!Array.isArray(result) || result.length === 0 || !result[0].id) {
+        console.error("[BitStudioProxy] Invalid response format from BitStudio inpaint endpoint. Full response:", result);
+        throw new Error("Received an invalid or empty response from the inpainting service.");
+      }
       taskId = result[0].id;
     }
 
