@@ -52,6 +52,7 @@ const VirtualTryOn = () => {
   const { supabase, session } = useSession();
   const { t } = useLanguage();
   const queryClient = useQueryClient();
+  const { showImagePreview } = useImagePreview();
   
   const [personImageFile, setPersonImageFile] = useState<File | null>(null);
   const [garmentImageFile, setGarmentImageFile] = useState<File | null>(null);
@@ -162,7 +163,7 @@ const VirtualTryOn = () => {
   const renderJobResult = (job: BitStudioJob) => {
     if (job.status === 'failed') return <p className="text-destructive text-sm p-2">Job failed: {job.error_message}</p>;
     if (job.status === 'complete' && job.final_image_url) {
-      return <SecureImageDisplay imageUrl={job.final_image_url} alt="Final Result" />;
+      return <SecureImageDisplay imageUrl={job.final_image_url} alt="Final Result" onClick={() => showImagePreview(job.final_image_url!)} />;
     }
     return (
       <div className="text-center text-muted-foreground">
@@ -180,8 +181,8 @@ const VirtualTryOn = () => {
           <Card>
             <CardHeader><div className="flex justify-between items-center"><CardTitle>{selectedJobId ? "Selected Job" : "1. Upload Images"}</CardTitle>{selectedJobId && <Button variant="outline" size="sm" onClick={resetForm}><PlusCircle className="h-4 w-4 mr-2" />New</Button>}</div></CardHeader>
             <CardContent className="grid grid-cols-2 gap-4">
-              {selectedJob ? <SecureImageDisplay imageUrl={selectedJob.source_person_image_url} alt="Person" /> : <ImageUploader onFileSelect={setPersonImageFile} title="Person Image" imageUrl={personImageUrl} onClear={() => setPersonImageFile(null)} />}
-              {selectedJob ? <SecureImageDisplay imageUrl={selectedJob.source_garment_image_url} alt="Garment" /> : <ImageUploader onFileSelect={setGarmentImageFile} title="Garment Image" imageUrl={garmentImageUrl} onClear={() => setGarmentImageFile(null)} />}
+              {selectedJob ? <SecureImageDisplay imageUrl={selectedJob.source_person_image_url} alt="Person" onClick={() => showImagePreview(selectedJob.source_person_image_url)} /> : <ImageUploader onFileSelect={setPersonImageFile} title="Person Image" imageUrl={personImageUrl} onClear={() => setPersonImageFile(null)} />}
+              {selectedJob ? <SecureImageDisplay imageUrl={selectedJob.source_garment_image_url} alt="Garment" onClick={() => showImagePreview(selectedJob.source_garment_image_url)} /> : <ImageUploader onFileSelect={setGarmentImageFile} title="Garment Image" imageUrl={garmentImageUrl} onClear={() => setGarmentImageFile(null)} />}
             </CardContent>
           </Card>
           <Card>
@@ -210,11 +211,21 @@ const VirtualTryOn = () => {
             <CardContent>
               {isLoadingRecentJobs ? <Skeleton className="h-24 w-full" /> : recentJobs && recentJobs.length > 0 ? (
                 <div className="flex gap-4 overflow-x-auto pb-2">
-                  {recentJobs.map(job => (
-                    <button key={job.id} onClick={() => setSelectedJobId(job.id)} className={cn("border-2 rounded-lg p-1 flex-shrink-0 w-24 h-24", selectedJobId === job.id ? "border-primary" : "border-transparent")}>
-                      <SecureImageDisplay imageUrl={job.final_image_url || job.source_person_image_url} alt="Recent job" />
-                    </button>
-                  ))}
+                  {recentJobs.map(job => {
+                    const urlToPreview = job.final_image_url || job.source_person_image_url;
+                    return (
+                      <button key={job.id} onClick={() => setSelectedJobId(job.id)} className={cn("border-2 rounded-lg p-1 flex-shrink-0 w-24 h-24", selectedJobId === job.id ? "border-primary" : "border-transparent")}>
+                        <SecureImageDisplay 
+                          imageUrl={urlToPreview} 
+                          alt="Recent job" 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (urlToPreview) showImagePreview(urlToPreview);
+                          }}
+                        />
+                      </button>
+                    )
+                  })}
                 </div>
               ) : <p className="text-muted-foreground text-sm">No recent jobs found.</p>}
             </CardContent>
@@ -225,12 +236,15 @@ const VirtualTryOn = () => {
   );
 };
 
-const SecureImageDisplay = ({ imageUrl, alt }: { imageUrl: string | null, alt: string }) => {
+const SecureImageDisplay = ({ imageUrl, alt, onClick }: { imageUrl: string | null, alt: string, onClick?: (e: React.MouseEvent<HTMLImageElement>) => void }) => {
   const { displayUrl, isLoading, error } = useSecureImage(imageUrl);
+  const hasClickHandler = !!onClick;
+
   if (!imageUrl) return <div className="w-full h-full bg-muted rounded-md flex items-center justify-center"><ImageIcon className="h-6 w-6 text-muted-foreground" /></div>;
   if (isLoading) return <div className="w-full h-full bg-muted rounded-md flex items-center justify-center"><Loader2 className="h-6 w-6 animate-spin" /></div>;
   if (error) return <div className="w-full h-full bg-muted rounded-md flex items-center justify-center"><AlertTriangle className="h-6 w-6 text-destructive" /></div>;
-  return <img src={displayUrl} alt={alt} className="w-full h-full object-cover rounded-md" />;
+  
+  return <img src={displayUrl} alt={alt} className={cn("w-full h-full object-cover rounded-md", hasClickHandler && "cursor-pointer")} onClick={onClick} />;
 };
 
 export default VirtualTryOn;
