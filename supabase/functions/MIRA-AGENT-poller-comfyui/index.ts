@@ -11,27 +11,34 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
 const POLLING_INTERVAL_MS = 5000; // 5 seconds for rapid polling
-const FINAL_OUTPUT_NODE_ID = "445"; // The ID of the node that produces the final image to be saved.
+const FINAL_OUTPUT_NODE_ID = "445"; // Primary target: The Color Match node
+const FALLBACK_NODE_IDS = ["431", "430"]; // Secondary targets: SaveImage, PreviewImage
 
 async function findOutputImage(historyOutputs: any): Promise<any | null> {
     if (!historyOutputs) return null;
     
-    // First, try to find the specific output node. This is the most reliable method.
-    const finalNodeOutput = historyOutputs[FINAL_OUTPUT_NODE_ID];
-    if (finalNodeOutput?.images && Array.isArray(finalNodeOutput.images) && finalNodeOutput.images.length > 0) {
-        console.log(`[Poller] Found output image in designated final node ${FINAL_OUTPUT_NODE_ID}.`);
-        return finalNodeOutput.images[0];
+    const nodesToCheck = [FINAL_OUTPUT_NODE_ID, ...FALLBACK_NODE_IDS];
+
+    // 1. Check the designated primary and fallback nodes in order.
+    for (const nodeId of nodesToCheck) {
+        const nodeOutput = historyOutputs[nodeId];
+        if (nodeOutput?.images && Array.isArray(nodeOutput.images) && nodeOutput.images.length > 0) {
+            console.log(`[Poller] Found output image in designated node ${nodeId}.`);
+            return nodeOutput.images[0];
+        }
     }
 
-    // Fallback for safety: check all nodes if the specific one isn't found.
-    console.warn(`[Poller] Could not find output in designated node ${FINAL_OUTPUT_NODE_ID}. Searching all nodes as a fallback.`);
+    // 2. If no image was found in the designated nodes, perform a generic search as a final fallback.
+    console.warn(`[Poller] Could not find output in any designated nodes (${nodesToCheck.join(', ')}). Searching all nodes as a final fallback.`);
     for (const nodeId in historyOutputs) {
         const outputData = historyOutputs[nodeId];
         if (outputData.images && Array.isArray(outputData.images) && outputData.images.length > 0) {
-            console.log(`[Poller] Found fallback output image in node ${nodeId}.`);
+            console.log(`[Poller] Found fallback output image in unexpected node ${nodeId}.`);
             return outputData.images[0];
         }
     }
+
+    // 3. If still no image is found.
     return null;
 }
 
