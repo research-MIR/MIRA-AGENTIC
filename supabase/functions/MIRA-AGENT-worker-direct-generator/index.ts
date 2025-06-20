@@ -27,18 +27,53 @@ serve(async (req) => {
 
     if (fetchError) throw fetchError;
     const context = job.context;
+    const modelId = context.model_id;
 
-    console.log(`[DirectGenWorker][${job_id}] Invoking Google image generation tool with context:`, context);
-    const { data: generationResult, error: generationError } = await supabase.functions.invoke('MIRA-AGENT-tool-generate-image-google', {
-      body: {
+    if (!modelId) {
+        throw new Error("No model_id found in job context.");
+    }
+
+    const { data: modelDetails, error: modelError } = await supabase
+        .from('mira-agent-models')
+        .select('provider')
+        .eq('model_id_string', modelId)
+        .single();
+
+    if (modelError) throw new Error(`Could not find details for model ${modelId}: ${modelError.message}`);
+    
+    const provider = modelDetails.provider.toLowerCase().replace(/\s/g, '-');
+    let toolToInvoke = '';
+    let payload: { [key: string]: any } = {
         prompt: context.final_prompt_used || context.prompt,
         negative_prompt: context.negative_prompt,
         number_of_images: context.number_of_images,
         seed: context.seed,
-        model_id: context.model_id,
+        model_id: modelId,
         invoker_user_id: job.user_id,
-        size: context.size
-      }
+    };
+
+    if (provider === 'google') {
+        toolToInvoke = 'MIRA-AGENT-tool-generate-image-google';
+        payload.size = context.size; // Google tool expects pixel dimensions
+    } else if (provider === 'fal-ai') {
+        toolToInvoke = 'MIRA-AGENT-tool-generate-image-fal-seedream';
+        // Fal.ai tool expects aspect ratio string like '1:1'
+        const sizeMap: { [key: string]: string } = {
+            '1024x1024': '1:1',
+            '1408x768': '16:9',
+            '768x1408': '9:16',
+            '1280x896': '4:3',
+            '896x1280': '3:4',
+        };
+        payload.size = sizeMap[context.size] || '1:1'; // Map pixels to ratio string
+    } else {
+        throw new Error(`Unsupported provider '${provider}' for direct generation.`);
+    }
+
+    console.log(`[DirectGenWorker][${job_id}] Routing to tool: ${toolToInvoke} for provider: ${provider} with payload:`, payload);
+    
+    const { data: generationResult, error: generationError } = await supabase.functions.invoke(toolToInvoke, {
+      body: payload
     });
 
     if (generationError) throw generationError;
