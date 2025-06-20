@@ -49,7 +49,7 @@ const workflowTemplate = `
         "307",
         0
       ],
-      "guidance": 3.1,
+      "guidance": 2.2,
       "clip": [
         "9",
         0
@@ -64,7 +64,7 @@ const workflowTemplate = `
     "inputs": {
       "clip_l": "over exposed,ugly, depth of field ",
       "t5xxl": "over exposed,ugly, depth of field",
-      "guidance": 3.1,
+      "guidance": 2.5,
       "clip": [
         "9",
         0
@@ -195,7 +195,7 @@ const workflowTemplate = `
   "414": {
     "inputs": {
       "lora_name": "Samsung_UltraReal.safetensors",
-      "strength_model": 0.8000000000000002,
+      "strength_model": 0.6000000000000001,
       "model": [
         "416",
         0
@@ -209,7 +209,7 @@ const workflowTemplate = `
   "415": {
     "inputs": {
       "lora_name": "IDunnohowtonameLora.safetensors",
-      "strength_model": 0.4700000000000001,
+      "strength_model": 0.5000000000000001,
       "model": [
         "414",
         0
@@ -320,7 +320,7 @@ const workflowTemplate = `
     "inputs": {
       "scheduler": "sgm_uniform",
       "steps": 10,
-      "denoise": 0.19000000000000003,
+      "denoise": 0.11000000000000001,
       "model": [
         "418",
         0
@@ -334,7 +334,7 @@ const workflowTemplate = `
   "430": {
     "inputs": {
       "images": [
-        "432",
+        "445",
         0
       ]
     },
@@ -347,7 +347,7 @@ const workflowTemplate = `
     "inputs": {
       "filename_prefix": "Output",
       "images": [
-        "432",
+        "445",
         0
       ]
     },
@@ -435,7 +435,7 @@ const workflowTemplate = `
     "inputs": {
       "scheduler": "sgm_uniform",
       "steps": 10,
-      "denoise": 0.33000000000000007,
+      "denoise": 0.22000000000000003,
       "model": [
         "418",
         0
@@ -444,6 +444,24 @@ const workflowTemplate = `
     "class_type": "BasicScheduler",
     "_meta": {
       "title": "BasicScheduler"
+    }
+  },
+  "445": {
+    "inputs": {
+      "method": "mkl",
+      "strength": 1,
+      "image_ref": [
+        "404",
+        0
+      ],
+      "image_target": [
+        "432",
+        0
+      ]
+    },
+    "class_type": "ColorMatch",
+    "_meta": {
+      "title": "Color Match"
     }
   }
 }

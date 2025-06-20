@@ -11,7 +11,7 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
 const POLLING_INTERVAL_MS = 5000; // 5 seconds for rapid polling
-const FINAL_OUTPUT_NODE_ID = "432"; // The ID of the node that produces the final image to be saved.
+const FINAL_OUTPUT_NODE_ID = "445"; // The ID of the node that produces the final image to be saved.
 
 async function findOutputImage(historyOutputs: any): Promise<any | null> {
     if (!historyOutputs) return null;
@@ -133,15 +133,15 @@ serve(async (req) => {
     if (fetchError) throw new Error(`Failed to fetch job: ${fetchError.message}`);
     
     if (job.status === 'complete' || job.status === 'failed') {
-        console.log(`[Poller][${job_id}] Job already resolved with status '${job.status}'. Halting check.`);
+        console.log(`[Poller][${job.id}] Job already resolved with status '${job.status}'. Halting check.`);
         return new Response(JSON.stringify({ success: true, message: "Job already resolved." }), { headers: corsHeaders });
     }
 
     const historyUrl = `${job.comfyui_address}/history/${job.comfyui_prompt_id}`;
-    console.log(`[Poller][${job_id}] Fetching history from ComfyUI: ${historyUrl}`);
+    console.log(`[Poller][${job.id}] Fetching history from ComfyUI: ${historyUrl}`);
     const historyResponse = await fetch(historyUrl);
     if (!historyResponse.ok) {
-        console.warn(`[Poller][${job_id}] ComfyUI history not available yet (Status: ${historyResponse.status}). Will retry.`);
+        console.warn(`[Poller][${job.id}] ComfyUI history not available yet (Status: ${historyResponse.status}). Will retry.`);
         setTimeout(() => {
             supabase.functions.invoke('MIRA-AGENT-poller-comfyui', { body: { job_id } }).catch(console.error);
         }, POLLING_INTERVAL_MS);
@@ -152,7 +152,7 @@ serve(async (req) => {
     const promptHistory = historyData[job.comfyui_prompt_id];
 
     if (!promptHistory) {
-        console.log(`[Poller][${job_id}] Job not yet in history. Will retry.`);
+        console.log(`[Poller][${job.id}] Job not yet in history. Will retry.`);
         setTimeout(() => {
             supabase.functions.invoke('MIRA-AGENT-poller-comfyui', { body: { job_id } }).catch(console.error);
         }, POLLING_INTERVAL_MS);
@@ -162,20 +162,20 @@ serve(async (req) => {
     const outputImage = await findOutputImage(promptHistory.outputs);
 
     if (outputImage) {
-        console.log(`[Poller][${job_id}] Image found! Filename: ${outputImage.filename}. Downloading...`);
+        console.log(`[Poller][${job.id}] Image found! Filename: ${outputImage.filename}. Downloading...`);
         const imageUrl = `${job.comfyui_address}/view?filename=${encodeURIComponent(outputImage.filename)}&subfolder=${encodeURIComponent(outputImage.subfolder)}&type=${outputImage.type}`;
         const imageResponse = await fetch(imageUrl);
         if (!imageResponse.ok) throw new Error("Failed to download final image from ComfyUI.");
         const imageBuffer = await imageResponse.arrayBuffer();
-        console.log(`[Poller][${job_id}] Download complete. Uploading to Supabase Storage...`);
+        console.log(`[Poller][${job.id}] Download complete. Uploading to Supabase Storage...`);
         
         const filePath = `${job.user_id}/${Date.now()}_comfyui_${outputImage.filename}`;
         await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(filePath, imageBuffer, { contentType: 'image/png', upsert: true });
         const { data: { publicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
-        console.log(`[Poller][${job_id}] Upload complete. Public URL: ${publicUrl}`);
+        console.log(`[Poller][${job.id}] Upload complete. Public URL: ${publicUrl}`);
         
         const finalResult = { publicUrl, storagePath: filePath };
-        console.log(`[Poller][${job_id}] Updating job status to 'complete'.`);
+        console.log(`[Poller][${job.id}] Updating job status to 'complete'.`);
         await supabase.from('mira-agent-comfyui-jobs').update({
             status: 'complete',
             final_result: finalResult
@@ -186,11 +186,11 @@ serve(async (req) => {
         } else {
             await createGalleryEntry(supabase, job, finalResult);
         }
-        console.log(`[Poller][${job_id}] All steps complete. Polling finished.`);
+        console.log(`[Poller][${job.id}] All steps complete. Polling finished.`);
 
         return new Response(JSON.stringify({ success: true, status: 'complete', publicUrl }), { headers: corsHeaders });
     } else {
-        console.log(`[Poller][${job_id}] Job is running, but output not ready. Re-polling in ${POLLING_INTERVAL_MS}ms.`);
+        console.log(`[Poller][${job.id}] Job is running, but output not ready. Re-polling in ${POLLING_INTERVAL_MS}ms.`);
         await supabase.from('mira-agent-comfyui-jobs').update({ status: 'processing' }).eq('id', job_id);
         setTimeout(() => {
             supabase.functions.invoke('MIRA-AGENT-poller-comfyui', { body: { job_id } }).catch(console.error);
@@ -199,7 +199,7 @@ serve(async (req) => {
     }
 
   } catch (error) {
-    console.error(`[Poller][${job_id}] Unhandled error:`, error);
+    console.error(`[Poller][${job.id}] Unhandled error:`, error);
     await supabase.from('mira-agent-comfyui-jobs').update({ status: 'failed', error_message: error.message }).eq('id', job_id);
     return new Response(JSON.stringify({ error: error.message }), { headers: corsHeaders, status: 500 });
   }
