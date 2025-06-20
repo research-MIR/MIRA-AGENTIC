@@ -20,6 +20,7 @@ import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface VtoPipelineJob {
   id: string;
@@ -188,7 +189,7 @@ const VirtualTryOn = () => {
   const [garmentImageFile, setGarmentImageFile] = useState<File | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
-  const [mode, setMode] = useState<'edit' | 'vton'>('edit');
+  const [mode, setMode] = useState<'auto' | 'manual'>('manual');
   const [optionalDetails, setOptionalDetails] = useState("");
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const channelRef = useRef<RealtimeChannel | null>(null);
@@ -253,53 +254,10 @@ const VirtualTryOn = () => {
   const personImageUrl = useMemo(() => personImageFile ? URL.createObjectURL(personImageFile) : null, [personImageFile]);
   const garmentImageUrl = useMemo(() => garmentImageFile ? URL.createObjectURL(garmentImageFile) : null, [garmentImageFile]);
 
-  const uploadFileAndGetUrl = async (file: File | null): Promise<string | null> => {
-    if (!file) return null;
-    if (!session?.user) throw new Error("User session not found.");
-    const optimizedFile = await optimizeImage(file);
-    const filePath = `${session.user.id}/${Date.now()}-${sanitizeFilename(optimizedFile.name)}`;
-    const { error: uploadError } = await supabase.storage.from('mira-agent-user-uploads').upload(filePath, optimizedFile);
-    if (uploadError) throw new Error(`Failed to upload file: ${uploadError.message}`);
-    const { data: { publicUrl } } = supabase.storage.from('mira-agent-user-uploads').getPublicUrl(filePath);
-    return publicUrl;
-  };
-
   const handleTryOn = async () => {
-    if (!personImageFile || !garmentImageFile) return showError("Please upload both a person and a garment image.");
-    setIsLoading(true);
-    const toastId = showLoading("Uploading images and starting pipeline...");
-    try {
-      const person_image_url = await uploadFileAndGetUrl(personImageFile);
-      const garment_image_url = await uploadFileAndGetUrl(garmentImageFile);
-      if (!person_image_url || !garment_image_url) throw new Error("Failed to upload one or both images.");
-      
-      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-vto-pipeline', { body: { person_image_url, garment_image_url, user_id: session?.user.id, mode, optional_details: optionalDetails } });
-      if (error) throw error;
-      
-      const newJobPlaceholder: VtoPipelineJob = {
-        id: data.jobId,
-        status: 'pending_segmentation',
-        source_person_image_url: person_image_url,
-        source_garment_image_url: garment_image_url,
-        context: { mode, optional_details: optionalDetails }
-      };
-      queryClient.setQueryData(['vtoPipelineJobs', session?.user?.id], (oldData: VtoPipelineJob[] | undefined) => {
-        return oldData ? [newJobPlaceholder, ...oldData] : [newJobPlaceholder];
-      });
-      setSelectedJobId(data.jobId);
-      
-      dismissToast(toastId);
-      showSuccess("VTO Pipeline job started! It will appear in your history shortly.");
-      setPersonImageFile(null);
-      setGarmentImageFile(null);
-      setOptionalDetails("");
-
-    } catch (err: any) {
-      showError(err.message);
-      dismissToast(toastId);
-    } finally {
-      setIsLoading(false);
-    }
+    // This function is now disabled as per the user request.
+    showError("This feature is currently under development.");
+    return;
   };
 
   const resetForm = () => {
@@ -313,7 +271,7 @@ const VirtualTryOn = () => {
     setPersonImageFile(null);
     setGarmentImageFile(null);
     setSelectedJobId(job.id);
-    setMode(job.context?.mode || 'edit');
+    setMode('manual');
     setOptionalDetails(job.context?.optional_details || "");
   };
 
@@ -394,19 +352,28 @@ const VirtualTryOn = () => {
             <Card>
               <CardHeader><CardTitle>2. Select Mode</CardTitle></CardHeader>
               <CardContent>
-                <RadioGroup value={mode} onValueChange={(value) => setMode(value as 'edit' | 'vton')} className="space-y-2" disabled={!!selectedJobId}>
+                <RadioGroup value={mode} onValueChange={(value) => setMode(value as 'auto' | 'manual')} className="space-y-2" disabled={!!selectedJobId}>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div className="flex items-center space-x-2 opacity-50 cursor-not-allowed">
+                          <RadioGroupItem value="auto" id="mode-auto" disabled />
+                          <Label htmlFor="mode-auto" className="flex flex-col cursor-not-allowed">
+                            <span>Auto Mode</span>
+                            <span className="font-normal text-xs text-muted-foreground">The AI automatically handles the entire process.</span>
+                          </Label>
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>Auto mode is coming soon!</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                   <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="edit" id="mode-edit" />
-                    <Label htmlFor="mode-edit" className="flex flex-col">
-                      <span>Creative Edit</span>
-                      <span className="font-normal text-xs text-muted-foreground">Swap the garment onto the existing pose.</span>
-                    </Label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="vton" id="mode-vton" />
-                    <Label htmlFor="mode-vton" className="flex flex-col">
-                      <span>Virtual Try-On</span>
-                      <span className="font-normal text-xs text-muted-foreground">Re-imagine the scene with a new pose and style.</span>
+                    <RadioGroupItem value="manual" id="mode-manual" />
+                    <Label htmlFor="mode-manual" className="flex flex-col">
+                      <span>Manual Mode</span>
+                      <span className="font-normal text-xs text-muted-foreground">You control each step of the process.</span>
                     </Label>
                   </div>
                 </RadioGroup>
@@ -425,7 +392,21 @@ const VirtualTryOn = () => {
               </CardContent>
             </Card>
             {!selectedJobId && (
-              <Button onClick={handleTryOn} disabled={isLoading || !personImageFile || !garmentImageFile} className="w-full">{isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}Start Virtual Try-On</Button>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div className="w-full">
+                      <Button onClick={handleTryOn} disabled={true} className="w-full">
+                        <Wand2 className="mr-2 h-4 w-4" />
+                        Start Virtual Try-On
+                      </Button>
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>This feature is currently under development.</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             )}
           </div>
           <div className="lg:col-span-2">

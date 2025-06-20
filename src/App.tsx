@@ -93,10 +93,10 @@ const App = () => {
             <Route path="/projects" element={<Projects />} />
             <Route path="/projects/:projectId" element={<ProjectDetail />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/virtual-try-on" element={<VirtualTryOn />} />
             
             <Route element={<DevProtectedRoute />}>
               <Route path="/developer" element={<Developer />} />
-              <Route path="/virtual-try-on" element={<VirtualTryOn />} />
             </Route>
           </Route>
         </Route>
