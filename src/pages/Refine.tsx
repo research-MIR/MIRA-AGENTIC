@@ -7,10 +7,10 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Loader2, Image as ImageIcon, Sparkles, Wand2, UploadCloud, X, PlusCircle, AlertTriangle, CheckCircle } from "lucide-react";
+import { Loader2, Image as ImageIcon, Sparkles, Wand2, UploadCloud, X, PlusCircle, AlertTriangle, CheckCircle, Layers } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
-import { useFileUpload } from "@/hooks/useFileUpload";
+import { useFileUpload, UploadedFile } from "@/hooks/useFileUpload";
 import { ImageCompareModal } from "@/components/ImageCompareModal";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
@@ -19,6 +19,8 @@ import { RecentJobThumbnail } from "@/components/Jobs/RecentJobThumbnail";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useSecureImage } from "@/hooks/useSecureImage";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useDropzone } from "@/hooks/useDropzone";
 
 interface VtoPipelineJob {
   id: string;
@@ -63,7 +65,8 @@ const Refine = () => {
   const { supabase, session } = useSession();
   const { t } = useLanguage();
   const queryClient = useQueryClient();
-  const { uploadedFiles, setUploadedFiles, handleFileUpload } = useFileUpload();
+  const { uploadedFiles, setUploadedFiles, handleFileUpload, removeFile } = useFileUpload();
+  const [batchFiles, setBatchFiles] = useState<UploadedFile[]>([]);
 
   const [prompt, setPrompt] = useState("");
   const [upscaleFactor, setUpscaleFactor] = useState(1.5);
@@ -181,6 +184,48 @@ const Refine = () => {
     }
   };
 
+  const handleBatchSubmit = async () => {
+    if (batchFiles.length === 0) return showError("Please upload images for batch processing.");
+    setIsSubmitting(true);
+    const toastId = showLoading(`Queuing ${batchFiles.length} jobs...`);
+
+    const promises = batchFiles.map(async (file) => {
+      try {
+        const base64Data = await fileToBase64(file.file);
+        const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-auto-describe-image', {
+          body: { base64_image_data: base64Data, mime_type: file.file.type }
+        });
+        if (promptError) throw promptError;
+        const autoPrompt = promptData.auto_prompt;
+
+        const payload = {
+          prompt_text: autoPrompt,
+          invoker_user_id: session?.user?.id,
+          upscale_factor: upscaleFactor,
+          original_prompt_for_gallery: `Upscaled: ${file.name}`,
+          source: 'refiner',
+          base64_image_data: base64Data,
+          mime_type: file.file.type,
+          metadata: { source_image_url: file.previewUrl }
+        };
+        const { error: queueError } = await supabase.functions.invoke('MIRA-AGENT-proxy-comfyui', { body: payload });
+        if (queueError) throw queueError;
+      } catch (err) {
+        console.error(`Failed to queue job for ${file.name}:`, err);
+        // Don't rethrow, let other jobs succeed
+      }
+    });
+
+    await Promise.all(promises);
+    dismissToast(toastId);
+    showSuccess(`${batchFiles.length} jobs sent for upscaling.`);
+    queryClient.invalidateQueries({ queryKey: ['activeComfyJobs'] });
+    setBatchFiles([]);
+    setIsSubmitting(false);
+  };
+
+  const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: (e) => handleFileUpload(e.dataTransfer.files, true).then(setBatchFiles) });
+
   return (
     <>
       <div className="p-4 md:p-8 h-screen overflow-y-auto">
@@ -189,140 +234,201 @@ const Refine = () => {
           <p className="text-muted-foreground">{t('refinePageDescription')}</p>
         </header>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          <div className="lg:col-span-1 space-y-6">
-            <Card>
-              <CardHeader><CardTitle>{t('sourceImage')}</CardTitle></CardHeader>
-              <CardContent>
-                {sourceImageUrl ? (
-                  <div className="max-w-sm mx-auto">
-                    <div className="w-full aspect-square bg-muted rounded-md overflow-hidden flex justify-center items-center">
-                      <SecureDisplayImage imageUrl={sourceImageUrl} onClear={startNew} showClearButton={true} />
-                    </div>
-                  </div>
-                ) : (
-                  <div className="p-4 border-2 border-dashed rounded-lg text-center">
-                    <UploadCloud className="mx-auto h-8 w-8 text-muted-foreground" />
-                    <Label htmlFor="refine-upload" className="mt-2 text-sm font-medium text-primary underline cursor-pointer">{t('uploadAFile')}</Label>
-                    <p className="text-xs text-muted-foreground">{t('dragAndDrop')}</p>
-                    <Input id="refine-upload" type="file" className="hidden" accept="image/*" onChange={(e) => handleFileUpload(e.target.files)} />
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader><CardTitle>{t('refinementPrompt')}</CardTitle></CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-center space-x-2">
-                  <Switch id="auto-prompt" checked={useAutoPrompt} onCheckedChange={(checked) => {
-                    setUseAutoPrompt(checked);
-                    if (!checked) {
-                      setPrompt("");
-                      setPromptReady(false);
-                    }
-                  }} />
-                  <Label htmlFor="auto-prompt">{t('autoPrompt')}</Label>
-                </div>
-                {useAutoPrompt ? (
-                  <>
-                    <Button className="w-full" onClick={handleGeneratePrompt} disabled={isGeneratingPrompt || promptReady || uploadedFiles.length === 0}>
-                      {isGeneratingPrompt ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating...</>
-                        : promptReady ? <><CheckCircle className="mr-2 h-4 w-4" /> Prompt Ready</>
-                        : <><Sparkles className="mr-2 h-4 w-4" /> Generate Prompt</>
-                      }
-                    </Button>
-                    {prompt && (
-                      <Accordion type="single" collapsible className="w-full" value={openAccordion} onValueChange={(value) => { setOpenAccordion(value); if (value) setPromptReady(false); }}>
-                        <AccordionItem value="item-1">
-                          <AccordionTrigger className={cn(promptReady && "text-primary animate-pulse")}>View Generated Prompt</AccordionTrigger>
-                          <AccordionContent>
-                            <p className="text-sm p-2 bg-muted rounded-md">{prompt}</p>
-                          </AccordionContent>
-                        </AccordionItem>
-                      </Accordion>
-                    )}
-                  </>
-                ) : (
-                  <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t('refinementPromptPlaceholder')} />
-                )}
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader><CardTitle>{t('upscaleSettings')}</CardTitle></CardHeader>
-              <CardContent>
-                <Label>{t('upscaleFactor')}: {upscaleFactor}x</Label>
-                <Slider value={[upscaleFactor]} onValueChange={(v) => setUpscaleFactor(v[0])} min={1} max={3} step={0.1} />
-              </CardContent>
-            </Card>
-            <Button size="lg" className="w-full" onClick={handleSubmit} disabled={isSubmitting || !sourceImageUrl || !prompt}>
-              {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
-              {t('refineButton')}
-            </Button>
-          </div>
-          <div className="lg:col-span-2 space-y-6">
-            <Card>
-              <CardHeader>
-                <div className="flex justify-between items-center">
-                  <CardTitle>{t('workbench')}</CardTitle>
-                  {selectedJob && <Button variant="outline" onClick={startNew}>{t('startNewJob')}</Button>}
-                </div>
-                <p className="text-sm text-muted-foreground">{t('refineWorkbenchTooltip')}</p>
-              </CardHeader>
-              <CardContent className="min-h-[400px]">
-                {selectedJob ? (
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="w-full aspect-square bg-muted rounded-md overflow-hidden flex justify-center items-center">
-                        <h3 className="font-semibold mb-2 absolute top-2 left-2 bg-background/80 px-2 py-1 rounded-full text-xs">{t('originalImage')}</h3>
-                        <SecureDisplayImage imageUrl={selectedJob.metadata?.source_image_url || null} />
+        <Tabs defaultValue="single" className="w-full">
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="single"><ImageIcon className="mr-2 h-4 w-4" />Single Image</TabsTrigger>
+            <TabsTrigger value="batch"><Layers className="mr-2 h-4 w-4" />Batch Process</TabsTrigger>
+          </TabsList>
+          <TabsContent value="single" className="pt-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              <div className="lg:col-span-1 space-y-6">
+                <Card>
+                  <CardHeader><CardTitle>{t('sourceImage')}</CardTitle></CardHeader>
+                  <CardContent>
+                    {sourceImageUrl ? (
+                      <div className="max-w-sm mx-auto">
+                        <div className="w-full aspect-square bg-muted rounded-md overflow-hidden flex justify-center items-center">
+                          <SecureDisplayImage imageUrl={sourceImageUrl} onClear={startNew} showClearButton={true} />
+                        </div>
                       </div>
-                      <div className="w-full aspect-square bg-muted rounded-md overflow-hidden flex justify-center items-center">
-                        <h3 className="font-semibold mb-2 absolute top-2 left-2 bg-background/80 px-2 py-1 rounded-full text-xs">{t('refinedImage')}</h3>
-                        {resultImageUrl ? (
-                          <SecureDisplayImage imageUrl={resultImageUrl} />
-                        ) : (
-                          <div className="w-full h-full flex flex-col items-center justify-center text-muted-foreground">
-                            <Loader2 className="h-8 w-8 animate-spin" />
-                            <p className="mt-2 text-sm">{t('inProgress')}</p>
+                    ) : (
+                      <div className="p-4 border-2 border-dashed rounded-lg text-center">
+                        <UploadCloud className="mx-auto h-8 w-8 text-muted-foreground" />
+                        <Label htmlFor="refine-upload" className="mt-2 text-sm font-medium text-primary underline cursor-pointer">{t('uploadAFile')}</Label>
+                        <p className="text-xs text-muted-foreground">{t('dragAndDrop')}</p>
+                        <Input id="refine-upload" type="file" className="hidden" accept="image/*" onChange={(e) => handleFileUpload(e.target.files)} />
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader><CardTitle>{t('refinementPrompt')}</CardTitle></CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="flex items-center space-x-2">
+                      <Switch id="auto-prompt" checked={useAutoPrompt} onCheckedChange={(checked) => {
+                        setUseAutoPrompt(checked);
+                        if (!checked) {
+                          setPrompt("");
+                          setPromptReady(false);
+                        }
+                      }} />
+                      <Label htmlFor="auto-prompt">{t('autoPrompt')}</Label>
+                    </div>
+                    {useAutoPrompt ? (
+                      <>
+                        <Button className="w-full" onClick={handleGeneratePrompt} disabled={isGeneratingPrompt || promptReady || uploadedFiles.length === 0}>
+                          {isGeneratingPrompt ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating...</>
+                            : promptReady ? <><CheckCircle className="mr-2 h-4 w-4" /> Prompt Ready</>
+                            : <><Sparkles className="mr-2 h-4 w-4" /> Generate Prompt</>
+                          }
+                        </Button>
+                        {prompt && (
+                          <Accordion type="single" collapsible className="w-full" value={openAccordion} onValueChange={(value) => { setOpenAccordion(value); if (value) setPromptReady(false); }}>
+                            <AccordionItem value="item-1">
+                              <AccordionTrigger className={cn(promptReady && "text-primary animate-pulse")}>View Generated Prompt</AccordionTrigger>
+                              <AccordionContent>
+                                <p className="text-sm p-2 bg-muted rounded-md">{prompt}</p>
+                              </AccordionContent>
+                            </AccordionItem>
+                          </Accordion>
+                        )}
+                      </>
+                    ) : (
+                      <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t('refinementPromptPlaceholder')} />
+                    )}
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader><CardTitle>{t('upscaleSettings')}</CardTitle></CardHeader>
+                  <CardContent>
+                    <Label>{t('upscaleFactor')}: {upscaleFactor}x</Label>
+                    <Slider value={[upscaleFactor]} onValueChange={(v) => setUpscaleFactor(v[0])} min={1} max={3} step={0.1} />
+                  </CardContent>
+                </Card>
+                <Button size="lg" className="w-full" onClick={handleSubmit} disabled={isSubmitting || !sourceImageUrl || !prompt}>
+                  {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+                  {t('refineButton')}
+                </Button>
+              </div>
+              <div className="lg:col-span-2 space-y-6">
+                <Card>
+                  <CardHeader>
+                    <div className="flex justify-between items-center">
+                      <CardTitle>{t('workbench')}</CardTitle>
+                      {selectedJob && <Button variant="outline" onClick={startNew}>{t('startNewJob')}</Button>}
+                    </div>
+                    <p className="text-sm text-muted-foreground">{t('refineWorkbenchTooltip')}</p>
+                  </CardHeader>
+                  <CardContent className="min-h-[400px]">
+                    {selectedJob ? (
+                      <div className="space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="w-full aspect-square bg-muted rounded-md overflow-hidden flex justify-center items-center">
+                            <h3 className="font-semibold mb-2 absolute top-2 left-2 bg-background/80 px-2 py-1 rounded-full text-xs">{t('originalImage')}</h3>
+                            <SecureDisplayImage imageUrl={selectedJob.metadata?.source_image_url || null} />
                           </div>
+                          <div className="w-full aspect-square bg-muted rounded-md overflow-hidden flex justify-center items-center">
+                            <h3 className="font-semibold mb-2 absolute top-2 left-2 bg-background/80 px-2 py-1 rounded-full text-xs">{t('refinedImage')}</h3>
+                            {resultImageUrl ? (
+                              <SecureDisplayImage imageUrl={resultImageUrl} />
+                            ) : (
+                              <div className="w-full h-full flex flex-col items-center justify-center text-muted-foreground">
+                                <Loader2 className="h-8 w-8 animate-spin" />
+                                <p className="mt-2 text-sm">{t('inProgress')}</p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        {resultImageUrl && (
+                          <Button className="w-full mt-4" onClick={() => setIsCompareModalOpen(true)}>{t('compareResults')}</Button>
                         )}
                       </div>
-                    </div>
-                    {resultImageUrl && (
-                      <Button className="w-full mt-4" onClick={() => setIsCompareModalOpen(true)}>{t('compareResults')}</Button>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+                        <ImageIcon className="h-16 w-16" />
+                        <p className="mt-4 text-center">{t('uploadOrSelect')}</p>
+                      </div>
                     )}
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-                    <ImageIcon className="h-16 w-16" />
-                    <p className="mt-4 text-center">{t('uploadOrSelect')}</p>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader><CardTitle>{t('recentRefinements')}</CardTitle></CardHeader>
-              <CardContent>
-                {isLoadingRecent ? <Skeleton className="h-24 w-full" /> : recentJobs && recentJobs.length > 0 ? (
-                  <ScrollArea className="h-32">
-                    <div className="flex gap-4 pb-2">
-                      {recentJobs.map(job => (
-                        <RecentJobThumbnail
-                          key={job.id}
-                          job={job}
-                          onClick={() => setSelectedJobId(job.id)}
-                          isSelected={selectedJobId === job.id}
-                        />
-                      ))}
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader><CardTitle>{t('recentRefinements')}</CardTitle></CardHeader>
+                  <CardContent>
+                    {isLoadingRecent ? <Skeleton className="h-24 w-full" /> : recentJobs && recentJobs.length > 0 ? (
+                      <ScrollArea className="h-32">
+                        <div className="flex gap-4 pb-2">
+                          {recentJobs.map(job => (
+                            <RecentJobThumbnail
+                              key={job.id}
+                              job={job}
+                              onClick={() => setSelectedJobId(job.id)}
+                              isSelected={selectedJobId === job.id}
+                            />
+                          ))}
+                        </div>
+                      </ScrollArea>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">{t('noRecentJobs')}</p>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          </TabsContent>
+          <TabsContent value="batch" className="pt-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              <div className="lg:col-span-1 space-y-6">
+                <Card>
+                  <CardHeader><CardTitle>1. Upload Images</CardTitle></CardHeader>
+                  <CardContent>
+                    <div {...dropzoneProps} className={cn("p-6 border-2 border-dashed rounded-lg text-center cursor-pointer hover:border-primary transition-colors", isDraggingOver && "border-primary bg-primary/10")}>
+                      <UploadCloud className="mx-auto h-12 w-12 text-muted-foreground" />
+                      <p className="mt-2 font-semibold">Upload Multiple Images</p>
+                      <p className="text-xs text-muted-foreground">Drag & drop or click to select files</p>
                     </div>
-                  </ScrollArea>
-                ) : (
-                  <p className="text-sm text-muted-foreground">{t('noRecentJobs')}</p>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-        </div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader><CardTitle>2. Configure Upscale</CardTitle></CardHeader>
+                  <CardContent>
+                    <Label>{t('upscaleFactor')}: {upscaleFactor}x</Label>
+                    <Slider value={[upscaleFactor]} onValueChange={(v) => setUpscaleFactor(v[0])} min={1} max={3} step={0.1} />
+                  </CardContent>
+                </Card>
+                <Button size="lg" className="w-full" onClick={handleBatchSubmit} disabled={isSubmitting || batchFiles.length === 0}>
+                  {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+                  Upscale {batchFiles.length > 0 ? `${batchFiles.length} Image(s)` : ''}
+                </Button>
+              </div>
+              <div className="lg:col-span-2">
+                <Card>
+                  <CardHeader><CardTitle>Selected Images for Batch</CardTitle></CardHeader>
+                  <CardContent>
+                    {batchFiles.length > 0 ? (
+                      <ScrollArea className="h-[60vh]">
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 pr-4">
+                          {batchFiles.map((file, index) => (
+                            <div key={index} className="relative aspect-square">
+                              <img src={file.previewUrl} alt={file.name} className="w-full h-full object-cover rounded-md" />
+                              <Button variant="destructive" size="icon" className="absolute top-1 right-1 h-6 w-6" onClick={() => setBatchFiles(files => files.filter((_, i) => i !== index))}>
+                                <X className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      </ScrollArea>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
+                        <ImageIcon className="h-12 w-12" />
+                        <p className="mt-4">Your uploaded images will appear here.</p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          </TabsContent>
+        </Tabs>
       </div>
       {isCompareModalOpen && sourceImageUrl && resultImageUrl && (
         <ImageCompareModal 

@@ -17,7 +17,7 @@ export const useFileUpload = () => {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
 
-  const handleFileUpload = useCallback(async (files: FileList | null): Promise<UploadedFile[]> => {
+  const handleFileUpload = useCallback(async (files: FileList | null, isBatch = false): Promise<UploadedFile[]> => {
     if (!files || files.length === 0) return [];
     
     const validFiles: File[] = [];
@@ -62,8 +62,14 @@ export const useFileUpload = () => {
       return { file, name: file.name, path: '', previewUrl, isImage, upload };
     });
 
-    setUploadedFiles(prev => [...prev, ...newFiles]);
-    return newFiles;
+    if (isBatch) {
+      // For batch mode, we just return the files to be managed by the component state
+      return newFiles;
+    } else {
+      // For single/chat mode, we update the hook's internal state
+      setUploadedFiles(prev => [...prev, ...newFiles]);
+      return newFiles;
+    }
 
   }, [session]);
 
