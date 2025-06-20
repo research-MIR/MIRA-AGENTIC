@@ -211,7 +211,7 @@ const VirtualTryOn = () => {
               {isLoadingRecentJobs ? <Skeleton className="h-24 w-full" /> : recentJobs && recentJobs.length > 0 ? (
                 <div className="flex gap-4 overflow-x-auto pb-2">
                   {recentJobs.map(job => (
-                    <button key={job.id} onClick={() => setSelectedJobId(job.id)} className={cn("border-2 rounded-lg p-1 flex-shrink-0", selectedJobId === job.id ? "border-primary" : "border-transparent")}>
+                    <button key={job.id} onClick={() => setSelectedJobId(job.id)} className={cn("border-2 rounded-lg p-1 flex-shrink-0 w-24 h-24", selectedJobId === job.id ? "border-primary" : "border-transparent")}>
                       <SecureImageDisplay imageUrl={job.final_image_url || job.source_person_image_url} alt="Recent job" />
                     </button>
                   ))}
