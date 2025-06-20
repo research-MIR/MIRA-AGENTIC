@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -10,6 +10,7 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const BITSTUDIO_API_KEY = Deno.env.get('BITSTUDIO_API_KEY');
 const BITSTUDIO_API_BASE = 'https://api.bitstudio.ai';
+const UPLOAD_BUCKET = 'mira-agent-user-uploads';
 
 async function uploadToBitStudio(fileBlob: Blob, type: 'virtual-try-on-person' | 'virtual-try-on-outfit', filename: string): Promise<string> {
   const formData = new FormData();
@@ -31,6 +32,24 @@ async function uploadToBitStudio(fileBlob: Blob, type: 'virtual-try-on-person' |
   return result.id;
 }
 
+async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
+    const url = new URL(publicUrl);
+    const pathStartIndex = url.pathname.indexOf(UPLOAD_BUCKET) + UPLOAD_BUCKET.length + 1;
+    const filePath = decodeURIComponent(url.pathname.substring(pathStartIndex));
+
+    if (!filePath) {
+        throw new Error(`Could not parse file path from URL: ${publicUrl}`);
+    }
+
+    console.log(`[BitStudioProxy] Downloading from storage path: ${filePath}`);
+    const { data, error } = await supabase.storage.from(UPLOAD_BUCKET).download(filePath);
+
+    if (error) {
+        throw new Error(`Failed to download from Supabase storage: ${error.message}`);
+    }
+    return data;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
 
@@ -42,14 +61,11 @@ serve(async (req) => {
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
 
-    // 1. Download images from our own Supabase storage
-    const [personRes, garmentRes] = await Promise.all([
-      fetch(person_image_url),
-      fetch(garment_image_url)
+    // 1. Download images from our own Supabase storage using the admin client
+    const [personBlob, garmentBlob] = await Promise.all([
+      downloadFromSupabase(supabase, person_image_url),
+      downloadFromSupabase(supabase, garment_image_url)
     ]);
-    if (!personRes.ok || !garmentRes.ok) throw new Error("Failed to download source images.");
-    
-    const [personBlob, garmentBlob] = await Promise.all([personRes.blob(), garmentRes.blob()]);
 
     // 2. Upload images to BitStudio to get their IDs
     const [personImageId, outfitImageId] = await Promise.all([
