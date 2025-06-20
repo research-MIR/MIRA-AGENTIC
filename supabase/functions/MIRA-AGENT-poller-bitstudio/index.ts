@@ -19,17 +19,23 @@ serve(async (req) => {
   if (!job_id) { throw new Error("job_id is required."); }
 
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
+  console.log(`[BitStudioPoller][${job_id}] Invoked to check status.`);
 
   try {
+    // HEARTBEAT: Mark the job as being polled right now to prevent watchdog conflicts
+    await supabase.from('mira-agent-bitstudio-jobs').update({ last_polled_at: new Date().toISOString() }).eq('id', job_id);
+
     const { data: job, error: fetchError } = await supabase
       .from('mira-agent-bitstudio-jobs')
       .select('*')
       .eq('id', job_id)
       .single();
 
-    if (fetchError) throw fetchError;
+    if (fetchError) throw new Error(`Failed to fetch job: ${fetchError.message}`);
+    
     if (job.status === 'complete' || job.status === 'failed') {
-      return new Response(JSON.stringify({ success: true, message: "Job already resolved." }), { headers: corsHeaders });
+        console.log(`[BitStudioPoller][${job_id}] Job already resolved with status '${job.status}'. Halting check.`);
+        return new Response(JSON.stringify({ success: true, message: "Job already resolved." }), { headers: corsHeaders });
     }
 
     const statusResponse = await fetch(`${BITSTUDIO_API_BASE}/images/${job.bitstudio_task_id}`, {
@@ -40,17 +46,19 @@ serve(async (req) => {
     const statusData = await statusResponse.json();
 
     if (statusData.status === 'completed') {
+      console.log(`[BitStudioPoller][${job_id}] Status is 'completed'. Updating job and finalizing.`);
       await supabase.from('mira-agent-bitstudio-jobs').update({
         status: 'complete',
         final_image_url: statusData.path,
       }).eq('id', job_id);
     } else if (statusData.status === 'failed') {
+      console.error(`[BitStudioPoller][${job_id}] Status is 'failed'. Updating job with error.`);
       await supabase.from('mira-agent-bitstudio-jobs').update({
         status: 'failed',
         error_message: 'BitStudio processing failed.',
       }).eq('id', job_id);
     } else {
-      // Still pending or generating, schedule another check
+      console.log(`[BitStudioPoller][${job_id}] Status is '${statusData.status}'. Re-polling in ${POLLING_INTERVAL_MS}ms.`);
       await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'processing' }).eq('id', job_id);
       setTimeout(() => {
         supabase.functions.invoke('MIRA-AGENT-poller-bitstudio', { body: { job_id } }).catch(console.error);
