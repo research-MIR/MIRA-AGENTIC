@@ -11,6 +11,7 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const BITSTUDIO_API_KEY = Deno.env.get('BITSTUDIO_API_KEY');
 const BITSTUDIO_API_BASE = 'https://api.bitstudio.ai';
 const POLLING_INTERVAL_MS = 3000; // 3 seconds
+const GENERATED_IMAGES_BUCKET = 'mira-generations';
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
@@ -24,6 +25,7 @@ serve(async (req) => {
   try {
     // HEARTBEAT: Mark the job as being polled right now to prevent watchdog conflicts
     await supabase.from('mira-agent-bitstudio-jobs').update({ last_polled_at: new Date().toISOString() }).eq('id', job_id);
+    console.log(`[BitStudioPoller][${job_id}] Heartbeat updated.`);
 
     const { data: job, error: fetchError } = await supabase
       .from('mira-agent-bitstudio-jobs')
@@ -32,25 +34,47 @@ serve(async (req) => {
       .single();
 
     if (fetchError) throw new Error(`Failed to fetch job: ${fetchError.message}`);
+    console.log(`[BitStudioPoller][${job_id}] Fetched job from DB. Current status: ${job.status}`);
     
     if (job.status === 'complete' || job.status === 'failed') {
-        console.log(`[BitStudioPoller][${job_id}] Job already resolved with status '${job.status}'. Halting check.`);
+        console.log(`[BitStudioPoller][${job_id}] Job already resolved. Halting check.`);
         return new Response(JSON.stringify({ success: true, message: "Job already resolved." }), { headers: corsHeaders });
     }
 
-    const statusResponse = await fetch(`${BITSTUDIO_API_BASE}/images/${job.bitstudio_task_id}`, {
+    const statusUrl = `${BITSTUDIO_API_BASE}/images/${job.bitstudio_task_id}`;
+    console.log(`[BitStudioPoller][${job_id}] Fetching status from BitStudio: ${statusUrl}`);
+    const statusResponse = await fetch(statusUrl, {
       headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}` }
     });
 
     if (!statusResponse.ok) throw new Error(`BitStudio status check failed: ${await statusResponse.text()}`);
     const statusData = await statusResponse.json();
+    console.log(`[BitStudioPoller][${job_id}] BitStudio status received: ${statusData.status}`);
 
     if (statusData.status === 'completed') {
-      console.log(`[BitStudioPoller][${job_id}] Status is 'completed'. Updating job and finalizing.`);
+      console.log(`[BitStudioPoller][${job_id}] Status is 'completed'. Downloading final image from: ${statusData.path}`);
+      
+      const imageResponse = await fetch(statusData.path);
+      if (!imageResponse.ok) throw new Error(`Failed to download final image from BitStudio URL: ${statusData.path}`);
+      const imageBuffer = await imageResponse.arrayBuffer();
+      console.log(`[BitStudioPoller][${job_id}] Download complete. Uploading to Supabase Storage...`);
+
+      const filePath = `${job.user_id}/${Date.now()}_vto_${job.id.substring(0, 8)}.png`;
+      const { error: uploadError } = await supabase.storage
+        .from(GENERATED_IMAGES_BUCKET)
+        .upload(filePath, imageBuffer, { contentType: 'image/png', upsert: true });
+      
+      if (uploadError) throw new Error(`Failed to upload final image to Supabase Storage: ${uploadError.message}`);
+      
+      const { data: { publicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
+      console.log(`[BitStudioPoller][${job_id}] Upload complete. New persistent URL: ${publicUrl}`);
+
       await supabase.from('mira-agent-bitstudio-jobs').update({
         status: 'complete',
-        final_image_url: statusData.path,
+        final_image_url: publicUrl, // Save our own persistent URL
       }).eq('id', job_id);
+      console.log(`[BitStudioPoller][${job_id}] Job finalized in DB.`);
+
     } else if (statusData.status === 'failed') {
       console.error(`[BitStudioPoller][${job_id}] Status is 'failed'. Updating job with error.`);
       await supabase.from('mira-agent-bitstudio-jobs').update({
