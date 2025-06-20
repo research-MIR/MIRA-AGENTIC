@@ -4,7 +4,7 @@ import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Image as ImageIcon, Bot, Wand2, Code, CheckCircle, Plus, Folder, MoreVertical, X, Download, Loader2 } from "lucide-react";
+import { Image as ImageIcon, Bot, Wand2, Code, CheckCircle, Plus, Folder, MoreVertical, X, Download, Loader2, Filter, SortAsc, SortDesc } from "lucide-react";
 import { useImagePreview } from "@/context/ImagePreviewContext";
 import { useLanguage } from "@/context/LanguageContext";
 import { Button } from "@/components/ui/button";
@@ -61,6 +61,8 @@ const Gallery = () => {
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
   const [targetProjectId, setTargetProjectId] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [selectedProjectId, setSelectedProjectId] = useState<string>('all');
+  const [sortOrder, setSortOrder] = useState<'created_at' | 'updated_at'>('created_at');
 
   const { 
     data, 
@@ -70,7 +72,7 @@ const Gallery = () => {
     isFetching, 
     isFetchingNextPage 
   } = useInfiniteQuery<Job[]>({
-    queryKey: ['galleryJobs', session?.user?.id, activeTab],
+    queryKey: ['galleryJobs', session?.user?.id, activeTab, selectedProjectId, sortOrder],
     queryFn: async ({ pageParam = 0 }) => {
       if (!session?.user) return [];
       const from = pageParam * PAGE_SIZE;
@@ -78,11 +80,12 @@ const Gallery = () => {
       
       let query = supabase
         .from('mira-agent-jobs')
-        .select('id, final_result, context, original_prompt, project_id, created_at')
+        .select('id, final_result, context, original_prompt, project_id, created_at, updated_at')
         .eq('user_id', session.user.id)
-        .order('created_at', { ascending: false })
+        .order(sortOrder, { ascending: false })
         .range(from, to);
 
+      // Filter by source tab
       switch (activeTab) {
         case 'agent':
           query = query.in('context->>source', ['agent', 'agent_branch']);
@@ -93,10 +96,13 @@ const Gallery = () => {
         case 'refined':
           query = query.eq('context->>source', 'refiner');
           break;
-        case 'all':
-        default:
-          // No additional filter needed for 'all'
-          break;
+      }
+
+      // Filter by project
+      if (selectedProjectId === 'unassigned') {
+        query = query.is('project_id', null);
+      } else if (selectedProjectId !== 'all') {
+        query = query.eq('project_id', selectedProjectId);
       }
         
       const { data, error } = await query;
@@ -345,7 +351,7 @@ const Gallery = () => {
   return (
     <>
       <div className="p-4 md:p-8 h-screen overflow-y-auto">
-        <header className="pb-4 mb-8 border-b flex justify-between items-center">
+        <header className="pb-4 mb-4 border-b flex justify-between items-center">
           <div>
             <h1 className="text-3xl font-bold">{t('resultsGallery')}</h1>
             <p className="text-muted-foreground">{t('galleryDescription')}</p>
@@ -362,6 +368,34 @@ const Gallery = () => {
           </Button>
         </header>
         
+        <div className="flex flex-wrap gap-4 mb-6 pb-4 border-b">
+          <div className="flex items-center gap-2">
+            <Label htmlFor="project-filter">Project:</Label>
+            <Select value={selectedProjectId} onValueChange={setSelectedProjectId}>
+              <SelectTrigger id="project-filter" className="w-[180px]">
+                <SelectValue placeholder="Filter by project..." />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Projects</SelectItem>
+                <SelectItem value="unassigned">Unassigned</SelectItem>
+                {projects?.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex items-center gap-2">
+            <Label htmlFor="sort-order">Sort by:</Label>
+            <Select value={sortOrder} onValueChange={(v) => setSortOrder(v as any)}>
+              <SelectTrigger id="sort-order" className="w-[180px]">
+                <SelectValue placeholder="Sort by..." />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="created_at">Newest</SelectItem>
+                <SelectItem value="updated_at">Last Updated</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
         <Tabs defaultValue="all" className="w-full" onValueChange={setActiveTab}>
           <TabsList className="grid w-full grid-cols-4 mb-4">
             <TabsTrigger value="all"><ImageIcon className="mr-2 h-4 w-4" />{t('galleryTabsAll')}</TabsTrigger>
