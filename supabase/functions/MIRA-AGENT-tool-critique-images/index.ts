@@ -4,6 +4,8 @@ import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const MODEL_NAME = "gemini-2.5-pro-preview-06-05";
+const MAX_DOWNLOAD_RETRIES = 3;
+const RETRY_DOWNLOAD_DELAY_MS = 1000;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -84,20 +86,26 @@ function extractJson(text: string): any {
 }
 
 async function downloadAndEncode(url: string): Promise<Part | null> {
-    try {
-        const response = await fetch(url);
-        if (!response.ok) {
-            console.error(`[CritiqueTool] Failed to download image from ${url}. Status: ${response.status}`);
-            return null;
+    for (let attempt = 1; attempt <= MAX_DOWNLOAD_RETRIES; attempt++) {
+        try {
+            const response = await fetch(url);
+            if (response.ok) {
+                const mimeType = response.headers.get("content-type") || "image/png";
+                const buffer = await response.arrayBuffer();
+                const base64 = encodeBase64(buffer);
+                console.log(`[CritiqueTool] Successfully downloaded image from ${url} on attempt ${attempt}.`);
+                return { inlineData: { mimeType, data: base64 } };
+            }
+            console.warn(`[CritiqueTool] Failed to download image from ${url}. Status: ${response.status}. Attempt ${attempt}/${MAX_DOWNLOAD_RETRIES}`);
+        } catch (e) {
+            console.warn(`[CritiqueTool] Exception during download/encode for ${url}:`, e.message, `Attempt ${attempt}/${MAX_DOWNLOAD_RETRIES}`);
         }
-        const mimeType = response.headers.get("content-type") || "image/png";
-        const buffer = await response.arrayBuffer();
-        const base64 = encodeBase64(buffer);
-        return { inlineData: { mimeType, data: base64 } };
-    } catch (e) {
-        console.error(`[CritiqueTool] Exception during download/encode for ${url}:`, e.message);
-        return null;
+        if (attempt < MAX_DOWNLOAD_RETRIES) {
+            await new Promise(resolve => setTimeout(resolve, RETRY_DOWNLOAD_DELAY_MS));
+        }
     }
+    console.error(`[CritiqueTool] Failed to download image from ${url} after ${MAX_DOWNLOAD_RETRIES} attempts.`);
+    return null;
 }
 
 serve(async (req) => {
