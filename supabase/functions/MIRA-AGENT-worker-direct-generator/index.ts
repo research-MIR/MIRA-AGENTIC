@@ -42,14 +42,10 @@ serve(async (req) => {
 
     if (modelError) throw new Error(`Could not find details for model ${modelId}: ${modelError.message}`);
     
-    console.log(`[DirectGenWorker][${job_id}] Raw provider from DB: "${modelDetails.provider}"`);
-
-    // Aggressive sanitization to remove any hidden/non-standard characters
     const provider = modelDetails.provider.toLowerCase().replace(/[^a-z0-9.-]/g, '');
     
     console.log(`[DirectGenWorker][${job_id}] Sanitized provider string: "${provider}"`);
-    console.log(`[DirectGenWorker][${job_id}] Is sanitized provider equal to 'fal-ai'? ${provider === 'fal-ai'}`);
-
+    
     let toolToInvoke = '';
     let payload: { [key: string]: any } = {
         prompt: context.final_prompt_used || context.prompt,
@@ -62,10 +58,9 @@ serve(async (req) => {
 
     if (provider === 'google') {
         toolToInvoke = 'MIRA-AGENT-tool-generate-image-google';
-        payload.size = context.size; // Google tool expects pixel dimensions
-    } else if (provider === 'fal-ai') {
+        payload.size = context.size;
+    } else if (provider === 'fal.ai') { // Corrected from 'fal-ai' to 'fal.ai'
         toolToInvoke = 'MIRA-AGENT-tool-generate-image-fal-seedream';
-        // Fal.ai tool expects aspect ratio string like '1:1'
         const sizeMap: { [key: string]: string } = {
             '1024x1024': '1:1',
             '1408x768': '16:9',
@@ -73,7 +68,7 @@ serve(async (req) => {
             '1280x896': '4:3',
             '896x1280': '3:4',
         };
-        payload.size = sizeMap[context.size] || '1:1'; // Map pixels to ratio string
+        payload.size = sizeMap[context.size] || '1:1';
     } else {
         throw new Error(`Unsupported provider '${provider}' for direct generation.`);
     }
