@@ -329,7 +329,7 @@ const Gallery = () => {
                   {isSelected && <CheckCircle className="h-10 w-10 text-white" />}
                 </div>
               )}
-              {!isSelectMode && (
+              {!isSelectMode && (image.source === 'agent' || image.source === 'agent_branch') && (
                 <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity rounded-b-md">
                   <Button size="sm" variant="secondary" className="w-full" onClick={(e) => { e.stopPropagation(); navigate(`/chat/${image.jobId}`); }}>{t('viewChat')}</Button>
                 </div>
