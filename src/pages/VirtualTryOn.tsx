@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
-import { UploadCloud, Wand2, Loader2, Image as ImageIcon, X, PlusCircle, CheckCircle, AlertTriangle, Settings, Trash2, Brush, Crop } from "lucide-react";
+import { UploadCloud, Wand2, Loader2, Image as ImageIcon, X, PlusCircle, CheckCircle, AlertTriangle, Settings, Trash2, Brush } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
 import { cn } from "@/lib/utils";
 import { useDropzone } from "@/hooks/useDropzone";
@@ -16,7 +16,6 @@ import { useImagePreview } from "@/context/ImagePreviewContext";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
-import { ManualCropModal } from "@/components/Editor/ManualCropModal";
 
 interface BitStudioJob {
   id: string;
@@ -28,18 +27,15 @@ interface BitStudioJob {
   mode: 'base' | 'pro';
 }
 
-const ImageUploader = ({ onFileSelect, title, imageUrl, onClear, onCrop, canCrop }: { onFileSelect: (file: File) => void, title: string, imageUrl: string | null, onClear: () => void, onCrop?: () => void, canCrop?: boolean }) => {
+const ImageUploader = ({ onFileSelect, title, imageUrl, onClear }: { onFileSelect: (file: File) => void, title: string, imageUrl: string | null, onClear: () => void }) => {
   const inputRef = useRef<HTMLInputElement>(null);
   const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: (e) => e.dataTransfer.files && onFileSelect(e.dataTransfer.files[0]) });
 
   if (imageUrl) {
     return (
-      <div className="relative aspect-square group">
+      <div className="relative aspect-square">
         <img src={imageUrl} alt={title} className="w-full h-full object-cover rounded-md" />
-        <div className="absolute top-2 right-2 z-10 flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-          <Button variant="destructive" size="icon" className="h-6 w-6" onClick={onClear}><X className="h-4 w-4" /></Button>
-          {canCrop && onCrop && <Button variant="secondary" size="icon" className="h-6 w-6" onClick={onCrop}><Crop className="h-4 w-4" /></Button>}
-        </div>
+        <Button variant="destructive" size="icon" className="absolute top-2 right-2 h-6 w-6 z-10" onClick={onClear}><X className="h-4 w-4" /></Button>
       </div>
     );
   }
@@ -59,11 +55,6 @@ const fileToBase64 = (file: File): Promise<string> => new Promise((resolve, reje
     reader.onerror = reject;
 });
 
-const dataUrlToBlob = async (dataUrl: string): Promise<Blob> => {
-    const res = await fetch(dataUrl);
-    return await res.blob();
-};
-
 const VirtualTryOn = () => {
   const { supabase, session } = useSession();
   const { t } = useLanguage();
@@ -71,12 +62,10 @@ const VirtualTryOn = () => {
   
   const [personImageFile, setPersonImageFile] = useState<File | null>(null);
   const [garmentImageFile, setGarmentImageFile] = useState<File | null>(null);
-  const [croppedPersonImageFile, setCroppedPersonImageFile] = useState<File | null>(null);
   const [maskImageDataUrl, setMaskImageDataUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [mode, setMode] = useState<'base' | 'pro'>('base');
-  const [isCropModalOpen, setIsCropModalOpen] = useState(false);
   const channelRef = useRef<RealtimeChannel | null>(null);
 
   const { data: recentJobs, isLoading: isLoadingRecentJobs } = useQuery<BitStudioJob[]>({
@@ -104,18 +93,16 @@ const VirtualTryOn = () => {
 
   const personImageUrl = useMemo(() => personImageFile ? URL.createObjectURL(personImageFile) : null, [personImageFile]);
   const garmentImageUrl = useMemo(() => garmentImageFile ? URL.createObjectURL(garmentImageFile) : null, [garmentImageFile]);
-  const croppedPersonImageUrl = useMemo(() => croppedPersonImageFile ? URL.createObjectURL(croppedPersonImageFile) : null, [croppedPersonImageFile]);
 
   const handleTryOn = async () => {
-    const personFileToUse = croppedPersonImageFile || personImageFile;
-    if (!personFileToUse || !garmentImageFile || !session?.user) return showError("Please select both a person and a garment image.");
+    if (!personImageFile || !garmentImageFile || !session?.user) return showError("Please select both a person and a garment image.");
     if (mode === 'pro' && !maskImageDataUrl) return showError("Please draw a mask on the person image for Pro mode.");
 
     setIsLoading(true);
     const toastId = showLoading("Preparing your virtual try-on...");
     try {
       const [person_image_data, garment_image_data] = await Promise.all([
-        fileToBase64(personFileToUse),
+        fileToBase64(personImageFile),
         fileToBase64(garmentImageFile)
       ]);
       
@@ -149,15 +136,8 @@ const VirtualTryOn = () => {
   const resetForm = () => {
     setPersonImageFile(null);
     setGarmentImageFile(null);
-    setCroppedPersonImageFile(null);
     setSelectedJobId(null);
     setMaskImageDataUrl(null);
-  };
-
-  const handleCropComplete = async (croppedDataUrl: string) => {
-    const blob = await dataUrlToBlob(croppedDataUrl);
-    const file = new File([blob], "cropped_person.webp", { type: "image/webp" });
-    setCroppedPersonImageFile(file);
   };
 
   const renderJobResult = (job: BitStudioJob) => {
@@ -174,66 +154,55 @@ const VirtualTryOn = () => {
   };
 
   return (
-    <>
-      <div className="p-4 md:p-8 h-screen overflow-y-auto">
-        <header className="pb-4 mb-8 border-b"><h1 className="text-3xl font-bold">{t('virtualTryOn')}</h1></header>
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          <div className="lg:col-span-1 space-y-6">
-            <Card>
-              <CardHeader><div className="flex justify-between items-center"><CardTitle>{selectedJobId ? "Selected Job" : "1. Upload Images"}</CardTitle>{selectedJobId && <Button variant="outline" size="sm" onClick={resetForm}><PlusCircle className="h-4 w-4 mr-2" />New</Button>}</div></CardHeader>
-              <CardContent className="grid grid-cols-2 gap-4">
-                {selectedJob ? <SecureImageDisplay imageUrl={selectedJob.source_person_image_url} alt="Person" /> : <ImageUploader onFileSelect={setPersonImageFile} title="Person Image" imageUrl={croppedPersonImageUrl || personImageUrl} onClear={() => { setPersonImageFile(null); setCroppedPersonImageFile(null); }} onCrop={() => setIsCropModalOpen(true)} canCrop={!!personImageFile} />}
-                {selectedJob ? <SecureImageDisplay imageUrl={selectedJob.source_garment_image_url} alt="Garment" /> : <ImageUploader onFileSelect={setGarmentImageFile} title="Garment Image" imageUrl={garmentImageUrl} onClear={() => setGarmentImageFile(null)} />}
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader><CardTitle>2. Select Mode</CardTitle></CardHeader>
-              <CardContent>
-                <RadioGroup value={mode} onValueChange={(v) => setMode(v as 'base' | 'pro')} className="space-y-2">
-                  <div className="flex items-center space-x-2"><RadioGroupItem value="base" id="mode-base" /><Label htmlFor="mode-base">Base</Label></div>
-                  <div className="flex items-center space-x-2"><RadioGroupItem value="pro" id="mode-pro" /><Label htmlFor="mode-pro">Pro (Inpainting)</Label></div>
-                </RadioGroup>
-              </CardContent>
-            </Card>
-            {mode === 'pro' && (
-              <Card>
-                <CardHeader><CardTitle>3. Create Mask</CardTitle></CardHeader>
-                <CardContent>
-                  {personImageUrl ? <MaskCanvas imageUrl={personImageUrl} onMaskChange={setMaskImageDataUrl} /> : <p className="text-sm text-muted-foreground">Upload a person image to create a mask.</p>}
-                </CardContent>
-              </Card>
-            )}
-            <Button onClick={handleTryOn} disabled={isLoading || !personImageFile || !garmentImageFile || (mode === 'pro' && !maskImageDataUrl)} className="w-full">
-              {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
-              Start Virtual Try-On
-            </Button>
-          </div>
-          <div className="lg:col-span-2">
-            <Card className="min-h-[60vh]">
-              <CardHeader><CardTitle>Result</CardTitle></CardHeader>
-              <CardContent className="flex items-center justify-center">
-                {selectedJob ? renderJobResult(selectedJob) : <div className="text-center text-muted-foreground"><ImageIcon className="h-16 w-16 mx-auto mb-4" /><p>Your result will appear here.</p></div>}
-              </CardContent>
-            </Card>
-            <Card className="mt-8">
-              <CardHeader><CardTitle>Recent Jobs</CardTitle></CardHeader>
-              <CardContent>
-                {isLoadingRecentJobs ? <Skeleton className="h-24 w-full" /> : recentJobs && recentJobs.length > 0 ? (
-                  <div className="flex gap-4 overflow-x-auto pb-2">
-                    {recentJobs.map(job => (
-                      <button key={job.id} onClick={() => setSelectedJobId(job.id)} className={cn("border-2 rounded-lg p-1 flex-shrink-0", selectedJobId === job.id ? "border-primary" : "border-transparent")}>
-                        <SecureImageDisplay imageUrl={job.final_image_url || job.source_person_image_url} alt="Recent job" />
-                      </button>
-                    ))}
-                  </div>
-                ) : <p className="text-muted-foreground text-sm">No recent jobs found.</p>}
-              </CardContent>
-            </Card>
-          </div>
+    <div className="p-4 md:p-8 h-screen overflow-y-auto">
+      <header className="pb-4 mb-8 border-b"><h1 className="text-3xl font-bold">{t('virtualTryOn')}</h1></header>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="lg:col-span-1 space-y-6">
+          <Card>
+            <CardHeader><div className="flex justify-between items-center"><CardTitle>{selectedJobId ? "Selected Job" : "1. Upload Images"}</CardTitle>{selectedJobId && <Button variant="outline" size="sm" onClick={resetForm}><PlusCircle className="h-4 w-4 mr-2" />New</Button>}</div></CardHeader>
+            <CardContent className="grid grid-cols-2 gap-4">
+              {selectedJob ? <SecureImageDisplay imageUrl={selectedJob.source_person_image_url} alt="Person" /> : <ImageUploader onFileSelect={setPersonImageFile} title="Person Image" imageUrl={personImageUrl} onClear={() => setPersonImageFile(null)} />}
+              {selectedJob ? <SecureImageDisplay imageUrl={selectedJob.source_garment_image_url} alt="Garment" /> : <ImageUploader onFileSelect={setGarmentImageFile} title="Garment Image" imageUrl={garmentImageUrl} onClear={() => setGarmentImageFile(null)} />}
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader><CardTitle>2. Select Mode</CardTitle></CardHeader>
+            <CardContent>
+              <RadioGroup value={mode} onValueChange={(v) => setMode(v as 'base' | 'pro')} className="space-y-2">
+                <div className="flex items-center space-x-2"><RadioGroupItem value="base" id="mode-base" /><Label htmlFor="mode-base">Base</Label></div>
+                <div className="flex items-center space-x-2"><RadioGroupItem value="pro" id="mode-pro" /><Label htmlFor="mode-pro">Pro (Inpainting)</Label></div>
+              </RadioGroup>
+            </CardContent>
+          </Card>
+          <Button onClick={handleTryOn} disabled={isLoading || !personImageFile || !garmentImageFile} className="w-full">
+            {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+            Start Virtual Try-On
+          </Button>
+        </div>
+        <div className="lg:col-span-2">
+          <Card className="min-h-[60vh]">
+            <CardHeader><CardTitle>Result</CardTitle></CardHeader>
+            <CardContent className="flex items-center justify-center">
+              {selectedJob ? renderJobResult(selectedJob) : <div className="text-center text-muted-foreground"><ImageIcon className="h-16 w-16 mx-auto mb-4" /><p>Your result will appear here.</p></div>}
+            </CardContent>
+          </Card>
+          <Card className="mt-8">
+            <CardHeader><CardTitle>Recent Jobs</CardTitle></CardHeader>
+            <CardContent>
+              {isLoadingRecentJobs ? <Skeleton className="h-24 w-full" /> : recentJobs && recentJobs.length > 0 ? (
+                <div className="flex gap-4 overflow-x-auto pb-2">
+                  {recentJobs.map(job => (
+                    <button key={job.id} onClick={() => setSelectedJobId(job.id)} className={cn("border-2 rounded-lg p-1 flex-shrink-0", selectedJobId === job.id ? "border-primary" : "border-transparent")}>
+                      <SecureImageDisplay imageUrl={job.final_image_url || job.source_person_image_url} alt="Recent job" />
+                    </button>
+                  ))}
+                </div>
+              ) : <p className="text-muted-foreground text-sm">No recent jobs found.</p>}
+            </CardContent>
+          </Card>
         </div>
       </div>
-      {personImageUrl && <ManualCropModal isOpen={isCropModalOpen} onClose={() => setIsCropModalOpen(false)} imageUrl={personImageUrl} onCropComplete={handleCropComplete} />}
-    </>
+    </div>
   );
 };
 

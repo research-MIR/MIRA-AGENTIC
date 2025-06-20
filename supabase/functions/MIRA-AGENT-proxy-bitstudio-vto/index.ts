@@ -11,7 +11,6 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const BITSTUDIO_API_KEY = Deno.env.get('BITSTUDIO_API_KEY');
 const UPLOAD_BUCKET = 'mira-agent-user-uploads';
-
 const BITSTUDIO_API_BASE = 'https://api.bitstudio.ai';
 
 async function uploadToBitStudio(file: Blob, type: string, filename: string) {
@@ -45,17 +44,13 @@ serve(async (req) => {
     const { 
       person_image_data, // base64
       garment_image_data, // base64
-      mask_image_data, // base64, for pro mode
-      mode, // 'base' or 'pro'
+      mode,
       user_id,
       prompt
     } = await req.json();
 
     if (!user_id || !mode || !person_image_data || !garment_image_data) {
       throw new Error("Missing required parameters.");
-    }
-    if (mode === 'pro' && !mask_image_data) {
-      throw new Error("Mask image is required for Pro mode.");
     }
 
     const { data: job, error: jobInsertError } = await supabase
@@ -89,58 +84,35 @@ serve(async (req) => {
         bitstudio_garment_image_id: garmentImageId,
     }).eq('id', jobId);
 
-    let taskId;
-    if (mode === 'base') {
-      const response = await fetch(`${BITSTUDIO_API_BASE}/images/virtual-try-on`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-            person_image_id: personImageId, 
-            outfit_image_id: garmentImageId, 
-            prompt: prompt || "professional portrait, high quality",
-            resolution: "standard"
-        })
-      });
-      
-      const resultText = await response.text();
-      console.log(`[BitStudioProxy] Raw response from /virtual-try-on: ${resultText}`);
+    // Simplified payload for the VTO call
+    const vtoPayload = { 
+        person_image_id: personImageId, 
+        outfit_image_id: garmentImageId, 
+        prompt: prompt || "professional portrait, high quality",
+    };
 
-      if (!response.ok) {
-          throw new Error(`BitStudio API Error: ${response.status} - ${resultText}`);
-      }
-      const result = JSON.parse(resultText);
+    console.log("[BitStudioProxy] Sending simplified payload to /virtual-try-on:", JSON.stringify(vtoPayload, null, 2));
 
-      if (!Array.isArray(result) || result.length === 0 || !result[0].id) {
-        console.error("[BitStudioProxy] Invalid response format from BitStudio VTO endpoint. Full response:", result);
-        throw new Error("Received an invalid or empty response from the virtual try-on service.");
-      }
-      taskId = result[0].id;
+    const response = await fetch(`${BITSTUDIO_API_BASE}/images/virtual-try-on`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(vtoPayload)
+    });
+    
+    const resultText = await response.text();
+    console.log(`[BitStudioProxy] Raw response from /virtual-try-on: ${resultText}`);
 
-    } else { // Pro mode
-      const maskBlob = new Blob([decodeBase64(mask_image_data)], { type: 'image/png' });
-      const maskImageId = await uploadToBitStudio(maskBlob, 'inpaint-mask', `mask_${jobId}.png`);
-      await supabase.from('mira-agent-bitstudio-jobs').update({ bitstudio_mask_image_id: maskImageId }).eq('id', jobId);
-
-      const response = await fetch(`${BITSTUDIO_API_BASE}/images/${personImageId}/inpaint`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mask_image_id: maskImageId, reference_image_id: garmentImageId, prompt })
-      });
-      
-      const resultText = await response.text();
-      console.log(`[BitStudioProxy] Raw response from /inpaint: ${resultText}`);
-
-      if (!response.ok) {
-          throw new Error(`BitStudio API Error (inpaint): ${response.status} - ${resultText}`);
-      }
-      const result = JSON.parse(resultText);
-
-      if (!Array.isArray(result) || result.length === 0 || !result[0].id) {
-        console.error("[BitStudioProxy] Invalid response format from BitStudio inpaint endpoint. Full response:", result);
-        throw new Error("Received an invalid or empty response from the inpainting service.");
-      }
-      taskId = result[0].id;
+    if (!response.ok) {
+        throw new Error(`BitStudio API Error: ${response.status} - ${resultText}`);
     }
+    
+    const result = JSON.parse(resultText);
+
+    if (!Array.isArray(result) || result.length === 0 || !result[0].id) {
+      console.error("[BitStudioProxy] Invalid response format from BitStudio VTO endpoint. Full response:", result);
+      throw new Error("Received an invalid or empty response from the virtual try-on service.");
+    }
+    const taskId = result[0].id;
 
     await supabase.from('mira-agent-bitstudio-jobs').update({ bitstudio_task_id: taskId, status: 'queued' }).eq('id', jobId);
     supabase.functions.invoke('MIRA-AGENT-poller-bitstudio-vto', { body: { job_id: jobId } }).catch(console.error);
