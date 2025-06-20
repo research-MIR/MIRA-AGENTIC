@@ -150,7 +150,7 @@ const workflowTemplate = `
   },
   "408": {
     "inputs": {
-      "model_name": "4x-UltraSharpV2.safetensors"
+      "model_name": "4xNomosWebPhoto_esrgan.safetensors"
     },
     "class_type": "UpscaleModelLoader",
     "_meta": {
@@ -322,7 +322,7 @@ const workflowTemplate = `
     "inputs": {
       "scheduler": "sgm_uniform",
       "steps": 10,
-      "denoise": 0.11000000000000001,
+      "denoise": 0.14,
       "model": [
         "418",
         0
@@ -437,7 +437,7 @@ const workflowTemplate = `
     "inputs": {
       "scheduler": "sgm_uniform",
       "steps": 10,
-      "denoise": 0.22000000000000003,
+      "denoise": 0.25000000000000006,
       "model": [
         "418",
         0
@@ -450,8 +450,8 @@ const workflowTemplate = `
   },
   "445": {
     "inputs": {
-      "method": "mkl",
-      "strength": 1,
+      "method": "hm-mvgd-hm",
+      "strength": 1.0000000000000002,
       "image_ref": [
         "404",
         0
@@ -714,7 +714,7 @@ const workflowTemplateSkin = `
   },
   "445": {
     "inputs": {
-      "method": "mkl",
+      "method": "hm-mvgd-hm",
       "strength": 1,
       "image_ref": [ "404", 0 ],
       "image_target": [ "432", 0 ]
