@@ -7,6 +7,8 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS'
 };
 const UPLOAD_BUCKET = 'mira-agent-user-uploads';
+
+// NOTE: This is the standard, general-purpose upscaling workflow.
 const workflowTemplate = `
 {
   "9": {
@@ -466,6 +468,263 @@ const workflowTemplate = `
   }
 }
 `;
+
+// NOTE: This is a placeholder for the skin-specific workflow.
+// It uses different settings (e.g., lower denoise) to be more conservative.
+const workflowTemplateSkin = `
+{
+  "9": {
+    "inputs": {
+      "clip_name1": "clip_l.safetensors",
+      "clip_name2": "t5xxl_fp16.safetensors",
+      "type": "flux",
+      "device": "default"
+    },
+    "class_type": "DualCLIPLoader",
+    "_meta": { "title": "DualCLIPLoader" }
+  },
+  "10": {
+    "inputs": { "vae_name": "ae.safetensors" },
+    "class_type": "VAELoader",
+    "_meta": { "title": "Load VAE" }
+  },
+  "307": {
+    "inputs": { "String": "HERE THE PROMPT" },
+    "class_type": "String",
+    "_meta": { "title": "Actual Scene Description" }
+  },
+  "349": {
+    "inputs": {
+      "clip_l": [ "307", 0 ],
+      "t5xxl": [ "307", 0 ],
+      "guidance": 2.2,
+      "clip": [ "9", 0 ]
+    },
+    "class_type": "CLIPTextEncodeFlux",
+    "_meta": { "title": "CLIPTextEncodeFlux" }
+  },
+  "361": {
+    "inputs": {
+      "clip_l": "over exposed,ugly, depth of field ",
+      "t5xxl": "over exposed,ugly, depth of field",
+      "guidance": 2.5,
+      "clip": [ "9", 0 ]
+    },
+    "class_type": "CLIPTextEncodeFlux",
+    "_meta": { "title": "CLIPTextEncodeFlux" }
+  },
+  "404": {
+    "inputs": { "image": "489107a8-dfd4-49f3-a32d-d7699aef2d52.jpg" },
+    "class_type": "LoadImage",
+    "_meta": { "title": "InputImage" }
+  },
+  "407": {
+    "inputs": {
+      "upscale_by": [ "437", 1 ],
+      "seed": 82060634998716,
+      "steps": 18,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "normal",
+      "denoise": 0.12,
+      "mode_type": "Linear",
+      "tile_width": 1024,
+      "tile_height": 1024,
+      "mask_blur": 64,
+      "tile_padding": 512,
+      "seam_fix_mode": "None",
+      "seam_fix_denoise": 0.4,
+      "seam_fix_width": 0,
+      "seam_fix_mask_blur": 8,
+      "seam_fix_padding": 16,
+      "force_uniform_tiles": true,
+      "tiled_decode": false,
+      "image": [ "421", 0 ],
+      "model": [ "418", 0 ],
+      "positive": [ "349", 0 ],
+      "negative": [ "361", 0 ],
+      "vae": [ "10", 0 ],
+      "upscale_model": [ "408", 0 ],
+      "custom_sampler": [ "423", 0 ],
+      "custom_sigmas": [ "424", 0 ]
+    },
+    "class_type": "UltimateSDUpscaleCustomSample",
+    "_meta": { "title": "Ultimate SD Upscale (Custom Sample)" }
+  },
+  "408": {
+    "inputs": { "model_name": "4x-UltraSharpV2.safetensors" },
+    "class_type": "UpscaleModelLoader",
+    "_meta": { "title": "Load Upscale Model" }
+  },
+  "410": {
+    "inputs": { "value": 1.5 },
+    "class_type": "FloatConstant",
+    "_meta": { "title": "Upscale_Scale" }
+  },
+  "412": {
+    "inputs": {
+      "double_layers": "10",
+      "single_layers": "3,4",
+      "scale": 3,
+      "start_percent": 0.01,
+      "end_percent": 0.15,
+      "rescaling_scale": 0,
+      "model": [ "413", 0 ]
+    },
+    "class_type": "SkipLayerGuidanceDiT",
+    "_meta": { "title": "SkipLayerGuidanceDiT" }
+  },
+  "413": {
+    "inputs": {
+      "unet_name": "flux1-dev.safetensors",
+      "weight_dtype": "fp8_e4m3fn_fast"
+    },
+    "class_type": "UNETLoader",
+    "_meta": { "title": "Load Diffusion Model" }
+  },
+  "414": {
+    "inputs": {
+      "lora_name": "hyper-sd-flux-lora.safetensors",
+      "strength_model": 0.6,
+      "model": [ "416", 0 ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": { "title": "LoraLoaderModelOnly" }
+  },
+  "415": {
+    "inputs": {
+      "lora_name": "IDunnohowtonameLora.safetensors",
+      "strength_model": 0.5,
+      "model": [ "414", 0 ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": { "title": "LoraLoaderModelOnly" }
+  },
+  "416": {
+    "inputs": {
+      "lora_name": "42lux-UltimateAtHome-flux-highresfix.safetensors",
+      "strength_model": 0.98,
+      "model": [ "412", 0 ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": { "title": "LoraLoaderModelOnly" }
+  },
+  "417": {
+    "inputs": { "model": [ "415", 0 ] },
+    "class_type": "ConfigureModifiedFlux",
+    "_meta": { "title": "Configure Modified Flux" }
+  },
+  "418": {
+    "inputs": { "scale": 1.75, "rescale": 0, "model": [ "417", 0 ] },
+    "class_type": "PAGAttention",
+    "_meta": { "title": "Apply Flux PAG Attention" }
+  },
+  "420": {
+    "inputs": { "pixels": [ "404", 0 ], "vae": [ "10", 0 ] },
+    "class_type": "VAEEncode",
+    "_meta": { "title": "VAE Encode" }
+  },
+  "421": {
+    "inputs": { "samples": [ "420", 0 ], "vae": [ "10", 0 ] },
+    "class_type": "VAEDecode",
+    "_meta": { "title": "VAE Decode" }
+  },
+  "422": {
+    "inputs": { "sampler_name": "dpmpp_2m" },
+    "class_type": "KSamplerSelect",
+    "_meta": { "title": "KSamplerSelect" }
+  },
+  "423": {
+    "inputs": {
+      "dishonesty_factor": -0.01,
+      "start_percent": 0.46,
+      "end_percent": 0.95,
+      "sampler": [ "422", 0 ]
+    },
+    "class_type": "LyingSigmaSampler",
+    "_meta": { "title": "Lying Sigma Sampler" }
+  },
+  "424": {
+    "inputs": {
+      "scheduler": "sgm_uniform",
+      "steps": 10,
+      "denoise": 0.11,
+      "model": [ "418", 0 ]
+    },
+    "class_type": "BasicScheduler",
+    "_meta": { "title": "BasicScheduler" }
+  },
+  "430": {
+    "inputs": { "images": [ "445", 0 ] },
+    "class_type": "PreviewImage",
+    "_meta": { "title": "Preview Image" }
+  },
+  "431": {
+    "inputs": { "filename_prefix": "Output", "images": [ "445", 0 ] },
+    "class_type": "SaveImage",
+    "_meta": { "title": "Save Image" }
+  },
+  "432": {
+    "inputs": {
+      "upscale_by": [ "437", 1 ],
+      "seed": 839614371047984,
+      "steps": 18,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "normal",
+      "denoise": 0.15,
+      "mode_type": "Linear",
+      "tile_width": 1024,
+      "tile_height": 1024,
+      "mask_blur": 64,
+      "tile_padding": 512,
+      "seam_fix_mode": "None",
+      "seam_fix_denoise": 0.4,
+      "seam_fix_width": 64,
+      "seam_fix_mask_blur": 8,
+      "seam_fix_padding": 16,
+      "force_uniform_tiles": true,
+      "tiled_decode": false,
+      "image": [ "407", 0 ],
+      "model": [ "418", 0 ],
+      "positive": [ "349", 0 ],
+      "negative": [ "361", 0 ],
+      "vae": [ "10", 0 ],
+      "upscale_model": [ "408", 0 ],
+      "custom_sampler": [ "423", 0 ],
+      "custom_sigmas": [ "444", 0 ]
+    },
+    "class_type": "UltimateSDUpscaleCustomSample",
+    "_meta": { "title": "Ultimate SD Upscale (Custom Sample)" }
+  },
+  "437": {
+    "inputs": { "expression": "a**0.5", "a": [ "410", 0 ] },
+    "class_type": "MathExpression|pysssss",
+    "_meta": { "title": "Math Expression 🐍" }
+  },
+  "444": {
+    "inputs": {
+      "scheduler": "sgm_uniform",
+      "steps": 10,
+      "denoise": 0.22,
+      "model": [ "418", 0 ]
+    },
+    "class_type": "BasicScheduler",
+    "_meta": { "title": "BasicScheduler" }
+  },
+  "445": {
+    "inputs": {
+      "method": "mkl",
+      "strength": 1,
+      "image_ref": [ "404", 0 ],
+      "image_target": [ "432", 0 ]
+    },
+    "class_type": "ColorMatch",
+    "_meta": { "title": "Color Match" }
+  }
+}
+`;
+
 async function uploadImageToComfyUI(comfyUiUrl, image, filename) {
   const uploadFormData = new FormData();
   uploadFormData.append('image', image, filename);
@@ -539,7 +798,7 @@ serve(async (req)=>{
         originalFilename = 'agent_history_image.png';
       }
     }
-    const { invoker_user_id, upscale_factor, original_prompt_for_gallery, main_agent_job_id, prompt_text, source } = body;
+    const { invoker_user_id, upscale_factor, original_prompt_for_gallery, main_agent_job_id, prompt_text, source, workflow_type } = body;
     if (!invoker_user_id) throw new Error("Missing required parameter: invoker_user_id");
     if (!prompt_text) throw new Error("Missing required parameter: prompt_text");
     if (!imageFile) throw new Error("Missing image data.");
@@ -582,8 +841,12 @@ serve(async (req)=>{
     // Step 2: Upload the same image to ComfyUI for processing
     const uploadedFilename = await uploadImageToComfyUI(sanitizedAddress, imageFile, originalFilename);
     console.log(`[QueueProxy][${requestId}] Successfully uploaded image to ComfyUI. Filename: ${uploadedFilename}`);
+    
     // Step 3: Prepare and queue the ComfyUI workflow
-    const finalWorkflow = JSON.parse(workflowTemplate);
+    const template = workflow_type === 'conservative_skin' ? workflowTemplateSkin : workflowTemplate;
+    console.log(`[QueueProxy][${requestId}] Using workflow type: ${workflow_type || 'standard'}`);
+    const finalWorkflow = JSON.parse(template);
+    
     finalWorkflow['404'].inputs.image = uploadedFilename;
     finalWorkflow['307'].inputs.String = prompt_text;
     const randomSeed = Math.floor(Math.random() * 1000000000000000);
@@ -623,7 +886,8 @@ serve(async (req)=>{
         prompt: prompt_text,
         original_prompt_for_gallery: original_prompt_for_gallery || `Refined: ${prompt_text?.slice(0, 40) || 'image'}...`,
         invoker_user_id: invoker_user_id,
-        source_image_url: sourceImageUrl // <-- CRITICAL FIX: Use the public Supabase URL
+        source_image_url: sourceImageUrl, // <-- CRITICAL FIX: Use the public Supabase URL
+        workflow_type: workflow_type || 'standard'
       }
     }).select('id').single();
     if (insertError) throw insertError;

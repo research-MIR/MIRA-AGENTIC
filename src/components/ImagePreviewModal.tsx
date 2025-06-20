@@ -104,7 +104,7 @@ export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => 
     downloadImage(currentImage.url, filename);
   };
 
-  const handleUpscale = async (factor: number) => {
+  const handleUpscale = async (factor: number, workflowType?: 'conservative_skin') => {
     if (!currentImage) return showError("No image selected.");
     if (!session?.user) return showError("You must be logged in to upscale images.");
     
@@ -139,7 +139,8 @@ export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => 
           image_url: currentImage.url,
           invoker_user_id: session.user.id,
           upscale_factor: factor,
-          original_prompt_for_gallery: `Upscaled from job ${currentImage.jobId || 'gallery'}`
+          original_prompt_for_gallery: `Upscaled from job ${currentImage.jobId || 'gallery'}`,
+          workflow_type: workflowType
         }
       });
 
@@ -182,11 +183,20 @@ export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => 
             <DropdownMenuItem onSelect={() => handleUpscale(1.5)} disabled={isUpscaling || !currentImage}>
               {t('upscaleAndDownload')} x1.5
             </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => handleUpscale(1.5, 'conservative_skin')} disabled={isUpscaling || !currentImage}>
+              {t('upscaleAndDownloadSkin')} x1.5
+            </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => handleUpscale(2)} disabled={isUpscaling || !currentImage}>
               {t('upscaleAndDownload')} x2
             </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => handleUpscale(2, 'conservative_skin')} disabled={isUpscaling || !currentImage}>
+              {t('upscaleAndDownloadSkin')} x2
+            </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => handleUpscale(3)} disabled={isUpscaling || !currentImage}>
               {t('upscaleAndDownload')} x3
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => handleUpscale(3, 'conservative_skin')} disabled={isUpscaling || !currentImage}>
+              {t('upscaleAndDownloadSkin')} x3
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

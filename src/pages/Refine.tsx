@@ -143,7 +143,7 @@ const Refine = () => {
     setOpenAccordion("");
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (workflowType?: 'conservative_skin') => {
     if (!sourceImageUrl) return showError("Please upload or select an image to refine.");
     if (!prompt.trim()) return showError("Please provide a refinement prompt.");
     
@@ -157,6 +157,7 @@ const Refine = () => {
             upscale_factor: upscaleFactor,
             original_prompt_for_gallery: prompt,
             source: 'refiner',
+            workflow_type: workflowType,
         };
 
         if (sourceImageUrl.startsWith('blob:')) {
@@ -186,7 +187,7 @@ const Refine = () => {
     }
   };
 
-  const handleBatchSubmit = async () => {
+  const handleBatchSubmit = async (workflowType?: 'conservative_skin') => {
     if (batchFiles.length === 0) return showError("Please upload images for batch processing.");
     setIsSubmitting(true);
     const toastId = showLoading(`Queuing ${batchFiles.length} jobs...`);
@@ -208,7 +209,8 @@ const Refine = () => {
           source: 'refiner',
           base64_image_data: base64Data,
           mime_type: file.file.type,
-          metadata: { source_image_url: file.previewUrl }
+          metadata: { source_image_url: file.previewUrl },
+          workflow_type: workflowType,
         };
         const { error: queueError } = await supabase.functions.invoke('MIRA-AGENT-proxy-comfyui', { body: payload });
         if (queueError) throw queueError;
@@ -227,7 +229,7 @@ const Refine = () => {
   };
 
   const { dropzoneProps: batchDropzoneProps, isDraggingOver: isDraggingOverBatch } = useDropzone({ onDrop: (e) => handleFileUpload(e.dataTransfer.files, true).then(setBatchFiles) });
-  const { dropzoneProps: singleDropzoneProps, isDraggingOver: isDraggingOverSingle } = useDropzone({ onDrop: (e) => handleFileUpload(e.dataTransfer.files) });
+  const { dropzoneProps: singleDropzoneProps, isDraggingOver: isDraggingOverSingle } = useDropzone({ onDrop: (e) => handleFileUpload(e.target.files) });
 
   return (
     <>
@@ -308,10 +310,16 @@ const Refine = () => {
                     <Slider value={[upscaleFactor]} onValueChange={(v) => setUpscaleFactor(v[0])} min={1} max={3} step={0.1} />
                   </CardContent>
                 </Card>
-                <Button size="lg" className="w-full" onClick={handleSubmit} disabled={isSubmitting || !sourceImageUrl || !prompt}>
-                  {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
-                  {t('refineButton')}
-                </Button>
+                <div className="space-y-2">
+                  <Button size="lg" className="w-full" onClick={() => handleSubmit()} disabled={isSubmitting || !sourceImageUrl || !prompt}>
+                    {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+                    {t('refineButton')}
+                  </Button>
+                  <Button size="lg" variant="secondary" className="w-full" onClick={() => handleSubmit('conservative_skin')} disabled={isSubmitting || !sourceImageUrl || !prompt}>
+                    <Wand2 className="mr-2 h-4 w-4" />
+                    {t('refineButtonSkin')}
+                  </Button>
+                </div>
               </div>
               <div className="lg:col-span-2 space-y-6">
                 <Card>
@@ -399,10 +407,16 @@ const Refine = () => {
                     <Slider value={[upscaleFactor]} onValueChange={(v) => setUpscaleFactor(v[0])} min={1} max={3} step={0.1} />
                   </CardContent>
                 </Card>
-                <Button size="lg" className="w-full" onClick={handleBatchSubmit} disabled={isSubmitting || batchFiles.length === 0}>
-                  {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
-                  {t('upscaleImages', { count: batchFiles.length })}
-                </Button>
+                <div className="space-y-2">
+                  <Button size="lg" className="w-full" onClick={() => handleBatchSubmit()} disabled={isSubmitting || batchFiles.length === 0}>
+                    {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+                    {t('upscaleImages', { count: batchFiles.length })}
+                  </Button>
+                  <Button size="lg" variant="secondary" className="w-full" onClick={() => handleBatchSubmit('conservative_skin')} disabled={isSubmitting || batchFiles.length === 0}>
+                    <Wand2 className="mr-2 h-4 w-4" />
+                    {t('upscaleImagesSkin', { count: batchFiles.length })}
+                  </Button>
+                </div>
               </div>
               <div className="lg:col-span-2">
                 <Card>

@@ -136,6 +136,7 @@ export const translations = {
     // Image Preview Modal
     download: "Scarica",
     upscaleAndDownload: "Migliora e Salva in Galleria",
+    upscaleAndDownloadSkin: "Migliora (Pelle) e Salva",
     compareBeforeAfter: "Confronta Prima e Dopo",
     compareDescription: "Trascina lo slider o la barra sull'immagine per confrontare.",
     // Toasts
@@ -172,6 +173,7 @@ export const translations = {
     refinementPrompt: "Prompt di Affinamento",
     refinementPromptPlaceholder: "Esempio: rendi lo stile più cinematografico, cambia i colori in toni autunnali...",
     refineButton: "Rifinisci Immagine",
+    refineButtonSkin: "Rifinisci (Pelle)",
     generateAndRefine: "Genera Prompt e Rifinisci",
     originalImage: "Immagine Originale",
     refinedImage: "Immagine Rifinita",
@@ -204,6 +206,7 @@ export const translations = {
     dragOrClick: "Trascina o clicca per selezionare i file",
     configureUpscale: "2. Configura Upscale",
     upscaleImages: "Migliora {count} Immagini",
+    upscaleImagesSkin: "Migliora {count} Immagini (Pelle)",
     selectedForBatch: "Immagini Selezionate per il Batch",
     yourUploadedImages: "Le tue immagini caricate appariranno qui.",
     generating: "Generazione in corso...",
@@ -400,6 +403,7 @@ export const translations = {
     // Image Preview Modal
     download: "Download",
     upscaleAndDownload: "Upscale & Save to Gallery",
+    upscaleAndDownloadSkin: "Upscale (Skin) & Save",
     compareBeforeAfter: "Compare Before & After",
     compareDescription: "Drag the slider or the bar on the image to compare.",
     // Toasts
@@ -436,6 +440,7 @@ export const translations = {
     refinementPrompt: "Refinement Prompt",
     refinementPromptPlaceholder: "Example: make the style more cinematic, change the colors to autumn tones...",
     refineButton: "Refine Image",
+    refineButtonSkin: "Refine (Skin)",
     generateAndRefine: "Generate Prompt & Refine",
     originalImage: "Original Image",
     refinedImage: "Refined Image",
@@ -468,6 +473,7 @@ export const translations = {
     dragOrClick: "Drag & drop or click to select files",
     configureUpscale: "2. Configure Upscale",
     upscaleImages: "Upscale {count} Image(s)",
+    upscaleImagesSkin: "Upscale {count} Image(s) (Skin)",
     selectedForBatch: "Selected Images for Batch",
     yourUploadedImages: "Your uploaded images will appear here.",
     generating: "Generating...",
