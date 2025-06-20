@@ -1,4 +1,4 @@
-import { useState, useMemo, Fragment } from "react";
+import { useState, useMemo, useEffect, MouseEvent } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -57,6 +57,7 @@ const Gallery = () => {
   const [activeTab, setActiveTab] = useState('all');
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
+  const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
   const [targetProjectId, setTargetProjectId] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
@@ -149,16 +150,29 @@ const Gallery = () => {
     return Array.from(new Map(images.map(item => [item.url, item])).values());
   }, [jobs]);
 
-  const toggleSelection = (imageUrl: string) => {
-    setSelectedImages(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(imageUrl)) {
-        newSet.delete(imageUrl);
-      } else {
-        newSet.add(imageUrl);
+  const handleImageClick = (image: ImageResult, index: number, event: MouseEvent) => {
+    if (!isSelectMode) {
+      showImage({ images: allImages.map(img => ({ url: img.url, jobId: img.jobId })), currentIndex: index });
+      return;
+    }
+
+    const newSelected = new Set(selectedImages);
+
+    if (event.shiftKey && lastSelectedIndex !== null) {
+      const start = Math.min(lastSelectedIndex, index);
+      const end = Math.max(lastSelectedIndex, index);
+      for (let i = start; i <= end; i++) {
+        newSelected.add(allImages[i].url);
       }
-      return newSet;
-    });
+    } else {
+      if (newSelected.has(image.url)) {
+        newSelected.delete(image.url);
+      } else {
+        newSelected.add(image.url);
+      }
+      setLastSelectedIndex(index);
+    }
+    setSelectedImages(newSelected);
   };
 
   const handleBulkUpscale = async (factor: number) => {
@@ -306,7 +320,7 @@ const Gallery = () => {
             <div
               key={image.url}
               className="group relative aspect-square cursor-pointer"
-              onClick={() => isSelectMode ? toggleSelection(image.url) : showImage({ images, currentIndex: index })}
+              onClick={(e) => handleImageClick(image, index, e)}
             >
               {isNew && <NewBadge />}
               <img src={image.url} alt={`Generated image ${index + 1}`} className={cn("w-full h-full object-cover rounded-md transition-transform", isSelectMode && "group-hover:scale-95")} />
@@ -335,7 +349,14 @@ const Gallery = () => {
             <h1 className="text-3xl font-bold">{t('resultsGallery')}</h1>
             <p className="text-muted-foreground">{t('galleryDescription')}</p>
           </div>
-          <Button variant={isSelectMode ? "secondary" : "outline"} onClick={() => { setIsSelectMode(!isSelectMode); setSelectedImages(new Set()); }}>
+          <Button variant={isSelectMode ? "secondary" : "outline"} onClick={() => {
+            const newMode = !isSelectMode;
+            setIsSelectMode(newMode);
+            setSelectedImages(new Set());
+            if (!newMode) {
+              setLastSelectedIndex(null);
+            }
+          }}>
             {isSelectMode ? t('cancel') : "Select"}
           </Button>
         </header>
