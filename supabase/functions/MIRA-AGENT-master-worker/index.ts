@@ -16,7 +16,7 @@ const corsHeaders = {
 
 const modelAspectRatioMap: any = {
     google: ['1024x1024', '768x1408', '1408x768', '1280x896', '896x1280'],
-    'fal-ai': ['1:1', '16:9', '9:16', '4:3', '3:4'],
+    'fal.ai': ['1:1', '16:9', '9:16', '4:3', '3:4'],
 };
 
 const getDynamicSystemPrompt = (jobContext: any): string => {
@@ -108,7 +108,7 @@ async function getDynamicMasterTools(jobContext: any, supabase: SupabaseClient):
     if (selectedModelId) {
         const modelData = models?.find(m => m.model_id_string === selectedModelId);
         if (modelData) {
-            provider = modelData.provider.toLowerCase().replace(/\s/g, '-');
+            provider = modelData.provider.toLowerCase().replace(/[^a-z0-9.-]/g, '');
             supportsImg2Img = modelData.supports_img2img;
         } else {
             console.warn(`Could not find details for selected model ${selectedModelId}, defaulting to 'google'.`);
@@ -384,9 +384,10 @@ serve(async (req) => {
         }
         
         const { data: modelDetails } = await supabase.from('mira-agent-models').select('provider').eq('model_id_string', finalModelId).single();
-        const provider = modelDetails?.provider.toLowerCase().replace(/\s/g, '-') || 'google';
+        const provider = modelDetails?.provider.toLowerCase().replace(/[^a-z0-9.-]/g, '') || 'google';
         
-        const payload: { [key: string]: any } = {
+        let toolToInvoke = '';
+        let payload: { [key: string]: any } = {
             prompt: call.args.prompt,
             negative_prompt: call.args.negative_prompt,
             seed: call.args.seed,
@@ -400,15 +401,31 @@ serve(async (req) => {
             payload.number_of_images = call.args.number_of_images;
         }
 
+        let sizeArg = '';
         if (currentContext.ratioMode && currentContext.ratioMode !== 'auto') {
-            const supportedRatios = modelAspectRatioMap[provider] || modelAspectRatioMap.google;
-            payload.size = mapToClosestRatio(currentContext.ratioMode, supportedRatios);
+            sizeArg = currentContext.ratioMode;
         } else if (call.args.size) {
-            payload.size = call.args.size;
+            sizeArg = call.args.size;
         }
 
-        const toolToInvoke = 'MIRA-AGENT-tool-generate-image-google';
-        console.log(`[MasterWorker][${currentJobId}] Invoking tool: ${toolToInvoke} with sanitized payload:`, payload);
+        if (provider === 'google') {
+            toolToInvoke = 'MIRA-AGENT-tool-generate-image-google';
+            payload.size = sizeArg;
+        } else if (provider === 'fal.ai') {
+            toolToInvoke = 'MIRA-AGENT-tool-generate-image-fal-seedream';
+            const sizeMap: { [key: string]: string } = {
+                '1024x1024': '1:1',
+                '1408x768': '16:9',
+                '768x1408': '9:16',
+                '1280x896': '4:3',
+                '896x1280': '3:4',
+            };
+            payload.size = sizeMap[sizeArg] || '1:1';
+        } else {
+            throw new Error(`Unsupported provider '${provider}' for image generation in master worker.`);
+        }
+
+        console.log(`[MasterWorker][${currentJobId}] Invoking tool: ${toolToInvoke} for provider: ${provider} with sanitized payload:`, payload);
         const { data, error } = await supabase.functions.invoke(toolToInvoke, { body: payload });
         if (error) throw error;
         toolResponseData = data;

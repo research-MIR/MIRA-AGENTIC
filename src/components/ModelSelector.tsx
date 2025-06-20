@@ -31,7 +31,7 @@ const modelAliases: { [key: string]: string } = {
   'imagen-4.0-ultra-generate-exp-05-20': 'Photoreal Model',
   'fal-ai/flux-pro/v1.1-ultra': 'Creative Model',
   'fal-ai/flux-pro/v1.1-ultra/redux': 'Creative Model (Refined)',
-  'fal-ai/bytedance/seedream/v3/text-to-image': 'Creative Model (SeedDream 3.0)',
+  'fal-ai/bytedance/seedream/v3/text-to-image': 'Creative Model V3',
 };
 
 export const ModelSelector = ({ selectedModelId, onModelChange, disabled = false }: ModelSelectorProps) => {
