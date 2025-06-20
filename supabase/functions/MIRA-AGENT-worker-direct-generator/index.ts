@@ -41,7 +41,7 @@ serve(async (req) => {
 
     if (modelError) throw new Error(`Could not find details for model ${modelId}: ${modelError.message}`);
     
-    const provider = modelDetails.provider.toLowerCase().replace(/\s/g, '-');
+    const provider = modelDetails.provider.trim().toLowerCase().replace(/\s/g, '-');
     let toolToInvoke = '';
     let payload: { [key: string]: any } = {
         prompt: context.final_prompt_used || context.prompt,
