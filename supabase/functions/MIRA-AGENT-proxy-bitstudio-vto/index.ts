@@ -14,7 +14,6 @@ const UPLOAD_BUCKET = 'mira-agent-user-uploads';
 
 const BITSTUDIO_API_BASE = 'https://api.bitstudio.ai';
 
-// This function is still needed for 'pro' mode, which requires image IDs.
 async function uploadToBitStudio(file: Blob, type: string, filename: string) {
   if (!BITSTUDIO_API_KEY) throw new Error("BitStudio API key is not configured.");
   
@@ -30,7 +29,8 @@ async function uploadToBitStudio(file: Blob, type: string, filename: string) {
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`BitStudio upload failed for type ${type}: ${errorText}`);
+    console.error(`BitStudio Upload Error for type ${type}:`, errorText);
+    throw new Error(`BitStudio upload failed for type ${type}.`);
   }
   const result = await response.json();
   return result.id;
@@ -58,7 +58,6 @@ serve(async (req) => {
       throw new Error("Mask image is required for Pro mode.");
     }
 
-    // 1. Create initial job record
     const { data: job, error: jobInsertError } = await supabase
       .from('mira-agent-bitstudio-jobs')
       .insert({ user_id, mode, status: 'uploading' })
@@ -67,16 +66,17 @@ serve(async (req) => {
     if (jobInsertError) throw jobInsertError;
     const jobId = job.id;
 
-    const personBlob = new Blob([decodeBase64(person_image_data)], { type: 'image/png' });
-    const garmentBlob = new Blob([decodeBase64(garment_image_data)], { type: 'image/png' });
+    const personBlob = new Blob([decodeBase64(person_image_data)], { type: 'image/webp' });
+    const garmentBlob = new Blob([decodeBase64(garment_image_data)], { type: 'image/webp' });
     
-    // 2. Upload source images to our own Supabase storage
-    const personStoragePath = `${user_id}/vto_person_${jobId}.png`;
-    const garmentStoragePath = `${user_id}/vto_garment_${jobId}.png`;
+    const personStoragePath = `${user_id}/vto_person_${jobId}.webp`;
+    const garmentStoragePath = `${user_id}/vto_garment_${jobId}.webp`;
 
-    await Promise.all([
-        supabase.storage.from(UPLOAD_BUCKET).upload(personStoragePath, personBlob, { contentType: 'image/png', upsert: true }),
-        supabase.storage.from(UPLOAD_BUCKET).upload(garmentStoragePath, garmentBlob, { contentType: 'image/png', upsert: true })
+    const [personImageId, garmentImageId] = await Promise.all([
+        uploadToBitStudio(personBlob, 'virtual-try-on-person', `person_${jobId}.webp`),
+        uploadToBitStudio(garmentBlob, 'virtual-try-on-outfit', `garment_${jobId}.webp`),
+        supabase.storage.from(UPLOAD_BUCKET).upload(personStoragePath, personBlob, { contentType: 'image/webp', upsert: true }),
+        supabase.storage.from(UPLOAD_BUCKET).upload(garmentStoragePath, garmentBlob, { contentType: 'image/webp', upsert: true })
     ]);
 
     const { data: { publicUrl: sourcePersonUrl } } = supabase.storage.from(UPLOAD_BUCKET).getPublicUrl(personStoragePath);
@@ -85,18 +85,18 @@ serve(async (req) => {
     await supabase.from('mira-agent-bitstudio-jobs').update({
         source_person_image_url: sourcePersonUrl,
         source_garment_image_url: sourceGarmentUrl,
+        bitstudio_person_image_id: personImageId,
+        bitstudio_garment_image_id: garmentImageId,
     }).eq('id', jobId);
 
-    // 3. Start the generation task
     let taskId;
     if (mode === 'base') {
-      // For 'base' mode, use the URL-based API as it's more robust.
       const response = await fetch(`${BITSTUDIO_API_BASE}/images/virtual-try-on`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-            person_image_url: sourcePersonUrl, 
-            outfit_image_url: sourceGarmentUrl, 
+            person_image_id: personImageId, 
+            outfit_image_id: garmentImageId, 
             prompt: prompt || "professional portrait, high quality",
             resolution: "standard"
         })
@@ -105,17 +105,6 @@ serve(async (req) => {
       const result = await response.json();
       taskId = result[0].id;
     } else { // Pro mode
-      // Pro mode (inpainting) requires image IDs, so we still need to upload.
-      // This might still fail with "invalid resolution" if images are too large.
-      const [personImageId, garmentImageId] = await Promise.all([
-        uploadToBitStudio(personBlob, 'virtual-try-on-person', `person_${jobId}.png`),
-        uploadToBitStudio(garmentBlob, 'virtual-try-on-outfit', `garment_${jobId}.png`),
-      ]);
-      await supabase.from('mira-agent-bitstudio-jobs').update({
-        bitstudio_person_image_id: personImageId,
-        bitstudio_garment_image_id: garmentImageId,
-      }).eq('id', jobId);
-
       const maskBlob = new Blob([decodeBase64(mask_image_data)], { type: 'image/png' });
       const maskImageId = await uploadToBitStudio(maskBlob, 'inpaint-mask', `mask_${jobId}.png`);
       await supabase.from('mira-agent-bitstudio-jobs').update({ bitstudio_mask_image_id: maskImageId }).eq('id', jobId);
@@ -130,7 +119,6 @@ serve(async (req) => {
       taskId = result[0].id;
     }
 
-    // 4. Update job with task ID and start poller
     await supabase.from('mira-agent-bitstudio-jobs').update({ bitstudio_task_id: taskId, status: 'queued' }).eq('id', jobId);
     supabase.functions.invoke('MIRA-AGENT-poller-bitstudio-vto', { body: { job_id: jobId } }).catch(console.error);
 
