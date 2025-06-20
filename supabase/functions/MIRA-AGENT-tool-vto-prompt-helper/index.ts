@@ -59,6 +59,19 @@ async function downloadImageAsPart(publicUrl: string, label: string): Promise<Pa
     ];
 }
 
+function extractJson(text: string): any {
+    const match = text.match(/```json\s*([\s\S]*?)\s*```/);
+    if (match && match[1]) {
+        return JSON.parse(match[1]);
+    }
+    try {
+        return JSON.parse(text);
+    } catch (e) {
+        console.error("Failed to parse JSON from model response:", text);
+        throw new Error("The model returned a response that could not be parsed as JSON.");
+    }
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
 
@@ -84,7 +97,7 @@ serve(async (req) => {
         config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
     });
 
-    const responseJson = JSON.parse(result.text);
+    const responseJson = extractJson(result.text);
     const finalPrompt = responseJson.final_prompt;
 
     if (!finalPrompt) {
