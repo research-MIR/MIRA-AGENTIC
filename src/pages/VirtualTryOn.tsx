@@ -18,6 +18,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { optimizeImage } from "@/lib/utils";
 
 interface BitStudioJob {
   id: string;
@@ -43,8 +44,8 @@ const MaskCanvas = ({ imageUrl, onMaskChange }: { imageUrl: string, onMaskChange
     image.crossOrigin = "anonymous";
     image.src = imageUrl;
     image.onload = () => {
-      canvas.width = image.width;
-      canvas.height = image.height;
+      canvas.width = image.naturalWidth;
+      canvas.height = image.naturalHeight;
     };
   }, [imageUrl]);
 
@@ -73,6 +74,7 @@ const MaskCanvas = ({ imageUrl, onMaskChange }: { imageUrl: string, onMaskChange
 
   const draw = (e: React.MouseEvent | React.TouchEvent) => {
     if (!isDrawing) return;
+    e.preventDefault();
     const ctx = canvasRef.current?.getContext('2d');
     if (!ctx) return;
     const { x, y } = getCoords(e);
@@ -86,7 +88,7 @@ const MaskCanvas = ({ imageUrl, onMaskChange }: { imageUrl: string, onMaskChange
 
   const stopDrawing = () => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas || !isDrawing) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.closePath();
@@ -112,9 +114,17 @@ const MaskCanvas = ({ imageUrl, onMaskChange }: { imageUrl: string, onMaskChange
   );
 };
 
-const ImageUploader = ({ onFileSelect, title, imageUrl, onClear }: { onFileSelect: (file: File) => void, title: string, imageUrl: string | null, onClear: () => void }) => {
+const ImageUploader = ({ onFileSelect, title, imageUrl, onClear, isLoading = false }: { onFileSelect: (file: File) => void, title: string, imageUrl: string | null, onClear: () => void, isLoading?: boolean }) => {
   const inputRef = useRef<HTMLInputElement>(null);
   const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: (e) => e.dataTransfer.files && onFileSelect(e.dataTransfer.files[0]) });
+
+  if (isLoading) {
+    return (
+      <div className="flex aspect-square justify-center items-center rounded-lg border border-dashed p-6 bg-muted">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
 
   if (imageUrl) {
     return (
@@ -147,8 +157,10 @@ const VirtualTryOn = () => {
   
   const [personImageFile, setPersonImageFile] = useState<File | null>(null);
   const [garmentImageFile, setGarmentImageFile] = useState<File | null>(null);
+  const [croppedPersonImageFile, setCroppedPersonImageFile] = useState<File | null>(null);
   const [maskImageDataUrl, setMaskImageDataUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isProcessingPerson, setIsProcessingPerson] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [mode, setMode] = useState<'base' | 'pro'>('base');
   const channelRef = useRef<RealtimeChannel | null>(null);
@@ -179,15 +191,49 @@ const VirtualTryOn = () => {
   const personImageUrl = useMemo(() => personImageFile ? URL.createObjectURL(personImageFile) : null, [personImageFile]);
   const garmentImageUrl = useMemo(() => garmentImageFile ? URL.createObjectURL(garmentImageFile) : null, [garmentImageFile]);
 
+  const handlePersonImageSelect = async (file: File) => {
+    setPersonImageFile(file);
+    setIsProcessingPerson(true);
+    const toastId = showLoading("Analyzing person image...");
+    try {
+      const optimizedFile = await optimizeImage(file);
+      const { data: { publicUrl } } = await supabase.storage.from('mira-agent-user-uploads').upload(`${session?.user?.id}/vto-source/${Date.now()}-${file.name}`, optimizedFile, { upsert: true });
+      
+      const { data: segData, error: segError } = await supabase.functions.invoke('MIRA-AGENT-worker-segmentation-test', { body: { person_image_url: publicUrl, user_id: session?.user?.id } });
+      if (segError) throw segError;
+      
+      const masks = segData.result.masks ? segData.result.masks : segData.result;
+      if (!masks || masks.length === 0) throw new Error("Could not detect a person in the image.");
+      
+      const { data: cropData, error: cropError } = await supabase.functions.invoke('MIRA-AGENT-tool-crop-image', { body: { image_url: publicUrl, box: masks[0].box_2d, user_id: session?.user?.id } });
+      if (cropError) throw cropError;
+
+      const response = await fetch(cropData.cropped_image_url);
+      const blob = await response.blob();
+      const croppedFile = new File([blob], "cropped_person.webp", { type: "image/webp" });
+      setCroppedPersonImageFile(croppedFile);
+
+      dismissToast(toastId);
+      showSuccess("Person analyzed and cropped successfully.");
+    } catch (err: any) {
+      dismissToast(toastId);
+      showError(`Failed to process person image: ${err.message}`);
+      setPersonImageFile(null);
+    } finally {
+      setIsProcessingPerson(false);
+    }
+  };
+
   const handleTryOn = async () => {
-    if (!personImageFile || !garmentImageFile || !session?.user) return showError("Please select both a person and a garment image.");
+    const personFileToUse = croppedPersonImageFile || personImageFile;
+    if (!personFileToUse || !garmentImageFile || !session?.user) return showError("Please select both a person and a garment image.");
     if (mode === 'pro' && !maskImageDataUrl) return showError("Please draw a mask on the person image for Pro mode.");
 
     setIsLoading(true);
     const toastId = showLoading("Preparing your virtual try-on...");
     try {
       const [person_image_data, garment_image_data] = await Promise.all([
-        fileToBase64(personImageFile),
+        fileToBase64(personFileToUse),
         fileToBase64(garmentImageFile)
       ]);
       
@@ -221,6 +267,7 @@ const VirtualTryOn = () => {
   const resetForm = () => {
     setPersonImageFile(null);
     setGarmentImageFile(null);
+    setCroppedPersonImageFile(null);
     setSelectedJobId(null);
     setMaskImageDataUrl(null);
   };
@@ -246,7 +293,7 @@ const VirtualTryOn = () => {
           <Card>
             <CardHeader><div className="flex justify-between items-center"><CardTitle>{selectedJobId ? "Selected Job" : "1. Upload Images"}</CardTitle>{selectedJobId && <Button variant="outline" size="sm" onClick={resetForm}><PlusCircle className="h-4 w-4 mr-2" />New</Button>}</div></CardHeader>
             <CardContent className="grid grid-cols-2 gap-4">
-              {selectedJob ? <SecureImageDisplay imageUrl={selectedJob.source_person_image_url} alt="Person" /> : <ImageUploader onFileSelect={setPersonImageFile} title="Person Image" imageUrl={personImageUrl} onClear={() => setPersonImageFile(null)} />}
+              {selectedJob ? <SecureImageDisplay imageUrl={selectedJob.source_person_image_url} alt="Person" /> : <ImageUploader onFileSelect={handlePersonImageSelect} title="Person Image" imageUrl={personImageUrl} onClear={() => setPersonImageFile(null)} isLoading={isProcessingPerson} />}
               {selectedJob ? <SecureImageDisplay imageUrl={selectedJob.source_garment_image_url} alt="Garment" /> : <ImageUploader onFileSelect={setGarmentImageFile} title="Garment Image" imageUrl={garmentImageUrl} onClear={() => setGarmentImageFile(null)} />}
             </CardContent>
           </Card>
