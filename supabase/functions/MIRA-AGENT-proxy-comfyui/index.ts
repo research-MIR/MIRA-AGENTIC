@@ -469,14 +469,12 @@ const workflowTemplate = `
 }
 `;
 
-// NOTE: This is the new skin-specific workflow.
-// It is simpler and does not use a text prompt.
+// NOTE: This is the new, correct skin-specific workflow using LDSR.
 const workflowTemplateSkin = `
 {
   "3": {
     "inputs": {
-      "image": "ComfyUI_00001_.png",
-      "upload": "image"
+      "image": "d0928d10-18cf-451f-8f4a-2c57936c1e59 (1).jpeg"
     },
     "class_type": "LoadImage",
     "_meta": {
@@ -495,38 +493,59 @@ const workflowTemplateSkin = `
       "title": "Preview Image"
     }
   },
+  "5": {
+    "inputs": {
+      "model": "last.ckpt"
+    },
+    "class_type": "LDSRModelLoader",
+    "_meta": {
+      "title": "Load LDSR Model"
+    }
+  },
   "6": {
     "inputs": {
-      "model_name": "4x-UltraSharp.pth"
+      "steps": "50",
+      "pre_downscale": "None",
+      "post_downscale": "None",
+      "downsample_method": "Lanczos",
+      "upscale_model": [
+        "5",
+        0
+      ],
+      "images": [
+        "3",
+        0
+      ]
     },
-    "class_type": "UpscaleModelLoader",
+    "class_type": "LDSRUpscale",
     "_meta": {
-      "title": "Load Upscale Model"
+      "title": "LDSR Upscale"
     }
   },
   "7": {
     "inputs": {
-      "upscale_by": [
+      "upscale_method": "nearest-exact",
+      "scale_by": [
         "8",
         0
       ],
       "image": [
-        "3",
+        "6",
         0
       ]
     },
     "class_type": "ImageScaleBy",
     "_meta": {
-      "title": "Upscale Image (by)"
+      "title": "Upscale Image By"
     }
   },
   "8": {
     "inputs": {
-      "Float": 1.5
+      "Number": "1"
     },
     "class_type": "Float",
     "_meta": {
-      "title": "Float"
+      "title": "SCALE - CONSIDER THAT LDSR UPSCALE OUTPUTS A X4 OF THE ORIGINAL IMAGE"
     }
   },
   "9": {
@@ -670,7 +689,12 @@ serve(async (req)=>{
     if (workflow_type === 'conservative_skin') {
         finalWorkflow['3'].inputs.image = uploadedFilename;
         if (upscale_factor) {
-            finalWorkflow['8'].inputs.Float = parseFloat(upscale_factor);
+            // The LDSR workflow (node 6) does a fixed x4 upscale.
+            // Node 7 then scales that result. To get the final desired upscale_factor,
+            // we need to calculate the secondary scale factor.
+            const secondary_scale_factor = parseFloat(upscale_factor) / 4.0;
+            finalWorkflow['8'].inputs.Number = String(secondary_scale_factor);
+            console.log(`[QueueProxy][${requestId}] LDSR workflow: User wants x${upscale_factor}, LDSR is x4, so secondary scale is set to ${secondary_scale_factor}`);
         }
     } else {
         finalWorkflow['404'].inputs.image = uploadedFilename;
