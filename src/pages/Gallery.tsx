@@ -17,6 +17,9 @@ import { Label } from "@/components/ui/label";
 import { showError, showSuccess, showLoading, dismissToast } from "@/utils/toast";
 import JSZip from 'jszip';
 import { Badge } from "@/components/ui/badge";
+import { DateRangePicker } from "@/components/DateRangePicker";
+import { DateRange } from "react-day-picker";
+import { endOfDay } from "date-fns";
 
 interface ImageResult {
   url: string;
@@ -32,6 +35,7 @@ interface Job {
   original_prompt: string;
   project_id: string | null;
   created_at: string;
+  updated_at: string;
 }
 
 interface Project {
@@ -63,6 +67,7 @@ const Gallery = () => {
   const [isDownloading, setIsDownloading] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState<string>('all');
   const [sortOrder, setSortOrder] = useState<'created_at' | 'updated_at'>('created_at');
+  const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
 
   const { 
     data, 
@@ -72,7 +77,7 @@ const Gallery = () => {
     isFetching, 
     isFetchingNextPage 
   } = useInfiniteQuery<Job[]>({
-    queryKey: ['galleryJobs', session?.user?.id, activeTab, selectedProjectId, sortOrder],
+    queryKey: ['galleryJobs', session?.user?.id, activeTab, selectedProjectId, sortOrder, dateRange],
     queryFn: async ({ pageParam = 0 }) => {
       if (!session?.user) return [];
       const from = pageParam * PAGE_SIZE;
@@ -103,6 +108,14 @@ const Gallery = () => {
         query = query.is('project_id', null);
       } else if (selectedProjectId !== 'all') {
         query = query.eq('project_id', selectedProjectId);
+      }
+
+      // Filter by date range
+      if (dateRange?.from) {
+        query = query.gte('created_at', dateRange.from.toISOString());
+      }
+      if (dateRange?.to) {
+        query = query.lte('created_at', endOfDay(dateRange.to).toISOString());
       }
         
       const { data, error } = await query;
@@ -393,6 +406,10 @@ const Gallery = () => {
                 <SelectItem value="updated_at">Last Updated</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+          <div className="flex items-center gap-2">
+            <Label htmlFor="date-filter">Date:</Label>
+            <DateRangePicker date={dateRange} setDate={setDateRange} />
           </div>
         </div>
 
