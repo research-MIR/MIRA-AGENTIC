@@ -42,16 +42,13 @@ serve(async (req) => {
 
     if (modelError) throw new Error(`Could not find details for model ${modelId}: ${modelError.message}`);
     
-    // LOG 1: Raw provider from DB
     console.log(`[DirectGenWorker][${job_id}] Raw provider from DB: "${modelDetails.provider}"`);
 
-    const provider = modelDetails.provider.trim().toLowerCase().replace(/\s/g, '-');
+    // Aggressive sanitization to remove any hidden/non-standard characters
+    const provider = modelDetails.provider.toLowerCase().replace(/[^a-z0-9.-]/g, '');
     
-    // LOG 2: Processed provider string
-    console.log(`[DirectGenWorker][${job_id}] Processed provider string: "${provider}"`);
-    
-    // LOG 3: Comparison check
-    console.log(`[DirectGenWorker][${job_id}] Is processed provider equal to 'fal-ai'? ${provider === 'fal-ai'}`);
+    console.log(`[DirectGenWorker][${job_id}] Sanitized provider string: "${provider}"`);
+    console.log(`[DirectGenWorker][${job_id}] Is sanitized provider equal to 'fal-ai'? ${provider === 'fal-ai'}`);
 
     let toolToInvoke = '';
     let payload: { [key: string]: any } = {
