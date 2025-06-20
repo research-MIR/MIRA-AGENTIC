@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Button } from "@/components/ui/button";
@@ -67,6 +67,7 @@ const Refine = () => {
   const queryClient = useQueryClient();
   const { uploadedFiles, setUploadedFiles, handleFileUpload, removeFile } = useFileUpload();
   const [batchFiles, setBatchFiles] = useState<UploadedFile[]>([]);
+  const batchInputRef = useRef<HTMLInputElement>(null);
 
   const [prompt, setPrompt] = useState("");
   const [upscaleFactor, setUpscaleFactor] = useState(1.5);
@@ -112,7 +113,7 @@ const Refine = () => {
     if (uploadedFiles.length === 0) return showError("Please upload an image first.");
     setIsGeneratingPrompt(true);
     setPromptReady(false);
-    const toastId = showLoading("Generating prompt from image...");
+    const toastId = showLoading(t('generating'));
     try {
       const file = uploadedFiles[0].file;
       const base64Data = await fileToBase64(file);
@@ -124,7 +125,7 @@ const Refine = () => {
       setPrompt(data.auto_prompt);
       setPromptReady(true);
       dismissToast(toastId);
-      showSuccess("Prompt generated!");
+      showSuccess(t('promptReady'));
     } catch (err: any) {
       dismissToast(toastId);
       showError(`Failed to generate prompt: ${err.message}`);
@@ -146,7 +147,7 @@ const Refine = () => {
     if (!prompt.trim()) return showError("Please provide a refinement prompt.");
     
     setIsSubmitting(true);
-    const toastId = showLoading("Submitting job...");
+    const toastId = showLoading(t('sendingJob'));
 
     try {
         const payload: any = {
@@ -180,7 +181,7 @@ const Refine = () => {
         dismissToast(toastId);
         showError(`Job submission failed: ${err.message}`);
     } finally {
-        setIsSubmitting(false);
+      setIsSubmitting(false);
     }
   };
 
@@ -236,8 +237,8 @@ const Refine = () => {
 
         <Tabs defaultValue="single" className="w-full">
           <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="single"><ImageIcon className="mr-2 h-4 w-4" />Single Image</TabsTrigger>
-            <TabsTrigger value="batch"><Layers className="mr-2 h-4 w-4" />Batch Process</TabsTrigger>
+            <TabsTrigger value="single"><ImageIcon className="mr-2 h-4 w-4" />{t('singleImage')}</TabsTrigger>
+            <TabsTrigger value="batch"><Layers className="mr-2 h-4 w-4" />{t('batchProcess')}</TabsTrigger>
           </TabsList>
           <TabsContent value="single" className="pt-6">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -277,15 +278,15 @@ const Refine = () => {
                     {useAutoPrompt ? (
                       <>
                         <Button className="w-full" onClick={handleGeneratePrompt} disabled={isGeneratingPrompt || promptReady || uploadedFiles.length === 0}>
-                          {isGeneratingPrompt ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating...</>
-                            : promptReady ? <><CheckCircle className="mr-2 h-4 w-4" /> Prompt Ready</>
-                            : <><Sparkles className="mr-2 h-4 w-4" /> Generate Prompt</>
+                          {isGeneratingPrompt ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> {t('generating')}</>
+                            : promptReady ? <><CheckCircle className="mr-2 h-4 w-4" /> {t('promptReady')}</>
+                            : <><Sparkles className="mr-2 h-4 w-4" /> {t('generatePrompt')}</>
                           }
                         </Button>
                         {prompt && (
                           <Accordion type="single" collapsible className="w-full" value={openAccordion} onValueChange={(value) => { setOpenAccordion(value); if (value) setPromptReady(false); }}>
                             <AccordionItem value="item-1">
-                              <AccordionTrigger className={cn(promptReady && "text-primary animate-pulse")}>View Generated Prompt</AccordionTrigger>
+                              <AccordionTrigger className={cn(promptReady && "text-primary animate-pulse")}>{t('viewGeneratedPrompt')}</AccordionTrigger>
                               <AccordionContent>
                                 <p className="text-sm p-2 bg-muted rounded-md">{prompt}</p>
                               </AccordionContent>
@@ -379,17 +380,18 @@ const Refine = () => {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
               <div className="lg:col-span-1 space-y-6">
                 <Card>
-                  <CardHeader><CardTitle>1. Upload Images</CardTitle></CardHeader>
+                  <CardHeader><CardTitle>{t('uploadImages')}</CardTitle></CardHeader>
                   <CardContent>
-                    <div {...dropzoneProps} className={cn("p-6 border-2 border-dashed rounded-lg text-center cursor-pointer hover:border-primary transition-colors", isDraggingOver && "border-primary bg-primary/10")}>
+                    <div {...dropzoneProps} onClick={() => batchInputRef.current?.click()} className={cn("p-6 border-2 border-dashed rounded-lg text-center cursor-pointer hover:border-primary transition-colors", isDraggingOver && "border-primary bg-primary/10")}>
                       <UploadCloud className="mx-auto h-12 w-12 text-muted-foreground" />
-                      <p className="mt-2 font-semibold">Upload Multiple Images</p>
-                      <p className="text-xs text-muted-foreground">Drag & drop or click to select files</p>
+                      <p className="mt-2 font-semibold">{t('uploadMultipleImages')}</p>
+                      <p className="text-xs text-muted-foreground">{t('dragOrClick')}</p>
+                      <Input ref={batchInputRef} type="file" multiple className="hidden" accept="image/*" onChange={(e) => handleFileUpload(e.target.files, true).then(setBatchFiles)} />
                     </div>
                   </CardContent>
                 </Card>
                 <Card>
-                  <CardHeader><CardTitle>2. Configure Upscale</CardTitle></CardHeader>
+                  <CardHeader><CardTitle>{t('configureUpscale')}</CardTitle></CardHeader>
                   <CardContent>
                     <Label>{t('upscaleFactor')}: {upscaleFactor}x</Label>
                     <Slider value={[upscaleFactor]} onValueChange={(v) => setUpscaleFactor(v[0])} min={1} max={3} step={0.1} />
@@ -397,12 +399,12 @@ const Refine = () => {
                 </Card>
                 <Button size="lg" className="w-full" onClick={handleBatchSubmit} disabled={isSubmitting || batchFiles.length === 0}>
                   {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
-                  Upscale {batchFiles.length > 0 ? `${batchFiles.length} Image(s)` : ''}
+                  {t('upscaleImages', { count: batchFiles.length })}
                 </Button>
               </div>
               <div className="lg:col-span-2">
                 <Card>
-                  <CardHeader><CardTitle>Selected Images for Batch</CardTitle></CardHeader>
+                  <CardHeader><CardTitle>{t('selectedForBatch')}</CardTitle></CardHeader>
                   <CardContent>
                     {batchFiles.length > 0 ? (
                       <ScrollArea className="h-[60vh]">
@@ -420,7 +422,7 @@ const Refine = () => {
                     ) : (
                       <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
                         <ImageIcon className="h-12 w-12" />
-                        <p className="mt-4">Your uploaded images will appear here.</p>
+                        <p className="mt-4">{t('yourUploadedImages')}</p>
                       </div>
                     )}
                   </CardContent>
