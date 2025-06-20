@@ -113,7 +113,7 @@ serve(async (req) => {
                 generationConfig: {
                     responseMimeType: "application/json",
                 },
-                systemInstruction: { role: "system", parts: [{ text: systemPrompt }] }
+                config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
             });
 
             if (result?.text) {
