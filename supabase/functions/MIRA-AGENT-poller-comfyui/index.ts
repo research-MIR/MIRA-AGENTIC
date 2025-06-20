@@ -11,8 +11,8 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
 const POLLING_INTERVAL_MS = 5000; // 5 seconds for rapid polling
-const FINAL_OUTPUT_NODE_ID = "445"; // Primary target: The Color Match node
-const FALLBACK_NODE_IDS = ["431", "430"]; // Secondary targets: SaveImage, PreviewImage
+const FINAL_OUTPUT_NODE_ID = "445"; // Primary target for standard workflow
+const FALLBACK_NODE_IDS = ["431", "430", "9", "4"]; // Fallbacks for standard and skin workflows
 
 async function findOutputImage(historyOutputs: any): Promise<any | null> {
     if (!historyOutputs) return null;
