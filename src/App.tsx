@@ -8,7 +8,6 @@ import Developer from "./pages/Developer";
 import Login from "./pages/Login";
 import Layout from "./components/Layout";
 import ProtectedRoute from "./components/Auth/ProtectedRoute";
-import DevProtectedRoute from "./components/Auth/DevProtectedRoute";
 import VirtualTryOn from "./pages/VirtualTryOn";
 import Refine from "./pages/Refine";
 import Editor from "./pages/Editor";
@@ -94,10 +93,7 @@ const App = () => {
             <Route path="/projects/:projectId" element={<ProjectDetail />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/virtual-try-on" element={<VirtualTryOn />} />
-            
-            <Route element={<DevProtectedRoute />}>
-              <Route path="/developer" element={<Developer />} />
-            </Route>
+            <Route path="/developer" element={<Developer />} />
           </Route>
         </Route>
         <Route path="*" element={<NotFound />} />
