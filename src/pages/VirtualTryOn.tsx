@@ -16,6 +16,7 @@ import { useImagePreview } from "@/context/ImagePreviewContext";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface BitStudioJob {
   id: string;
@@ -48,13 +49,6 @@ const ImageUploader = ({ onFileSelect, title, imageUrl, onClear }: { onFileSelec
   );
 };
 
-const fileToBase64 = (file: File): Promise<string> => new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = () => resolve((reader.result as string).split(',')[1]);
-    reader.onerror = reject;
-});
-
 const VirtualTryOn = () => {
   const { supabase, session } = useSession();
   const { t } = useLanguage();
@@ -62,7 +56,6 @@ const VirtualTryOn = () => {
   
   const [personImageFile, setPersonImageFile] = useState<File | null>(null);
   const [garmentImageFile, setGarmentImageFile] = useState<File | null>(null);
-  const [maskImageDataUrl, setMaskImageDataUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [mode, setMode] = useState<'base' | 'pro'>('base');
@@ -95,49 +88,13 @@ const VirtualTryOn = () => {
   const garmentImageUrl = useMemo(() => garmentImageFile ? URL.createObjectURL(garmentImageFile) : null, [garmentImageFile]);
 
   const handleTryOn = async () => {
-    if (!personImageFile || !garmentImageFile || !session?.user) return showError("Please select both a person and a garment image.");
-    if (mode === 'pro' && !maskImageDataUrl) return showError("Please draw a mask on the person image for Pro mode.");
-
-    setIsLoading(true);
-    const toastId = showLoading("Preparing your virtual try-on...");
-    try {
-      const [person_image_data, garment_image_data] = await Promise.all([
-        fileToBase64(personImageFile),
-        fileToBase64(garmentImageFile)
-      ]);
-      
-      const payload: any = {
-        person_image_data,
-        garment_image_data,
-        mode,
-        user_id: session.user.id,
-        prompt: mode === 'pro' ? "wearing this garment" : "professional portrait, high quality"
-      };
-
-      if (mode === 'pro' && maskImageDataUrl) {
-        payload.mask_image_data = maskImageDataUrl.split(',')[1];
-      }
-
-      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio-vto', { body: payload });
-      if (error) throw error;
-      
-      dismissToast(toastId);
-      showSuccess("Job started! Your result will appear below shortly.");
-      resetForm();
-      setSelectedJobId(data.jobId);
-    } catch (err: any) {
-      dismissToast(toastId);
-      showError(`Failed to start job: ${err.message}`);
-    } finally {
-      setIsLoading(false);
-    }
+    showError("This feature is temporarily disabled while we resolve a backend issue.");
   };
 
   const resetForm = () => {
     setPersonImageFile(null);
     setGarmentImageFile(null);
     setSelectedJobId(null);
-    setMaskImageDataUrl(null);
   };
 
   const renderJobResult = (job: BitStudioJob) => {
@@ -174,10 +131,21 @@ const VirtualTryOn = () => {
               </RadioGroup>
             </CardContent>
           </Card>
-          <Button onClick={handleTryOn} disabled={isLoading || !personImageFile || !garmentImageFile} className="w-full">
-            {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
-            Start Virtual Try-On
-          </Button>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="w-full">
+                  <Button onClick={handleTryOn} disabled={true} className="w-full">
+                    <Wand2 className="mr-2 h-4 w-4" />
+                    Start Virtual Try-On
+                  </Button>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>This feature is temporarily disabled.</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         </div>
         <div className="lg:col-span-2">
           <Card className="min-h-[60vh]">
