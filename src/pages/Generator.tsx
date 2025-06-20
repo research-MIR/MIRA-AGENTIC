@@ -176,6 +176,9 @@ const Generator = () => {
                         <SelectItem value="768x1408">9:16</SelectItem>
                         <SelectItem value="1280x896">4:3</SelectItem>
                         <SelectItem value="896x1280">3:4</SelectItem>
+                        <SelectItem value="1152x768">3:2</SelectItem>
+                        <SelectItem value="768x1152">2:3</SelectItem>
+                        <SelectItem value="1536x640">21:9</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>

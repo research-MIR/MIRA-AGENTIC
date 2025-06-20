@@ -52,6 +52,9 @@ export const ControlPanel = ({
               <SelectItem value="9:16">9:16</SelectItem>
               <SelectItem value="4:3">4:3</SelectItem>
               <SelectItem value="3:4">3:4</SelectItem>
+              <SelectItem value="3:2">3:2</SelectItem>
+              <SelectItem value="2:3">2:3</SelectItem>
+              <SelectItem value="21:9">21:9</SelectItem>
             </SelectContent>
           </Select>
         </div>

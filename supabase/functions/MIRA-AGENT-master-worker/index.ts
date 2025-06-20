@@ -16,7 +16,7 @@ const corsHeaders = {
 
 const modelAspectRatioMap: any = {
     google: ['1024x1024', '768x1408', '1408x768', '1280x896', '896x1280'],
-    'fal.ai': ['1:1', '16:9', '9:16', '4:3', '3:4'],
+    'fal.ai': ['1:1', '3:4', '4:3', '16:9', '9:16', '2:3', '3:2', '21:9'],
 };
 
 const getDynamicSystemPrompt = (jobContext: any): string => {
@@ -413,14 +413,7 @@ serve(async (req) => {
             payload.size = sizeArg;
         } else if (provider === 'fal.ai') {
             toolToInvoke = 'MIRA-AGENT-tool-generate-image-fal-seedream';
-            const sizeMap: { [key: string]: string } = {
-                '1024x1024': '1:1',
-                '1408x768': '16:9',
-                '768x1408': '9:16',
-                '1280x896': '4:3',
-                '896x1280': '3:4',
-            };
-            payload.size = sizeMap[sizeArg] || '1:1';
+            payload.size = sizeArg;
         } else {
             throw new Error(`Unsupported provider '${provider}' for image generation in master worker.`);
         }

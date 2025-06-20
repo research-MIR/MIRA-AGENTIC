@@ -12,6 +12,36 @@ const corsHeaders = {
 const FAL_KEY = Deno.env.get('FAL_KEY');
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
 
+const SUPPORTED_FAL_RATIOS = ['1:1', '3:4', '4:3', '16:9', '9:16', '2:3', '3:2', '21:9'];
+
+function parseRatio(ratioStr: string): number {
+    if (!ratioStr || !ratioStr.includes(':')) return 1;
+    const parts = ratioStr.split(':').map(Number);
+    if (parts.length !== 2 || isNaN(parts[0]) || isNaN(parts[1]) || parts[1] === 0) {
+        return 1;
+    }
+    return parts[0] / parts[1];
+}
+
+function mapToFalAspectRatio(size?: string): string {
+    if (!size) return "1:1";
+    
+    const targetRatio = parseRatio(size);
+    let closestRatio = "1:1";
+    let minDiff = Infinity;
+
+    for (const supported of SUPPORTED_FAL_RATIOS) {
+        const diff = Math.abs(targetRatio - parseRatio(supported));
+        if (diff < minDiff) {
+            minDiff = diff;
+            closestRatio = supported;
+        }
+    }
+    console.log(`[SeedDreamTool] Mapped size:${size} (ratio:${targetRatio}) to closest supported ratio: ${closestRatio}`);
+    return closestRatio;
+}
+
+
 async function describeImage(base64Data: string, mimeType: string): Promise<string> {
     const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
     if (!GEMINI_API_KEY) return "No description available.";
@@ -65,7 +95,7 @@ serve(async (req) => {
 
     const falInput = {
         prompt: prompt,
-        aspect_ratio: size || "1:1",
+        aspect_ratio: mapToFalAspectRatio(size),
         num_images: finalImageCount,
         seed: seed ? Number(seed) : undefined,
     };
