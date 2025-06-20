@@ -10,7 +10,7 @@ import { useLanguage } from "@/context/LanguageContext";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuPortal, DropdownMenuSubContent } from "@/components/ui/dropdown-menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
@@ -175,7 +175,7 @@ const Gallery = () => {
     setSelectedImages(newSelected);
   };
 
-  const handleBulkUpscale = async (factor: number) => {
+  const handleBulkUpscale = async (factor: number, workflowType?: 'conservative_skin') => {
     const toastId = showLoading(`Queuing ${selectedImages.size} images for x${factor} upscale...`);
     const promises = Array.from(selectedImages).map(async (url) => {
       try {
@@ -202,7 +202,8 @@ const Gallery = () => {
             invoker_user_id: session?.user?.id,
             upscale_factor: factor,
             original_prompt_for_gallery: `Upscaled from gallery`,
-            source: 'refiner'
+            source: 'refiner',
+            workflow_type: workflowType
           }
         });
         if (queueError) throw queueError;
@@ -405,9 +406,26 @@ const Gallery = () => {
               <Button><Wand2 className="mr-2 h-4 w-4" />Upscale</Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent>
-              <DropdownMenuItem onSelect={() => handleBulkUpscale(1.5)}>Upscale x1.5</DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => handleBulkUpscale(2.0)}>Upscale x2.0</DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => handleBulkUpscale(2.5)}>Upscale x2.5</DropdownMenuItem>
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>Standard Upscale</DropdownMenuSubTrigger>
+                <DropdownMenuPortal>
+                  <DropdownMenuSubContent>
+                    <DropdownMenuItem onSelect={() => handleBulkUpscale(1.5)}>Upscale x1.5</DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => handleBulkUpscale(2.0)}>Upscale x2.0</DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => handleBulkUpscale(2.5)}>Upscale x2.5</DropdownMenuItem>
+                  </DropdownMenuSubContent>
+                </DropdownMenuPortal>
+              </DropdownMenuSub>
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>Skin Upscale</DropdownMenuSubTrigger>
+                <DropdownMenuPortal>
+                  <DropdownMenuSubContent>
+                    <DropdownMenuItem onSelect={() => handleBulkUpscale(1.5, 'conservative_skin')}>Upscale x1.5 (Skin)</DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => handleBulkUpscale(2.0, 'conservative_skin')}>Upscale x2.0 (Skin)</DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => handleBulkUpscale(2.5, 'conservative_skin')}>Upscale x2.5 (Skin)</DropdownMenuItem>
+                  </DropdownMenuSubContent>
+                </DropdownMenuPortal>
+              </DropdownMenuSub>
             </DropdownMenuContent>
           </DropdownMenu>
           <Button variant="ghost" onClick={() => setSelectedImages(new Set())}>Clear</Button>
