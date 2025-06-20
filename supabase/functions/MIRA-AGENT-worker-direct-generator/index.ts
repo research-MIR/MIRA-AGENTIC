@@ -32,6 +32,7 @@ serve(async (req) => {
     if (!modelId) {
         throw new Error("No model_id found in job context.");
     }
+    console.log(`[DirectGenWorker][${job_id}] Found model_id in context: ${modelId}`);
 
     const { data: modelDetails, error: modelError } = await supabase
         .from('mira-agent-models')
@@ -41,7 +42,17 @@ serve(async (req) => {
 
     if (modelError) throw new Error(`Could not find details for model ${modelId}: ${modelError.message}`);
     
+    // LOG 1: Raw provider from DB
+    console.log(`[DirectGenWorker][${job_id}] Raw provider from DB: "${modelDetails.provider}"`);
+
     const provider = modelDetails.provider.trim().toLowerCase().replace(/\s/g, '-');
+    
+    // LOG 2: Processed provider string
+    console.log(`[DirectGenWorker][${job_id}] Processed provider string: "${provider}"`);
+    
+    // LOG 3: Comparison check
+    console.log(`[DirectGenWorker][${job_id}] Is processed provider equal to 'fal-ai'? ${provider === 'fal-ai'}`);
+
     let toolToInvoke = '';
     let payload: { [key: string]: any } = {
         prompt: context.final_prompt_used || context.prompt,
