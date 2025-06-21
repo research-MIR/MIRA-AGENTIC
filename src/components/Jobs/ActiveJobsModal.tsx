@@ -7,25 +7,24 @@ import {
 } from "@/components/ui/dialog";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Loader2, X, RefreshCw } from "lucide-react";
+import { Loader2, X, RefreshCw, Wand2, Shirt } from "lucide-react";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { useQueryClient } from "@tanstack/react-query";
 import { showError } from "@/utils/toast";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 
-interface ComfyJob {
+export interface UnifiedJob {
   id: string;
-  status: 'queued' | 'processing' | 'complete' | 'failed';
-  metadata?: {
-    source_image_url?: string;
-  };
+  type: 'refine' | 'vto';
+  status: 'queued' | 'processing';
+  sourceImageUrl?: string;
 }
 
 interface ActiveJobsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  jobs: ComfyJob[];
+  jobs: UnifiedJob[];
 }
 
 export const ActiveJobsModal = ({ isOpen, onClose, jobs }: ActiveJobsModalProps) => {
@@ -33,11 +32,19 @@ export const ActiveJobsModal = ({ isOpen, onClose, jobs }: ActiveJobsModalProps)
   const queryClient = useQueryClient();
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const handleCancelJob = async (jobId: string) => {
+  const handleCancelJob = async (jobId: string, jobType: 'refine' | 'vto') => {
     try {
-      const { error } = await supabase.rpc('cancel_comfyui_job_by_id', { p_job_id: jobId });
-      if (error) throw error;
-      queryClient.invalidateQueries({ queryKey: ['activeComfyJobs'] });
+      if (jobType === 'refine') {
+        const { error } = await supabase.rpc('cancel_comfyui_job_by_id', { p_job_id: jobId });
+        if (error) throw error;
+      } else if (jobType === 'vto') {
+        const { error } = await supabase
+          .from('mira-agent-bitstudio-jobs')
+          .update({ status: 'failed', error_message: 'Cancelled by user.' })
+          .eq('id', jobId);
+        if (error) throw error;
+      }
+      queryClient.invalidateQueries({ queryKey: ['activeJobs', session?.user?.id] });
     } catch (err: any) {
       showError(`Failed to cancel job: ${err.message}`);
     }
@@ -45,8 +52,7 @@ export const ActiveJobsModal = ({ isOpen, onClose, jobs }: ActiveJobsModalProps)
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
-    await queryClient.invalidateQueries({ queryKey: ['activeComfyJobs', session?.user?.id] });
-    // A short delay to give visual feedback
+    await queryClient.invalidateQueries({ queryKey: ['activeJobs', session?.user?.id] });
     setTimeout(() => setIsRefreshing(false), 500);
   };
 
@@ -70,21 +76,21 @@ export const ActiveJobsModal = ({ isOpen, onClose, jobs }: ActiveJobsModalProps)
           {jobs.length > 0 ? jobs.map((job) => (
             <Card key={job.id}>
               <CardContent className="p-3 flex items-center gap-4">
-                {job.metadata?.source_image_url && (
+                {job.sourceImageUrl && (
                   <img
-                    src={job.metadata.source_image_url}
+                    src={job.sourceImageUrl}
                     alt="Source"
                     className="w-16 h-16 object-cover rounded-md bg-muted"
                   />
                 )}
                 <div className="flex-1">
                   <p className="text-sm font-medium capitalize flex items-center">
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    {job.status}...
+                    {job.type === 'refine' ? <Wand2 className="h-4 w-4 mr-2 text-purple-500" /> : <Shirt className="h-4 w-4 mr-2 text-blue-500" />}
+                    {job.type === 'refine' ? 'Refining Image...' : 'Virtual Try-On...'}
                   </p>
                   <p className="text-xs text-muted-foreground truncate">Job ID: {job.id}</p>
                 </div>
-                <Button variant="ghost" size="icon" onClick={() => handleCancelJob(job.id)}>
+                <Button variant="ghost" size="icon" onClick={() => handleCancelJob(job.id, job.type)}>
                   <X className="h-4 w-4" />
                 </Button>
               </CardContent>

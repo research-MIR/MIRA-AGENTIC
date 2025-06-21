@@ -6,99 +6,104 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Loader2 } from 'lucide-react';
 import { showSuccess, showError } from '@/utils/toast';
 import { downloadImage } from '@/lib/utils';
-import { ActiveJobsModal } from './ActiveJobsModal';
-
-interface ComfyJob {
-  id: string;
-  status: 'queued' | 'processing' | 'complete' | 'failed';
-  final_result?: { publicUrl: string };
-  error_message?: string;
-  metadata?: {
-    source_image_url?: string;
-  };
-}
+import { ActiveJobsModal, UnifiedJob } from './ActiveJobsModal';
 
 export const ActiveJobsTracker = () => {
   const { supabase, session } = useSession();
   const queryClient = useQueryClient();
   const [isModalOpen, setIsModalOpen] = useState(false);
 
-  const { data: activeJobs, isLoading } = useQuery<ComfyJob[]>({
-    queryKey: ['activeComfyJobs', session?.user?.id],
+  const { data: activeJobs, isLoading } = useQuery<UnifiedJob[]>({
+    queryKey: ['activeJobs', session?.user?.id],
     queryFn: async () => {
       if (!session?.user) return [];
-      console.log('[ActiveJobsTracker] Polling for active jobs...');
-      const { data, error } = await supabase
+      console.log('[ActiveJobsTracker] Polling for ALL active jobs...');
+
+      const comfyPromise = supabase
         .from('mira-agent-comfyui-jobs')
-        .select('*')
+        .select('id, status, metadata')
         .eq('user_id', session.user.id)
         .in('status', ['queued', 'processing']);
-      if (error) {
-        // Re-throw the error so react-query can handle it with retries
-        throw new Error(error.message);
-      }
-      return data;
+
+      const vtoPromise = supabase
+        .from('mira-agent-bitstudio-jobs')
+        .select('id, status, source_person_image_url')
+        .eq('user_id', session.user.id)
+        .in('status', ['queued', 'processing']);
+
+      const [comfyResult, vtoResult] = await Promise.all([comfyPromise, vtoPromise]);
+
+      if (comfyResult.error) throw new Error(`ComfyUI jobs fetch failed: ${comfyResult.error.message}`);
+      if (vtoResult.error) throw new Error(`VTO jobs fetch failed: ${vtoResult.error.message}`);
+
+      const comfyJobs: UnifiedJob[] = (comfyResult.data || []).map(job => ({
+        id: job.id,
+        type: 'refine',
+        status: job.status as 'queued' | 'processing',
+        sourceImageUrl: job.metadata?.source_image_url,
+      }));
+
+      const vtoJobs: UnifiedJob[] = (vtoResult.data || []).map(job => ({
+        id: job.id,
+        type: 'vto',
+        status: job.status as 'queued' | 'processing',
+        sourceImageUrl: job.source_person_image_url,
+      }));
+
+      return [...comfyJobs, ...vtoJobs];
     },
     enabled: !!session?.user,
-    refetchInterval: 15000, // Refetch every 15 seconds
+    refetchInterval: 15000,
     refetchOnWindowFocus: true,
-    retry: 2, // Retry up to 2 times on failure
+    retry: 2,
   });
 
   useEffect(() => {
     if (!session?.user?.id) return;
 
-    const channel = supabase.channel('comfyui-jobs-tracker')
-      .on<ComfyJob>(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'mira-agent-comfyui-jobs', filter: `user_id=eq.${session?.user?.id}` },
-        (payload) => {
-          console.log('[ActiveJobsTracker] Realtime event received:', payload.eventType, payload.new.id);
-          const updatedJob = payload.new as ComfyJob;
-
-          // Imperatively update the active jobs query cache
-          queryClient.setQueryData(['activeComfyJobs', session.user.id], (oldData: ComfyJob[] | undefined) => {
-            const existingJobs = oldData || [];
-            if (updatedJob.status === 'complete' || updatedJob.status === 'failed') {
-              return existingJobs.filter(job => job.id !== updatedJob.id);
-            }
-            const jobIndex = existingJobs.findIndex(job => job.id === updatedJob.id);
-            if (jobIndex !== -1) {
-              const newJobs = [...existingJobs];
-              newJobs[jobIndex] = updatedJob;
-              return newJobs;
-            }
-            return [updatedJob, ...existingJobs];
-          });
-
-          // Imperatively update the recent jobs query cache (for Refine page)
-          queryClient.setQueryData(['recentRefinerJobs', session.user.id], (oldData: ComfyJob[] | undefined) => {
-            const existingJobs = oldData || [];
-            const jobIndex = existingJobs.findIndex(job => job.id === updatedJob.id);
-            if (jobIndex !== -1) {
-              const newJobs = [...existingJobs];
-              newJobs[jobIndex] = updatedJob;
-              return newJobs;
-            }
-            return [updatedJob, ...existingJobs];
-          });
-          
-          if (payload.eventType === 'UPDATE' && (updatedJob.status === 'complete' || updatedJob.status === 'failed')) {
-            if (updatedJob.status === 'complete' && updatedJob.final_result?.publicUrl) {
-              showSuccess(`Upscale complete! Downloading now...`, { duration: 10000 });
-              downloadImage(updatedJob.final_result.publicUrl, `upscaled-${updatedJob.id.substring(0, 8)}.png`);
-            } else if (updatedJob.status === 'failed') {
-              showError(`Upscale failed: ${updatedJob.error_message || 'Unknown error'}`);
-            }
-            // Only invalidate the main gallery query when a job is finished.
-            queryClient.invalidateQueries({ queryKey: ['galleryJobs'] });
-          }
+    const handleComfyUpdate = (payload: any) => {
+      console.log('[ActiveJobsTracker] Realtime ComfyUI event:', payload.eventType, payload.new.id);
+      queryClient.invalidateQueries({ queryKey: ['activeJobs', session.user.id] });
+      const updatedJob = payload.new;
+      if (payload.eventType === 'UPDATE' && (updatedJob.status === 'complete' || updatedJob.status === 'failed')) {
+        if (updatedJob.status === 'complete' && updatedJob.final_result?.publicUrl) {
+          showSuccess(`Upscale complete! Downloading now...`, { duration: 10000 });
+          downloadImage(updatedJob.final_result.publicUrl, `upscaled-${updatedJob.id.substring(0, 8)}.png`);
+        } else if (updatedJob.status === 'failed') {
+          showError(`Upscale failed: ${updatedJob.error_message || 'Unknown error'}`);
         }
-      )
+        queryClient.invalidateQueries({ queryKey: ['galleryJobs'] });
+        queryClient.invalidateQueries({ queryKey: ['recentRefinerJobs'] });
+      }
+    };
+
+    const handleVtoUpdate = (payload: any) => {
+      console.log('[ActiveJobsTracker] Realtime VTO event:', payload.eventType, payload.new.id);
+      queryClient.invalidateQueries({ queryKey: ['activeJobs', session.user.id] });
+      const updatedJob = payload.new;
+      if (payload.eventType === 'UPDATE' && (updatedJob.status === 'complete' || updatedJob.status === 'failed')) {
+        if (updatedJob.status === 'complete' && updatedJob.final_image_url) {
+          showSuccess(`Virtual Try-On complete! Downloading now...`, { duration: 10000 });
+          downloadImage(updatedJob.final_image_url, `vto-${updatedJob.id.substring(0, 8)}.png`);
+        } else if (updatedJob.status === 'failed') {
+          showError(`Virtual Try-On failed: ${updatedJob.error_message || 'Unknown error'}`);
+        }
+        queryClient.invalidateQueries({ queryKey: ['galleryJobs'] });
+        queryClient.invalidateQueries({ queryKey: ['bitstudioJobs'] });
+      }
+    };
+
+    const comfyChannel = supabase.channel('comfyui-jobs-tracker')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mira-agent-comfyui-jobs', filter: `user_id=eq.${session.user.id}` }, handleComfyUpdate)
+      .subscribe();
+
+    const vtoChannel = supabase.channel('bitstudio-jobs-tracker')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mira-agent-bitstudio-jobs', filter: `user_id=eq.${session.user.id}` }, handleVtoUpdate)
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      supabase.removeChannel(comfyChannel);
+      supabase.removeChannel(vtoChannel);
     };
   }, [supabase, session?.user?.id, queryClient]);
 
@@ -117,7 +122,7 @@ export const ActiveJobsTracker = () => {
             </Button>
           </TooltipTrigger>
           <TooltipContent>
-            <p>Click to view details. Your upscaled images will be downloaded automatically when ready.</p>
+            <p>Click to view details. Your results will be downloaded automatically when ready.</p>
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>
