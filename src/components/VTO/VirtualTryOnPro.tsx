@@ -264,27 +264,6 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
             />
           </CardContent>
         </Card>
-        <Card>
-          <Accordion type="single" collapsible className="w-full">
-            <AccordionItem value="item-1" className="border-b-0">
-              <AccordionTrigger className="p-4 hover:no-underline">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Brush className="h-5 w-5" />
-                  Mask Preview
-                </CardTitle>
-              </AccordionTrigger>
-              <AccordionContent className="p-4 pt-0">
-                {maskImage ? (
-                    <div>
-                        <img src={maskImage} alt="Generated Mask" className="w-full h-auto rounded-md mt-2 border bg-muted" />
-                    </div>
-                ) : (
-                  <div className="text-sm text-muted-foreground">Draw on the image in the workbench to generate a mask.</div>
-                )}
-              </AccordionContent>
-            </AccordionItem>
-          </Accordion>
-        </Card>
       </div>
       <div className="lg:col-span-2 space-y-6">
         <Card>
