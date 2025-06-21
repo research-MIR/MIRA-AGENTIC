@@ -74,18 +74,24 @@ serve(async (req) => {
     ]);
 
     // 3. Start the Virtual Try-On job
-    const vtoResponse = await fetch(`${BITSTUDIO_API_BASE}/images/virtual-try-on`, {
+    const vtoUrl = `${BITSTUDIO_API_BASE}/images/virtual-try-on`;
+    const vtoPayload = {
+      person_image_id: personImageId,
+      outfit_image_id: outfitImageId,
+      resolution: "standard",
+      num_images: 1
+    };
+
+    console.log(`[BitStudioProxy] Sending VTO request to: ${vtoUrl}`);
+    console.log(`[BitStudioProxy] VTO Request Payload:`, JSON.stringify(vtoPayload, null, 2));
+
+    const vtoResponse = await fetch(vtoUrl, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${BITSTUDIO_API_KEY}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({
-        person_image_id: personImageId,
-        outfit_image_id: outfitImageId,
-        resolution: "standard",
-        num_images: 1
-      })
+      body: JSON.stringify(vtoPayload)
     });
     if (!vtoResponse.ok) throw new Error(`BitStudio VTO request failed: ${await vtoResponse.text()}`);
     const vtoResult = await vtoResponse.json();
