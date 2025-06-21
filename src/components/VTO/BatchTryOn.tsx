@@ -27,8 +27,8 @@ const ImageUploader = ({ onFileSelect, title, imageUrl, onClear }: { onFileSelec
     }
   
     return (
-      <div {...dropzoneProps} className={cn("flex aspect-square justify-center items-center rounded-lg border border-dashed p-6 transition-colors cursor-pointer", isDraggingOver && "border-primary bg-primary/10")} onClick={() => inputRef.current?.click()}>
-        <div className="text-center pointer-events-none"><PlusCircle className="mx-auto h-12 w-12 text-muted-foreground" /><p className="mt-2 font-semibold">{title}</p></div>
+      <div {...dropzoneProps} className={cn("flex aspect-square justify-center items-center rounded-lg border border-dashed p-4 text-center transition-colors cursor-pointer", isDraggingOver && "border-primary bg-primary/10")} onClick={() => inputRef.current?.click()}>
+        <div className="text-center pointer-events-none"><PlusCircle className="mx-auto h-8 w-8 text-muted-foreground" /><p className="mt-2 text-sm font-semibold">{title}</p></div>
         <Input ref={inputRef} type="file" className="hidden" accept="image/*" onChange={(e) => e.target.files && onFileSelect(e.target.files[0])} />
       </div>
     );
@@ -39,9 +39,9 @@ const MultiImageUploader = ({ onFilesSelect, title, icon, description }: { onFil
     const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: (e) => e.dataTransfer.files && onFilesSelect(Array.from(e.dataTransfer.files)) });
   
     return (
-      <div {...dropzoneProps} className={cn("flex flex-col justify-center items-center rounded-lg border border-dashed p-6 transition-colors cursor-pointer", isDraggingOver && "border-primary bg-primary/10")} onClick={() => inputRef.current?.click()}>
-        {icon}
-        <p className="mt-2 font-semibold">{title}</p>
+      <div {...dropzoneProps} className={cn("flex flex-col justify-center items-center rounded-lg border border-dashed p-4 text-center transition-colors cursor-pointer", isDraggingOver && "border-primary bg-primary/10")} onClick={() => inputRef.current?.click()}>
+        {React.cloneElement(icon as React.ReactElement, { className: "h-6 w-6 text-muted-foreground" })}
+        <p className="mt-1 text-sm font-semibold">{title}</p>
         <p className="text-xs text-muted-foreground">{description}</p>
         <Input ref={inputRef} type="file" multiple className="hidden" accept="image/*" onChange={(e) => e.target.files && onFilesSelect(Array.from(e.target.files))} />
       </div>
@@ -82,22 +82,6 @@ export const BatchTryOn = () => {
         return publicUrl;
     };
 
-    const queueTryOnJob = async (personFile: File, garmentFile: File, promptToSend?: string) => {
-        if (!session?.user) throw new Error("User session not found.");
-        const person_image_url = await uploadFile(personFile, 'person');
-        const garment_image_url = await uploadFile(garmentFile, 'garment');
-        const { error } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
-          body: { 
-            person_image_url, 
-            garment_image_url, 
-            user_id: session.user.id, 
-            mode: 'base',
-            prompt: promptToSend
-          }
-        });
-        if (error) throw error;
-    };
-
     const resetBatchForm = () => {
         setBatchGarmentFile(null);
         setBatchPersonFiles([]);
@@ -128,7 +112,30 @@ export const BatchTryOn = () => {
     
         setIsLoading(true);
         const toastId = showLoading(`Queuing ${pairs.length} jobs...`);
-        const results = await Promise.allSettled(pairs.map(p => queueTryOnJob(p.person, p.garment)));
+        
+        const jobPromises = pairs.map(async (pair) => {
+            const person_image_url = await uploadFile(pair.person, 'person');
+            const garment_image_url = await uploadFile(pair.garment, 'garment');
+            
+            const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-prompt-helper', {
+                body: { person_image_url, garment_image_url }
+            });
+            if (promptError) throw promptError;
+            const autoPrompt = promptData.final_prompt;
+    
+            const { error } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
+                body: { 
+                    person_image_url, 
+                    garment_image_url, 
+                    user_id: session?.user?.id, 
+                    mode: 'base',
+                    prompt: autoPrompt
+                }
+            });
+            if (error) throw error;
+        });
+
+        const results = await Promise.allSettled(jobPromises);
         const failedCount = results.filter(r => r.status === 'rejected').length;
         
         dismissToast(toastId);
