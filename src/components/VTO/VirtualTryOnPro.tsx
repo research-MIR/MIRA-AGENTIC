@@ -68,7 +68,9 @@ export const VirtualTryOnPro = () => {
           </CardHeader>
           <CardContent>
             {sourceImage ? (
-              <MaskCanvas imageUrl={sourceImage} onMaskChange={setMaskImage} />
+              <div className="w-full aspect-square">
+                <MaskCanvas imageUrl={sourceImage} onMaskChange={setMaskImage} />
+              </div>
             ) : (
               <div
                 {...dropzoneProps}

@@ -99,7 +99,7 @@ export const MaskCanvas = ({ imageUrl, onMaskChange }: MaskCanvasProps) => {
   };
 
   return (
-    <div ref={containerRef} className="relative w-full h-full flex items-center justify-center">
+    <div ref={containerRef} className="relative w-full h-full">
       <canvas ref={imageCanvasRef} className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
       <canvas
         ref={drawingCanvasRef}
