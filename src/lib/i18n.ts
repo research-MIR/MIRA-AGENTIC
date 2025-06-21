@@ -60,6 +60,8 @@ export const translations = {
     accountInformation: "Informazioni Account",
     yourAccountDetails: "I dettagli del tuo account.",
     emailAddress: "Indirizzo Email",
+    highResolution: "Alta Risoluzione",
+    numberOfImages: "Numero di Immagini",
     // Index Page
     agentInteraction: "Interazione con l'Agente",
     chooseYourModel: "1. Scegli il tuo Modello AI",
@@ -294,7 +296,7 @@ export const translations = {
     errorQuotaExceeded: "Hai raggiunto il tuo limite di generazioni di immagini per questo periodo. Controlla i dettagli del tuo piano.",
     errorSafetyFilters: "La richiesta non può essere completata a causa dei filtri di sicurezza. Modifica il tuo prompt e riprova.",
     errorAgentStuck: "L'IA sembra bloccata. Prova a riformulare la tua richiesta o a iniziare una nuova chat.",
-    errorNoImageToRefine: "Non sono riuscito a trovare un'immagine da affinare in questa conversazione. Per favore, caricane o generane una prima.",
+    errorNoImageToRefine: "Non sono riuscito a trovare un'immagine da rifinare in questa conversazione. Per favore, caricane o generane una prima.",
     errorNetwork: "Si è verificato un problema di rete. Controlla la tua connessione e riprova.",
     errorUnknown: "Si è verificato un errore imprevisto. Per favore, riprova."
   },
@@ -359,6 +361,8 @@ export const translations = {
     accountInformation: "Account Information",
     yourAccountDetails: "Your account details.",
     emailAddress: "Email Address",
+    highResolution: "High Resolution",
+    numberOfImages: "Number of Images",
     // Index Page
     agentInteraction: "Agent Interaction",
     chooseYourModel: "1. Choose Your AI Model",

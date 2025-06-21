@@ -54,7 +54,7 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
 
   try {
-    const { person_image_url, garment_image_url, user_id, mode, prompt } = await req.json();
+    const { person_image_url, garment_image_url, user_id, mode, prompt, resolution, num_images } = await req.json();
     if (!person_image_url || !garment_image_url || !user_id || !mode) {
       throw new Error("person_image_url, garment_image_url, user_id, and mode are required.");
     }
@@ -78,8 +78,8 @@ serve(async (req) => {
     const vtoPayload: any = {
       person_image_id: personImageId,
       outfit_image_id: outfitImageId,
-      resolution: "standard",
-      num_images: 1
+      resolution: resolution || "standard",
+      num_images: num_images || 1,
     };
 
     if (prompt) {

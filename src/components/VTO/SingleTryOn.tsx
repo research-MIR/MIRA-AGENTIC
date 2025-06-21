@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
-import { UploadCloud, Wand2, Loader2, Image as ImageIcon, X, PlusCircle, Sparkles, CheckCircle } from "lucide-react";
+import { UploadCloud, Wand2, Loader2, Image as ImageIcon, X, PlusCircle, Sparkles, CheckCircle, AlertTriangle } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
 import { cn } from "@/lib/utils";
 import { useDropzone } from "@/hooks/useDropzone";
@@ -16,6 +16,7 @@ import { optimizeImage, sanitizeFilename } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { SingleTryOnSettings } from "./SingleTryOnSettings";
 
 interface BitStudioJob {
   id: string;
@@ -78,6 +79,8 @@ export const SingleTryOn = ({ selectedJob, resetForm }: SingleTryOnProps) => {
     const [promptReady, setPromptReady] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [openAccordion, setOpenAccordion] = useState("");
+    const [resolution, setResolution] = useState<'standard' | 'high'>('standard');
+    const [numImages, setNumImages] = useState(1);
 
     const personImageUrl = useMemo(() => personImageFile ? URL.createObjectURL(personImageFile) : null, [personImageFile]);
     const garmentImageUrl = useMemo(() => garmentImageFile ? URL.createObjectURL(garmentImageFile) : null, [garmentImageFile]);
@@ -148,7 +151,9 @@ export const SingleTryOn = ({ selectedJob, resetForm }: SingleTryOnProps) => {
                   garment_image_url, 
                   user_id: session?.user?.id, 
                   mode: 'base',
-                  prompt: prompt
+                  prompt: prompt,
+                  resolution: resolution,
+                  num_images: numImages,
                 }
             });
             if (error) throw error;
@@ -160,6 +165,8 @@ export const SingleTryOn = ({ selectedJob, resetForm }: SingleTryOnProps) => {
             setGarmentImageFile(null);
             setPrompt("");
             setPromptReady(false);
+            setResolution('standard');
+            setNumImages(1);
         } catch (err: any) {
           dismissToast(toastId);
           showError(err.message);
@@ -217,6 +224,13 @@ export const SingleTryOn = ({ selectedJob, resetForm }: SingleTryOnProps) => {
                   {isGeneratingPrompt && <div className="flex items-center text-sm text-muted-foreground"><Loader2 className="mr-2 h-4 w-4 animate-spin" />Generating prompt...</div>}
                 </CardContent>
               </Card>
+              <SingleTryOnSettings
+                resolution={resolution}
+                setResolution={setResolution}
+                numImages={numImages}
+                setNumImages={setNumImages}
+                disabled={!!selectedJob}
+              />
               <Button onClick={handleTryOn} disabled={isTryOnDisabled} className="w-full">
                 {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
                 Start Virtual Try-On
