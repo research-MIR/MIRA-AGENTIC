@@ -1,9 +1,9 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useMemo, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Wand2, Brush, Palette, UploadCloud, Sparkles } from "lucide-react";
+import { Wand2, Brush, Palette, UploadCloud, Sparkles, Loader2 } from "lucide-react";
 import { MaskCanvas } from "@/components/Editor/MaskCanvas";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -35,7 +35,18 @@ export const VirtualTryOnPro = () => {
   const [resetTrigger, setResetTrigger] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
 
-  const sourceImageUrl = sourceImageFile ? URL.createObjectURL(sourceImageFile) : null;
+  const sourceImageUrl = useMemo(() => 
+    sourceImageFile ? URL.createObjectURL(sourceImageFile) : null, 
+  [sourceImageFile]);
+
+  useEffect(() => {
+    // Clean up the object URL when the component unmounts or the file changes
+    return () => {
+      if (sourceImageUrl) {
+        URL.revokeObjectURL(sourceImageUrl);
+      }
+    };
+  }, [sourceImageUrl]);
 
   const handleFileSelect = (file: File | null) => {
     if (file && file.type.startsWith("image/")) {
@@ -103,7 +114,7 @@ export const VirtualTryOnPro = () => {
           </CardContent>
         </Card>
         <Card>
-          <Accordion type="single" collapsible className="w-full" defaultValue="item-1">
+          <Accordion type="single" collapsible className="w-full">
             <AccordionItem value="item-1" className="border-b-0">
               <AccordionTrigger className="p-4 hover:no-underline">
                 <CardTitle className="flex items-center gap-2 text-base">

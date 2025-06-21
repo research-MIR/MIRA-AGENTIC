@@ -24,14 +24,16 @@ export const MaskCanvas = ({ imageUrl, onMaskChange, brushSize, resetTrigger }: 
   }, [onMaskChange]);
 
   useEffect(() => {
-    clearCanvas();
+    if (resetTrigger > 0) {
+      clearCanvas();
+    }
   }, [resetTrigger, clearCanvas]);
 
   // Effect to draw the base image
   useEffect(() => {
     const imageCanvas = imageCanvasRef.current;
     const drawingCanvas = drawingCanvasRef.current;
-    if (!imageCanvas || !drawingCanvas) return;
+    if (!imageCanvas || !drawingCanvas || !imageUrl) return;
     const ctx = imageCanvas.getContext('2d');
     if (!ctx) return;
 
@@ -65,7 +67,7 @@ export const MaskCanvas = ({ imageUrl, onMaskChange, brushSize, resetTrigger }: 
     };
   }, [imageUrl, clearCanvas]);
 
-  const getCoords = (e: React.MouseEvent | React.TouchEvent) => {
+  const getCoords = useCallback((e: React.MouseEvent | React.TouchEvent) => {
     const canvas = drawingCanvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
@@ -75,17 +77,17 @@ export const MaskCanvas = ({ imageUrl, onMaskChange, brushSize, resetTrigger }: 
       x: clientX - rect.left,
       y: clientY - rect.top,
     };
-  };
+  }, []);
 
-  const startDrawing = (e: React.MouseEvent | React.TouchEvent) => {
+  const startDrawing = useCallback((e: React.MouseEvent | React.TouchEvent) => {
     const ctx = drawingCanvasRef.current?.getContext('2d');
     if (!ctx) return;
     setIsDrawing(true);
     const coords = getCoords(e);
     lastPoint.current = coords;
-  };
+  }, [getCoords]);
 
-  const draw = (e: React.MouseEvent | React.TouchEvent) => {
+  const draw = useCallback((e: React.MouseEvent | React.TouchEvent) => {
     if (!isDrawing) return;
     e.preventDefault();
     const ctx = drawingCanvasRef.current?.getContext('2d');
@@ -102,9 +104,9 @@ export const MaskCanvas = ({ imageUrl, onMaskChange, brushSize, resetTrigger }: 
     ctx.stroke();
     ctx.closePath();
     lastPoint.current = coords;
-  };
+  }, [isDrawing, getCoords, brushSize]);
 
-  const stopDrawing = () => {
+  const stopDrawing = useCallback(() => {
     if (!isDrawing) return;
     setIsDrawing(false);
     lastPoint.current = null;
@@ -112,7 +114,7 @@ export const MaskCanvas = ({ imageUrl, onMaskChange, brushSize, resetTrigger }: 
     if (drawingCanvas) {
       onMaskChange(drawingCanvas.toDataURL('image/png'));
     }
-  };
+  }, [isDrawing, onMaskChange]);
 
   return (
     <div ref={containerRef} className="relative w-full h-full">
