@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { useDropzone } from "@/hooks/useDropzone";
 import { MaskControls } from "@/components/Editor/MaskControls";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 
 export const VirtualTryOnPro = () => {
   const [sourceImage, setSourceImage] = useState<string | null>(null);
@@ -53,22 +54,25 @@ export const VirtualTryOnPro = () => {
           </CardContent>
         </Card>
         <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Brush className="h-5 w-5" />
-              Mask Editor
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {maskImage ? (
-                <div>
-                    <Label>Generated Mask</Label>
-                    <img src={maskImage} alt="Generated Mask" className="w-full h-auto rounded-md mt-2 border bg-muted" />
-                </div>
-            ) : (
-              <div className="text-sm text-muted-foreground">Draw on the image in the workbench to generate a mask.</div>
-            )}
-          </CardContent>
+          <Accordion type="single" collapsible className="w-full">
+            <AccordionItem value="item-1" className="border-b-0">
+              <AccordionTrigger className="p-4 hover:no-underline">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Brush className="h-5 w-5" />
+                  Mask Preview
+                </CardTitle>
+              </AccordionTrigger>
+              <AccordionContent className="p-4 pt-0">
+                {maskImage ? (
+                    <div>
+                        <img src={maskImage} alt="Generated Mask" className="w-full h-auto rounded-md mt-2 border bg-muted" />
+                    </div>
+                ) : (
+                  <div className="text-sm text-muted-foreground">Draw on the image in the workbench to generate a mask.</div>
+                )}
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
         </Card>
       </div>
       <div className="lg:col-span-2 space-y-6">

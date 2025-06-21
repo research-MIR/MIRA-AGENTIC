@@ -95,7 +95,7 @@ export const MaskCanvas = ({ imageUrl, onMaskChange, brushSize, resetTrigger }: 
     ctx.beginPath();
     ctx.moveTo(lastPoint.current.x, lastPoint.current.y);
     ctx.lineTo(coords.x, coords.y);
-    ctx.strokeStyle = 'white';
+    ctx.strokeStyle = 'rgba(239, 68, 68, 0.7)'; // Semi-transparent red
     ctx.lineWidth = brushSize;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
