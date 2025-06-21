@@ -40,26 +40,38 @@ serve(async (req) => {
 
     if (fetchError) throw fetchError;
     if (!job.final_image_url) throw new Error("Job is missing the final_image_url (inpainted crop).");
-    if (!job.metadata?.full_source_image_base64 || !job.metadata?.bbox || !job.metadata?.cropped_dilated_mask_base64 || !job.metadata?.cropped_source_image_base64) {
+
+    console.log(`[Compositor][${job_id}] Checking for required metadata...`);
+    const metadata = job.metadata || {};
+    console.log(`[Compositor][${job_id}] Metadata keys found:`, Object.keys(metadata));
+
+    const hasFullSource = !!metadata.full_source_image_base64;
+    const hasBbox = !!metadata.bbox;
+    const hasCroppedMask = !!metadata.cropped_dilated_mask_base64;
+    const hasCroppedSource = !!metadata.cropped_source_image_base64;
+
+    console.log(`[Compositor][${job_id}] full_source_image_base64: ${hasFullSource}`);
+    console.log(`[Compositor][${job_id}] bbox: ${hasBbox}`);
+    console.log(`[Compositor][${job_id}] cropped_dilated_mask_base64: ${hasCroppedMask}`);
+    console.log(`[Compositor][${job_id}] cropped_source_image_base64: ${hasCroppedSource}`);
+
+    if (!hasFullSource || !hasBbox || !hasCroppedMask || !hasCroppedSource) {
       throw new Error("Job is missing necessary metadata for compositing.");
     }
 
     const { createCanvas, loadImage } = await import('https://deno.land/x/canvas@v1.4.1/mod.ts');
     
-    // 1. Load all necessary images from metadata and temporary URL
     const fullSourceImage = await loadImage(`data:image/png;base64,${job.metadata.full_source_image_base64}`);
     const inpaintedCropResponse = await fetch(job.final_image_url);
     if (!inpaintedCropResponse.ok) throw new Error("Failed to download inpainted crop from BitStudio.");
     const inpaintedCropImage = await loadImage(new Uint8Array(await inpaintedCropResponse.arrayBuffer()));
 
-    // 2. Perform the final composition
     const canvas = createCanvas(fullSourceImage.width(), fullSourceImage.height());
     const ctx = canvas.getContext('2d');
     ctx.drawImage(fullSourceImage, 0, 0);
     ctx.drawImage(inpaintedCropImage, job.metadata.bbox.x, job.metadata.bbox.y, job.metadata.bbox.width, job.metadata.bbox.height);
     const finalImageBuffer = canvas.toBuffer('image/png');
 
-    // 3. Upload all assets to our permanent storage
     const [
         finalCompositedUrl,
         croppedSourceUrl,
@@ -72,7 +84,6 @@ serve(async (req) => {
         uploadBufferToStorage(supabase, new Uint8Array(await inpaintedCropResponse.clone().arrayBuffer()), job.user_id, 'inpainted_crop.png')
     ]);
 
-    // 4. Assemble the final debug assets object with permanent URLs
     const debug_assets = {
         cropped_source_url: croppedSourceUrl,
         dilated_mask_url: dilatedMaskUrl,
@@ -80,7 +91,6 @@ serve(async (req) => {
         final_composited_url: finalCompositedUrl
     };
 
-    // 5. Update the job with the final, composited URL and mark as complete
     await supabase.from('mira-agent-bitstudio-jobs')
       .update({ 
           final_image_url: finalCompositedUrl,
