@@ -1,18 +1,23 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { SupabaseClient } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 
 const SessionContext = createContext<{
   session: any;
   supabase: SupabaseClient<any, "public", any>;
+  isProMode: boolean;
+  toggleProMode: () => void;
 }>({
   session: null,
   supabase: supabase,
+  isProMode: false,
+  toggleProMode: () => {},
 });
 
 export const SessionContextProvider = (props: any) => {
   const [session, setSession] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isProMode, setIsProMode] = useState(false);
 
   useEffect(() => {
     const getSession = async () => {
@@ -36,9 +41,15 @@ export const SessionContextProvider = (props: any) => {
     };
   }, []);
 
+  const toggleProMode = useCallback(() => {
+    setIsProMode(prev => !prev);
+  }, []);
+
   const value = {
     session,
     supabase,
+    isProMode,
+    toggleProMode,
   };
 
   return (
