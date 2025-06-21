@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Wand2, Brush, Palette, UploadCloud, Sparkles, Loader2, Image as ImageIcon, X, PlusCircle, AlertTriangle } from "lucide-react";
+import { Wand2, Brush, Palette, UploadCloud, Sparkles, Loader2, Image as ImageIcon, X, PlusCircle, AlertTriangle, Eye } from "lucide-react";
 import { MaskCanvas } from "@/components/Editor/MaskCanvas";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -15,6 +15,7 @@ import { useImagePreview } from "@/context/ImagePreviewContext";
 import { useSecureImage } from "@/hooks/useSecureImage";
 import { Skeleton } from "../ui/skeleton";
 import { useQueryClient } from "@tanstack/react-query";
+import { DebugStepsModal } from "./DebugStepsModal";
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -33,6 +34,9 @@ interface BitStudioJob {
   final_image_url?: string;
   error_message?: string;
   mode: 'base' | 'inpaint';
+  metadata?: {
+    debug_assets?: any;
+  }
 }
 
 const SecureImageDisplay = ({ imageUrl, alt, onClick }: { imageUrl: string | null, alt: string, onClick?: (e: React.MouseEvent<HTMLImageElement>) => void }) => {
@@ -88,6 +92,7 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
   const [brushSize, setBrushSize] = useState(30);
   const [resetTrigger, setResetTrigger] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
+  const [isDebugModalOpen, setIsDebugModalOpen] = useState(false);
 
   const sourceImageUrl = useMemo(() => sourceImageFile ? URL.createObjectURL(sourceImageFile) : null, [sourceImageFile]);
   const referenceImageUrl = useMemo(() => referenceImageFile ? URL.createObjectURL(referenceImageFile) : null, [referenceImageFile]);
@@ -248,7 +253,24 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
   const renderJobResult = (job: BitStudioJob) => {
     if (job.status === 'failed') return <p className="text-destructive text-sm p-2">Job failed: {job.error_message}</p>;
     if (job.status === 'complete' && job.final_image_url) {
-      return <SecureImageDisplay imageUrl={job.final_image_url} alt="Final Result" onClick={() => showImage({ images: [{ url: job.final_image_url! }], currentIndex: 0 })} />;
+      return (
+        <div className="relative group w-full h-full">
+          <SecureImageDisplay imageUrl={job.final_image_url} alt="Final Result" onClick={() => showImage({ images: [{ url: job.final_image_url! }], currentIndex: 0 })} />
+          {job.metadata?.debug_assets && (
+            <Button 
+              variant="secondary" 
+              className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsDebugModalOpen(true);
+              }}
+            >
+              <Eye className="mr-2 h-4 w-4" />
+              Show Steps
+            </Button>
+          )}
+        </div>
+      );
     }
     return (
       <div className="text-center text-muted-foreground">
@@ -259,122 +281,129 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-      <div className="lg:col-span-1 space-y-4">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Wand2 className="h-5 w-5" />
-              Inpainting Prompt
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <Label htmlFor="pro-prompt">Describe what to generate in the masked area:</Label>
-            <Textarea id="pro-prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="e.g., a red silk shirt, a leather jacket with zippers..." rows={4} />
-            <Button className="w-full" onClick={handleGenerate} disabled={isLoading}>
-              {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-              Generate
-            </Button>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Palette className="h-5 w-5" />
-              Style Reference (Optional)
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ImageUploader 
-              onFileSelect={setReferenceImageFile} 
-              title="Upload Reference" 
-              imageUrl={referenceImageUrl} 
-              onClear={() => setReferenceImageFile(null)} 
-            />
-          </CardContent>
-        </Card>
-      </div>
-      <div className="lg:col-span-2 space-y-6">
-        <Card>
-          <CardHeader>
-            <div className="flex justify-between items-center">
-              <CardTitle>PRO Workbench</CardTitle>
-              {selectedJob && <Button variant="outline" size="sm" onClick={resetForm}><PlusCircle className="h-4 w-4 mr-2" />New</Button>}
-            </div>
-          </CardHeader>
-          <CardContent className="flex items-center justify-center">
-            {selectedJob ? (
-              renderJobResult(selectedJob)
-            ) : sourceImageUrl ? (
-              <div className="w-full max-h-[70vh] aspect-square relative">
-                <MaskCanvas 
-                  imageUrl={sourceImageUrl} 
-                  onMaskChange={setMaskImage}
-                  brushSize={brushSize}
-                  resetTrigger={resetTrigger}
-                />
-                {resultImage && (
-                  <img 
-                    src={resultImage} 
-                    alt="Inpainting Result" 
-                    className="absolute top-0 left-0 w-full h-full object-contain pointer-events-none"
-                    onClick={() => showImage({ images: [{ url: resultImage }], currentIndex: 0 })}
-                  />
-                )}
-                {isLoading && !resultImage && (
-                  <div className="absolute inset-0 bg-black/50 flex items-center justify-center rounded-md">
-                    <Loader2 className="h-10 w-10 text-white animate-spin" />
-                  </div>
-                )}
-                <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
-                  <MaskControls 
+    <>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="lg:col-span-1 space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Wand2 className="h-5 w-5" />
+                Inpainting Prompt
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <Label htmlFor="pro-prompt">Describe what to generate in the masked area:</Label>
+              <Textarea id="pro-prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="e.g., a red silk shirt, a leather jacket with zippers..." rows={4} />
+              <Button className="w-full" onClick={handleGenerate} disabled={isLoading}>
+                {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+                Generate
+              </Button>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Palette className="h-5 w-5" />
+                Style Reference (Optional)
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ImageUploader 
+                onFileSelect={setReferenceImageFile} 
+                title="Upload Reference" 
+                imageUrl={referenceImageUrl} 
+                onClear={() => setReferenceImageFile(null)} 
+              />
+            </CardContent>
+          </Card>
+        </div>
+        <div className="lg:col-span-2 space-y-6">
+          <Card>
+            <CardHeader>
+              <div className="flex justify-between items-center">
+                <CardTitle>PRO Workbench</CardTitle>
+                {selectedJob && <Button variant="outline" size="sm" onClick={resetForm}><PlusCircle className="h-4 w-4 mr-2" />New</Button>}
+              </div>
+            </CardHeader>
+            <CardContent className="flex items-center justify-center">
+              {selectedJob ? (
+                renderJobResult(selectedJob)
+              ) : sourceImageUrl ? (
+                <div className="w-full max-h-[70vh] aspect-square relative">
+                  <MaskCanvas 
+                    imageUrl={sourceImageUrl} 
+                    onMaskChange={setMaskImage}
                     brushSize={brushSize}
-                    onBrushSizeChange={setBrushSize}
-                    onReset={handleResetMask}
+                    resetTrigger={resetTrigger}
+                  />
+                  {resultImage && (
+                    <img 
+                      src={resultImage} 
+                      alt="Inpainting Result" 
+                      className="absolute top-0 left-0 w-full h-full object-contain pointer-events-none"
+                      onClick={() => showImage({ images: [{ url: resultImage }], currentIndex: 0 })}
+                    />
+                  )}
+                  {isLoading && !resultImage && (
+                    <div className="absolute inset-0 bg-black/50 flex items-center justify-center rounded-md">
+                      <Loader2 className="h-10 w-10 text-white animate-spin" />
+                    </div>
+                  )}
+                  <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
+                    <MaskControls 
+                      brushSize={brushSize}
+                      onBrushSizeChange={setBrushSize}
+                      onReset={handleResetMask}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div
+                  {...dropzoneProps}
+                  className={cn(
+                    "h-96 w-full bg-muted rounded-md flex flex-col items-center justify-center cursor-pointer border-2 border-dashed hover:border-primary transition-colors",
+                    isDraggingOver && "border-primary bg-primary/10"
+                  )}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <UploadCloud className="h-12 w-12 text-muted-foreground" />
+                  <p className="mt-4 font-semibold">Upload an image to start</p>
+                  <p className="text-sm text-muted-foreground">Drag & drop or click to select a file</p>
+                  <Input
+                    ref={fileInputRef}
+                    type="file"
+                    className="hidden"
+                    accept="image/*"
+                    onChange={(e) => handleFileSelect(e.target.files?.[0])}
                   />
                 </div>
-              </div>
-            ) : (
-              <div
-                {...dropzoneProps}
-                className={cn(
-                  "h-96 w-full bg-muted rounded-md flex flex-col items-center justify-center cursor-pointer border-2 border-dashed hover:border-primary transition-colors",
-                  isDraggingOver && "border-primary bg-primary/10"
-                )}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <UploadCloud className="h-12 w-12 text-muted-foreground" />
-                <p className="mt-4 font-semibold">Upload an image to start</p>
-                <p className="text-sm text-muted-foreground">Drag & drop or click to select a file</p>
-                <Input
-                  ref={fileInputRef}
-                  type="file"
-                  className="hidden"
-                  accept="image/*"
-                  onChange={(e) => handleFileSelect(e.target.files?.[0])}
-                />
-              </div>
-            )}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader><CardTitle>Recent PRO Jobs</CardTitle></CardHeader>
-          <CardContent>
-            {isLoadingRecentJobs ? <Skeleton className="h-24 w-full" /> : proJobs.length > 0 ? (
-              <div className="flex gap-4 overflow-x-auto pb-2">
-                {proJobs.map(job => {
-                  const urlToPreview = job.final_image_url || job.source_person_image_url;
-                  return (
-                    <button key={job.id} onClick={() => handleSelectJob(job)} className={cn("border-2 rounded-lg p-1 flex-shrink-0 w-24 h-24", selectedJob?.id === job.id ? "border-primary" : "border-transparent")}>
-                      <SecureImageDisplay imageUrl={urlToPreview} alt="Recent job" />
-                    </button>
-                  )
-                })}
-              </div>
-            ) : <p className="text-muted-foreground text-sm">No recent PRO jobs found.</p>}
-          </CardContent>
-        </Card>
+              )}
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader><CardTitle>Recent PRO Jobs</CardTitle></CardHeader>
+            <CardContent>
+              {isLoadingRecentJobs ? <Skeleton className="h-24 w-full" /> : proJobs.length > 0 ? (
+                <div className="flex gap-4 overflow-x-auto pb-2">
+                  {proJobs.map(job => {
+                    const urlToPreview = job.final_image_url || job.source_person_image_url;
+                    return (
+                      <button key={job.id} onClick={() => handleSelectJob(job)} className={cn("border-2 rounded-lg p-1 flex-shrink-0 w-24 h-24", selectedJob?.id === job.id ? "border-primary" : "border-transparent")}>
+                        <SecureImageDisplay imageUrl={urlToPreview} alt="Recent job" />
+                      </button>
+                    )
+                  })}
+                </div>
+              ) : <p className="text-muted-foreground text-sm">No recent PRO jobs found.</p>}
+            </CardContent>
+          </Card>
+        </div>
       </div>
-    </div>
+      <DebugStepsModal 
+        isOpen={isDebugModalOpen}
+        onClose={() => setIsDebugModalOpen(false)}
+        assets={selectedJob?.metadata?.debug_assets || null}
+      />
+    </>
   );
 };

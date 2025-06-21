@@ -38,10 +38,7 @@ serve(async (req) => {
     const fullSourceImage = await loadImage(`data:image/png;base64,${job.metadata.full_source_image_base64}`);
     const inpaintedCropResponse = await fetch(job.final_image_url);
     if (!inpaintedCropResponse.ok) throw new Error("Failed to download inpainted crop from BitStudio.");
-    
-    // FIX: Convert ArrayBuffer to Uint8Array before passing to loadImage
-    const imageArrayBuffer = await inpaintedCropResponse.arrayBuffer();
-    const inpaintedCropImage = await loadImage(new Uint8Array(imageArrayBuffer));
+    const inpaintedCropImage = await loadImage(new Uint8Array(await inpaintedCropResponse.arrayBuffer()));
 
     const canvas = createCanvas(fullSourceImage.width(), fullSourceImage.height());
     const ctx = canvas.getContext('2d');
@@ -51,24 +48,31 @@ serve(async (req) => {
 
     const finalImageBuffer = canvas.toBuffer('image/png');
     
-    const filePath = `${job.user_id}/inpainted/${Date.now()}.png`;
+    const finalImagePath = `${job.user_id}/inpainted/${Date.now()}.png`;
     const { error: uploadError } = await supabase.storage
       .from(GENERATED_IMAGES_BUCKET)
-      .upload(filePath, finalImageBuffer, { contentType: 'image/png', upsert: true });
+      .upload(finalImagePath, finalImageBuffer, { contentType: 'image/png', upsert: true });
 
     if (uploadError) throw uploadError;
 
-    const { data: { publicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
+    const { data: { publicUrl: finalCompositedUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(finalImagePath);
+
+    // --- Create and upload debug assets ---
+    const debug_assets = {
+        inpainted_crop_url: job.final_image_url, // The result from BitStudio
+        final_composited_url: finalCompositedUrl
+    };
 
     // Update the job with the final, composited URL and mark as complete
     await supabase.from('mira-agent-bitstudio-jobs')
       .update({ 
-          final_image_url: publicUrl,
-          status: 'complete'
+          final_image_url: finalCompositedUrl,
+          status: 'complete',
+          metadata: { ...job.metadata, debug_assets }
       })
       .eq('id', job_id);
 
-    return new Response(JSON.stringify({ success: true, finalImageUrl: publicUrl }), {
+    return new Response(JSON.stringify({ success: true, finalImageUrl: finalCompositedUrl }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });
