@@ -3,35 +3,80 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Wand2, Brush, Palette, UploadCloud } from "lucide-react";
+import { Wand2, Brush, Palette, UploadCloud, Sparkles } from "lucide-react";
 import { MaskCanvas } from "@/components/Editor/MaskCanvas";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { useDropzone } from "@/hooks/useDropzone";
 import { MaskControls } from "@/components/Editor/MaskControls";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { useSession } from "@/components/Auth/SessionContextProvider";
+import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
+import { useImagePreview } from "@/context/ImagePreviewContext";
+
+const fileToBase64 = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve((reader.result as string).split(',')[1]);
+    reader.onerror = (error) => reject(error);
+  });
+};
 
 export const VirtualTryOnPro = () => {
-  const [sourceImage, setSourceImage] = useState<string | null>(null);
+  const { supabase } = useSession();
+  const { showImage } = useImagePreview();
+  const [sourceImageFile, setSourceImageFile] = useState<File | null>(null);
   const [maskImage, setMaskImage] = useState<string | null>(null);
+  const [resultImage, setResultImage] = useState<string | null>(null);
+  const [prompt, setPrompt] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [brushSize, setBrushSize] = useState(30);
   const [resetTrigger, setResetTrigger] = useState(0);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const sourceImageUrl = sourceImageFile ? URL.createObjectURL(sourceImageFile) : null;
 
   const handleFileSelect = (file: File | null) => {
     if (file && file.type.startsWith("image/")) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        setSourceImage(e.target?.result as string);
-        setMaskImage(null);
-        setResetTrigger(c => c + 1);
-      };
-      reader.readAsDataURL(file);
+      setSourceImageFile(file);
+      setMaskImage(null);
+      setResultImage(null);
+      setResetTrigger(c => c + 1);
     }
   };
 
   const handleResetMask = () => {
     setResetTrigger(c => c + 1);
+  };
+
+  const handleGenerate = async () => {
+    if (!sourceImageFile || !maskImage || !prompt.trim()) {
+      showError("Please provide a source image, a mask, and a prompt.");
+      return;
+    }
+    setIsLoading(true);
+    const toastId = showLoading("Starting inpainting job...");
+    try {
+      const source_image_base64 = await fileToBase64(sourceImageFile);
+      const mask_image_base64 = maskImage.split(',')[1];
+
+      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-inpaint-image', {
+        body: { source_image_base64, mask_image_base64, prompt }
+      });
+
+      if (error) throw error;
+      if (!data.success || !data.imageUrl) throw new Error("Inpainting service failed to return an image.");
+
+      setResultImage(data.imageUrl);
+      dismissToast(toastId);
+      showSuccess("Inpainting complete!");
+    } catch (err: any) {
+      dismissToast(toastId);
+      showError(`Inpainting failed: ${err.message}`);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const { dropzoneProps, isDraggingOver } = useDropzone({
@@ -40,21 +85,25 @@ export const VirtualTryOnPro = () => {
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-      <div className="lg:col-span-1 space-y-6">
+      <div className="lg:col-span-1 space-y-4">
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Wand2 className="h-5 w-5" />
-              Advanced Prompting
+              Inpainting Prompt
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            <Label htmlFor="pro-prompt">Detailed Prompt</Label>
-            <Textarea id="pro-prompt" placeholder="e.g., A photorealistic shot of the model wearing the garment, with dramatic side lighting..." rows={6} />
+          <CardContent className="space-y-4">
+            <Label htmlFor="pro-prompt">Describe what to generate in the masked area:</Label>
+            <Textarea id="pro-prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="e.g., a red silk shirt, a leather jacket with zippers..." rows={4} />
+            <Button className="w-full" onClick={handleGenerate} disabled={isLoading}>
+              {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+              Generate
+            </Button>
           </CardContent>
         </Card>
         <Card>
-          <Accordion type="single" collapsible className="w-full">
+          <Accordion type="single" collapsible className="w-full" defaultValue="item-1">
             <AccordionItem value="item-1" className="border-b-0">
               <AccordionTrigger className="p-4 hover:no-underline">
                 <CardTitle className="flex items-center gap-2 text-base">
@@ -81,14 +130,22 @@ export const VirtualTryOnPro = () => {
             <CardTitle>PRO Workbench</CardTitle>
           </CardHeader>
           <CardContent className="flex items-center justify-center">
-            {sourceImage ? (
+            {sourceImageUrl ? (
               <div className="w-full max-h-[70vh] aspect-square relative">
                 <MaskCanvas 
-                  imageUrl={sourceImage} 
+                  imageUrl={sourceImageUrl} 
                   onMaskChange={setMaskImage}
                   brushSize={brushSize}
                   resetTrigger={resetTrigger}
                 />
+                {resultImage && (
+                  <img 
+                    src={resultImage} 
+                    alt="Inpainting Result" 
+                    className="absolute top-0 left-0 w-full h-full object-contain pointer-events-none"
+                    onClick={() => showImage({ images: [{ url: resultImage }], currentIndex: 0 })}
+                  />
+                )}
                 <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
                   <MaskControls 
                     brushSize={brushSize}
