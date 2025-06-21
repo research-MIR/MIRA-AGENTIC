@@ -124,43 +124,45 @@ const VirtualTryOn = () => {
         </div>
       </header>
       
-      {isProMode ? (
-        <VirtualTryOnPro />
-      ) : (
-        <div className="flex-1 overflow-y-auto">
-          <Tabs defaultValue="single" className="w-full">
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="single">{t('singleTryOn')}</TabsTrigger>
-              <TabsTrigger value="batch">{t('batchProcess')}</TabsTrigger>
-            </TabsList>
-            <TabsContent value="single" className="pt-6">
-              <p className="text-sm text-muted-foreground mb-6">{t('singleVtoDescription')}</p>
-              <SingleTryOn selectedJob={selectedJob} resetForm={() => setSelectedJobId(null)} />
-            </TabsContent>
-            <TabsContent value="batch" className="pt-6">
-              <p className="text-sm text-muted-foreground mb-6">{t('batchVtoDescription')}</p>
-              <BatchTryOn />
-            </TabsContent>
-          </Tabs>
-          <Card className="mt-8">
-            <CardHeader><CardTitle>Recent Jobs</CardTitle></CardHeader>
-            <CardContent>
-              {isLoadingRecentJobs ? <Skeleton className="h-24 w-full" /> : recentJobs && recentJobs.length > 0 ? (
-                <div className="flex gap-4 overflow-x-auto pb-2">
-                  {recentJobs.map(job => {
-                    const urlToPreview = job.final_image_url || job.source_person_image_url;
-                    return (
-                      <button key={job.id} onClick={() => handleSelectJob(job)} className={cn("border-2 rounded-lg p-1 flex-shrink-0 w-24 h-24", selectedJobId === job.id ? "border-primary" : "border-transparent")}>
-                        <SecureImageDisplay imageUrl={urlToPreview} alt="Recent job" />
-                      </button>
-                    )
-                  })}
-                </div>
-              ) : <p className="text-muted-foreground text-sm">No recent jobs found.</p>}
-            </CardContent>
-          </Card>
-        </div>
-      )}
+      <div className="flex-1 overflow-y-auto">
+        {isProMode ? (
+          <VirtualTryOnPro />
+        ) : (
+          <>
+            <Tabs defaultValue="single" className="w-full">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="single">{t('singleTryOn')}</TabsTrigger>
+                <TabsTrigger value="batch">{t('batchProcess')}</TabsTrigger>
+              </TabsList>
+              <TabsContent value="single" className="pt-6">
+                <p className="text-sm text-muted-foreground mb-6">{t('singleVtoDescription')}</p>
+                <SingleTryOn selectedJob={selectedJob} resetForm={() => setSelectedJobId(null)} />
+              </TabsContent>
+              <TabsContent value="batch" className="pt-6">
+                <p className="text-sm text-muted-foreground mb-6">{t('batchVtoDescription')}</p>
+                <BatchTryOn />
+              </TabsContent>
+            </Tabs>
+            <Card className="mt-8">
+              <CardHeader><CardTitle>Recent Jobs</CardTitle></CardHeader>
+              <CardContent>
+                {isLoadingRecentJobs ? <Skeleton className="h-24 w-full" /> : recentJobs && recentJobs.length > 0 ? (
+                  <div className="flex gap-4 overflow-x-auto pb-2">
+                    {recentJobs.map(job => {
+                      const urlToPreview = job.final_image_url || job.source_person_image_url;
+                      return (
+                        <button key={job.id} onClick={() => handleSelectJob(job)} className={cn("border-2 rounded-lg p-1 flex-shrink-0 w-24 h-24", selectedJobId === job.id ? "border-primary" : "border-transparent")}>
+                          <SecureImageDisplay imageUrl={urlToPreview} alt="Recent job" />
+                        </button>
+                      )
+                    })}
+                  </div>
+                ) : <p className="text-muted-foreground text-sm">No recent jobs found.</p>}
+              </CardContent>
+            </Card>
+          </>
+        )}
+      </div>
     </div>
   );
 };
