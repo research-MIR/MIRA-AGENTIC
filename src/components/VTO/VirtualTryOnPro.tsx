@@ -16,6 +16,7 @@ import { useImagePreview } from "@/context/ImagePreviewContext";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { useSecureImage } from "@/hooks/useSecureImage";
 import { Skeleton } from "../ui/skeleton";
+import { useQueryClient } from "@tanstack/react-query";
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -56,8 +57,9 @@ interface VirtualTryOnProProps {
 }
 
 export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, handleSelectJob, resetForm }: VirtualTryOnProProps) => {
-  const { supabase } = useSession();
+  const { supabase, session } = useSession();
   const { showImage } = useImagePreview();
+  const queryClient = useQueryClient();
   const [sourceImageFile, setSourceImageFile] = useState<File | null>(null);
   const [maskImage, setMaskImage] = useState<string | null>(null);
   const [resultImage, setResultImage] = useState<string | null>(null);
@@ -117,8 +119,7 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
       const source_image_base64 = await fileToBase64(sourceImageFile);
       const mask_image_base64 = maskImage.split(',')[1];
 
-      const sessionData = await supabase.auth.getSession();
-      const userId = sessionData.data.session?.user.id;
+      const userId = session?.user.id;
       if (!userId) {
         throw new Error("User not authenticated.");
       }
@@ -139,10 +140,18 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
       setActiveJobId(data.jobId);
       dismissToast(toastId);
       showSuccess("Inpainting job started! You can track its progress in the sidebar.");
+      
+      // Clear the form and refresh recent jobs
+      queryClient.invalidateQueries({ queryKey: ['bitstudioJobs', session?.user?.id] });
+      setSourceImageFile(null);
+      setMaskImage(null);
+      setPrompt("");
+      setResetTrigger(c => c + 1);
 
     } catch (err: any) {
       dismissToast(toastId);
       showError(`Inpainting failed: ${err.message}`);
+    } finally {
       setIsLoading(false);
     }
   };
