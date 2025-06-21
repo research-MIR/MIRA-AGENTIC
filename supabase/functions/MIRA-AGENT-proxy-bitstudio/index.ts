@@ -77,15 +77,17 @@ serve(async (req) => {
       const sourceBlob = new Blob([decodeBase64(source_image_base64)], { type: 'image/png' });
       const maskBlob = new Blob([decodeBase64(mask_image_base64)], { type: 'image/png' });
 
-      // FIX: Use correct image types from BitStudio docs
       const [sourceImageId, maskImageId] = await Promise.all([
         uploadToBitStudio(sourceBlob, 'inpaint-base', 'source.png'),
         uploadToBitStudio(maskBlob, 'inpaint-mask', 'mask.png')
       ]);
 
-      // FIX: Use correct endpoint and payload structure
       const inpaintUrl = `${BITSTUDIO_API_BASE}/images/${sourceImageId}/inpaint`;
-      const inpaintPayload = { mask_image_id: maskImageId, prompt };
+      const inpaintPayload = { 
+        mask_image_id: maskImageId, 
+        prompt,
+        resolution: 'standard' // FIX: Add default resolution
+      };
       
       const inpaintResponse = await fetch(inpaintUrl, {
         method: 'POST',
