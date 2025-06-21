@@ -38,7 +38,10 @@ serve(async (req) => {
     const fullSourceImage = await loadImage(`data:image/png;base64,${job.metadata.full_source_image_base64}`);
     const inpaintedCropResponse = await fetch(job.final_image_url);
     if (!inpaintedCropResponse.ok) throw new Error("Failed to download inpainted crop from BitStudio.");
-    const inpaintedCropImage = await loadImage(await inpaintedCropResponse.arrayBuffer());
+    
+    // FIX: Convert ArrayBuffer to Uint8Array before passing to loadImage
+    const imageArrayBuffer = await inpaintedCropResponse.arrayBuffer();
+    const inpaintedCropImage = await loadImage(new Uint8Array(imageArrayBuffer));
 
     const canvas = createCanvas(fullSourceImage.width(), fullSourceImage.height());
     const ctx = canvas.getContext('2d');
