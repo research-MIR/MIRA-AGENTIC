@@ -104,6 +104,8 @@ serve(async (req) => {
         inpaintPayload.reference_image_id = referenceImageId;
       }
       
+      console.log(`[BitStudioProxy] Sending inpainting request to ${inpaintUrl} with payload:`, JSON.stringify(inpaintPayload, null, 2));
+
       const inpaintResponse = await fetch(inpaintUrl, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}`, 'Content-Type': 'application/json' },
