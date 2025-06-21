@@ -109,12 +109,47 @@ const VirtualTryOn = () => {
 
   useEffect(() => {
     if (!session?.user?.id) return;
-    const channel = supabase.channel(`bitstudio-jobs-tracker-${session.user.id}`)
-      .on<BitStudioJob>('postgres_changes', { event: '*', schema: 'public', table: 'mira-agent-bitstudio-jobs', filter: `user_id=eq.${session.user.id}` },
-        () => queryClient.invalidateQueries({ queryKey: ['bitstudioJobs'] })
-      ).subscribe();
+
+    console.log(`[VTO Realtime] Setting up subscription for user: ${session.user.id}`);
+
+    const channel = supabase
+      .channel(`bitstudio-jobs-tracker-${session.user.id}`)
+      .on<BitStudioJob>(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'mira-agent-bitstudio-jobs',
+          filter: `user_id=eq.${session.user.id}`,
+        },
+        (payload) => {
+          console.log('[VTO Realtime] Received payload:', payload);
+          // Corrected query key to include the user ID
+          queryClient.invalidateQueries({ queryKey: ['bitstudioJobs', session.user.id] });
+        }
+      )
+      .subscribe((status) => {
+        console.log(`[VTO Realtime] Subscription status: ${status}`);
+        if (status === 'SUBSCRIBED') {
+          console.log('[VTO Realtime] Successfully subscribed to bitstudio-jobs updates.');
+        }
+        if (status === 'CHANNEL_ERROR') {
+            console.error('[VTO Realtime] Subscription channel error.');
+        }
+        if (status === 'TIMED_OUT') {
+            console.warn('[VTO Realtime] Subscription timed out.');
+        }
+      });
+
     channelRef.current = channel;
-    return () => { if (channelRef.current) supabase.removeChannel(channelRef.current); };
+
+    return () => {
+      if (channelRef.current) {
+        console.log('[VTO Realtime] Cleaning up subscription.');
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+    };
   }, [supabase, session?.user?.id, queryClient]);
 
   const personImageUrl = useMemo(() => personImageFile ? URL.createObjectURL(personImageFile) : null, [personImageFile]);
@@ -462,7 +497,7 @@ const SecureImageDisplay = ({ imageUrl, alt, onClick }: { imageUrl: string | nul
   if (isLoading) return <div className="w-full h-full bg-muted rounded-md flex items-center justify-center"><Loader2 className="h-6 w-6 animate-spin" /></div>;
   if (error) return <div className="w-full h-full bg-muted rounded-md flex items-center justify-center"><AlertTriangle className="h-6 w-6 text-destructive" /></div>;
   
-  return <img src={displayUrl} alt={alt} className={cn("w-full h-full object-cover rounded-md", hasClickHandler && "cursor-pointer")} onClick={onClick} />;
+  return <img src={displayUrl} alt={alt} className={cn("w-full h-full object-contain rounded-md", hasClickHandler && "cursor-pointer")} onClick={onClick} />;
 };
 
 export default VirtualTryOn;
