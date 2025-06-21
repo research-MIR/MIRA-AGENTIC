@@ -59,6 +59,7 @@ async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string)
 }
 
 serve(async (req) => {
+  const requestId = `proxy-${Date.now()}`;
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
 
   try {
@@ -73,6 +74,7 @@ serve(async (req) => {
 
     if (mode === 'inpaint') {
       const { full_source_image_base64, cropped_source_image_base64, cropped_dilated_mask_base64, prompt, bbox, reference_image_base64 } = body;
+      
       if (!full_source_image_base64 || !cropped_source_image_base64 || !cropped_dilated_mask_base64 || !prompt || !bbox) {
         throw new Error("Missing required parameters for inpaint mode.");
       }
@@ -111,13 +113,19 @@ serve(async (req) => {
       const newVersion = inpaintResult.versions?.[0];
       if (!newVersion || !newVersion.id) throw new Error("BitStudio did not return a valid version object for the inpainting job.");
       
+      const metadataToSave = {
+        bitstudio_version_id: newVersion.id,
+        full_source_image_base64,
+        cropped_source_image_base64,
+        cropped_dilated_mask_base64,
+        bbox,
+      };
+
+      console.log(`[Proxy][${requestId}] Saving metadata with keys:`, Object.keys(metadataToSave));
+
       const { data: newJob, error: insertError } = await supabase.from('mira-agent-bitstudio-jobs').insert({
         user_id, mode, status: 'queued', bitstudio_task_id: inpaintResult.id,
-        metadata: {
-          bitstudio_version_id: newVersion.id,
-          full_source_image_base64, // Store for compositor
-          bbox, // Store for compositor
-        }
+        metadata: metadataToSave
       }).select('id').single();
       if (insertError) throw insertError;
       newJobId = newJob.id;
@@ -171,7 +179,7 @@ serve(async (req) => {
     });
 
   } catch (error) {
-    console.error("[BitStudioProxy] Error:", error);
+    console.error(`[BitStudioProxy][${requestId}] Error:`, error);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,
