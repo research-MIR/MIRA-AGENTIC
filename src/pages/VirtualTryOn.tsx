@@ -108,10 +108,17 @@ const VirtualTryOn = () => {
   const selectedJob = useMemo(() => recentJobs?.find(job => job.id === selectedJobId), [recentJobs, selectedJobId]);
 
   useEffect(() => {
-    if (!session?.user?.id) return;
+    if (!session?.user?.id) {
+      return;
+    }
 
-    console.log(`[VTO Realtime] Setting up subscription for user: ${session.user.id}`);
+    // Ensure we only have one subscription active at a time.
+    if (channelRef.current) {
+      supabase.removeChannel(channelRef.current);
+      channelRef.current = null;
+    }
 
+    console.log(`[VTO Realtime] Attempting to subscribe for user: ${session.user.id}`);
     const channel = supabase
       .channel(`bitstudio-jobs-tracker-${session.user.id}`)
       .on<BitStudioJob>(
@@ -124,20 +131,16 @@ const VirtualTryOn = () => {
         },
         (payload) => {
           console.log('[VTO Realtime] Received payload:', payload);
-          // Corrected query key to include the user ID
           queryClient.invalidateQueries({ queryKey: ['bitstudioJobs', session.user.id] });
         }
       )
-      .subscribe((status) => {
+      .subscribe((status, err) => {
         console.log(`[VTO Realtime] Subscription status: ${status}`);
         if (status === 'SUBSCRIBED') {
           console.log('[VTO Realtime] Successfully subscribed to bitstudio-jobs updates.');
         }
-        if (status === 'CHANNEL_ERROR') {
-            console.error('[VTO Realtime] Subscription channel error.');
-        }
-        if (status === 'TIMED_OUT') {
-            console.warn('[VTO Realtime] Subscription timed out.');
+        if (status === 'CHANNEL_ERROR' || err) {
+          console.error('[VTO Realtime] Subscription channel error:', err);
         }
       });
 
@@ -150,7 +153,7 @@ const VirtualTryOn = () => {
         channelRef.current = null;
       }
     };
-  }, [supabase, session?.user?.id, queryClient]);
+  }, [session?.user?.id]); // Rerun only when the user ID changes
 
   const personImageUrl = useMemo(() => personImageFile ? URL.createObjectURL(personImageFile) : null, [personImageFile]);
   const garmentImageUrl = useMemo(() => garmentImageFile ? URL.createObjectURL(garmentImageFile) : null, [garmentImageFile]);
@@ -382,8 +385,8 @@ const VirtualTryOn = () => {
             <div className="lg:col-span-2">
               <Card className="h-[75vh] flex flex-col">
                 <CardHeader><CardTitle>Result</CardTitle></CardHeader>
-                <CardContent className="flex-1 flex items-center justify-center overflow-hidden p-2">
-                  {selectedJob ? renderJobResult(selectedJob) : <div className="text-center text-muted-foreground"><ImageIcon className="h-16 w-16 mx-auto mb-4" /><p>Your result will appear here.</p></div>}
+                <CardContent className="flex-1 p-2">
+                  {selectedJob ? renderJobResult(selectedJob) : <div className="w-full h-full flex items-center justify-center text-center text-muted-foreground bg-muted rounded-md"><ImageIcon className="h-16 w-16 mx-auto mb-4" /><p>Your result will appear here.</p></div>}
                 </CardContent>
               </Card>
               <Card className="mt-8">
