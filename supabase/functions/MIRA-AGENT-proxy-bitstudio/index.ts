@@ -86,7 +86,8 @@ serve(async (req) => {
       const inpaintPayload = { 
         mask_image_id: maskImageId, 
         prompt,
-        resolution: 'standard' // FIX: Add default resolution
+        resolution: 'standard',
+        denoise: 1.0 // FIX: Add default denoise parameter
       };
       
       const inpaintResponse = await fetch(inpaintUrl, {
