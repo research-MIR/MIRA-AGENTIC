@@ -72,11 +72,13 @@ serve(async (req) => {
     let newJobId;
 
     if (mode === 'inpaint') {
-      const { source_image_base64, mask_image_base64, prompt, reference_image_base64 } = body;
-      if (!source_image_base64 || !mask_image_base64 || !prompt) throw new Error("source_image_base64, mask_image_base64, and prompt are required for inpaint mode.");
+      const { full_source_image_base64, cropped_source_image_base64, cropped_dilated_mask_base64, prompt, bbox, reference_image_base64 } = body;
+      if (!full_source_image_base64 || !cropped_source_image_base64 || !cropped_dilated_mask_base64 || !prompt || !bbox) {
+        throw new Error("Missing required parameters for inpaint mode.");
+      }
 
-      const sourceBlob = new Blob([decodeBase64(source_image_base64)], { type: 'image/png' });
-      const maskBlob = new Blob([decodeBase64(mask_image_base64)], { type: 'image/png' });
+      const sourceBlob = new Blob([decodeBase64(cropped_source_image_base64)], { type: 'image/png' });
+      const maskBlob = new Blob([decodeBase64(cropped_dilated_mask_base64)], { type: 'image/png' });
 
       const uploadPromises: Promise<string | null>[] = [
         uploadToBitStudio(sourceBlob, 'inpaint-base', 'source.png'),
@@ -87,25 +89,15 @@ serve(async (req) => {
         const referenceBlob = new Blob([decodeBase64(reference_image_base64)], { type: 'image/png' });
         uploadPromises.push(uploadToBitStudio(referenceBlob, 'inpaint-reference', 'reference.png'));
       } else {
-        uploadPromises.push(Promise.resolve(null)); // Keep array length consistent
+        uploadPromises.push(Promise.resolve(null));
       }
 
       const [sourceImageId, maskImageId, referenceImageId] = await Promise.all(uploadPromises);
 
       const inpaintUrl = `${BITSTUDIO_API_BASE}/images/${sourceImageId}/inpaint`;
-      const inpaintPayload: any = { 
-        mask_image_id: maskImageId, 
-        prompt,
-        resolution: 'standard',
-        denoise: 1.0
-      };
+      const inpaintPayload: any = { mask_image_id: maskImageId, prompt, resolution: 'standard', denoise: 1.0 };
+      if (referenceImageId) inpaintPayload.reference_image_id = referenceImageId;
       
-      if (referenceImageId) {
-        inpaintPayload.reference_image_id = referenceImageId;
-      }
-      
-      console.log(`[BitStudioProxy] Sending inpainting request to ${inpaintUrl} with payload:`, JSON.stringify(inpaintPayload, null, 2));
-
       const inpaintResponse = await fetch(inpaintUrl, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}`, 'Content-Type': 'application/json' },
@@ -113,25 +105,18 @@ serve(async (req) => {
       });
 
       const responseText = await inpaintResponse.text();
-      console.log(`[BitStudioProxy] Raw inpainting response from BitStudio: ${responseText}`);
-
       if (!inpaintResponse.ok) throw new Error(`BitStudio inpainting request failed: ${responseText}`);
       
       const inpaintResult = JSON.parse(responseText);
       const newVersion = inpaintResult.versions?.[0];
-      if (!newVersion || !newVersion.id) {
-        throw new Error("BitStudio did not return a valid version object for the inpainting job.");
-      }
-      const versionId = newVersion.id;
-      const baseImageId = inpaintResult.id;
-
+      if (!newVersion || !newVersion.id) throw new Error("BitStudio did not return a valid version object for the inpainting job.");
+      
       const { data: newJob, error: insertError } = await supabase.from('mira-agent-bitstudio-jobs').insert({
-        user_id, 
-        mode, 
-        status: 'queued', 
-        bitstudio_task_id: baseImageId,
+        user_id, mode, status: 'queued', bitstudio_task_id: inpaintResult.id,
         metadata: {
-          bitstudio_version_id: versionId
+          bitstudio_version_id: newVersion.id,
+          full_source_image_base64, // Store for compositor
+          bbox, // Store for compositor
         }
       }).select('id').single();
       if (insertError) throw insertError;
