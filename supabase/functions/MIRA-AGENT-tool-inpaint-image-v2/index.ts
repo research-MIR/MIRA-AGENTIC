@@ -72,25 +72,24 @@ serve(async (req) => {
     const { 
         full_source_image_base64, 
         cropped_source_image_base64, 
-        dilated_mask_base64, 
+        cropped_dilated_mask_base64, 
         prompt, 
         bbox,
         user_id 
     } = await req.json();
 
-    if (!full_source_image_base64 || !cropped_source_image_base64 || !dilated_mask_base64 || !prompt || !bbox || !user_id) {
+    if (!full_source_image_base64 || !cropped_source_image_base64 || !cropped_dilated_mask_base64 || !prompt || !bbox || !user_id) {
       throw new Error("Missing one or more required parameters.");
     }
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
 
-    // --- Actual Inpainting on the cropped image ---
     const croppedSourceBlob = new Blob([decodeBase64(cropped_source_image_base64)], { type: 'image/png' });
-    const dilatedMaskBlob = new Blob([decodeBase64(dilated_mask_base64)], { type: 'image/png' });
+    const croppedDilatedMaskBlob = new Blob([decodeBase64(cropped_dilated_mask_base64)], { type: 'image/png' });
 
     const [croppedSourceImageId, dilatedMaskImageId] = await Promise.all([
         uploadToBitStudio(croppedSourceBlob, 'inpaint-base', 'cropped_source.png'),
-        uploadToBitStudio(dilatedMaskBlob, 'inpaint-mask', 'dilated_mask.png')
+        uploadToBitStudio(croppedDilatedMaskBlob, 'inpaint-mask', 'cropped_dilated_mask.png')
     ]);
 
     const inpaintUrl = `${BITSTUDIO_API_BASE}/images/${croppedSourceImageId}/inpaint`;
@@ -109,9 +108,7 @@ serve(async (req) => {
     if (!newVersion || !newVersion.id) throw new Error("BitStudio did not return a valid version object for the inpainting job.");
     
     const inpaintedCropUrl = await pollForInpaintingResult(inpaintResult.id, newVersion.id);
-    // --- End of Inpainting ---
 
-    // --- Re-compositing Logic (Server-Side) ---
     const { createCanvas, loadImage } = await import('https://deno.land/x/canvas@v1.4.1/mod.ts');
     
     const fullSourceImage = await loadImage(`data:image/png;base64,${full_source_image_base64}`);

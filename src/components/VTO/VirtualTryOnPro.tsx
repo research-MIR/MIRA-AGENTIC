@@ -135,7 +135,6 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
     const toastId = showLoading("Preparing images for inpainting...");
 
     try {
-      // 1. Load images into memory
       const sourceImg = new Image();
       sourceImg.src = URL.createObjectURL(sourceImageFile);
       await new Promise(resolve => sourceImg.onload = resolve);
@@ -144,19 +143,17 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
       maskImg.src = maskImage;
       await new Promise(resolve => maskImg.onload = resolve);
 
-      // 2. Dilate the mask
       const dilatedCanvas = document.createElement('canvas');
       dilatedCanvas.width = maskImg.width;
       dilatedCanvas.height = maskImg.height;
       const dilateCtx = dilatedCanvas.getContext('2d');
       if (!dilateCtx) throw new Error("Could not get canvas context for dilation.");
       
-      const dilationAmount = Math.max(10, Math.round(maskImg.width * 0.02)); // 2% dilation radius
+      const dilationAmount = Math.max(10, Math.round(maskImg.width * 0.02));
       dilateCtx.filter = `blur(${dilationAmount}px)`;
       dilateCtx.drawImage(maskImg, 0, 0);
       dilateCtx.filter = 'none';
       
-      // Threshold to make it pure B&W again
       const dilatedImageData = dilateCtx.getImageData(0, 0, dilatedCanvas.width, dilatedCanvas.height);
       const data = dilatedImageData.data;
       for (let i = 0; i < data.length; i += 4) {
@@ -167,14 +164,12 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
         }
       }
       dilateCtx.putImageData(dilatedImageData, 0, 0);
-      const dilatedMaskBase64 = dilatedCanvas.toDataURL('image/jpeg').split(',')[1];
 
-      // 3. Find bounding box of the dilated mask
       let minX = dilatedCanvas.width, minY = dilatedCanvas.height, maxX = 0, maxY = 0;
       for (let y = 0; y < dilatedCanvas.height; y++) {
         for (let x = 0; x < dilatedCanvas.width; x++) {
           const i = (y * dilatedCanvas.width + x) * 4;
-          if (data[i] === 255) { // White pixel
+          if (data[i] === 255) {
             if (x < minX) minX = x;
             if (x > maxX) maxX = x;
             if (y < minY) minY = y;
@@ -183,12 +178,9 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
         }
       }
 
-      if (maxX < minX) { // No mask drawn
-        throw new Error("The mask is empty. Please draw on the image.");
-      }
+      if (maxX < minX) throw new Error("The mask is empty. Please draw on the image.");
 
-      // 4. Add padding to bounding box
-      const padding = Math.round(Math.max(maxX - minX, maxY - minY) * 0.05); // 5% padding
+      const padding = Math.round(Math.max(maxX - minX, maxY - minY) * 0.05);
       const bbox = {
         x: Math.max(0, minX - padding),
         y: Math.max(0, minY - padding),
@@ -196,7 +188,6 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
         height: Math.min(sourceImg.height - (minY - padding), (maxY - minY) + padding * 2)
       };
 
-      // 5. Crop the source image
       const croppedCanvas = document.createElement('canvas');
       croppedCanvas.width = bbox.width;
       croppedCanvas.height = bbox.height;
@@ -205,15 +196,22 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
       cropCtx.drawImage(sourceImg, bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
       const croppedSourceBase64 = croppedCanvas.toDataURL('image/png').split(',')[1];
 
+      const croppedMaskCanvas = document.createElement('canvas');
+      croppedMaskCanvas.width = bbox.width;
+      croppedMaskCanvas.height = bbox.height;
+      const cropMaskCtx = croppedMaskCanvas.getContext('2d');
+      if (!cropMaskCtx) throw new Error("Could not get canvas context for mask cropping.");
+      cropMaskCtx.drawImage(dilatedCanvas, bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
+      const croppedDilatedMaskBase64 = croppedMaskCanvas.toDataURL('image/jpeg').split(',')[1];
+
       dismissToast(toastId);
       showLoading("Sending job to inpainting service...");
 
-      // 6. Call the new inpainting function
       const { data: result, error } = await supabase.functions.invoke('MIRA-AGENT-tool-inpaint-image-v2', {
         body: {
           full_source_image_base64: await fileToBase64(sourceImageFile),
           cropped_source_image_base64: croppedSourceBase64,
-          dilated_mask_base64: dilatedMaskBase64,
+          cropped_dilated_mask_base64: croppedDilatedMaskBase64,
           prompt,
           bbox,
           user_id: session?.user.id
@@ -237,7 +235,7 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
   };
 
   const { dropzoneProps, isDraggingOver } = useDropzone({
-    onDrop: (e) => handleFileSelect(e.dataTransfer.files?.[0]),
+    onDrop: (e) => handleFileSelect(e.target.files?.[0]),
   });
 
   const renderJobResult = (job: BitStudioJob) => {
