@@ -54,7 +54,7 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
 
   try {
-    const { person_image_url, garment_image_url, user_id, mode } = await req.json();
+    const { person_image_url, garment_image_url, user_id, mode, prompt } = await req.json();
     if (!person_image_url || !garment_image_url || !user_id || !mode) {
       throw new Error("person_image_url, garment_image_url, user_id, and mode are required.");
     }
@@ -75,12 +75,16 @@ serve(async (req) => {
 
     // 3. Start the Virtual Try-On job
     const vtoUrl = `${BITSTUDIO_API_BASE}/images/virtual-try-on`;
-    const vtoPayload = {
+    const vtoPayload: any = {
       person_image_id: personImageId,
       outfit_image_id: outfitImageId,
       resolution: "standard",
       num_images: 1
     };
+
+    if (prompt) {
+      vtoPayload.prompt = prompt;
+    }
 
     console.log(`[BitStudioProxy] Sending VTO request to: ${vtoUrl}`);
     console.log(`[BitStudioProxy] VTO Request Payload:`, JSON.stringify(vtoPayload, null, 2));

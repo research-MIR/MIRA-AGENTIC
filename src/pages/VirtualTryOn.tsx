@@ -173,12 +173,18 @@ const VirtualTryOn = () => {
     }
   }, [personImageFile, garmentImageFile, isAutoPromptEnabled, handleGeneratePrompt]);
 
-  const queueTryOnJob = async (personFile: File, garmentFile: File) => {
+  const queueTryOnJob = async (personFile: File, garmentFile: File, promptToSend?: string) => {
     if (!session?.user) throw new Error("User session not found.");
     const person_image_url = await uploadFile(personFile, 'person');
     const garment_image_url = await uploadFile(garmentFile, 'garment');
     const { error } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
-      body: { person_image_url, garment_image_url, user_id: session.user.id, mode: 'base' }
+      body: { 
+        person_image_url, 
+        garment_image_url, 
+        user_id: session.user.id, 
+        mode: 'base',
+        prompt: promptToSend
+      }
     });
     if (error) throw error;
   };
@@ -188,7 +194,7 @@ const VirtualTryOn = () => {
     setIsLoading(true);
     const toastId = showLoading("Starting Virtual Try-On job...");
     try {
-      await queueTryOnJob(personImageFile, garmentImageFile);
+      await queueTryOnJob(personImageFile, garmentImageFile, prompt);
       dismissToast(toastId);
       showSuccess("Virtual Try-On job started!");
       queryClient.invalidateQueries({ queryKey: ['bitstudioJobs', session.user.id] });
