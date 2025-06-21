@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
-import { Card, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { useLanguage } from "@/context/LanguageContext";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Skeleton } from "@/components/ui/skeleton";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { useSecureImage } from "@/hooks/useSecureImage";
@@ -36,6 +36,7 @@ const SecureImageDisplay = ({ imageUrl, alt, onClick }: { imageUrl: string | nul
 const VirtualTryOn = () => {
   const { supabase, session } = useSession();
   const { t } = useLanguage();
+  const queryClient = useQueryClient();
   
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
@@ -52,6 +53,53 @@ const VirtualTryOn = () => {
   });
 
   const selectedJob = useMemo(() => recentJobs?.find(job => job.id === selectedJobId), [recentJobs, selectedJobId]);
+
+  useEffect(() => {
+    if (!session?.user?.id) {
+      return;
+    }
+
+    if (channelRef.current) {
+      supabase.removeChannel(channelRef.current);
+      channelRef.current = null;
+    }
+
+    console.log(`[VTO Realtime] Attempting to subscribe for user: ${session.user.id}`);
+    const channel = supabase
+      .channel(`bitstudio-jobs-tracker-${session.user.id}`)
+      .on<BitStudioJob>(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'mira-agent-bitstudio-jobs',
+          filter: `user_id=eq.${session.user.id}`,
+        },
+        (payload) => {
+          console.log('[VTO Realtime] Received payload:', payload);
+          queryClient.invalidateQueries({ queryKey: ['bitstudioJobs', session.user.id] });
+        }
+      )
+      .subscribe((status, err) => {
+        console.log(`[VTO Realtime] Subscription status: ${status}`);
+        if (status === 'SUBSCRIBED') {
+          console.log('[VTO Realtime] Successfully subscribed to bitstudio-jobs updates.');
+        }
+        if (status === 'CHANNEL_ERROR' || err) {
+          console.error('[VTO Realtime] Subscription channel error:', err);
+        }
+      });
+
+    channelRef.current = channel;
+
+    return () => {
+      if (channelRef.current) {
+        console.log('[VTO Realtime] Cleaning up subscription.');
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+    };
+  }, [session?.user?.id, supabase, queryClient]);
 
   const resetForm = () => {
     setSelectedJobId(null);
