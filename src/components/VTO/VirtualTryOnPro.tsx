@@ -9,11 +9,9 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { useDropzone } from "@/hooks/useDropzone";
 import { MaskControls } from "@/components/Editor/MaskControls";
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { useImagePreview } from "@/context/ImagePreviewContext";
-import { RealtimeChannel } from "@supabase/supabase-js";
 import { useSecureImage } from "@/hooks/useSecureImage";
 import { Skeleton } from "../ui/skeleton";
 import { useQueryClient } from "@tanstack/react-query";
@@ -90,8 +88,6 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
   const [brushSize, setBrushSize] = useState(30);
   const [resetTrigger, setResetTrigger] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
-  const [activeJobId, setActiveJobId] = useState<string | null>(null);
-  const channelRef = useRef<RealtimeChannel | null>(null);
 
   const sourceImageUrl = useMemo(() => sourceImageFile ? URL.createObjectURL(sourceImageFile) : null, [sourceImageFile]);
   const referenceImageUrl = useMemo(() => referenceImageFile ? URL.createObjectURL(referenceImageFile) : null, [referenceImageFile]);
@@ -100,9 +96,8 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
     return () => {
       if (sourceImageUrl) URL.revokeObjectURL(sourceImageUrl);
       if (referenceImageUrl) URL.revokeObjectURL(referenceImageUrl);
-      if (channelRef.current) supabase.removeChannel(channelRef.current);
     };
-  }, [sourceImageUrl, referenceImageUrl, supabase]);
+  }, [sourceImageUrl, referenceImageUrl]);
 
   useEffect(() => {
     if (selectedJob) {
@@ -111,6 +106,7 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
       setMaskImage(null);
       setPrompt("");
       setResetTrigger(c => c + 1);
+      setResultImage(null);
     }
   }, [selectedJob]);
 
@@ -122,7 +118,6 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
       setSourceImageFile(file);
       setMaskImage(null);
       setResultImage(null);
-      setActiveJobId(null);
       setResetTrigger(c => c + 1);
     }
   };
@@ -137,80 +132,109 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
       return;
     }
     setIsLoading(true);
-    const toastId = showLoading("Starting inpainting job...");
-    try {
-      const payload: any = {
-        mode: 'inpaint',
-        source_image_base64: await fileToBase64(sourceImageFile),
-        mask_image_base64: maskImage.split(',')[1],
-        prompt,
-        user_id: session?.user.id
-      };
+    const toastId = showLoading("Preparing images for inpainting...");
 
-      if (referenceImageFile) {
-        payload.reference_image_base64 = await fileToBase64(referenceImageFile);
+    try {
+      // 1. Load images into memory
+      const sourceImg = new Image();
+      sourceImg.src = URL.createObjectURL(sourceImageFile);
+      await new Promise(resolve => sourceImg.onload = resolve);
+
+      const maskImg = new Image();
+      maskImg.src = maskImage;
+      await new Promise(resolve => maskImg.onload = resolve);
+
+      // 2. Dilate the mask
+      const dilatedCanvas = document.createElement('canvas');
+      dilatedCanvas.width = maskImg.width;
+      dilatedCanvas.height = maskImg.height;
+      const dilateCtx = dilatedCanvas.getContext('2d');
+      if (!dilateCtx) throw new Error("Could not get canvas context for dilation.");
+      
+      const dilationAmount = Math.max(10, Math.round(maskImg.width * 0.02)); // 2% dilation radius
+      dilateCtx.filter = `blur(${dilationAmount}px)`;
+      dilateCtx.drawImage(maskImg, 0, 0);
+      dilateCtx.filter = 'none';
+      
+      // Threshold to make it pure B&W again
+      const dilatedImageData = dilateCtx.getImageData(0, 0, dilatedCanvas.width, dilatedCanvas.height);
+      const data = dilatedImageData.data;
+      for (let i = 0; i < data.length; i += 4) {
+        if (data[i] > 128) {
+          data[i] = data[i+1] = data[i+2] = 255;
+        } else {
+          data[i] = data[i+1] = data[i+2] = 0;
+        }
+      }
+      dilateCtx.putImageData(dilatedImageData, 0, 0);
+      const dilatedMaskBase64 = dilatedCanvas.toDataURL('image/jpeg').split(',')[1];
+
+      // 3. Find bounding box of the dilated mask
+      let minX = dilatedCanvas.width, minY = dilatedCanvas.height, maxX = 0, maxY = 0;
+      for (let y = 0; y < dilatedCanvas.height; y++) {
+        for (let x = 0; x < dilatedCanvas.width; x++) {
+          const i = (y * dilatedCanvas.width + x) * 4;
+          if (data[i] === 255) { // White pixel
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+          }
+        }
       }
 
-      if (!payload.user_id) throw new Error("User not authenticated.");
+      if (maxX < minX) { // No mask drawn
+        throw new Error("The mask is empty. Please draw on the image.");
+      }
 
-      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', { body: payload });
+      // 4. Add padding to bounding box
+      const padding = Math.round(Math.max(maxX - minX, maxY - minY) * 0.05); // 5% padding
+      const bbox = {
+        x: Math.max(0, minX - padding),
+        y: Math.max(0, minY - padding),
+        width: Math.min(sourceImg.width - (minX - padding), (maxX - minX) + padding * 2),
+        height: Math.min(sourceImg.height - (minY - padding), (maxY - minY) + padding * 2)
+      };
+
+      // 5. Crop the source image
+      const croppedCanvas = document.createElement('canvas');
+      croppedCanvas.width = bbox.width;
+      croppedCanvas.height = bbox.height;
+      const cropCtx = croppedCanvas.getContext('2d');
+      if (!cropCtx) throw new Error("Could not get canvas context for cropping.");
+      cropCtx.drawImage(sourceImg, bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
+      const croppedSourceBase64 = croppedCanvas.toDataURL('image/png').split(',')[1];
+
+      dismissToast(toastId);
+      showLoading("Sending job to inpainting service...");
+
+      // 6. Call the new inpainting function
+      const { data: result, error } = await supabase.functions.invoke('MIRA-AGENT-tool-inpaint-image-v2', {
+        body: {
+          full_source_image_base64: await fileToBase64(sourceImageFile),
+          cropped_source_image_base64: croppedSourceBase64,
+          dilated_mask_base64: dilatedMaskBase64,
+          prompt,
+          bbox,
+          user_id: session?.user.id
+        }
+      });
 
       if (error) throw error;
-      if (!data.success || !data.jobId) throw new Error("Failed to queue inpainting job.");
-      
-      setActiveJobId(data.jobId);
+      if (!result.success) throw new Error(result.error || "Inpainting failed on the server.");
+
       dismissToast(toastId);
-      showSuccess("Inpainting job started! You can track its progress in the sidebar.");
-      
+      showSuccess("Inpainting complete!");
+      setResultImage(result.imageUrl);
       queryClient.invalidateQueries({ queryKey: ['bitstudioJobs', session?.user?.id] });
-      setSourceImageFile(null);
-      setReferenceImageFile(null);
-      setMaskImage(null);
-      setPrompt("");
-      setResetTrigger(c => c + 1);
 
     } catch (err: any) {
       dismissToast(toastId);
-      showError(`Inpainting failed: ${err.message}`);
+      showError(`Processing failed: ${err.message}`);
     } finally {
       setIsLoading(false);
     }
   };
-
-  useEffect(() => {
-    if (!activeJobId) return;
-
-    const channel = supabase
-      .channel(`inpaint-job-${activeJobId}`)
-      .on('postgres_changes', {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'mira-agent-bitstudio-jobs',
-        filter: `id=eq.${activeJobId}`
-      }, (payload) => {
-        const updatedJob = payload.new as any;
-        if (updatedJob.status === 'complete' && updatedJob.final_image_url) {
-          setResultImage(updatedJob.final_image_url);
-          setIsLoading(false);
-          setActiveJobId(null);
-          channel.unsubscribe();
-        } else if (updatedJob.status === 'failed') {
-          showError(`Inpainting failed: ${updatedJob.error_message || 'Unknown error'}`);
-          setIsLoading(false);
-          setActiveJobId(null);
-          channel.unsubscribe();
-        }
-      })
-      .subscribe();
-    
-    channelRef.current = channel;
-
-    return () => {
-      if (channelRef.current) {
-        supabase.removeChannel(channelRef.current);
-      }
-    };
-  }, [activeJobId, supabase]);
 
   const { dropzoneProps, isDraggingOver } = useDropzone({
     onDrop: (e) => handleFileSelect(e.dataTransfer.files?.[0]),
