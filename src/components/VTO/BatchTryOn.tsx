@@ -39,9 +39,9 @@ const MultiImageUploader = ({ onFilesSelect, title, icon, description }: { onFil
     const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: (e) => e.dataTransfer.files && onFilesSelect(Array.from(e.dataTransfer.files)) });
   
     return (
-      <div {...dropzoneProps} className={cn("flex flex-col justify-center items-center rounded-lg border border-dashed p-4 text-center transition-colors cursor-pointer", isDraggingOver && "border-primary bg-primary/10")} onClick={() => inputRef.current?.click()}>
+      <div {...dropzoneProps} className={cn("flex flex-col h-full justify-center items-center rounded-lg border border-dashed p-2 text-center transition-colors cursor-pointer", isDraggingOver && "border-primary bg-primary/10")} onClick={() => inputRef.current?.click()}>
         {React.cloneElement(icon as React.ReactElement, { className: "h-6 w-6 text-muted-foreground" })}
-        <p className="mt-1 text-sm font-semibold">{title}</p>
+        <p className="mt-1 text-xs font-semibold">{title}</p>
         <p className="text-xs text-muted-foreground">{description}</p>
         <Input ref={inputRef} type="file" multiple className="hidden" accept="image/*" onChange={(e) => e.target.files && onFilesSelect(Array.from(e.target.files))} />
       </div>
@@ -172,13 +172,17 @@ export const BatchTryOn = () => {
                     </TabsList>
                     <TabsContent value="one-garment" className="pt-4 space-y-4">
                       <p className="text-sm text-muted-foreground">{t('oneGarmentDescription')}</p>
-                      <ImageUploader onFileSelect={setBatchGarmentFile} title="Upload Garment" imageUrl={batchGarmentFile ? URL.createObjectURL(batchGarmentFile) : null} onClear={() => setBatchGarmentFile(null)} />
-                      <MultiImageUploader onFilesSelect={setBatchPersonFiles} title="Upload People" icon={<Users className="h-8 w-8 text-muted-foreground" />} description="Select multiple person images." />
+                      <div className="grid grid-cols-2 gap-4">
+                        <ImageUploader onFileSelect={setBatchGarmentFile} title="Upload Garment" imageUrl={batchGarmentFile ? URL.createObjectURL(batchGarmentFile) : null} onClear={() => setBatchGarmentFile(null)} />
+                        <MultiImageUploader onFilesSelect={setBatchPersonFiles} title="Upload People" icon={<Users />} description="Select multiple person images." />
+                      </div>
                     </TabsContent>
                     <TabsContent value="random" className="pt-4 space-y-4">
                       <p className="text-sm text-muted-foreground">{t('randomPairsDescription')}</p>
-                      <MultiImageUploader onFilesSelect={setBatchRandomGarmentFiles} title="Upload Garments" icon={<Shirt className="h-8 w-8 text-muted-foreground" />} description="Select multiple garment images." />
-                      <MultiImageUploader onFilesSelect={setBatchRandomPersonFiles} title="Upload People" icon={<Users className="h-8 w-8 text-muted-foreground" />} description="Select multiple person images." />
+                      <div className="grid grid-cols-2 gap-4">
+                        <MultiImageUploader onFilesSelect={setBatchRandomGarmentFiles} title="Upload Garments" icon={<Shirt />} description="Select multiple garment images." />
+                        <MultiImageUploader onFilesSelect={setBatchRandomPersonFiles} title="Upload People" icon={<Users />} description="Select multiple person images." />
+                      </div>
                     </TabsContent>
                     <TabsContent value="precise" className="pt-4 space-y-4">
                       <p className="text-sm text-muted-foreground">{t('precisePairsDescription')}</p>
