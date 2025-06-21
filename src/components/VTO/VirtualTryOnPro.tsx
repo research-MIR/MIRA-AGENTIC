@@ -74,13 +74,19 @@ export const VirtualTryOnPro = () => {
       const source_image_base64 = await fileToBase64(sourceImageFile);
       const mask_image_base64 = maskImage.split(',')[1];
 
+      const sessionData = await supabase.auth.getSession();
+      const userId = sessionData.data.session?.user.id;
+      if (!userId) {
+        throw new Error("User not authenticated.");
+      }
+
       const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
         body: { 
           mode: 'inpaint',
           source_image_base64, 
           mask_image_base64, 
           prompt,
-          user_id: supabase.auth.getSession()?.then(s => s.data.session?.user.id)
+          user_id: userId
         }
       });
 
