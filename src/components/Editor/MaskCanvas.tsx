@@ -1,16 +1,31 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
 
 interface MaskCanvasProps {
   imageUrl: string;
   onMaskChange: (dataUrl: string) => void;
+  brushSize: number;
+  resetTrigger: number;
 }
 
-export const MaskCanvas = ({ imageUrl, onMaskChange }: MaskCanvasProps) => {
+export const MaskCanvas = ({ imageUrl, onMaskChange, brushSize, resetTrigger }: MaskCanvasProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const imageCanvasRef = useRef<HTMLCanvasElement>(null);
   const drawingCanvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const lastPoint = useRef<{ x: number; y: number } | null>(null);
+
+  const clearCanvas = useCallback(() => {
+    const canvas = drawingCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    onMaskChange(canvas.toDataURL('image/png'));
+  }, [onMaskChange]);
+
+  useEffect(() => {
+    clearCanvas();
+  }, [resetTrigger, clearCanvas]);
 
   // Effect to draw the base image
   useEffect(() => {
@@ -45,9 +60,10 @@ export const MaskCanvas = ({ imageUrl, onMaskChange }: MaskCanvasProps) => {
         drawingCanvas.height = renderHeight;
         
         ctx.drawImage(image, 0, 0, renderWidth, renderHeight);
+        clearCanvas(); // Clear drawing canvas when new image loads
       }
     };
-  }, [imageUrl]);
+  }, [imageUrl, clearCanvas]);
 
   const getCoords = (e: React.MouseEvent | React.TouchEvent) => {
     const canvas = drawingCanvasRef.current;
@@ -80,7 +96,7 @@ export const MaskCanvas = ({ imageUrl, onMaskChange }: MaskCanvasProps) => {
     ctx.moveTo(lastPoint.current.x, lastPoint.current.y);
     ctx.lineTo(coords.x, coords.y);
     ctx.strokeStyle = 'white';
-    ctx.lineWidth = 30;
+    ctx.lineWidth = brushSize;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.stroke();

@@ -8,21 +8,29 @@ import { MaskCanvas } from "@/components/Editor/MaskCanvas";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { useDropzone } from "@/hooks/useDropzone";
+import { MaskControls } from "@/components/Editor/MaskControls";
 
 export const VirtualTryOnPro = () => {
   const [sourceImage, setSourceImage] = useState<string | null>(null);
   const [maskImage, setMaskImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [brushSize, setBrushSize] = useState(30);
+  const [resetTrigger, setResetTrigger] = useState(0);
 
   const handleFileSelect = (file: File | null) => {
     if (file && file.type.startsWith("image/")) {
       const reader = new FileReader();
       reader.onload = (e) => {
         setSourceImage(e.target?.result as string);
-        setMaskImage(null); // Reset mask when new image is loaded
+        setMaskImage(null);
+        setResetTrigger(c => c + 1);
       };
       reader.readAsDataURL(file);
     }
+  };
+
+  const handleResetMask = () => {
+    setResetTrigger(c => c + 1);
   };
 
   const { dropzoneProps, isDraggingOver } = useDropzone({
@@ -52,30 +60,44 @@ export const VirtualTryOnPro = () => {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {maskImage && (
+            {maskImage ? (
                 <div>
                     <Label>Generated Mask</Label>
-                    <img src={maskImage} alt="Generated Mask" className="w-full h-auto rounded-md mt-2 border" />
+                    <img src={maskImage} alt="Generated Mask" className="w-full h-auto rounded-md mt-2 border bg-muted" />
                 </div>
+            ) : (
+              <div className="text-sm text-muted-foreground">Draw on the image in the workbench to generate a mask.</div>
             )}
           </CardContent>
         </Card>
       </div>
       <div className="lg:col-span-2 space-y-6">
-        <Card className="h-full">
+        <Card>
           <CardHeader>
             <CardTitle>PRO Workbench</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="flex items-center justify-center">
             {sourceImage ? (
-              <div className="w-full aspect-square">
-                <MaskCanvas imageUrl={sourceImage} onMaskChange={setMaskImage} />
+              <div className="w-full max-h-[70vh] aspect-square relative">
+                <MaskCanvas 
+                  imageUrl={sourceImage} 
+                  onMaskChange={setMaskImage}
+                  brushSize={brushSize}
+                  resetTrigger={resetTrigger}
+                />
+                <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
+                  <MaskControls 
+                    brushSize={brushSize}
+                    onBrushSizeChange={setBrushSize}
+                    onReset={handleResetMask}
+                  />
+                </div>
               </div>
             ) : (
               <div
                 {...dropzoneProps}
                 className={cn(
-                  "h-96 bg-muted rounded-md flex flex-col items-center justify-center cursor-pointer border-2 border-dashed hover:border-primary transition-colors",
+                  "h-96 w-full bg-muted rounded-md flex flex-col items-center justify-center cursor-pointer border-2 border-dashed hover:border-primary transition-colors",
                   isDraggingOver && "border-primary bg-primary/10"
                 )}
                 onClick={() => fileInputRef.current?.click()}
