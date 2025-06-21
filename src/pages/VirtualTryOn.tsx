@@ -196,12 +196,22 @@ const VirtualTryOn = () => {
     setSelectedJobId(null);
     setPrompt("");
     setPromptReady(false);
+    setIsAutoPromptEnabled(true);
+  };
+
+  const handleSelectJob = (job: BitStudioJob) => {
+    setSelectedJobId(job.id);
+    setPersonImageFile(null);
+    setGarmentImageFile(null);
+    setPrompt(""); // We don't store the prompt, so clear it
+    setPromptReady(false);
+    setIsAutoPromptEnabled(false); // Disable auto-prompt when viewing old jobs
   };
 
   const renderJobResult = (job: BitStudioJob) => {
     if (job.status === 'failed') return <p className="text-destructive text-sm p-2">Job failed: {job.error_message}</p>;
     if (job.status === 'complete' && job.final_image_url) {
-      return <SecureImageDisplay imageUrl={job.final_image_url} alt="Final Result" onClick={() => showImage(job.final_image_url!)} />;
+      return <SecureImageDisplay imageUrl={job.final_image_url} alt="Final Result" onClick={() => showImage({ images: [{ url: job.final_image_url! }], currentIndex: 0 })} />;
     }
     return (
       <div className="text-center text-muted-foreground">
@@ -221,8 +231,17 @@ const VirtualTryOn = () => {
           <Card>
             <CardHeader><div className="flex justify-between items-center"><CardTitle>{selectedJobId ? "Selected Job" : "1. Upload Images"}</CardTitle>{selectedJobId && <Button variant="outline" size="sm" onClick={resetForm}><PlusCircle className="h-4 w-4 mr-2" />New</Button>}</div></CardHeader>
             <CardContent className="grid grid-cols-2 gap-4">
-              {selectedJob ? <SecureImageDisplay imageUrl={selectedJob.source_person_image_url} alt="Person" onClick={() => showImage(selectedJob.source_person_image_url)} /> : <ImageUploader onFileSelect={setPersonImageFile} title="Person Image" imageUrl={personImageUrl} onClear={() => setPersonImageFile(null)} />}
-              {selectedJob ? <SecureImageDisplay imageUrl={selectedJob.source_garment_image_url} alt="Garment" onClick={() => showImage(selectedJob.source_garment_image_url)} /> : <ImageUploader onFileSelect={setGarmentImageFile} title="Garment Image" imageUrl={garmentImageUrl} onClear={() => setGarmentImageFile(null)} />}
+              {selectedJob ? (
+                <>
+                  <SecureImageDisplay imageUrl={selectedJob.source_person_image_url} alt="Person" onClick={() => showImage({ images: [{ url: selectedJob.source_person_image_url }], currentIndex: 0 })} />
+                  <SecureImageDisplay imageUrl={selectedJob.source_garment_image_url} alt="Garment" onClick={() => showImage({ images: [{ url: selectedJob.source_garment_image_url }], currentIndex: 0 })} />
+                </>
+              ) : (
+                <>
+                  <ImageUploader onFileSelect={setPersonImageFile} title="Person Image" imageUrl={personImageUrl} onClear={() => setPersonImageFile(null)} />
+                  <ImageUploader onFileSelect={setGarmentImageFile} title="Garment Image" imageUrl={garmentImageUrl} onClear={() => setGarmentImageFile(null)} />
+                </>
+              )}
             </CardContent>
           </Card>
           <Card>
@@ -231,7 +250,7 @@ const VirtualTryOn = () => {
                 <CardTitle>2. Prompt</CardTitle>
                 <div className="flex items-center space-x-2">
                   <Label htmlFor="auto-prompt" className="text-sm text-muted-foreground">Auto-Generate</Label>
-                  <Switch id="auto-prompt" checked={isAutoPromptEnabled} onCheckedChange={setIsAutoPromptEnabled} />
+                  <Switch id="auto-prompt" checked={isAutoPromptEnabled} onCheckedChange={setIsAutoPromptEnabled} disabled={!!selectedJobId} />
                 </div>
               </div>
             </CardHeader>
@@ -260,13 +279,13 @@ const VirtualTryOn = () => {
                   {recentJobs.map(job => {
                     const urlToPreview = job.final_image_url || job.source_person_image_url;
                     return (
-                      <button key={job.id} onClick={() => setSelectedJobId(job.id)} className={cn("border-2 rounded-lg p-1 flex-shrink-0 w-24 h-24", selectedJobId === job.id ? "border-primary" : "border-transparent")}>
+                      <button key={job.id} onClick={() => handleSelectJob(job)} className={cn("border-2 rounded-lg p-1 flex-shrink-0 w-24 h-24", selectedJobId === job.id ? "border-primary" : "border-transparent")}>
                         <SecureImageDisplay 
                           imageUrl={urlToPreview} 
                           alt="Recent job" 
                           onClick={(e) => {
                             e.stopPropagation();
-                            if (urlToPreview) showImage(urlToPreview);
+                            if (urlToPreview) showImage({ images: [{ url: urlToPreview }], currentIndex: 0 });
                           }}
                         />
                       </button>
