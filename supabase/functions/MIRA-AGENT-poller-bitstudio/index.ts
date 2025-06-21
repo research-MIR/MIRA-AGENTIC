@@ -70,7 +70,7 @@ serve(async (req) => {
       if (job.mode === 'inpaint') {
         console.log(`[BitStudioPoller][${job.id}] Inpaint job complete. Triggering compositor...`);
         await supabase.from('mira-agent-bitstudio-jobs').update({
-          status: 'complete',
+          status: 'compositing', // Set intermediate status
           final_image_url: finalImageUrl, // Temporarily store the crop URL
         }).eq('id', job_id);
         supabase.functions.invoke('MIRA-AGENT-compositor-inpaint', { body: { job_id } }).catch(console.error);
@@ -81,7 +81,7 @@ serve(async (req) => {
           final_image_url: finalImageUrl,
         }).eq('id', job_id);
       }
-      console.log(`[BitStudioPoller][${job.id}] Polling finished.`);
+      console.log(`[BitStudioPoller][${job.id}] Polling finished for this cycle.`);
 
     } else if (jobStatus === 'failed') {
       console.error(`[BitStudioPoller][${job.id}] Status is 'failed'. Updating job with error.`);

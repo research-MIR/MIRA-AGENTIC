@@ -15,12 +15,12 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  const { job_id } = await req.json();
+  if (!job_id) throw new Error("job_id is required.");
+  
+  const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
+
   try {
-    const { job_id } = await req.json();
-    if (!job_id) throw new Error("job_id is required.");
-
-    const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-
     const { data: job, error: fetchError } = await supabase
       .from('mira-agent-bitstudio-jobs')
       .select('final_image_url, metadata, user_id')
@@ -57,9 +57,12 @@ serve(async (req) => {
 
     const { data: { publicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
 
-    // Update the job with the final, composited URL
+    // Update the job with the final, composited URL and mark as complete
     await supabase.from('mira-agent-bitstudio-jobs')
-      .update({ final_image_url: publicUrl })
+      .update({ 
+          final_image_url: publicUrl,
+          status: 'complete'
+      })
       .eq('id', job_id);
 
     return new Response(JSON.stringify({ success: true, finalImageUrl: publicUrl }), {
@@ -68,7 +71,8 @@ serve(async (req) => {
     });
 
   } catch (error) {
-    console.error("[Compositor] Error:", error);
+    console.error(`[Compositor][${job_id}] Error:`, error);
+    await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'failed', error_message: `Compositor failed: ${error.message}` }).eq('id', job_id);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,
