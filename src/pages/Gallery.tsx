@@ -4,7 +4,7 @@ import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Image as ImageIcon, Bot, Wand2, Code, CheckCircle, Plus, Folder, MoreVertical, X, Download, Loader2, Filter, SortAsc, SortDesc } from "lucide-react";
+import { Image as ImageIcon, Bot, Wand2, Code, CheckCircle, Plus, Folder, MoreVertical, X, Download, Loader2, Filter, SortAsc, SortDesc, Shirt } from "lucide-react";
 import { useImagePreview } from "@/context/ImagePreviewContext";
 import { useLanguage } from "@/context/LanguageContext";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { DateRangePicker } from "@/components/DateRangePicker";
 import { DateRange } from "react-day-picker";
 import { endOfDay } from "date-fns";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface ImageResult {
   url: string;
@@ -28,12 +29,19 @@ interface ImageResult {
   createdAt: string;
 }
 
-interface Job {
+interface AgentJob {
   id: string;
   final_result: any;
   context: any;
   original_prompt: string;
   project_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface VtoJob {
+  id: string;
+  final_image_url?: string;
   created_at: string;
   updated_at: string;
 }
@@ -70,14 +78,14 @@ const Gallery = () => {
   const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
 
   const { 
-    data, 
-    error, 
-    fetchNextPage, 
-    hasNextPage, 
-    isFetching, 
-    isFetchingNextPage 
-  } = useInfiniteQuery<Job[]>({
-    queryKey: ['galleryJobs', session?.user?.id, activeTab, selectedProjectId, sortOrder, dateRange],
+    data: agentJobsData, 
+    error: agentJobsError, 
+    fetchNextPage: fetchNextAgentJobs, 
+    hasNextPage: hasNextAgentJobs, 
+    isFetching: isFetchingAgentJobs, 
+    isFetchingNextPage: isFetchingNextAgentJobs 
+  } = useInfiniteQuery<AgentJob[]>({
+    queryKey: ['galleryAgentJobs', session?.user?.id, activeTab, selectedProjectId, sortOrder, dateRange],
     queryFn: async ({ pageParam = 0 }) => {
       if (!session?.user) return [];
       const from = pageParam * PAGE_SIZE;
@@ -90,46 +98,64 @@ const Gallery = () => {
         .order(sortOrder, { ascending: false })
         .range(from, to);
 
-      // Filter by source tab
       switch (activeTab) {
-        case 'agent':
-          query = query.in('context->>source', ['agent', 'agent_branch']);
-          break;
-        case 'direct':
-          query = query.eq('context->>source', 'direct_generator');
-          break;
-        case 'refined':
-          query = query.eq('context->>source', 'refiner');
-          break;
+        case 'agent': query = query.in('context->>source', ['agent', 'agent_branch']); break;
+        case 'direct': query = query.eq('context->>source', 'direct_generator'); break;
+        case 'refined': query = query.eq('context->>source', 'refiner'); break;
       }
 
-      // Filter by project
       if (selectedProjectId === 'unassigned') {
         query = query.is('project_id', null);
       } else if (selectedProjectId !== 'all') {
         query = query.eq('project_id', selectedProjectId);
       }
 
-      // Filter by date range
-      if (dateRange?.from) {
-        query = query.gte('created_at', dateRange.from.toISOString());
-      }
-      if (dateRange?.to) {
-        query = query.lte('created_at', endOfDay(dateRange.to).toISOString());
-      }
+      if (dateRange?.from) query = query.gte('created_at', dateRange.from.toISOString());
+      if (dateRange?.to) query = query.lte('created_at', endOfDay(dateRange.to).toISOString());
         
       const { data, error } = await query;
       if (error) throw error;
       return data || [];
     },
     initialPageParam: 0,
-    getNextPageParam: (lastPage, allPages) => {
-      return lastPage.length === PAGE_SIZE ? allPages.length : undefined;
-    },
-    enabled: !!session?.user,
+    getNextPageParam: (lastPage, allPages) => lastPage.length === PAGE_SIZE ? allPages.length : undefined,
+    enabled: !!session?.user && activeTab !== 'vto',
   });
 
-  const jobs = useMemo(() => data?.pages.flatMap(page => page) ?? [], [data]);
+  const { 
+    data: vtoJobsData, 
+    error: vtoJobsError, 
+    fetchNextPage: fetchNextVtoJobs, 
+    hasNextPage: hasNextVtoJobs, 
+    isFetching: isFetchingVtoJobs, 
+    isFetchingNextPage: isFetchingNextVtoJobs 
+  } = useInfiniteQuery<VtoJob[]>({
+    queryKey: ['galleryVtoJobs', session?.user?.id, sortOrder, dateRange],
+    queryFn: async ({ pageParam = 0 }) => {
+      if (!session?.user) return [];
+      const from = pageParam * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
+      
+      let query = supabase
+        .from('mira-agent-bitstudio-jobs')
+        .select('id, final_image_url, created_at, updated_at')
+        .eq('user_id', session.user.id)
+        .eq('status', 'complete')
+        .not('final_image_url', 'is', null)
+        .order(sortOrder, { ascending: false })
+        .range(from, to);
+
+      if (dateRange?.from) query = query.gte('created_at', dateRange.from.toISOString());
+      if (dateRange?.to) query = query.lte('created_at', endOfDay(dateRange.to).toISOString());
+
+      const { data, error } = await query;
+      if (error) throw error;
+      return data || [];
+    },
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) => lastPage.length === PAGE_SIZE ? allPages.length : undefined,
+    enabled: !!session?.user && activeTab === 'vto',
+  });
 
   const { data: projects } = useQuery<Project[]>({
     queryKey: ['projects', session?.user?.id],
@@ -143,7 +169,17 @@ const Gallery = () => {
   });
 
   const allImages = useMemo((): ImageResult[] => {
-    if (!jobs) return [];
+    if (activeTab === 'vto') {
+      const jobs = vtoJobsData?.pages.flatMap(page => page) ?? [];
+      return jobs.filter(job => job.final_image_url).map(job => ({
+        url: job.final_image_url!,
+        jobId: job.id,
+        source: 'vto',
+        createdAt: job.created_at,
+      }));
+    }
+
+    const jobs = agentJobsData?.pages.flatMap(page => page) ?? [];
     const images: ImageResult[] = [];
     for (const job of jobs) {
       const source = job.context?.source || 'agent';
@@ -167,7 +203,7 @@ const Gallery = () => {
       }
     }
     return Array.from(new Map(images.map(item => [item.url, item])).values());
-  }, [jobs]);
+  }, [agentJobsData, vtoJobsData, activeTab]);
 
   const handleImageClick = (image: ImageResult, index: number, event: MouseEvent) => {
     if (!isSelectMode) {
@@ -228,7 +264,6 @@ const Gallery = () => {
         if (queueError) throw queueError;
       } catch (err) {
         console.error(`Failed to queue upscale for ${url}:`, err);
-        // Don't rethrow, let other jobs succeed
       }
     });
     await Promise.all(promises);
@@ -318,6 +353,7 @@ const Gallery = () => {
   };
 
   const renderImageGrid = (images: ImageResult[]) => {
+    const isFetching = activeTab === 'vto' ? isFetchingVtoJobs : isFetchingAgentJobs;
     if (images.length === 0 && !isFetching) {
       return (
         <div className="text-center py-16">
@@ -349,7 +385,7 @@ const Gallery = () => {
                   {isSelected && <CheckCircle className="h-10 w-10 text-white" />}
                 </div>
               )}
-              {!isSelectMode && (image.source === 'agent' || image.source === 'agent_branch') && (
+              {(!isSelectMode && (image.source === 'agent' || image.source === 'agent_branch')) && (
                 <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity rounded-b-md">
                   <Button size="sm" variant="secondary" className="w-full" onClick={(e) => { e.stopPropagation(); navigate(`/chat/${image.jobId}`); }}>{t('viewChat')}</Button>
                 </div>
@@ -360,6 +396,13 @@ const Gallery = () => {
       </div>
     );
   };
+
+  const isFetching = activeTab === 'vto' ? isFetchingVtoJobs : isFetchingAgentJobs;
+  const isFetchingNextPage = activeTab === 'vto' ? isFetchingNextVtoJobs : isFetchingNextAgentJobs;
+  const hasNextPage = activeTab === 'vto' ? hasNextVtoJobs : hasNextAgentJobs;
+  const fetchNextPage = activeTab === 'vto' ? fetchNextVtoJobs : fetchNextAgentJobs;
+  const error = activeTab === 'vto' ? vtoJobsError : agentJobsError;
+  const isProjectFilterDisabled = activeTab === 'vto';
 
   return (
     <>
@@ -384,16 +427,25 @@ const Gallery = () => {
         <div className="flex flex-wrap gap-4 mb-6 pb-4 border-b">
           <div className="flex items-center gap-2">
             <Label htmlFor="project-filter">{t('filterProject')}</Label>
-            <Select value={selectedProjectId} onValueChange={setSelectedProjectId}>
-              <SelectTrigger id="project-filter" className="w-[180px]">
-                <SelectValue placeholder={t('filterByProjectPlaceholder')} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">{t('filterAllProjects')}</SelectItem>
-                <SelectItem value="unassigned">{t('filterUnassigned')}</SelectItem>
-                {projects?.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className={cn(isProjectFilterDisabled && "cursor-not-allowed")}>
+                    <Select value={selectedProjectId} onValueChange={setSelectedProjectId} disabled={isProjectFilterDisabled}>
+                      <SelectTrigger id="project-filter" className="w-[180px]">
+                        <SelectValue placeholder={t('filterByProjectPlaceholder')} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">{t('filterAllProjects')}</SelectItem>
+                        <SelectItem value="unassigned">{t('filterUnassigned')}</SelectItem>
+                        {projects?.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </TooltipTrigger>
+                {isProjectFilterDisabled && <TooltipContent><p>Project filter is not available for Virtual Try-On images.</p></TooltipContent>}
+              </Tooltip>
+            </TooltipProvider>
           </div>
           <div className="flex items-center gap-2">
             <Label htmlFor="sort-order">{t('filterSortBy')}</Label>
@@ -414,11 +466,12 @@ const Gallery = () => {
         </div>
 
         <Tabs defaultValue="all" className="w-full" onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-4 mb-4">
+          <TabsList className="grid w-full grid-cols-5 mb-4">
             <TabsTrigger value="all"><ImageIcon className="mr-2 h-4 w-4" />{t('galleryTabsAll')}</TabsTrigger>
             <TabsTrigger value="agent"><Bot className="mr-2 h-4 w-4" />{t('galleryTabsAgent')}</TabsTrigger>
             <TabsTrigger value="direct"><Code className="mr-2 h-4 w-4" />{t('galleryTabsDirect')}</TabsTrigger>
             <TabsTrigger value="refined"><Wand2 className="mr-2 h-4 w-4" />{t('galleryTabsRefined')}</TabsTrigger>
+            <TabsTrigger value="vto"><Shirt className="mr-2 h-4 w-4" />{t('virtualTryOn')}</TabsTrigger>
           </TabsList>
           
           {isFetching && !isFetchingNextPage ? (
@@ -447,7 +500,7 @@ const Gallery = () => {
       {isSelectMode && selectedImages.size > 0 && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 w-auto bg-background border rounded-lg shadow-2xl p-2 flex items-center gap-4 z-50">
           <p className="text-sm font-medium px-2">{selectedImages.size} selected</p>
-          <Button variant="outline" onClick={() => setIsProjectModalOpen(true)}><Folder className="mr-2 h-4 w-4" />Add to Project</Button>
+          <Button variant="outline" onClick={() => setIsProjectModalOpen(true)} disabled={activeTab === 'vto'}><Folder className="mr-2 h-4 w-4" />Add to Project</Button>
           <Button variant="outline" onClick={handleBulkDownload} disabled={isDownloading}>
             {isDownloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
             Download as ZIP
