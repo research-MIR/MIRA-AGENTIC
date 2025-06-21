@@ -48,6 +48,27 @@ const SecureImageDisplay = ({ imageUrl, alt, onClick }: { imageUrl: string | nul
     return <img src={displayUrl} alt={alt} className={cn("max-w-full max-h-full object-contain rounded-md", hasClickHandler && "cursor-pointer")} onClick={onClick} />;
 };
 
+const ImageUploader = ({ onFileSelect, title, imageUrl, onClear }: { onFileSelect: (file: File) => void, title: string, imageUrl: string | null, onClear: () => void }) => {
+    const inputRef = useRef<HTMLInputElement>(null);
+    const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: (e) => e.dataTransfer.files && onFileSelect(e.dataTransfer.files[0]) });
+  
+    if (imageUrl) {
+      return (
+        <div className="relative aspect-square">
+          <img src={imageUrl} alt={title} className="w-full h-full object-cover rounded-md" />
+          <Button variant="destructive" size="icon" className="absolute top-2 right-2 h-6 w-6 z-10" onClick={onClear}><X className="h-4 w-4" /></Button>
+        </div>
+      );
+    }
+  
+    return (
+      <div {...dropzoneProps} className={cn("flex aspect-square justify-center items-center rounded-lg border border-dashed p-4 text-center transition-colors cursor-pointer", isDraggingOver && "border-primary bg-primary/10")} onClick={() => inputRef.current?.click()}>
+        <div className="text-center pointer-events-none"><PlusCircle className="mx-auto h-8 w-8 text-muted-foreground" /><p className="mt-2 text-sm font-semibold">{title}</p></div>
+        <Input ref={inputRef} type="file" className="hidden" accept="image/*" onChange={(e) => e.target.files && onFileSelect(e.target.files[0])} />
+      </div>
+    );
+};
+
 interface VirtualTryOnProProps {
   recentJobs: BitStudioJob[] | undefined;
   isLoadingRecentJobs: boolean;
@@ -61,6 +82,7 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
   const { showImage } = useImagePreview();
   const queryClient = useQueryClient();
   const [sourceImageFile, setSourceImageFile] = useState<File | null>(null);
+  const [referenceImageFile, setReferenceImageFile] = useState<File | null>(null);
   const [maskImage, setMaskImage] = useState<string | null>(null);
   const [resultImage, setResultImage] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
@@ -71,20 +93,21 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
 
-  const sourceImageUrl = useMemo(() => 
-    sourceImageFile ? URL.createObjectURL(sourceImageFile) : null, 
-  [sourceImageFile]);
+  const sourceImageUrl = useMemo(() => sourceImageFile ? URL.createObjectURL(sourceImageFile) : null, [sourceImageFile]);
+  const referenceImageUrl = useMemo(() => referenceImageFile ? URL.createObjectURL(referenceImageFile) : null, [referenceImageFile]);
 
   useEffect(() => {
     return () => {
       if (sourceImageUrl) URL.revokeObjectURL(sourceImageUrl);
+      if (referenceImageUrl) URL.revokeObjectURL(referenceImageUrl);
       if (channelRef.current) supabase.removeChannel(channelRef.current);
     };
-  }, [sourceImageUrl, supabase]);
+  }, [sourceImageUrl, referenceImageUrl, supabase]);
 
   useEffect(() => {
     if (selectedJob) {
       setSourceImageFile(null);
+      setReferenceImageFile(null);
       setMaskImage(null);
       setPrompt("");
       setResetTrigger(c => c + 1);
@@ -116,23 +139,21 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
     setIsLoading(true);
     const toastId = showLoading("Starting inpainting job...");
     try {
-      const source_image_base64 = await fileToBase64(sourceImageFile);
-      const mask_image_base64 = maskImage.split(',')[1];
+      const payload: any = {
+        mode: 'inpaint',
+        source_image_base64: await fileToBase64(sourceImageFile),
+        mask_image_base64: maskImage.split(',')[1],
+        prompt,
+        user_id: session?.user.id
+      };
 
-      const userId = session?.user.id;
-      if (!userId) {
-        throw new Error("User not authenticated.");
+      if (referenceImageFile) {
+        payload.reference_image_base64 = await fileToBase64(referenceImageFile);
       }
 
-      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
-        body: { 
-          mode: 'inpaint',
-          source_image_base64, 
-          mask_image_base64, 
-          prompt,
-          user_id: userId
-        }
-      });
+      if (!payload.user_id) throw new Error("User not authenticated.");
+
+      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', { body: payload });
 
       if (error) throw error;
       if (!data.success || !data.jobId) throw new Error("Failed to queue inpainting job.");
@@ -141,9 +162,9 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
       dismissToast(toastId);
       showSuccess("Inpainting job started! You can track its progress in the sidebar.");
       
-      // Clear the form and refresh recent jobs
       queryClient.invalidateQueries({ queryKey: ['bitstudioJobs', session?.user?.id] });
       setSourceImageFile(null);
+      setReferenceImageFile(null);
       setMaskImage(null);
       setPrompt("");
       setResetTrigger(c => c + 1);
@@ -225,6 +246,22 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
               {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
               Generate
             </Button>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Palette className="h-5 w-5" />
+              Style Reference (Optional)
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ImageUploader 
+              onFileSelect={setReferenceImageFile} 
+              title="Upload Reference" 
+              imageUrl={referenceImageUrl} 
+              onClear={() => setReferenceImageFile(null)} 
+            />
           </CardContent>
         </Card>
         <Card>

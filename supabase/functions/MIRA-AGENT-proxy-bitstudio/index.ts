@@ -17,7 +17,8 @@ type BitStudioImageType =
   | 'virtual-try-on-person' 
   | 'virtual-try-on-outfit' 
   | 'inpaint-base' 
-  | 'inpaint-mask';
+  | 'inpaint-mask'
+  | 'inpaint-reference';
 
 async function uploadToBitStudio(fileBlob: Blob, type: BitStudioImageType, filename: string): Promise<string> {
   const formData = new FormData();
@@ -71,24 +72,37 @@ serve(async (req) => {
     let newJobId;
 
     if (mode === 'inpaint') {
-      const { source_image_base64, mask_image_base64, prompt } = body;
+      const { source_image_base64, mask_image_base64, prompt, reference_image_base64 } = body;
       if (!source_image_base64 || !mask_image_base64 || !prompt) throw new Error("source_image_base64, mask_image_base64, and prompt are required for inpaint mode.");
 
       const sourceBlob = new Blob([decodeBase64(source_image_base64)], { type: 'image/png' });
       const maskBlob = new Blob([decodeBase64(mask_image_base64)], { type: 'image/png' });
 
-      const [sourceImageId, maskImageId] = await Promise.all([
+      const uploadPromises: Promise<string | null>[] = [
         uploadToBitStudio(sourceBlob, 'inpaint-base', 'source.png'),
         uploadToBitStudio(maskBlob, 'inpaint-mask', 'mask.png')
-      ]);
+      ];
+
+      if (reference_image_base64) {
+        const referenceBlob = new Blob([decodeBase64(reference_image_base64)], { type: 'image/png' });
+        uploadPromises.push(uploadToBitStudio(referenceBlob, 'inpaint-reference', 'reference.png'));
+      } else {
+        uploadPromises.push(Promise.resolve(null)); // Keep array length consistent
+      }
+
+      const [sourceImageId, maskImageId, referenceImageId] = await Promise.all(uploadPromises);
 
       const inpaintUrl = `${BITSTUDIO_API_BASE}/images/${sourceImageId}/inpaint`;
-      const inpaintPayload = { 
+      const inpaintPayload: any = { 
         mask_image_id: maskImageId, 
         prompt,
         resolution: 'standard',
         denoise: 1.0
       };
+      
+      if (referenceImageId) {
+        inpaintPayload.reference_image_id = referenceImageId;
+      }
       
       const inpaintResponse = await fetch(inpaintUrl, {
         method: 'POST',
