@@ -102,7 +102,7 @@ serve(async (req) => {
       if (!inpaintResponse.ok) throw new Error(`BitStudio inpainting request failed: ${responseText}`);
       
       const inpaintResult = JSON.parse(responseText);
-      const taskId = inpaintResult[0]?.id;
+      const taskId = inpaintResult.versions?.[0]?.id;
       if (!taskId) throw new Error("BitStudio did not return a task ID for the inpainting job.");
 
       const { data: newJob, error: insertError } = await supabase.from('mira-agent-bitstudio-jobs').insert({
