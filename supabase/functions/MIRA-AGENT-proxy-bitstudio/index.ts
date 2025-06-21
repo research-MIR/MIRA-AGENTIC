@@ -13,7 +13,13 @@ const BITSTUDIO_API_KEY = Deno.env.get('BITSTUDIO_API_KEY');
 const BITSTUDIO_API_BASE = 'https://api.bitstudio.ai';
 const UPLOAD_BUCKET = 'mira-agent-user-uploads';
 
-async function uploadToBitStudio(fileBlob: Blob, type: 'virtual-try-on-person' | 'virtual-try-on-outfit' | 'inpainting', filename: string): Promise<string> {
+type BitStudioImageType = 
+  | 'virtual-try-on-person' 
+  | 'virtual-try-on-outfit' 
+  | 'inpaint-base' 
+  | 'inpaint-mask';
+
+async function uploadToBitStudio(fileBlob: Blob, type: BitStudioImageType, filename: string): Promise<string> {
   const formData = new FormData();
   formData.append('file', fileBlob, filename);
   formData.append('type', type);
@@ -71,13 +77,16 @@ serve(async (req) => {
       const sourceBlob = new Blob([decodeBase64(source_image_base64)], { type: 'image/png' });
       const maskBlob = new Blob([decodeBase64(mask_image_base64)], { type: 'image/png' });
 
+      // FIX: Use correct image types from BitStudio docs
       const [sourceImageId, maskImageId] = await Promise.all([
-        uploadToBitStudio(sourceBlob, 'inpainting', 'source.png'),
-        uploadToBitStudio(maskBlob, 'inpainting', 'mask.png')
+        uploadToBitStudio(sourceBlob, 'inpaint-base', 'source.png'),
+        uploadToBitStudio(maskBlob, 'inpaint-mask', 'mask.png')
       ]);
 
-      const inpaintUrl = `${BITSTUDIO_API_BASE}/images/inpainting`;
-      const inpaintPayload = { image_id: sourceImageId, mask_id: maskImageId, prompt };
+      // FIX: Use correct endpoint and payload structure
+      const inpaintUrl = `${BITSTUDIO_API_BASE}/images/${sourceImageId}/inpaint`;
+      const inpaintPayload = { mask_image_id: maskImageId, prompt };
+      
       const inpaintResponse = await fetch(inpaintUrl, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}`, 'Content-Type': 'application/json' },
