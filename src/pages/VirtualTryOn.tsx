@@ -289,13 +289,17 @@ const VirtualTryOn = () => {
 
   return (
     <div className="p-4 md:p-8 h-screen overflow-y-auto">
-      <header className="pb-4 mb-8 border-b"><h1 className="text-3xl font-bold">{t('virtualTryOn')}</h1></header>
+      <header className="pb-4 mb-8 border-b">
+        <h1 className="text-3xl font-bold">{t('virtualTryOn')}</h1>
+        <p className="text-muted-foreground">{t('vtoDescription')}</p>
+      </header>
       <Tabs defaultValue="single" className="w-full">
         <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="single">Single Try-On</TabsTrigger>
-          <TabsTrigger value="batch">Batch Process</TabsTrigger>
+          <TabsTrigger value="single">{t('singleTryOn')}</TabsTrigger>
+          <TabsTrigger value="batch">{t('batchProcess')}</TabsTrigger>
         </TabsList>
         <TabsContent value="single" className="pt-6">
+          <p className="text-sm text-muted-foreground mb-6">{t('singleVtoDescription')}</p>
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div className="lg:col-span-1 space-y-6">
               <Card>
@@ -335,9 +339,9 @@ const VirtualTryOn = () => {
               </Button>
             </div>
             <div className="lg:col-span-2">
-              <Card className="min-h-[60vh]">
+              <Card className="h-[75vh] flex flex-col">
                 <CardHeader><CardTitle>Result</CardTitle></CardHeader>
-                <CardContent className="flex items-center justify-center">
+                <CardContent className="flex-1 flex items-center justify-center overflow-hidden p-2">
                   {selectedJob ? renderJobResult(selectedJob) : <div className="text-center text-muted-foreground"><ImageIcon className="h-16 w-16 mx-auto mb-4" /><p>Your result will appear here.</p></div>}
                 </CardContent>
               </Card>
@@ -362,6 +366,7 @@ const VirtualTryOn = () => {
           </div>
         </TabsContent>
         <TabsContent value="batch" className="pt-6">
+          <p className="text-sm text-muted-foreground mb-6">{t('batchVtoDescription')}</p>
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div className="lg:col-span-1 space-y-6">
               <Card>
@@ -369,39 +374,39 @@ const VirtualTryOn = () => {
                 <CardContent>
                   <Tabs defaultValue="one-garment" onValueChange={setBatchMode}>
                     <TabsList className="grid w-full grid-cols-3">
-                      <TabsTrigger value="one-garment"><Shirt className="h-4 w-4" /></TabsTrigger>
-                      <TabsTrigger value="random"><Users className="h-4 w-4" /></TabsTrigger>
-                      <TabsTrigger value="precise"><Link2 className="h-4 w-4" /></TabsTrigger>
+                      <TabsTrigger value="one-garment" title={t('oneGarment')}><Shirt className="h-4 w-4" /></TabsTrigger>
+                      <TabsTrigger value="random" title={t('randomPairs')}><Users className="h-4 w-4" /></TabsTrigger>
+                      <TabsTrigger value="precise" title={t('precisePairs')}><Link2 className="h-4 w-4" /></TabsTrigger>
                     </TabsList>
                     <TabsContent value="one-garment" className="pt-4 space-y-4">
-                      <p className="text-sm text-muted-foreground">One garment on multiple people.</p>
+                      <p className="text-sm text-muted-foreground">{t('oneGarmentDescription')}</p>
                       <ImageUploader onFileSelect={setBatchGarmentFile} title="Upload Garment" imageUrl={batchGarmentFile ? URL.createObjectURL(batchGarmentFile) : null} onClear={() => setBatchGarmentFile(null)} />
                       <MultiImageUploader onFilesSelect={setBatchPersonFiles} title="Upload People" icon={<Users className="h-8 w-8 text-muted-foreground" />} description="Select multiple person images." />
                     </TabsContent>
                     <TabsContent value="random" className="pt-4 space-y-4">
-                      <p className="text-sm text-muted-foreground">Randomly pair garments and people.</p>
+                      <p className="text-sm text-muted-foreground">{t('randomPairsDescription')}</p>
                       <MultiImageUploader onFilesSelect={setBatchRandomGarmentFiles} title="Upload Garments" icon={<Shirt className="h-8 w-8 text-muted-foreground" />} description="Select multiple garment images." />
                       <MultiImageUploader onFilesSelect={setBatchRandomPersonFiles} title="Upload People" icon={<Users className="h-8 w-8 text-muted-foreground" />} description="Select multiple person images." />
                     </TabsContent>
                     <TabsContent value="precise" className="pt-4 space-y-4">
-                      <p className="text-sm text-muted-foreground">Create specific pairs.</p>
+                      <p className="text-sm text-muted-foreground">{t('precisePairsDescription')}</p>
                       <div className="grid grid-cols-2 gap-2">
                         <ImageUploader onFileSelect={setTempPairPerson} title="Person" imageUrl={tempPairPerson ? URL.createObjectURL(tempPairPerson) : null} onClear={() => setTempPairPerson(null)} />
                         <ImageUploader onFileSelect={setTempPairGarment} title="Garment" imageUrl={tempPairGarment ? URL.createObjectURL(tempPairGarment) : null} onClear={() => setTempPairGarment(null)} />
                       </div>
-                      <Button className="w-full" onClick={addPrecisePair} disabled={!tempPairPerson || !tempPairGarment}>Add Pair</Button>
+                      <Button className="w-full" onClick={addPrecisePair} disabled={!tempPairPerson || !tempPairGarment}>{t('addPair')}</Button>
                     </TabsContent>
                   </Tabs>
                 </CardContent>
               </Card>
               <Button size="lg" className="w-full" onClick={handleBatchSubmit} disabled={isLoading}>
                 {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
-                Start Batch Try-On
+                {t('startBatchTryOn')}
               </Button>
             </div>
             <div className="lg:col-span-2">
               <Card className="min-h-[75vh]">
-                <CardHeader><CardTitle>Batch Queue</CardTitle></CardHeader>
+                <CardHeader><CardTitle>{t('batchQueue')}</CardTitle></CardHeader>
                 <CardContent>
                   <ScrollArea className="h-[65vh]">
                     {batchMode === 'one-garment' && batchPersonFiles.length > 0 && (
