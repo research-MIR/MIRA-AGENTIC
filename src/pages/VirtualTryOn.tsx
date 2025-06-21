@@ -33,7 +33,7 @@ const SecureImageDisplay = ({ imageUrl, alt, onClick }: { imageUrl: string | nul
     if (isLoading) return <div className="w-full h-full bg-muted rounded-md flex items-center justify-center"><Loader2 className="h-6 w-6 animate-spin" /></div>;
     if (error) return <div className="w-full h-full bg-muted rounded-md flex items-center justify-center"><AlertTriangle className="h-6 w-6 text-destructive" /></div>;
     
-    return <img src={displayUrl} alt={alt} className={cn("w-full h-full object-contain rounded-md", hasClickHandler && "cursor-pointer")} onClick={onClick} />;
+    return <img src={displayUrl} alt={alt} className={cn("max-w-full max-h-full object-contain rounded-md", hasClickHandler && "cursor-pointer")} onClick={onClick} />;
 };
 
 const VirtualTryOn = () => {
