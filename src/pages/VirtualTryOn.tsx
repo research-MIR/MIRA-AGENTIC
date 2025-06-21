@@ -283,10 +283,6 @@ const VirtualTryOn = () => {
                         <SecureImageDisplay 
                           imageUrl={urlToPreview} 
                           alt="Recent job" 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (urlToPreview) showImage({ images: [{ url: urlToPreview }], currentIndex: 0 });
-                          }}
                         />
                       </button>
                     )
