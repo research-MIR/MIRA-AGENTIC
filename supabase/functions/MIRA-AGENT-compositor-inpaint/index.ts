@@ -47,7 +47,6 @@ serve(async (req) => {
 
     const metadata = job.metadata || {};
     
-    // Core logic check: Only fail if essential data is missing.
     if (!metadata.full_source_image_base64 || !metadata.bbox) {
       console.error(`[Compositor][${job_id}] CRITICAL ERROR: Missing essential metadata. Has full source: ${!!metadata.full_source_image_base64}, Has bbox: ${!!metadata.bbox}`);
       throw new Error("Job is missing essential metadata (full source image or bounding box) for compositing.");
@@ -58,7 +57,12 @@ serve(async (req) => {
     const fullSourceImage = await loadImage(`data:image/png;base64,${job.metadata.full_source_image_base64}`);
     const inpaintedCropResponse = await fetch(job.final_image_url);
     if (!inpaintedCropResponse.ok) throw new Error("Failed to download inpainted crop from BitStudio.");
-    const inpaintedCropImage = await loadImage(new Uint8Array(await inpaintedCropResponse.arrayBuffer()));
+    
+    // Read the body ONCE and store it.
+    const inpaintedCropArrayBuffer = await inpaintedCropResponse.arrayBuffer();
+    
+    // Use the stored buffer to load the image for compositing.
+    const inpaintedCropImage = await loadImage(new Uint8Array(inpaintedCropArrayBuffer));
 
     const canvas = createCanvas(fullSourceImage.width(), fullSourceImage.height());
     const ctx = canvas.getContext('2d');
@@ -69,7 +73,8 @@ serve(async (req) => {
     // Debug asset generation (optional)
     const croppedSourceBuffer = metadata.cropped_source_image_base64 ? decodeBase64(metadata.cropped_source_image_base64) : null;
     const dilatedMaskBuffer = metadata.cropped_dilated_mask_base64 ? decodeBase64(metadata.cropped_dilated_mask_base64) : null;
-    const inpaintedCropBuffer = new Uint8Array(await inpaintedCropResponse.clone().arrayBuffer());
+    // Reuse the stored buffer for the debug asset.
+    const inpaintedCropBuffer = new Uint8Array(inpaintedCropArrayBuffer);
 
     const [
         finalCompositedUrl,
