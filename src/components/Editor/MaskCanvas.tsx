@@ -42,47 +42,38 @@ const MaskCanvasComponent = ({ imageUrl, onMaskChange, brushSize, resetTrigger }
     image.crossOrigin = "anonymous";
     image.src = imageUrl;
     image.onload = () => {
-      const container = containerRef.current;
-      if (container) {
-        const { width, height } = container.getBoundingClientRect();
-        const imgAspectRatio = image.naturalWidth / image.naturalHeight;
-        const containerAspectRatio = width / height;
-
-        let renderWidth, renderHeight;
-        if (imgAspectRatio > containerAspectRatio) {
-          renderWidth = width;
-          renderHeight = width / imgAspectRatio;
-        } else {
-          renderHeight = height;
-          renderWidth = height * imgAspectRatio;
-        }
-
-        imageCanvas.width = renderWidth;
-        imageCanvas.height = renderHeight;
-        drawingCanvas.width = renderWidth;
-        drawingCanvas.height = renderHeight;
-        
-        ctx.drawImage(image, 0, 0, renderWidth, renderHeight);
-        clearCanvas(); // Clear drawing canvas when new image loads
-      }
+      // FIX: Set canvas resolution to the image's natural dimensions
+      imageCanvas.width = image.naturalWidth;
+      imageCanvas.height = image.naturalHeight;
+      drawingCanvas.width = image.naturalWidth;
+      drawingCanvas.height = image.naturalHeight;
+      
+      ctx.drawImage(image, 0, 0, image.naturalWidth, image.naturalHeight);
+      clearCanvas();
     };
   }, [imageUrl, clearCanvas]);
 
   const getCoords = useCallback((e: React.MouseEvent | React.TouchEvent) => {
-    const rect = canvasRect.current;
-    if (!rect) return { x: 0, y: 0 };
+    const canvas = drawingCanvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    
+    const rect = canvas.getBoundingClientRect();
     const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
     const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+
+    // Translate screen coordinates to canvas coordinates, accounting for CSS scaling
+    const canvasX = (clientX - rect.left) * (canvas.width / rect.width);
+    const canvasY = (clientY - rect.top) * (canvas.height / rect.height);
+
     return {
-      x: clientX - rect.left,
-      y: clientY - rect.top,
+      x: canvasX,
+      y: canvasY,
     };
   }, []);
 
   const startDrawing = useCallback((e: React.MouseEvent | React.TouchEvent) => {
     const canvas = drawingCanvasRef.current;
     if (!canvas) return;
-    canvasRect.current = canvas.getBoundingClientRect(); // Cache the rect on mousedown
     setIsDrawing(true);
     const coords = getCoords(e);
     lastPoint.current = coords;
@@ -118,11 +109,14 @@ const MaskCanvasComponent = ({ imageUrl, onMaskChange, brushSize, resetTrigger }
   }, [isDrawing, onMaskChange]);
 
   return (
-    <div ref={containerRef} className="relative w-full h-full">
-      <canvas ref={imageCanvasRef} className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
+    <div ref={containerRef} className="relative w-full h-full flex items-center justify-center">
+      <canvas 
+        ref={imageCanvasRef} 
+        className="absolute max-w-full max-h-full object-contain" 
+      />
       <canvas
         ref={drawingCanvasRef}
-        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 cursor-crosshair"
+        className="absolute max-w-full max-h-full object-contain cursor-crosshair"
         onMouseDown={startDrawing}
         onMouseMove={draw}
         onMouseUp={stopDrawing}
