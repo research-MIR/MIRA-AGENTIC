@@ -11,12 +11,16 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
 
-async function uploadBufferToStorage(supabase: SupabaseClient, buffer: Uint8Array, userId: string, filename: string): Promise<string> {
+async function uploadBufferToStorage(supabase: SupabaseClient, buffer: Uint8Array | null, userId: string, filename: string): Promise<string | null> {
+    if (!buffer) return null;
     const filePath = `${userId}/vto-debug/${Date.now()}-${filename}`;
     const { error } = await supabase.storage
       .from(GENERATED_IMAGES_BUCKET)
       .upload(filePath, buffer, { contentType: 'image/png', upsert: true });
-    if (error) throw new Error(`Storage upload failed for ${filename}: ${error.message}`);
+    if (error) {
+        console.error(`Storage upload failed for ${filename}: ${error.message}`);
+        return null; // Return null on failure instead of throwing
+    }
     const { data: { publicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
     return publicUrl;
 }
@@ -41,22 +45,12 @@ serve(async (req) => {
     if (fetchError) throw fetchError;
     if (!job.final_image_url) throw new Error("Job is missing the final_image_url (inpainted crop).");
 
-    console.log(`[Compositor][${job_id}] Checking for required metadata...`);
     const metadata = job.metadata || {};
-    console.log(`[Compositor][${job_id}] Metadata keys found:`, Object.keys(metadata));
-
-    const hasFullSource = !!metadata.full_source_image_base64;
-    const hasBbox = !!metadata.bbox;
-    const hasCroppedMask = !!metadata.cropped_dilated_mask_base64;
-    const hasCroppedSource = !!metadata.cropped_source_image_base64;
-
-    console.log(`[Compositor][${job_id}] full_source_image_base64: ${hasFullSource}`);
-    console.log(`[Compositor][${job_id}] bbox: ${hasBbox}`);
-    console.log(`[Compositor][${job_id}] cropped_dilated_mask_base64: ${hasCroppedMask}`);
-    console.log(`[Compositor][${job_id}] cropped_source_image_base64: ${hasCroppedSource}`);
-
-    if (!hasFullSource || !hasBbox || !hasCroppedMask || !hasCroppedSource) {
-      throw new Error("Job is missing necessary metadata for compositing.");
+    
+    // Core logic check: Only fail if essential data is missing.
+    if (!metadata.full_source_image_base64 || !metadata.bbox) {
+      console.error(`[Compositor][${job_id}] CRITICAL ERROR: Missing essential metadata. Has full source: ${!!metadata.full_source_image_base64}, Has bbox: ${!!metadata.bbox}`);
+      throw new Error("Job is missing essential metadata (full source image or bounding box) for compositing.");
     }
 
     const { createCanvas, loadImage } = await import('https://deno.land/x/canvas@v1.4.1/mod.ts');
@@ -72,6 +66,11 @@ serve(async (req) => {
     ctx.drawImage(inpaintedCropImage, job.metadata.bbox.x, job.metadata.bbox.y, job.metadata.bbox.width, job.metadata.bbox.height);
     const finalImageBuffer = canvas.toBuffer('image/png');
 
+    // Debug asset generation (optional)
+    const croppedSourceBuffer = metadata.cropped_source_image_base64 ? decodeBase64(metadata.cropped_source_image_base64) : null;
+    const dilatedMaskBuffer = metadata.cropped_dilated_mask_base64 ? decodeBase64(metadata.cropped_dilated_mask_base64) : null;
+    const inpaintedCropBuffer = new Uint8Array(await inpaintedCropResponse.clone().arrayBuffer());
+
     const [
         finalCompositedUrl,
         croppedSourceUrl,
@@ -79,10 +78,14 @@ serve(async (req) => {
         inpaintedCropUrl
     ] = await Promise.all([
         uploadBufferToStorage(supabase, finalImageBuffer, job.user_id, 'final_composite.png'),
-        uploadBufferToStorage(supabase, decodeBase64(job.metadata.cropped_source_image_base64), job.user_id, 'cropped_source.png'),
-        uploadBufferToStorage(supabase, decodeBase64(job.metadata.cropped_dilated_mask_base64), job.user_id, 'dilated_mask.png'),
-        uploadBufferToStorage(supabase, new Uint8Array(await inpaintedCropResponse.clone().arrayBuffer()), job.user_id, 'inpainted_crop.png')
+        uploadBufferToStorage(supabase, croppedSourceBuffer, job.user_id, 'cropped_source.png'),
+        uploadBufferToStorage(supabase, dilatedMaskBuffer, job.user_id, 'dilated_mask.png'),
+        uploadBufferToStorage(supabase, inpaintedCropBuffer, job.user_id, 'inpainted_crop.png')
     ]);
+
+    if (!finalCompositedUrl) {
+        throw new Error("Failed to upload the final composited image to storage.");
+    }
 
     const debug_assets = {
         cropped_source_url: croppedSourceUrl,
