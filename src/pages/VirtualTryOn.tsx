@@ -10,7 +10,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SingleTryOn } from "@/components/VTO/SingleTryOn";
 import { BatchTryOn } from "@/components/VTO/BatchTryOn";
 import { cn } from "@/lib/utils";
-import { AlertTriangle, ImageIcon, Loader2 } from "lucide-react";
+import { AlertTriangle, ImageIcon, Loader2, Star } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 
 interface BitStudioJob {
   id: string;
@@ -48,7 +50,7 @@ const VirtualTryOnPro = () => {
 };
 
 const VirtualTryOn = () => {
-  const { supabase, session, isProMode } = useSession();
+  const { supabase, session, isProMode, toggleProMode } = useSession();
   const { t } = useLanguage();
   const queryClient = useQueryClient();
   
@@ -125,9 +127,18 @@ const VirtualTryOn = () => {
 
   return (
     <div className="p-4 md:p-8 h-screen flex flex-col">
-      <header className="pb-4 mb-8 border-b shrink-0">
-        <h1 className="text-3xl font-bold">{t('virtualTryOn')}</h1>
-        <p className="text-muted-foreground">{t('vtoDescription')}</p>
+      <header className="pb-4 mb-8 border-b shrink-0 flex justify-between items-center">
+        <div>
+          <h1 className="text-3xl font-bold">{t('virtualTryOn')}</h1>
+          <p className="text-muted-foreground">{t('vtoDescription')}</p>
+        </div>
+        <div className="flex items-center space-x-2">
+          <Label htmlFor="pro-mode-switch" className="flex items-center gap-2">
+            <Star className="text-yellow-500" />
+            Pro Mode
+          </Label>
+          <Switch id="pro-mode-switch" checked={isProMode} onCheckedChange={toggleProMode} />
+        </div>
       </header>
       <div className="flex-1 overflow-y-auto">
         <Tabs defaultValue="single" className="w-full">
