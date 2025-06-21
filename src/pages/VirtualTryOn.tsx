@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { useLanguage } from "@/context/LanguageContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -33,8 +33,22 @@ const SecureImageDisplay = ({ imageUrl, alt, onClick }: { imageUrl: string | nul
     return <img src={displayUrl} alt={alt} className={cn("w-full h-full object-contain rounded-md", hasClickHandler && "cursor-pointer")} onClick={onClick} />;
 };
 
+const VirtualTryOnPro = () => {
+  return (
+    <div className="p-4 md:p-8 h-screen flex flex-col">
+      <header className="pb-4 mb-8 border-b shrink-0">
+        <h1 className="text-3xl font-bold">Virtual Try-On (PRO)</h1>
+        <p className="text-muted-foreground">This is the PRO interface for advanced VTO tasks.</p>
+      </header>
+      <div className="flex-1 flex items-center justify-center">
+        <p className="text-2xl text-muted-foreground">Pro Mode Content Goes Here</p>
+      </div>
+    </div>
+  );
+};
+
 const VirtualTryOn = () => {
-  const { supabase, session } = useSession();
+  const { supabase, session, isProMode } = useSession();
   const { t } = useLanguage();
   const queryClient = useQueryClient();
   
@@ -101,13 +115,13 @@ const VirtualTryOn = () => {
     };
   }, [session?.user?.id, supabase, queryClient]);
 
-  const resetForm = () => {
-    setSelectedJobId(null);
-  };
-
   const handleSelectJob = (job: BitStudioJob) => {
     setSelectedJobId(job.id);
   };
+
+  if (isProMode) {
+    return <VirtualTryOnPro />;
+  }
 
   return (
     <div className="p-4 md:p-8 h-screen flex flex-col">
@@ -123,7 +137,7 @@ const VirtualTryOn = () => {
           </TabsList>
           <TabsContent value="single" className="pt-6">
             <p className="text-sm text-muted-foreground mb-6">{t('singleVtoDescription')}</p>
-            <SingleTryOn selectedJob={selectedJob} resetForm={resetForm} />
+            <SingleTryOn selectedJob={selectedJob} resetForm={() => setSelectedJobId(null)} />
           </TabsContent>
           <TabsContent value="batch" className="pt-6">
             <p className="text-sm text-muted-foreground mb-6">{t('batchVtoDescription')}</p>
