@@ -87,7 +87,7 @@ serve(async (req) => {
         mask_image_id: maskImageId, 
         prompt,
         resolution: 'standard',
-        denoise: 1.0 // FIX: Add default denoise parameter
+        denoise: 1.0
       };
       
       const inpaintResponse = await fetch(inpaintUrl, {
@@ -95,8 +95,13 @@ serve(async (req) => {
         headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(inpaintPayload)
       });
-      if (!inpaintResponse.ok) throw new Error(`BitStudio inpainting request failed: ${await inpaintResponse.text()}`);
-      const inpaintResult = await inpaintResponse.json();
+
+      const responseText = await inpaintResponse.text();
+      console.log(`[BitStudioProxy] Raw inpainting response from BitStudio: ${responseText}`);
+
+      if (!inpaintResponse.ok) throw new Error(`BitStudio inpainting request failed: ${responseText}`);
+      
+      const inpaintResult = JSON.parse(responseText);
       const taskId = inpaintResult[0]?.id;
       if (!taskId) throw new Error("BitStudio did not return a task ID for the inpainting job.");
 
