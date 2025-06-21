@@ -1,9 +1,9 @@
-import { useState, useRef, useMemo, useEffect } from "react";
+import { useState, useRef, useMemo, useEffect, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Wand2, Brush, Palette, UploadCloud, Sparkles, Loader2 } from "lucide-react";
+import { Wand2, Brush, Palette, UploadCloud, Sparkles, Loader2, Image as ImageIcon } from "lucide-react";
 import { MaskCanvas } from "@/components/Editor/MaskCanvas";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -13,6 +13,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { useImagePreview } from "@/context/ImagePreviewContext";
+import { RealtimeChannel } from "@supabase/supabase-js";
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -34,25 +35,26 @@ export const VirtualTryOnPro = () => {
   const [brushSize, setBrushSize] = useState(30);
   const [resetTrigger, setResetTrigger] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const channelRef = useRef<RealtimeChannel | null>(null);
 
   const sourceImageUrl = useMemo(() => 
     sourceImageFile ? URL.createObjectURL(sourceImageFile) : null, 
   [sourceImageFile]);
 
   useEffect(() => {
-    // Clean up the object URL when the component unmounts or the file changes
     return () => {
-      if (sourceImageUrl) {
-        URL.revokeObjectURL(sourceImageUrl);
-      }
+      if (sourceImageUrl) URL.revokeObjectURL(sourceImageUrl);
+      if (channelRef.current) supabase.removeChannel(channelRef.current);
     };
-  }, [sourceImageUrl]);
+  }, [sourceImageUrl, supabase]);
 
   const handleFileSelect = (file: File | null) => {
     if (file && file.type.startsWith("image/")) {
       setSourceImageFile(file);
       setMaskImage(null);
       setResultImage(null);
+      setActiveJobId(null);
       setResetTrigger(c => c + 1);
     }
   };
@@ -72,23 +74,64 @@ export const VirtualTryOnPro = () => {
       const source_image_base64 = await fileToBase64(sourceImageFile);
       const mask_image_base64 = maskImage.split(',')[1];
 
-      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-inpaint-image', {
-        body: { source_image_base64, mask_image_base64, prompt }
+      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
+        body: { 
+          mode: 'inpaint',
+          source_image_base64, 
+          mask_image_base64, 
+          prompt,
+          user_id: supabase.auth.getSession()?.then(s => s.data.session?.user.id)
+        }
       });
 
       if (error) throw error;
-      if (!data.success || !data.imageUrl) throw new Error("Inpainting service failed to return an image.");
-
-      setResultImage(data.imageUrl);
+      if (!data.success || !data.jobId) throw new Error("Failed to queue inpainting job.");
+      
+      setActiveJobId(data.jobId);
       dismissToast(toastId);
-      showSuccess("Inpainting complete!");
+      showSuccess("Inpainting job started! You can track its progress in the sidebar.");
+
     } catch (err: any) {
       dismissToast(toastId);
       showError(`Inpainting failed: ${err.message}`);
-    } finally {
       setIsLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (!activeJobId) return;
+
+    const channel = supabase
+      .channel(`inpaint-job-${activeJobId}`)
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'mira-agent-bitstudio-jobs',
+        filter: `id=eq.${activeJobId}`
+      }, (payload) => {
+        const updatedJob = payload.new as any;
+        if (updatedJob.status === 'complete' && updatedJob.final_image_url) {
+          setResultImage(updatedJob.final_image_url);
+          setIsLoading(false);
+          setActiveJobId(null);
+          channel.unsubscribe();
+        } else if (updatedJob.status === 'failed') {
+          showError(`Inpainting failed: ${updatedJob.error_message || 'Unknown error'}`);
+          setIsLoading(false);
+          setActiveJobId(null);
+          channel.unsubscribe();
+        }
+      })
+      .subscribe();
+    
+    channelRef.current = channel;
+
+    return () => {
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+      }
+    };
+  }, [activeJobId, supabase]);
 
   const { dropzoneProps, isDraggingOver } = useDropzone({
     onDrop: (e) => handleFileSelect(e.dataTransfer.files?.[0]),
@@ -156,6 +199,11 @@ export const VirtualTryOnPro = () => {
                     className="absolute top-0 left-0 w-full h-full object-contain pointer-events-none"
                     onClick={() => showImage({ images: [{ url: resultImage }], currentIndex: 0 })}
                   />
+                )}
+                {isLoading && !resultImage && (
+                  <div className="absolute inset-0 bg-black/50 flex items-center justify-center rounded-md">
+                    <Loader2 className="h-10 w-10 text-white animate-spin" />
+                  </div>
                 )}
                 <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
                   <MaskControls 

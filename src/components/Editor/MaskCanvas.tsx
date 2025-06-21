@@ -7,7 +7,7 @@ interface MaskCanvasProps {
   resetTrigger: number;
 }
 
-export const MaskCanvas = ({ imageUrl, onMaskChange, brushSize, resetTrigger }: MaskCanvasProps) => {
+const MaskCanvasComponent = ({ imageUrl, onMaskChange, brushSize, resetTrigger }: MaskCanvasProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const imageCanvasRef = useRef<HTMLCanvasElement>(null);
   const drawingCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -82,11 +82,7 @@ export const MaskCanvas = ({ imageUrl, onMaskChange, brushSize, resetTrigger }: 
   const startDrawing = useCallback((e: React.MouseEvent | React.TouchEvent) => {
     const canvas = drawingCanvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
     canvasRect.current = canvas.getBoundingClientRect(); // Cache the rect on mousedown
-
     setIsDrawing(true);
     const coords = getCoords(e);
     lastPoint.current = coords;
@@ -138,3 +134,5 @@ export const MaskCanvas = ({ imageUrl, onMaskChange, brushSize, resetTrigger }: 
     </div>
   );
 };
+
+export const MaskCanvas = React.memo(MaskCanvasComponent);
