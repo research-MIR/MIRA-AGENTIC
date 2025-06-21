@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -8,17 +9,58 @@ const corsHeaders = {
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-const UPLOAD_BUCKET = 'mira-agent-user-uploads';
+const BITSTUDIO_API_KEY = Deno.env.get('BITSTUDIO_API_KEY');
+const BITSTUDIO_API_BASE = 'https://api.bitstudio.ai';
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
+const POLLING_INTERVAL_MS = 2000; // 2 seconds
+const MAX_POLLING_ATTEMPTS = 30; // 1 minute timeout
 
-// Helper to upload a file from a base64 string
-async function uploadBase64(supabase: any, base64: string, mimeType: string, path: string): Promise<string> {
-    const { Buffer } = await import('https://deno.land/std@0.140.0/node/buffer.ts');
-    const buffer = Buffer.from(base64, 'base64');
-    const { error } = await supabase.storage.from(UPLOAD_BUCKET).upload(path, buffer, { contentType: mimeType, upsert: true });
-    if (error) throw new Error(`Storage upload failed for ${path}: ${error.message}`);
-    const { data: { publicUrl } } = supabase.storage.from(UPLOAD_BUCKET).getPublicUrl(path);
-    return publicUrl;
+type BitStudioImageType = 'inpaint-base' | 'inpaint-mask' | 'inpaint-reference';
+
+async function uploadToBitStudio(fileBlob: Blob, type: BitStudioImageType, filename: string): Promise<string> {
+  const formData = new FormData();
+  formData.append('file', fileBlob, filename);
+  formData.append('type', type);
+
+  const response = await fetch(`${BITSTUDIO_API_BASE}/images`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}` },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`BitStudio upload failed for type ${type}: ${errorText}`);
+  }
+  const result = await response.json();
+  if (!result.id) throw new Error(`BitStudio upload for ${type} did not return an ID.`);
+  return result.id;
+}
+
+async function pollForInpaintingResult(baseImageId: string, versionId: string): Promise<string> {
+    for (let i = 0; i < MAX_POLLING_ATTEMPTS; i++) {
+        await new Promise(resolve => setTimeout(resolve, POLLING_INTERVAL_MS));
+        
+        const statusUrl = `${BITSTUDIO_API_BASE}/images/${baseImageId}`;
+        const statusResponse = await fetch(statusUrl, {
+            headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}` }
+        });
+
+        if (!statusResponse.ok) continue; // Ignore transient errors and retry
+
+        const statusData = await statusResponse.json();
+        const targetVersion = statusData.versions?.find((v: any) => v.id === versionId);
+
+        if (targetVersion) {
+            if (targetVersion.status === 'completed') {
+                return targetVersion.path;
+            }
+            if (targetVersion.status === 'failed') {
+                throw new Error("BitStudio inpainting job failed.");
+            }
+        }
+    }
+    throw new Error("Inpainting job timed out.");
 }
 
 serve(async (req) => {
@@ -42,32 +84,49 @@ serve(async (req) => {
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
 
-    // --- Placeholder for actual inpainting on the cropped image ---
-    // In a real scenario, you would call your inpainting service here,
-    // passing it the cropped_source_image_base64 and a cropped version of the mask.
-    // For this example, we'll simulate receiving an inpainted crop.
-    // We will just return the cropped source image as if it were inpainted.
-    const inpainted_crop_base64 = cropped_source_image_base64;
-    // --- End of Placeholder ---
+    // --- Actual Inpainting on the cropped image ---
+    const croppedSourceBlob = new Blob([decodeBase64(cropped_source_image_base64)], { type: 'image/png' });
+    const dilatedMaskBlob = new Blob([decodeBase64(dilated_mask_base64)], { type: 'image/png' });
+
+    const [croppedSourceImageId, dilatedMaskImageId] = await Promise.all([
+        uploadToBitStudio(croppedSourceBlob, 'inpaint-base', 'cropped_source.png'),
+        uploadToBitStudio(dilatedMaskBlob, 'inpaint-mask', 'dilated_mask.png')
+    ]);
+
+    const inpaintUrl = `${BITSTUDIO_API_BASE}/images/${croppedSourceImageId}/inpaint`;
+    const inpaintPayload = { mask_image_id: dilatedMaskImageId, prompt, resolution: 'standard', denoise: 1.0 };
+    
+    const inpaintResponse = await fetch(inpaintUrl, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(inpaintPayload)
+    });
+
+    if (!inpaintResponse.ok) throw new Error(`BitStudio inpainting request failed: ${await inpaintResponse.text()}`);
+    
+    const inpaintResult = await inpaintResponse.json();
+    const newVersion = inpaintResult.versions?.[0];
+    if (!newVersion || !newVersion.id) throw new Error("BitStudio did not return a valid version object for the inpainting job.");
+    
+    const inpaintedCropUrl = await pollForInpaintingResult(inpaintResult.id, newVersion.id);
+    // --- End of Inpainting ---
 
     // --- Re-compositing Logic (Server-Side) ---
     const { createCanvas, loadImage } = await import('https://deno.land/x/canvas@v1.4.1/mod.ts');
     
     const fullSourceImage = await loadImage(`data:image/png;base64,${full_source_image_base64}`);
-    const inpaintedCropImage = await loadImage(`data:image/png;base64,${inpainted_crop_base64}`);
+    const inpaintedCropResponse = await fetch(inpaintedCropUrl);
+    if (!inpaintedCropResponse.ok) throw new Error("Failed to download inpainted crop from BitStudio.");
+    const inpaintedCropImage = await loadImage(await inpaintedCropResponse.arrayBuffer());
 
     const canvas = createCanvas(fullSourceImage.width(), fullSourceImage.height());
     const ctx = canvas.getContext('2d');
 
-    // 1. Draw the original full-size image
     ctx.drawImage(fullSourceImage, 0, 0);
-
-    // 2. Draw the inpainted crop on top at the correct location
     ctx.drawImage(inpaintedCropImage, bbox.x, bbox.y, bbox.width, bbox.height);
 
     const finalImageBuffer = canvas.toBuffer('image/png');
     
-    // 3. Upload the final composited image to storage
     const filePath = `${user_id}/inpainted/${Date.now()}.png`;
     const { error: uploadError } = await supabase.storage
       .from(GENERATED_IMAGES_BUCKET)
