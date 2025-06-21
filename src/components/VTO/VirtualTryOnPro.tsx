@@ -207,24 +207,31 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
       dismissToast(toastId);
       showLoading("Sending job to inpainting service...");
 
-      const { data: result, error } = await supabase.functions.invoke('MIRA-AGENT-tool-inpaint-image-v2', {
-        body: {
-          full_source_image_base64: await fileToBase64(sourceImageFile),
-          cropped_source_image_base64: croppedSourceBase64,
-          cropped_dilated_mask_base64: croppedDilatedMaskBase64,
-          prompt,
-          bbox,
-          user_id: session?.user.id
-        }
+      const payload: any = {
+        mode: 'inpaint',
+        full_source_image_base64: await fileToBase64(sourceImageFile),
+        cropped_source_image_base64: croppedSourceBase64,
+        cropped_dilated_mask_base64: croppedDilatedMaskBase64,
+        prompt,
+        bbox,
+        user_id: session?.user.id
+      };
+
+      if (referenceImageFile) {
+        payload.reference_image_base64 = await fileToBase64(referenceImageFile);
+      }
+
+      const { error } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
+        body: payload
       });
 
       if (error) throw error;
-      if (!result.success) throw new Error(result.error || "Inpainting failed on the server.");
 
       dismissToast(toastId);
-      showSuccess("Inpainting complete!");
-      setResultImage(result.imageUrl);
+      showSuccess("Inpainting job started! You can track its progress in the sidebar.");
+      queryClient.invalidateQueries({ queryKey: ['activeJobs'] });
       queryClient.invalidateQueries({ queryKey: ['bitstudioJobs', session?.user?.id] });
+      resetForm();
 
     } catch (err: any) {
       dismissToast(toastId);
