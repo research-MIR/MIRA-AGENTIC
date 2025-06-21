@@ -102,11 +102,21 @@ serve(async (req) => {
       if (!inpaintResponse.ok) throw new Error(`BitStudio inpainting request failed: ${responseText}`);
       
       const inpaintResult = JSON.parse(responseText);
-      const taskId = inpaintResult.versions?.[0]?.id;
-      if (!taskId) throw new Error("BitStudio did not return a task ID for the inpainting job.");
+      const newVersion = inpaintResult.versions?.[0];
+      if (!newVersion || !newVersion.id) {
+        throw new Error("BitStudio did not return a valid version object for the inpainting job.");
+      }
+      const versionId = newVersion.id;
+      const baseImageId = inpaintResult.id;
 
       const { data: newJob, error: insertError } = await supabase.from('mira-agent-bitstudio-jobs').insert({
-        user_id, mode, status: 'queued', bitstudio_task_id: taskId,
+        user_id, 
+        mode, 
+        status: 'queued', 
+        bitstudio_task_id: baseImageId,
+        metadata: {
+          bitstudio_version_id: versionId
+        }
       }).select('id').single();
       if (insertError) throw insertError;
       newJobId = newJob.id;
