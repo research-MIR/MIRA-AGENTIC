@@ -78,7 +78,7 @@ export const SingleTryOn = ({ selectedJob, resetForm }: SingleTryOnProps) => {
     const [isAutoPromptEnabled, setIsAutoPromptEnabled] = useState(true);
     const [promptReady, setPromptReady] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
-    const [openAccordion, setOpenAccordion] = useState("");
+    const [openAccordion, setOpenAccordion] = useState("item-1");
     const [resolution, setResolution] = useState<'standard' | 'high'>('standard');
     const [numImages, setNumImages] = useState(1);
 
@@ -192,45 +192,58 @@ export const SingleTryOn = ({ selectedJob, resetForm }: SingleTryOnProps) => {
 
     return (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <div className="lg:col-span-1 space-y-6">
-              <Card>
-                <CardHeader><div className="flex justify-between items-center"><CardTitle>{selectedJob ? "Selected Job" : "1. Upload Images"}</CardTitle>{selectedJob && <Button variant="outline" size="sm" onClick={resetForm}><PlusCircle className="h-4 w-4 mr-2" />New</Button>}</div></CardHeader>
-                <CardContent className="grid grid-cols-2 gap-4">
-                  {selectedJob ? (
-                    <>
-                      <SecureImageDisplay imageUrl={selectedJob.source_person_image_url} alt="Person" onClick={() => showImage({ images: [{ url: selectedJob.source_person_image_url }], currentIndex: 0 })} />
-                      <SecureImageDisplay imageUrl={selectedJob.source_garment_image_url} alt="Garment" onClick={() => showImage({ images: [{ url: selectedJob.source_garment_image_url }], currentIndex: 0 })} />
-                    </>
-                  ) : (
-                    <>
-                      <ImageUploader onFileSelect={setPersonImageFile} title="Person Image" imageUrl={personImageUrl} onClear={() => setPersonImageFile(null)} />
-                      <ImageUploader onFileSelect={setGarmentImageFile} title="Garment Image" imageUrl={garmentImageUrl} onClear={() => setGarmentImageFile(null)} />
-                    </>
-                  )}
-                </CardContent>
-              </Card>
+            <div className="lg:col-span-1 space-y-4">
               <Card>
                 <CardHeader>
                   <div className="flex justify-between items-center">
-                    <CardTitle>2. Prompt</CardTitle>
-                    <div className="flex items-center space-x-2">
-                      <Label htmlFor="auto-prompt" className="text-sm text-muted-foreground">Auto-Generate</Label>
-                      <Switch id="auto-prompt" checked={isAutoPromptEnabled} onCheckedChange={setIsAutoPromptEnabled} disabled={!!selectedJob} />
-                    </div>
+                    <CardTitle>{selectedJob ? "Selected Job" : "Setup"}</CardTitle>
+                    {selectedJob && <Button variant="outline" size="sm" onClick={resetForm}><PlusCircle className="h-4 w-4 mr-2" />New</Button>}
                   </div>
                 </CardHeader>
-                <CardContent className="space-y-2">
-                  <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="A detailed prompt will appear here..." rows={4} disabled={isAutoPromptEnabled} />
-                  {isGeneratingPrompt && <div className="flex items-center text-sm text-muted-foreground"><Loader2 className="mr-2 h-4 w-4 animate-spin" />Generating prompt...</div>}
+                <CardContent>
+                  {selectedJob ? (
+                    <div className="grid grid-cols-2 gap-4">
+                      <SecureImageDisplay imageUrl={selectedJob.source_person_image_url} alt="Person" onClick={() => showImage({ images: [{ url: selectedJob.source_person_image_url }], currentIndex: 0 })} />
+                      <SecureImageDisplay imageUrl={selectedJob.source_garment_image_url} alt="Garment" onClick={() => showImage({ images: [{ url: selectedJob.source_garment_image_url }], currentIndex: 0 })} />
+                    </div>
+                  ) : (
+                    <Accordion type="multiple" defaultValue={['item-1']} className="w-full">
+                      <AccordionItem value="item-1">
+                        <AccordionTrigger>1. Upload Images</AccordionTrigger>
+                        <AccordionContent className="pt-4">
+                          <div className="grid grid-cols-2 gap-4">
+                            <ImageUploader onFileSelect={setPersonImageFile} title="Person Image" imageUrl={personImageUrl} onClear={() => setPersonImageFile(null)} />
+                            <ImageUploader onFileSelect={setGarmentImageFile} title="Garment Image" imageUrl={garmentImageUrl} onClear={() => setGarmentImageFile(null)} />
+                          </div>
+                        </AccordionContent>
+                      </AccordionItem>
+                      <AccordionItem value="item-2">
+                        <AccordionTrigger>2. Prompt</AccordionTrigger>
+                        <AccordionContent className="pt-4 space-y-2">
+                          <div className="flex items-center space-x-2">
+                            <Switch id="auto-prompt" checked={isAutoPromptEnabled} onCheckedChange={setIsAutoPromptEnabled} disabled={!!selectedJob} />
+                            <Label htmlFor="auto-prompt" className="text-sm">Auto-Generate</Label>
+                          </div>
+                          <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="A detailed prompt will appear here..." rows={4} disabled={isAutoPromptEnabled} />
+                          {isGeneratingPrompt && <div className="flex items-center text-sm text-muted-foreground"><Loader2 className="mr-2 h-4 w-4 animate-spin" />Generating prompt...</div>}
+                        </AccordionContent>
+                      </AccordionItem>
+                      <AccordionItem value="item-3">
+                        <AccordionTrigger>3. Settings</AccordionTrigger>
+                        <AccordionContent className="pt-4">
+                          <SingleTryOnSettings
+                            resolution={resolution}
+                            setResolution={setResolution}
+                            numImages={numImages}
+                            setNumImages={setNumImages}
+                            disabled={!!selectedJob}
+                          />
+                        </AccordionContent>
+                      </AccordionItem>
+                    </Accordion>
+                  )}
                 </CardContent>
               </Card>
-              <SingleTryOnSettings
-                resolution={resolution}
-                setResolution={setResolution}
-                numImages={numImages}
-                setNumImages={setNumImages}
-                disabled={!!selectedJob}
-              />
               <Button onClick={handleTryOn} disabled={isTryOnDisabled} className="w-full">
                 {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
                 Start Virtual Try-On
