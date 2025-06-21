@@ -13,6 +13,7 @@ export const MaskCanvas = ({ imageUrl, onMaskChange, brushSize, resetTrigger }: 
   const drawingCanvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const lastPoint = useRef<{ x: number; y: number } | null>(null);
+  const canvasRect = useRef<DOMRect | null>(null);
 
   const clearCanvas = useCallback(() => {
     const canvas = drawingCanvasRef.current;
@@ -68,9 +69,8 @@ export const MaskCanvas = ({ imageUrl, onMaskChange, brushSize, resetTrigger }: 
   }, [imageUrl, clearCanvas]);
 
   const getCoords = useCallback((e: React.MouseEvent | React.TouchEvent) => {
-    const canvas = drawingCanvasRef.current;
-    if (!canvas) return { x: 0, y: 0 };
-    const rect = canvas.getBoundingClientRect();
+    const rect = canvasRect.current;
+    if (!rect) return { x: 0, y: 0 };
     const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
     const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
     return {
@@ -80,8 +80,13 @@ export const MaskCanvas = ({ imageUrl, onMaskChange, brushSize, resetTrigger }: 
   }, []);
 
   const startDrawing = useCallback((e: React.MouseEvent | React.TouchEvent) => {
-    const ctx = drawingCanvasRef.current?.getContext('2d');
+    const canvas = drawingCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
     if (!ctx) return;
+
+    canvasRect.current = canvas.getBoundingClientRect(); // Cache the rect on mousedown
+
     setIsDrawing(true);
     const coords = getCoords(e);
     lastPoint.current = coords;
