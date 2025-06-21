@@ -22,7 +22,7 @@ interface BitStudioJob {
   source_garment_image_url: string;
   final_image_url?: string;
   error_message?: string;
-  mode: 'base' | 'pro';
+  mode: 'base' | 'inpaint';
 }
 
 const SecureImageDisplay = ({ imageUrl, alt, onClick }: { imageUrl: string | null, alt: string, onClick?: (e: React.MouseEvent<HTMLImageElement>) => void }) => {
@@ -108,6 +108,10 @@ const VirtualTryOn = () => {
     setSelectedJobId(job.id);
   };
 
+  const resetForm = () => {
+    setSelectedJobId(null);
+  };
+
   return (
     <div className="p-4 md:p-8 h-screen flex flex-col">
       <header className="pb-4 mb-8 border-b shrink-0 flex justify-between items-center">
@@ -126,7 +130,13 @@ const VirtualTryOn = () => {
       
       <div className="flex-1 overflow-y-auto">
         {isProMode ? (
-          <VirtualTryOnPro />
+          <VirtualTryOnPro 
+            recentJobs={recentJobs}
+            isLoadingRecentJobs={isLoadingRecentJobs}
+            selectedJob={selectedJob}
+            handleSelectJob={handleSelectJob}
+            resetForm={resetForm}
+          />
         ) : (
           <>
             <Tabs defaultValue="single" className="w-full">
@@ -136,7 +146,7 @@ const VirtualTryOn = () => {
               </TabsList>
               <TabsContent value="single" className="pt-6">
                 <p className="text-sm text-muted-foreground mb-6">{t('singleVtoDescription')}</p>
-                <SingleTryOn selectedJob={selectedJob} resetForm={() => setSelectedJobId(null)} />
+                <SingleTryOn selectedJob={selectedJob} resetForm={resetForm} />
               </TabsContent>
               <TabsContent value="batch" className="pt-6">
                 <p className="text-sm text-muted-foreground mb-6">{t('batchVtoDescription')}</p>
@@ -148,7 +158,7 @@ const VirtualTryOn = () => {
               <CardContent>
                 {isLoadingRecentJobs ? <Skeleton className="h-24 w-full" /> : recentJobs && recentJobs.length > 0 ? (
                   <div className="flex gap-4 overflow-x-auto pb-2">
-                    {recentJobs.map(job => {
+                    {recentJobs.filter(job => job.mode === 'base').map(job => {
                       const urlToPreview = job.final_image_url || job.source_person_image_url;
                       return (
                         <button key={job.id} onClick={() => handleSelectJob(job)} className={cn("border-2 rounded-lg p-1 flex-shrink-0 w-24 h-24", selectedJobId === job.id ? "border-primary" : "border-transparent")}>

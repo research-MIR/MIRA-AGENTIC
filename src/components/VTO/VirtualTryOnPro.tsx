@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Wand2, Brush, Palette, UploadCloud, Sparkles, Loader2, Image as ImageIcon } from "lucide-react";
+import { Wand2, Brush, Palette, UploadCloud, Sparkles, Loader2, Image as ImageIcon, X, PlusCircle, AlertTriangle } from "lucide-react";
 import { MaskCanvas } from "@/components/Editor/MaskCanvas";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -14,6 +14,8 @@ import { useSession } from "@/components/Auth/SessionContextProvider";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { useImagePreview } from "@/context/ImagePreviewContext";
 import { RealtimeChannel } from "@supabase/supabase-js";
+import { useSecureImage } from "@/hooks/useSecureImage";
+import { Skeleton } from "../ui/skeleton";
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -24,7 +26,36 @@ const fileToBase64 = (file: File): Promise<string> => {
   });
 };
 
-export const VirtualTryOnPro = () => {
+interface BitStudioJob {
+  id: string;
+  status: 'queued' | 'processing' | 'complete' | 'failed';
+  source_person_image_url: string;
+  source_garment_image_url: string;
+  final_image_url?: string;
+  error_message?: string;
+  mode: 'base' | 'inpaint';
+}
+
+const SecureImageDisplay = ({ imageUrl, alt, onClick }: { imageUrl: string | null, alt: string, onClick?: (e: React.MouseEvent<HTMLImageElement>) => void }) => {
+    const { displayUrl, isLoading, error } = useSecureImage(imageUrl);
+    const hasClickHandler = !!onClick;
+  
+    if (!imageUrl) return <div className="w-full h-full bg-muted rounded-md flex items-center justify-center"><ImageIcon className="h-6 w-6 text-muted-foreground" /></div>;
+    if (isLoading) return <div className="w-full h-full bg-muted rounded-md flex items-center justify-center"><Loader2 className="h-6 w-6 animate-spin" /></div>;
+    if (error) return <div className="w-full h-full bg-muted rounded-md flex items-center justify-center"><AlertTriangle className="h-6 w-6 text-destructive" /></div>;
+    
+    return <img src={displayUrl} alt={alt} className={cn("max-w-full max-h-full object-contain rounded-md", hasClickHandler && "cursor-pointer")} onClick={onClick} />;
+};
+
+interface VirtualTryOnProProps {
+  recentJobs: BitStudioJob[] | undefined;
+  isLoadingRecentJobs: boolean;
+  selectedJob: BitStudioJob | undefined;
+  handleSelectJob: (job: BitStudioJob) => void;
+  resetForm: () => void;
+}
+
+export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, handleSelectJob, resetForm }: VirtualTryOnProProps) => {
   const { supabase } = useSession();
   const { showImage } = useImagePreview();
   const [sourceImageFile, setSourceImageFile] = useState<File | null>(null);
@@ -49,8 +80,20 @@ export const VirtualTryOnPro = () => {
     };
   }, [sourceImageUrl, supabase]);
 
+  useEffect(() => {
+    if (selectedJob) {
+      setSourceImageFile(null);
+      setMaskImage(null);
+      setPrompt("");
+      setResetTrigger(c => c + 1);
+    }
+  }, [selectedJob]);
+
+  const proJobs = useMemo(() => recentJobs?.filter(job => job.mode === 'inpaint') || [], [recentJobs]);
+
   const handleFileSelect = (file: File | null) => {
     if (file && file.type.startsWith("image/")) {
+      resetForm();
       setSourceImageFile(file);
       setMaskImage(null);
       setResultImage(null);
@@ -143,6 +186,19 @@ export const VirtualTryOnPro = () => {
     onDrop: (e) => handleFileSelect(e.dataTransfer.files?.[0]),
   });
 
+  const renderJobResult = (job: BitStudioJob) => {
+    if (job.status === 'failed') return <p className="text-destructive text-sm p-2">Job failed: {job.error_message}</p>;
+    if (job.status === 'complete' && job.final_image_url) {
+      return <SecureImageDisplay imageUrl={job.final_image_url} alt="Final Result" onClick={() => showImage({ images: [{ url: job.final_image_url! }], currentIndex: 0 })} />;
+    }
+    return (
+      <div className="text-center text-muted-foreground">
+        <Loader2 className="h-12 w-12 mx-auto animate-spin" />
+        <p className="mt-4">Job status: {job.status}</p>
+      </div>
+    );
+  };
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
       <div className="lg:col-span-1 space-y-4">
@@ -187,10 +243,15 @@ export const VirtualTryOnPro = () => {
       <div className="lg:col-span-2 space-y-6">
         <Card>
           <CardHeader>
-            <CardTitle>PRO Workbench</CardTitle>
+            <div className="flex justify-between items-center">
+              <CardTitle>PRO Workbench</CardTitle>
+              {selectedJob && <Button variant="outline" size="sm" onClick={resetForm}><PlusCircle className="h-4 w-4 mr-2" />New</Button>}
+            </div>
           </CardHeader>
           <CardContent className="flex items-center justify-center">
-            {sourceImageUrl ? (
+            {selectedJob ? (
+              renderJobResult(selectedJob)
+            ) : sourceImageUrl ? (
               <div className="w-full max-h-[70vh] aspect-square relative">
                 <MaskCanvas 
                   imageUrl={sourceImageUrl} 
@@ -240,6 +301,23 @@ export const VirtualTryOnPro = () => {
                 />
               </div>
             )}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle>Recent PRO Jobs</CardTitle></CardHeader>
+          <CardContent>
+            {isLoadingRecentJobs ? <Skeleton className="h-24 w-full" /> : proJobs.length > 0 ? (
+              <div className="flex gap-4 overflow-x-auto pb-2">
+                {proJobs.map(job => {
+                  const urlToPreview = job.final_image_url || job.source_person_image_url;
+                  return (
+                    <button key={job.id} onClick={() => handleSelectJob(job)} className={cn("border-2 rounded-lg p-1 flex-shrink-0 w-24 h-24", selectedJob?.id === job.id ? "border-primary" : "border-transparent")}>
+                      <SecureImageDisplay imageUrl={urlToPreview} alt="Recent job" />
+                    </button>
+                  )
+                })}
+              </div>
+            ) : <p className="text-muted-foreground text-sm">No recent PRO jobs found.</p>}
           </CardContent>
         </Card>
       </div>
