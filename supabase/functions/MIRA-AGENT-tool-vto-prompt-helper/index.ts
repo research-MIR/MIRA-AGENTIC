@@ -14,25 +14,26 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const systemPrompt = `You are an expert fashion stylist and photo analyst. Your task is to combine two images into a single, coherent, and detailed text-to-image prompt. The final prompt MUST be in English.
+const systemPrompt = `You are an expert fashion stylist and photo analyst. Your task is to combine two images and an optional user instruction into a single, coherent, and detailed text-to-image prompt. The final prompt MUST be in English.
 
 ### Your Inputs:
-You will be given two images:
+You will be given:
 1.  **PERSON IMAGE:** This image contains the model, their pose, the background scene, and the overall lighting and mood.
 2.  **GARMENT IMAGE:** This image contains a piece of clothing.
+3.  **PROMPT APPENDIX (Optional, HIGH PRIORITY):** A specific, non-negotiable instruction from the user.
 
 ### Your Internal Thought Process (Do not include this in the output):
 1.  **Analyze the PERSON IMAGE:** Deconstruct the scene. Describe the model's pose, the lighting style (e.g., "soft studio lighting," "harsh outdoor sunlight"), the background details, and the overall mood or aesthetic.
 2.  **Analyze the GARMENT IMAGE:** Describe the garment with extreme detail. **IMPORTANT: You MUST focus exclusively on the garment or accessory itself. IGNORE any person, pose, or background present in the GARMENT IMAGE.** Mention its type (e.g., "denim jacket," "silk blouse"), color, fabric texture, fit, and any notable details like buttons, zippers, patterns, or stitching.
-3.  **Synthesize:** Create a new, single prompt that describes the person from the PERSON IMAGE as if they are now wearing the clothing from the GARMENT IMAGE. The final prompt should seamlessly integrate the detailed garment description (and only the garment description) onto the person within their original environment and lighting.
+3.  **Synthesize with Appendix:** Create a new, single prompt that describes the person from the PERSON IMAGE as if they are now wearing the clothing from the GARMENT IMAGE. **You MUST seamlessly integrate the user's PROMPT APPENDIX instruction into the main body of your description.** Do not just append it. It is a core creative constraint that must be woven into the final prompt naturally.
 
 ### Your Output:
 Your entire response MUST be a single, valid JSON object with ONE key, "final_prompt".
 
-**Example Output:**
+**Example Output (with appendix "wearing light blue jeans"):**
 \`\`\`json
 {
-  "final_prompt": "A photorealistic, cinematic shot of a woman standing with her hands on her hips in a dimly lit urban alleyway. She is wearing a vintage, slightly oversized, faded blue denim jacket with worn-out elbows and brass buttons. The lighting is dramatic, with a single light source from the side creating long shadows."
+  "final_prompt": "A photorealistic, cinematic shot of a woman standing with her hands on her hips in a dimly lit urban alleyway. She is wearing a vintage, slightly oversized, faded blue denim jacket with worn-out elbows and brass buttons, paired with light blue jeans. The lighting is dramatic, with a single light source from the side creating long shadows."
 }
 \`\`\`
 `;
@@ -110,6 +111,11 @@ serve(async (req) => {
     
     const finalParts: Part[] = [...personParts, ...garmentParts];
 
+    if (prompt_appendix && typeof prompt_appendix === 'string' && prompt_appendix.trim() !== "") {
+        console.log(`[VTO-PromptHelper] Providing appendix to AI: "${prompt_appendix}"`);
+        finalParts.push({ text: `--- PROMPT APPENDIX (HIGH PRIORITY) ---\n${prompt_appendix.trim()}` });
+    }
+
     const result = await ai.models.generateContent({
         model: MODEL_NAME,
         contents: [{ role: 'user', parts: finalParts }],
@@ -118,13 +124,7 @@ serve(async (req) => {
     });
 
     const responseJson = extractJson(result.text);
-    let finalPrompt = responseJson.final_prompt;
-
-    if (prompt_appendix && typeof prompt_appendix === 'string' && prompt_appendix.trim() !== "") {
-        console.log(`[VTO-PromptHelper] Appending user instruction: "${prompt_appendix}"`);
-        const separator = finalPrompt.trim().endsWith('.') ? ' ' : ', ';
-        finalPrompt += `${separator}${prompt_appendix.trim()}`;
-    }
+    const finalPrompt = responseJson.final_prompt;
 
     if (!finalPrompt) {
         throw new Error("AI Helper did not return a final prompt in the expected format.");
