@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
+import { createCanvas, loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -98,8 +99,6 @@ serve(async (req) => {
           throw new Error("Job is missing essential metadata (full source image or bounding box) for compositing.");
         }
         console.log(`[BitStudioPoller-V2][${job.id}] Metadata validated.`);
-
-        const { createCanvas, loadImage } = await import('https://deno.land/x/canvas@v1.4.1/mod.ts');
         
         console.log(`[BitStudioPoller-V2][${job.id}] Loading full source image from base64...`);
         const fullSourceImage = await loadImage(`data:image/png;base64,${job.metadata.full_source_image_base64}`);
