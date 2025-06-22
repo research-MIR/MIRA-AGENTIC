@@ -1,0 +1,26 @@
+export const errorTranslations = {
+  it: {
+    errorQuotaExceeded: "Hai raggiunto il tuo limite di generazioni di immagini per questo periodo. Controlla i dettagli del tuo piano.",
+    errorSafetyFilters: "La richiesta non può essere completata a causa dei filtri di sicurezza. Modifica il tuo prompt e riprova.",
+    errorAgentStuck: "L'IA sembra bloccata. Prova a riformulare la tua richiesta o a iniziare una nuova chat.",
+    errorNoImageToRefine: "Non sono riuscito a trovare un'immagine da rifinare in questa conversazione. Per favore, caricane o generane una prima.",
+    errorNetwork: "Si è verificato un problema di rete. Controlla la tua connessione e riprova.",
+    errorUnknown: "Si è verificato un errore imprevisto. Per favore, riprova.",
+    noImageToRefine: "Mi dispiace, non ho trovato un'immagine nella nostra conversazione da rifinire. Per favore, caricane una o generane una prima.",
+    REFINEMENT_COMPLETE: "Ecco l'immagine rifinita. Cosa vuoi fare ora?",
+    REFINEMENT_FURTHER: "Ecco l'immagine ulteriormente rifinita. Vuoi continuare?",
+    ERROR_NO_IMAGE_TO_REFINE: "Mi dispiace, non ho trovato un'immagine nella nostra conversazione da rifinire. Per favore, caricane una o generane una prima.",
+  },
+  en: {
+    errorQuotaExceeded: "You have reached your image generation limit for this period. Please check your plan details.",
+    errorSafetyFilters: "The request could not be completed due to safety filters. Please modify your prompt and try again.",
+    errorAgentStuck: "The AI seems to be stuck. Try rephrasing your request, or start a new chat.",
+    errorNoImageToRefine: "I couldn't find an image to refine in this conversation. Please upload or generate one first.",
+    errorNetwork: "A network problem occurred. Please check your connection and try again.",
+    errorUnknown: "An unexpected error occurred. Please try again.",
+    noImageToRefine: "I'm sorry, I couldn't find an image in our current conversation to refine. Please upload or generate one first.",
+    REFINEMENT_COMPLETE: "Here is the refined image. What would you like to do next?",
+    REFINEMENT_FURTHER: "Here is the further refined image. Would you like to continue?",
+    ERROR_NO_IMAGE_TO_REFINE: "I'm sorry, I couldn't find an image in our current conversation to refine. Please upload or generate one first.",
+  },
+};
