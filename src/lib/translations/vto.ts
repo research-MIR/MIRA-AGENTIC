@@ -77,10 +77,12 @@ export const vtoTranslations = {
 L'inpainting è uno strumento potente per sostituire parti di un'immagine, ma richiede un approccio specifico per ottenere i migliori risultati.
 
 #### 1. Il Prompt Preciso: Lascia Fare all'IA
-- **Usa l'Auto-Prompt (Consigliato):** Per risultati ottimali, ti consigliamo vivamente di lasciare attiva l'opzione "Auto-Genera". L'IA analizzerà la tua immagine sorgente e quella di riferimento per creare un prompt tecnicamente perfetto.
-- **Se Scrivi Manualmente:** Se preferisci il controllo manuale, ricorda questa regola fondamentale: descrivi **solo** ciò che vuoi che appaia *all'interno* dell'area mascherata. Non descrivere l'intera scena.
-  - **❌ Esempio negativo:** "una donna che indossa una maglietta blu"
-  - **✅ Esempio positivo:** "una maglietta blu in cotone fotorealistica con pieghe morbide, sotto una luce da studio diffusa"
+- **Usa l'Auto-Prompt (Consigliato):** Per risultati ottimali, ti consigliamo vivamente di lasciare attiva l'opzione "Auto-Genera". L'IA analizzerà la tua immagine sorgente e quella di riferimento per creare un prompt tecnicamente perfetto che descrive come il nuovo indumento dovrebbe apparire nel contesto della scena originale (illuminazione, posa, ecc.).
+- **Se Scrivi Manualmente:** Se preferisci il controllo manuale, ricorda che stai sostituendo il lavoro dell'IA. Il tuo prompt deve descrivere in dettaglio l'oggetto da inserire *come se fosse nella scena*.
+  - **Descrivi solo la sostituzione:** Il tuo prompt dovrebbe descrivere solo ciò che vuoi che appaia *all'interno* dell'area mascherata. Non descrivere l'intera immagine.
+  - **Sii dettagliato:** Includi dettagli su materiale, texture, stile e illuminazione per aiutare l'IA a integrare l'oggetto in modo realistico.
+  - **❌ Esempio negativo:** "una donna che indossa una maglietta blu" (Descrive l'intera scena)
+  - **✅ Esempio positivo:** "una maglietta blu in cotone fotorealistica con pieghe morbide, sotto una luce da studio diffusa" (Descrive solo l'oggetto e il suo contesto di illuminazione)
 
 #### 2. La Maschera è Tutto: Strategie per il Try-On
 - **Sii Generoso:** È meglio mascherare un'area leggermente più grande del necessario. Questo aiuta l'IA ad avere più spazio per fondere il nuovo contenuto.
@@ -89,6 +91,9 @@ L'inpainting è uno strumento potente per sostituire parti di un'immagine, ma ri
   1.  **Se il nuovo indumento è più piccolo del vecchio:** Assicurati di coprire completamente l'intero indumento originale per rimuoverlo del tutto.
   2.  **Se il nuovo indumento è più grande del vecchio:** Maschera l'area che il nuovo indumento andrebbe a coprire. (Es: per aggiungere maniche a una canottiera, maschera anche le spalle).
   3.  **Se le forme sono diverse:** Maschera l'area totale che entrambi gli indumenti coprirebbero. Questo garantisce che il vecchio venga rimosso e il nuovo abbia lo spazio necessario.
+- **Gestione delle Braccia:**
+  - Se il nuovo indumento non copre le braccia (es. una canottiera), evita di mascherarle.
+  - Se il nuovo indumento copre le braccia (es. una giacca) e noti che la posa del braccio viene alterata in modo innaturale, prova ad abbassare gradualmente l'intensità del "Denoise" (partendo da 0.95 e scendendo) per incoraggiare l'IA a preservare meglio la posa originale.
 
 #### 3. Il Riferimento Prodotto (Opzionale)
 - **È per il Prodotto, non per lo Stile:** A differenza di altri strumenti, qui l'immagine di riferimento serve a mostrare all'IA il **prodotto specifico** che vuoi inserire nell'area mascherata. L'IA cercherà di replicare l'indumento di riferimento.
@@ -178,10 +183,12 @@ L'inpainting è uno strumento potente per sostituire parti di un'immagine, ma ri
 Inpainting is a powerful tool for replacing parts of an image, but it requires a specific approach to get the best results.
 
 #### 1. The Precise Prompt: Let the AI Do the Work
-- **Use Auto-Prompt (Recommended):** For optimal results, we strongly recommend leaving the "Auto-Generate" option enabled. The AI will analyze your source and reference images to create a technically perfect prompt.
-- **If Writing Manually:** If you prefer manual control, remember this fundamental rule: describe **only** what you want to appear *inside* the masked area. Do not describe the entire scene.
-  - **❌ Bad example:** "a woman wearing a blue t-shirt"
-  - **✅ Good example:** "a photorealistic blue cotton t-shirt with soft wrinkles, under diffused studio lighting"
+- **Use Auto-Prompt (Recommended):** For optimal results, we strongly recommend leaving the "Auto-Generate" option enabled. The AI will analyze your source and reference images to create a technically perfect prompt that describes how the new garment should appear in the context of the original scene (lighting, pose, etc.).
+- **If Writing Manually:** If you prefer manual control, remember that you are replacing the AI's job. Your prompt must describe the object to be inserted in detail, *as if it were in the scene*.
+  - **Describe Only the Replacement:** Your prompt should describe only what you want to appear *inside* the masked area. Do not describe the entire image.
+  - **Be Detailed:** Include details about material, texture, style, and lighting to help the AI realistically integrate the object.
+  - **❌ Bad Example:** "a woman wearing a blue t-shirt" (Describes the whole scene)
+  - **✅ Good Example:** "a photorealistic blue cotton t-shirt with soft wrinkles, under diffused studio lighting" (Describes only the object and its lighting context)
 
 #### 2. The Mask is Everything: Try-On Strategies
 - **Be Generous:** It's better to mask a slightly larger area than necessary. This helps the AI have more room to blend the new content.
@@ -190,6 +197,9 @@ Inpainting is a powerful tool for replacing parts of an image, but it requires a
   1.  **If the new garment is smaller than the old one:** Make sure to completely cover the entire original garment to remove it fully.
   2.  **If the new garment is larger than the old one:** Mask the area the new garment would cover. (e.g., to add sleeves to a tank top, mask the shoulders as well).
   3.  **If shapes differ:** Mask the total area that both garments would cover. This ensures the old one is removed and the new one has the necessary space.
+- **Handling Arms:**
+  - If the new garment does not cover the arms (e.g., a tank top), avoid masking them.
+  - If the new garment does cover the arms (e.g., a jacket) and you notice the arm's pose is unnaturally altered, try gradually lowering the "Denoise" strength (starting from 0.95 and going down) to encourage the AI to better preserve the original pose.
 
 #### 3. The Product Reference (Optional)
 - **It's for the Product, not the Style:** Unlike other tools, the reference image here serves to show the AI the **specific product** you want to inpaint. The AI will try to replicate the reference garment.
