@@ -43,7 +43,7 @@ export const useSecureImage = (imageUrl: string | null | undefined) => {
           }
 
           const MAX_RETRIES = 3;
-          const RETRY_DELAY = 1000; // 1 second
+          const RETRY_DELAY = 1000; // Base delay of 1 second
 
           for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
             const { data, error: downloadError } = await supabase.storage
@@ -57,8 +57,9 @@ export const useSecureImage = (imageUrl: string | null | undefined) => {
             }
 
             if (attempt < MAX_RETRIES) {
-              console.warn(`[useSecureImage] Failed to download ${storagePath} (attempt ${attempt}/${MAX_RETRIES}). Retrying in ${RETRY_DELAY}ms...`);
-              await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+              const delay = RETRY_DELAY * attempt; // Exponential backoff
+              console.warn(`[useSecureImage] Failed to download ${storagePath} (attempt ${attempt}/${MAX_RETRIES}). Retrying in ${delay}ms...`);
+              await new Promise(resolve => setTimeout(resolve, delay));
             } else {
               throw new Error(`Failed to download image after ${MAX_RETRIES} attempts: ${downloadError.message}`);
             }
