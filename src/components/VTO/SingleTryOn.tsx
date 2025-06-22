@@ -89,6 +89,7 @@ export const SingleTryOn = ({ selectedJob, resetForm, transferredImageUrl }: Sin
     useEffect(() => {
         if (transferredImageUrl) {
           const fetchImageAsFile = async (imageUrl: string) => {
+            console.log(`[SingleTryOn] Attempting to fetch transferred image: ${imageUrl}`);
             try {
               const url = new URL(imageUrl);
               const pathSegments = url.pathname.split('/');
@@ -106,10 +107,12 @@ export const SingleTryOn = ({ selectedJob, resetForm, transferredImageUrl }: Sin
     
               if (error) throw error;
               if (!blob) throw new Error("Downloaded blob is null.");
+              console.log('[SingleTryOn] Image blob downloaded successfully from Supabase.');
     
               const filename = imageUrl.split('/').pop() || 'image.png';
               const file = new File([blob], filename, { type: blob.type });
               setPersonImageFile(file);
+              console.log('[SingleTryOn] State updated with new person image file.');
             } catch (e) {
               console.error("Failed to fetch transferred image for VTO:", e);
               showError("Could not load the transferred image.");

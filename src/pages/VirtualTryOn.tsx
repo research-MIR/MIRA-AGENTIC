@@ -60,15 +60,19 @@ const VirtualTryOn = () => {
   const [transferredImage, setTransferredImage] = useState<{ url: string; target: 'base' | 'pro-source' } | null>(null);
 
   useEffect(() => {
+    console.log('[VTO Page] Image transfer effect triggered.');
     if (imageUrlToTransfer && vtoTarget) {
       console.log(`[VTO Page] Received transferred image for target: ${vtoTarget}`);
       setTransferredImage({ url: imageUrlToTransfer, target: vtoTarget });
       if (vtoTarget === 'pro-source' && !isProMode) {
+        console.log('[VTO Page] Switching to PRO mode for transferred image.');
         toggleProMode();
       }
       if (vtoTarget === 'base' && isProMode) {
+        console.log('[VTO Page] Switching to Base mode for transferred image.');
         toggleProMode();
       }
+      console.log('[VTO Page] Consuming image URL from store.');
       consumeImageUrl();
     }
   }, [imageUrlToTransfer, vtoTarget, isProMode, toggleProMode, consumeImageUrl]);

@@ -117,6 +117,7 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
   useEffect(() => {
     if (transferredImageUrl) {
       const fetchImageAsFile = async (imageUrl: string) => {
+        console.log(`[VirtualTryOnPro] Attempting to fetch transferred image: ${imageUrl}`);
         try {
           const url = new URL(imageUrl);
           const pathSegments = url.pathname.split('/');
@@ -134,10 +135,12 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
 
           if (error) throw error;
           if (!blob) throw new Error("Downloaded blob is null.");
+          console.log('[VirtualTryOnPro] Image blob downloaded successfully from Supabase.');
 
           const filename = imageUrl.split('/').pop() || 'image.png';
           const file = new File([blob], filename, { type: blob.type });
           setSourceImageFile(file);
+          console.log('[VirtualTryOnPro] State updated with new source image file.');
         } catch (e) {
           console.error("Failed to fetch transferred image for VTO Pro:", e);
           showError("Could not load the transferred image.");
