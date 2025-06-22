@@ -12,6 +12,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { optimizeImage, sanitizeFilename } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Textarea } from "../ui/textarea";
 
 const ImageUploader = ({ onFileSelect, title, imageUrl, onClear }: { onFileSelect: (file: File) => void, title: string, imageUrl: string | null, onClear: () => void }) => {
     const inputRef = useRef<HTMLInputElement>(null);
@@ -58,10 +59,12 @@ export const BatchTryOn = () => {
     const [batchPersonFiles, setBatchPersonFiles] = useState<File[]>([]);
     const [batchRandomGarmentFiles, setBatchRandomGarmentFiles] = useState<File[]>([]);
     const [batchRandomPersonFiles, setBatchRandomPersonFiles] = useState<File[]>([]);
-    const [precisePairs, setPrecisePairs] = useState<{ person: File, garment: File }[]>([]);
+    const [precisePairs, setPrecisePairs] = useState<{ person: File, garment: File, appendix: string }[]>([]);
     const [tempPairPerson, setTempPairPerson] = useState<File | null>(null);
     const [tempPairGarment, setTempPairGarment] = useState<File | null>(null);
+    const [tempPairAppendix, setTempPairAppendix] = useState("");
     const [isLoading, setIsLoading] = useState(false);
+    const [generalAppendix, setGeneralAppendix] = useState("");
 
     const uploadFile = async (file: File, type: 'person' | 'garment') => {
         if (!session?.user) throw new Error("User session not found.");
@@ -88,20 +91,21 @@ export const BatchTryOn = () => {
         setBatchRandomGarmentFiles([]);
         setBatchRandomPersonFiles([]);
         setPrecisePairs([]);
+        setGeneralAppendix("");
     };
 
     const handleBatchSubmit = async () => {
-        let pairs: { person: File, garment: File }[] = [];
+        let pairs: { person: File, garment: File, appendix?: string }[] = [];
         if (batchMode === 'one-garment') {
           if (!batchGarmentFile || batchPersonFiles.length === 0) return showError("Please provide one garment and at least one person image.");
-          pairs = batchPersonFiles.map(person => ({ person, garment: batchGarmentFile }));
+          pairs = batchPersonFiles.map(person => ({ person, garment: batchGarmentFile, appendix: generalAppendix }));
         } else if (batchMode === 'random') {
           if (batchRandomPersonFiles.length === 0 || batchRandomGarmentFiles.length === 0) return showError("Please provide at least one person and one garment image for random pairing.");
           const shuffledPeople = [...batchRandomPersonFiles].sort(() => 0.5 - Math.random());
           const shuffledGarments = [...batchRandomGarmentFiles].sort(() => 0.5 - Math.random());
           const numPairs = Math.min(shuffledPeople.length, shuffledGarments.length);
           for (let i = 0; i < numPairs; i++) {
-            pairs.push({ person: shuffledPeople[i], garment: shuffledGarments[i] });
+            pairs.push({ person: shuffledPeople[i], garment: shuffledGarments[i], appendix: generalAppendix });
           }
         } else if (batchMode === 'precise') {
           if (precisePairs.length === 0) return showError("Please add at least one precise pair.");
@@ -118,7 +122,7 @@ export const BatchTryOn = () => {
             const garment_image_url = await uploadFile(pair.garment, 'garment');
             
             const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-prompt-helper', {
-                body: { person_image_url, garment_image_url }
+                body: { person_image_url, garment_image_url, prompt_appendix: pair.appendix }
             });
             if (promptError) throw promptError;
             const autoPrompt = promptData.final_prompt;
@@ -152,9 +156,10 @@ export const BatchTryOn = () => {
 
     const addPrecisePair = () => {
         if (tempPairPerson && tempPairGarment) {
-          setPrecisePairs(prev => [...prev, { person: tempPairPerson, garment: tempPairGarment }]);
+          setPrecisePairs(prev => [...prev, { person: tempPairPerson, garment: tempPairGarment, appendix: tempPairAppendix }]);
           setTempPairPerson(null);
           setTempPairGarment(null);
+          setTempPairAppendix("");
         }
     };
 
@@ -176,6 +181,10 @@ export const BatchTryOn = () => {
                         <ImageUploader onFileSelect={setBatchGarmentFile} title={t('uploadGarment')} imageUrl={batchGarmentFile ? URL.createObjectURL(batchGarmentFile) : null} onClear={() => setBatchGarmentFile(null)} />
                         <MultiImageUploader onFilesSelect={setBatchPersonFiles} title={t('uploadPeople')} icon={<Users />} description={t('selectMultiplePersonImages')} />
                       </div>
+                      <div>
+                        <Label htmlFor="general-appendix">{t('promptAppendix')}</Label>
+                        <Textarea id="general-appendix" value={generalAppendix} onChange={(e) => setGeneralAppendix(e.target.value)} placeholder={t('promptAppendixPlaceholder')} rows={2} />
+                      </div>
                     </TabsContent>
                     <TabsContent value="random" className="pt-4 space-y-4">
                       <p className="text-sm text-muted-foreground">{t('randomPairsDescription')}</p>
@@ -183,12 +192,20 @@ export const BatchTryOn = () => {
                         <MultiImageUploader onFilesSelect={setBatchRandomGarmentFiles} title={t('uploadGarments')} icon={<Shirt />} description={t('selectMultipleGarmentImages')} />
                         <MultiImageUploader onFilesSelect={setBatchRandomPersonFiles} title={t('uploadPeople')} icon={<Users />} description={t('selectMultiplePersonImages')} />
                       </div>
+                       <div>
+                        <Label htmlFor="general-appendix-random">{t('promptAppendix')}</Label>
+                        <Textarea id="general-appendix-random" value={generalAppendix} onChange={(e) => setGeneralAppendix(e.target.value)} placeholder={t('promptAppendixPlaceholder')} rows={2} />
+                      </div>
                     </TabsContent>
                     <TabsContent value="precise" className="pt-4 space-y-4">
                       <p className="text-sm text-muted-foreground">{t('precisePairsDescription')}</p>
                       <div className="grid grid-cols-2 gap-2">
                         <ImageUploader onFileSelect={setTempPairPerson} title={t('person')} imageUrl={tempPairPerson ? URL.createObjectURL(tempPairPerson) : null} onClear={() => setTempPairPerson(null)} />
                         <ImageUploader onFileSelect={setTempPairGarment} title={t('garment')} imageUrl={tempPairGarment ? URL.createObjectURL(tempPairGarment) : null} onClear={() => setTempPairGarment(null)} />
+                      </div>
+                      <div>
+                        <Label htmlFor="pair-appendix">{t('promptAppendixPair')}</Label>
+                        <Input id="pair-appendix" value={tempPairAppendix} onChange={(e) => setTempPairAppendix(e.target.value)} placeholder={t('promptAppendixPairPlaceholder')} />
                       </div>
                       <Button className="w-full" onClick={addPrecisePair} disabled={!tempPairPerson || !tempPairGarment}>{t('addPair')}</Button>
                     </TabsContent>
@@ -229,6 +246,7 @@ export const BatchTryOn = () => {
                             <img src={URL.createObjectURL(pair.person)} className="w-16 h-16 object-cover rounded-md" />
                             <PlusCircle className="h-5 w-5 text-muted-foreground" />
                             <img src={URL.createObjectURL(pair.garment)} className="w-16 h-16 object-cover rounded-md" />
+                            <p className="text-xs text-muted-foreground flex-1 truncate italic">"{pair.appendix}"</p>
                           </div>
                         ))}
                       </div>

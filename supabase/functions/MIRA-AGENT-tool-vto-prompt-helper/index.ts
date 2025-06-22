@@ -79,7 +79,8 @@ serve(async (req) => {
     const { 
         person_image_url, garment_image_url,
         person_image_base64, person_image_mime_type,
-        garment_image_base64, garment_image_mime_type
+        garment_image_base64, garment_image_mime_type,
+        prompt_appendix
     } = await req.json();
 
     if (!(person_image_url && garment_image_url) && !(person_image_base64 && garment_image_base64)) {
@@ -117,7 +118,13 @@ serve(async (req) => {
     });
 
     const responseJson = extractJson(result.text);
-    const finalPrompt = responseJson.final_prompt;
+    let finalPrompt = responseJson.final_prompt;
+
+    if (prompt_appendix && typeof prompt_appendix === 'string' && prompt_appendix.trim() !== "") {
+        console.log(`[VTO-PromptHelper] Appending user instruction: "${prompt_appendix}"`);
+        const separator = finalPrompt.trim().endsWith('.') ? ' ' : ', ';
+        finalPrompt += `${separator}${prompt_appendix.trim()}`;
+    }
 
     if (!finalPrompt) {
         throw new Error("AI Helper did not return a final prompt in the expected format.");

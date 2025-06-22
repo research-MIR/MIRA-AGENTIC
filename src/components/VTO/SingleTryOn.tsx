@@ -76,6 +76,7 @@ export const SingleTryOn = ({ selectedJob, resetForm, transferredImageUrl, onTra
     const [personImageFile, setPersonImageFile] = useState<File | null>(null);
     const [garmentImageFile, setGarmentImageFile] = useState<File | null>(null);
     const [prompt, setPrompt] = useState("");
+    const [promptAppendix, setPromptAppendix] = useState("");
     const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
     const [isAutoPromptEnabled, setIsAutoPromptEnabled] = useState(true);
     const [promptReady, setPromptReady] = useState(false);
@@ -191,6 +192,7 @@ export const SingleTryOn = ({ selectedJob, resetForm, transferredImageUrl, onTra
                   user_id: session?.user?.id, 
                   mode: 'base',
                   prompt: prompt,
+                  prompt_appendix: promptAppendix,
                   resolution: resolution,
                   num_images: numImages,
                 }
@@ -203,6 +205,7 @@ export const SingleTryOn = ({ selectedJob, resetForm, transferredImageUrl, onTra
             setPersonImageFile(null);
             setGarmentImageFile(null);
             setPrompt("");
+            setPromptAppendix("");
             setPromptReady(false);
             setResolution('standard');
             setNumImages(1);
@@ -263,13 +266,17 @@ export const SingleTryOn = ({ selectedJob, resetForm, transferredImageUrl, onTra
                       </AccordionItem>
                       <AccordionItem value="item-2">
                         <AccordionTrigger>{t('promptSectionTitle')}</AccordionTrigger>
-                        <AccordionContent className="pt-4 space-y-2">
+                        <AccordionContent className="pt-4 space-y-4">
                           <div className="flex items-center space-x-2">
                             <Switch id="auto-prompt" checked={isAutoPromptEnabled} onCheckedChange={setIsAutoPromptEnabled} disabled={!!selectedJob} />
                             <Label htmlFor="auto-prompt" className="text-sm">{t('autoGenerate')}</Label>
                           </div>
                           <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t('promptPlaceholderVTO')} rows={4} disabled={isAutoPromptEnabled} />
                           {isGeneratingPrompt && <div className="flex items-center text-sm text-muted-foreground"><Loader2 className="mr-2 h-4 w-4 animate-spin" />{t('generatingPrompt')}</div>}
+                          <div>
+                            <Label htmlFor="prompt-appendix">{t('promptAppendix')}</Label>
+                            <Textarea id="prompt-appendix" value={promptAppendix} onChange={(e) => setPromptAppendix(e.target.value)} placeholder={t('promptAppendixPlaceholder')} rows={2} />
+                          </div>
                         </AccordionContent>
                       </AccordionItem>
                       <AccordionItem value="item-3">

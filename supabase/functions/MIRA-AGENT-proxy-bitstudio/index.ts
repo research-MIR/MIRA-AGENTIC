@@ -256,7 +256,7 @@ serve(async (req) => {
       }
 
     } else { // Default to virtual-try-on
-      const { person_image_url, garment_image_url, resolution, num_images, prompt } = body;
+      const { person_image_url, garment_image_url, resolution, num_images, prompt, prompt_appendix } = body;
       if (!person_image_url || !garment_image_url) throw new Error("person_image_url and garment_image_url are required for try-on mode.");
 
       const [personBlob, garmentBlob] = await Promise.all([
@@ -277,6 +277,7 @@ serve(async (req) => {
         num_images: num_images || 1,
       };
       if (prompt) vtoPayload.prompt = prompt;
+      if (prompt_appendix) vtoPayload.prompt_appendix = prompt_appendix;
 
       const vtoResponse = await fetch(vtoUrl, {
         method: 'POST',
