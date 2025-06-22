@@ -16,6 +16,7 @@ import { useSecureImage } from "@/hooks/useSecureImage";
 import { Skeleton } from "../ui/skeleton";
 import { useQueryClient } from "@tanstack/react-query";
 import { DebugStepsModal } from "./DebugStepsModal";
+import { Switch } from "../ui/switch";
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -93,6 +94,7 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
   const [resetTrigger, setResetTrigger] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [isDebugModalOpen, setIsDebugModalOpen] = useState(false);
+  const [isAutoPromptEnabled, setIsAutoPromptEnabled] = useState(true);
 
   const sourceImageUrl = useMemo(() => sourceImageFile ? URL.createObjectURL(sourceImageFile) : null, [sourceImageFile]);
   const referenceImageUrl = useMemo(() => referenceImageFile ? URL.createObjectURL(referenceImageFile) : null, [referenceImageFile]);
@@ -132,8 +134,12 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
   };
 
   const handleGenerate = async () => {
-    if (!sourceImageFile || !maskImage || !prompt.trim()) {
-      showError("Please provide a source image, a mask, and a prompt.");
+    if (!sourceImageFile || !maskImage) {
+      showError("Please provide a source image and draw a mask.");
+      return;
+    }
+    if (!isAutoPromptEnabled && !prompt.trim()) {
+      showError("Please provide a prompt or enable auto-prompt.");
       return;
     }
     setIsLoading(true);
@@ -217,7 +223,8 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
         full_source_image_base64: await fileToBase64(sourceImageFile),
         cropped_source_image_base64: croppedSourceBase64,
         cropped_dilated_mask_base64: croppedDilatedMaskBase64,
-        prompt,
+        prompt: isAutoPromptEnabled ? "" : prompt,
+        auto_prompt_enabled: isAutoPromptEnabled,
         bbox,
         user_id: session?.user.id
       };
@@ -292,8 +299,11 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <Label htmlFor="pro-prompt">Describe what to generate in the masked area:</Label>
-              <Textarea id="pro-prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="e.g., a red silk shirt, a leather jacket with zippers..." rows={4} />
+              <div className="flex items-center space-x-2">
+                <Switch id="auto-prompt-pro" checked={isAutoPromptEnabled} onCheckedChange={setIsAutoPromptEnabled} />
+                <Label htmlFor="auto-prompt-pro">Auto-Generate Prompt</Label>
+              </div>
+              <Textarea id="pro-prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="e.g., a red silk shirt, a leather jacket with zippers..." rows={4} disabled={isAutoPromptEnabled} />
               <Button className="w-full" onClick={handleGenerate} disabled={isLoading}>
                 {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
                 Generate

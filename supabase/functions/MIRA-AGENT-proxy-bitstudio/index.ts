@@ -73,10 +73,24 @@ serve(async (req) => {
     let newJobId;
 
     if (mode === 'inpaint') {
-      const { full_source_image_base64, cropped_source_image_base64, cropped_dilated_mask_base64, prompt, bbox, reference_image_base64 } = body;
+      let { full_source_image_base64, cropped_source_image_base64, cropped_dilated_mask_base64, prompt, bbox, reference_image_base64, auto_prompt_enabled } = body;
       
-      if (!full_source_image_base64 || !cropped_source_image_base64 || !cropped_dilated_mask_base64 || !prompt || !bbox) {
+      if (!full_source_image_base64 || !cropped_source_image_base64 || !cropped_dilated_mask_base64 || !bbox) {
         throw new Error("Missing required parameters for inpaint mode.");
+      }
+
+      if (auto_prompt_enabled) {
+        console.log(`[Proxy][${requestId}] Auto-prompt enabled. Generating prompt from cropped source...`);
+        const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-auto-describe-image', {
+          body: { base64_image_data: cropped_source_image_base64, mime_type: 'image/png' }
+        });
+        if (promptError) throw new Error(`Auto-prompt generation failed: ${promptError.message}`);
+        prompt = promptData.auto_prompt;
+        console.log(`[Proxy][${requestId}] Auto-generated prompt: "${prompt.substring(0, 50)}..."`);
+      }
+
+      if (!prompt) {
+        throw new Error("Prompt is required for inpainting, either manually or via auto-generation.");
       }
 
       const sourceBlob = new Blob([decodeBase64(cropped_source_image_base64)], { type: 'image/png' });
