@@ -165,7 +165,13 @@ serve(async (req) => {
         const [sourceImageId, maskImageId, referenceImageId] = await Promise.all(uploadPromises);
 
         const inpaintUrl = `${BITSTUDIO_API_BASE}/images/${sourceImageId}/inpaint`;
-        const inpaintPayload: any = { mask_image_id: maskImageId, prompt, resolution, denoise };
+        const inpaintPayload: any = { 
+            mask_image_id: maskImageId, 
+            prompt, 
+            resolution, 
+            denoise,
+            seed: Math.floor(Math.random() * 1000000000) // Add unique seed for each attempt
+        };
         if (referenceImageId) inpaintPayload.reference_image_id = referenceImageId;
         
         const inpaintResponse = await fetch(inpaintUrl, {
