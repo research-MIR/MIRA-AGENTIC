@@ -16,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { SingleTryOnSettings } from "./SingleTryOnSettings";
+import { useImagePreview } from "@/context/ImagePreviewContext";
 
 interface BitStudioJob {
   id: string;
