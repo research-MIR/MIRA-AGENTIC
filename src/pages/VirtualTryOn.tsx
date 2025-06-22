@@ -11,7 +11,7 @@ import { SingleTryOn } from "@/components/VTO/SingleTryOn";
 import { BatchTryOn } from "@/components/VTO/BatchTryOn";
 import { VirtualTryOnPro } from "@/components/VTO/VirtualTryOnPro";
 import { cn } from "@/lib/utils";
-import { AlertTriangle, ImageIcon, Loader2, Star } from "lucide-react";
+import { AlertTriangle, ImageIcon, Loader2, Star, Shirt } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 
@@ -23,17 +23,21 @@ interface BitStudioJob {
   final_image_url?: string;
   error_message?: string;
   mode: 'base' | 'inpaint';
+  metadata?: {
+    debug_assets?: any;
+    prompt_used?: string;
+  }
 }
 
-const SecureImageDisplay = ({ imageUrl, alt, onClick }: { imageUrl: string | null, alt: string, onClick?: (e: React.MouseEvent<HTMLImageElement>) => void }) => {
+const SecureImageDisplay = ({ imageUrl, alt, onClick, className }: { imageUrl: string | null, alt: string, onClick?: (e: React.MouseEvent<HTMLImageElement>) => void, className?: string }) => {
     const { displayUrl, isLoading, error } = useSecureImage(imageUrl);
     const hasClickHandler = !!onClick;
   
-    if (!imageUrl) return <div className="w-full h-full bg-muted rounded-md flex items-center justify-center"><ImageIcon className="h-6 w-6 text-muted-foreground" /></div>;
-    if (isLoading) return <div className="w-full h-full bg-muted rounded-md flex items-center justify-center"><Loader2 className="h-6 w-6 animate-spin" /></div>;
-    if (error) return <div className="w-full h-full bg-muted rounded-md flex items-center justify-center"><AlertTriangle className="h-6 w-6 text-destructive" /></div>;
+    if (!imageUrl) return <div className={cn("w-full h-full bg-muted rounded-md flex items-center justify-center", className)}><ImageIcon className="h-6 w-6 text-muted-foreground" /></div>;
+    if (isLoading) return <div className={cn("w-full h-full bg-muted rounded-md flex items-center justify-center", className)}><Loader2 className="h-6 w-6 animate-spin" /></div>;
+    if (error) return <div className={cn("w-full h-full bg-muted rounded-md flex items-center justify-center", className)}><AlertTriangle className="h-6 w-6 text-destructive" /></div>;
     
-    return <img src={displayUrl} alt={alt} className={cn("max-w-full max-h-full object-contain rounded-md", hasClickHandler && "cursor-pointer")} onClick={onClick} />;
+    return <img src={displayUrl} alt={alt} className={cn("max-w-full max-h-full object-contain rounded-md", hasClickHandler && "cursor-pointer", className)} onClick={onClick} />;
 };
 
 const VirtualTryOn = () => {
@@ -112,6 +116,10 @@ const VirtualTryOn = () => {
     setSelectedJobId(null);
   };
 
+  const jobsToDisplay = isProMode 
+    ? recentJobs?.filter(job => job.mode === 'inpaint') 
+    : recentJobs?.filter(job => job.mode === 'base');
+
   return (
     <div className="p-4 md:p-8 h-screen flex flex-col">
       <header className="pb-4 mb-8 border-b shrink-0 flex justify-between items-center">
@@ -131,47 +139,44 @@ const VirtualTryOn = () => {
       <div className="flex-1 overflow-y-auto">
         {isProMode ? (
           <VirtualTryOnPro 
-            recentJobs={recentJobs}
-            isLoadingRecentJobs={isLoadingRecentJobs}
             selectedJob={selectedJob}
             handleSelectJob={handleSelectJob}
             resetForm={resetForm}
           />
         ) : (
-          <>
-            <Tabs defaultValue="single" className="w-full">
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="single">{t('singleTryOn')}</TabsTrigger>
-                <TabsTrigger value="batch">{t('batchProcess')}</TabsTrigger>
-              </TabsList>
-              <TabsContent value="single" className="pt-6">
-                <p className="text-sm text-muted-foreground mb-6">{t('singleVtoDescription')}</p>
-                <SingleTryOn selectedJob={selectedJob} resetForm={resetForm} />
-              </TabsContent>
-              <TabsContent value="batch" className="pt-6">
-                <p className="text-sm text-muted-foreground mb-6">{t('batchVtoDescription')}</p>
-                <BatchTryOn />
-              </TabsContent>
-            </Tabs>
-            <Card className="mt-8">
-              <CardHeader><CardTitle>Recent Jobs</CardTitle></CardHeader>
-              <CardContent>
-                {isLoadingRecentJobs ? <Skeleton className="h-24 w-full" /> : recentJobs && recentJobs.length > 0 ? (
-                  <div className="flex gap-4 overflow-x-auto pb-2">
-                    {recentJobs.filter(job => job.mode === 'base').map(job => {
-                      const urlToPreview = job.final_image_url || job.source_person_image_url;
-                      return (
-                        <button key={job.id} onClick={() => handleSelectJob(job)} className={cn("border-2 rounded-lg p-1 flex-shrink-0 w-24 h-24", selectedJobId === job.id ? "border-primary" : "border-transparent")}>
-                          <SecureImageDisplay imageUrl={urlToPreview} alt="Recent job" />
-                        </button>
-                      )
-                    })}
-                  </div>
-                ) : <p className="text-muted-foreground text-sm">No recent jobs found.</p>}
-              </CardContent>
-            </Card>
-          </>
+          <Tabs defaultValue="single" className="w-full">
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="single">{t('singleTryOn')}</TabsTrigger>
+              <TabsTrigger value="batch">{t('batchProcess')}</TabsTrigger>
+            </TabsList>
+            <TabsContent value="single" className="pt-6">
+              <p className="text-sm text-muted-foreground mb-6">{t('singleVtoDescription')}</p>
+              <SingleTryOn selectedJob={selectedJob} resetForm={resetForm} />
+            </TabsContent>
+            <TabsContent value="batch" className="pt-6">
+              <p className="text-sm text-muted-foreground mb-6">{t('batchVtoDescription')}</p>
+              <BatchTryOn />
+            </TabsContent>
+          </Tabs>
         )}
+        
+        <Card className="mt-8">
+          <CardHeader><CardTitle>Recent Jobs</CardTitle></CardHeader>
+          <CardContent>
+            {isLoadingRecentJobs ? <Skeleton className="h-24 w-full" /> : jobsToDisplay && jobsToDisplay.length > 0 ? (
+              <div className="flex gap-4 overflow-x-auto pb-2">
+                {jobsToDisplay.map(job => {
+                  const urlToPreview = job.final_image_url || job.source_person_image_url;
+                  return (
+                    <button key={job.id} onClick={() => handleSelectJob(job)} className={cn("border-2 rounded-lg p-1 flex-shrink-0 w-24 h-24", selectedJobId === job.id ? "border-primary" : "border-transparent")}>
+                      <SecureImageDisplay imageUrl={urlToPreview} alt="Recent job" />
+                    </button>
+                  )
+                })}
+              </div>
+            ) : <p className="text-muted-foreground text-sm">No recent jobs found for this mode.</p>}
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
