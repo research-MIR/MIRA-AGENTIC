@@ -18,7 +18,7 @@ export const MaskControls = ({ brushSize, onBrushSizeChange, onReset }: MaskCont
         <Slider
           value={[brushSize]}
           onValueChange={(v) => onBrushSizeChange(v[0])}
-          min={5}
+          min={1}
           max={100}
           step={1}
           className="w-32"

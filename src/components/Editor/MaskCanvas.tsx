@@ -3,7 +3,7 @@ import React, { useRef, useEffect, useState, useCallback } from 'react';
 interface MaskCanvasProps {
   imageUrl: string;
   onMaskChange: (dataUrl: string) => void;
-  brushSize: number;
+  brushSize: number; // This is now a relative value (e.g., 1-100)
   resetTrigger: number;
 }
 
@@ -118,15 +118,22 @@ const MaskCanvasComponent = ({ imageUrl, onMaskChange, brushSize, resetTrigger }
   const draw = useCallback((e: React.MouseEvent | React.TouchEvent) => {
     if (!isDrawing) return;
     e.preventDefault();
-    const ctx = drawingCanvasRef.current?.getContext('2d');
-    if (!ctx || !lastPoint.current) return;
+    const canvas = drawingCanvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (!ctx || !lastPoint.current || !canvas) return;
     
     const coords = getCoords(e);
+
+    // Calculate dynamic brush size based on the smaller dimension of the canvas
+    const smallerDimension = Math.min(canvas.width, canvas.height);
+    // The slider value (1-100) will correspond to a brush size from 0% to 20% of the smaller image dimension
+    const dynamicBrushSize = (brushSize / 100) * (smallerDimension * 0.2);
+
     ctx.beginPath();
     ctx.moveTo(lastPoint.current.x, lastPoint.current.y);
     ctx.lineTo(coords.x, coords.y);
     ctx.strokeStyle = 'rgba(239, 68, 68, 0.7)'; // Draw with semi-transparent red for user visibility
-    ctx.lineWidth = brushSize;
+    ctx.lineWidth = dynamicBrushSize;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.stroke();
