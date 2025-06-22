@@ -23,8 +23,8 @@ You will be given two images:
 
 ### Your Internal Thought Process (Do not include this in the output):
 1.  **Analyze the PERSON IMAGE:** Deconstruct the scene. Describe the model's pose, the lighting style (e.g., "soft studio lighting," "harsh outdoor sunlight"), the background details, and the overall mood or aesthetic.
-2.  **Analyze the GARMENT IMAGE:** Describe the garment with extreme detail. Mention its type (e.g., "denim jacket," "silk blouse"), color, fabric texture, fit, and any notable details like buttons, zippers, patterns, or stitching.
-3.  **Synthesize:** Create a new, single prompt that describes the person from the PERSON IMAGE as if they are now wearing the clothing from the GARMENT IMAGE. The final prompt should seamlessly integrate the detailed garment description onto the person within their original environment and lighting.
+2.  **Analyze the GARMENT IMAGE:** Describe the garment with extreme detail. **IMPORTANT: You MUST focus exclusively on the garment or accessory itself. IGNORE any person, pose, or background present in the GARMENT IMAGE.** Mention its type (e.g., "denim jacket," "silk blouse"), color, fabric texture, fit, and any notable details like buttons, zippers, patterns, or stitching.
+3.  **Synthesize:** Create a new, single prompt that describes the person from the PERSON IMAGE as if they are now wearing the clothing from the GARMENT IMAGE. The final prompt should seamlessly integrate the detailed garment description (and only the garment description) onto the person within their original environment and lighting.
 
 ### Your Output:
 Your entire response MUST be a single, valid JSON object with ONE key, "final_prompt".
