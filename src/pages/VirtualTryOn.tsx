@@ -116,10 +116,6 @@ const VirtualTryOn = () => {
     setSelectedJobId(null);
   };
 
-  const jobsToDisplay = isProMode 
-    ? recentJobs?.filter(job => job.mode === 'inpaint') 
-    : recentJobs?.filter(job => job.mode === 'base');
-
   return (
     <div className="p-4 md:p-8 h-screen flex flex-col">
       <header className="pb-4 mb-4 border-b shrink-0 flex justify-between items-center">
@@ -136,7 +132,7 @@ const VirtualTryOn = () => {
         </div>
       </header>
       
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-hidden">
         {isProMode ? (
           <VirtualTryOnPro 
             recentJobs={recentJobs}
@@ -146,7 +142,7 @@ const VirtualTryOn = () => {
             resetForm={resetForm}
           />
         ) : (
-          <>
+          <div className="h-full overflow-y-auto">
             <Tabs defaultValue="single" className="w-full">
               <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="single">{t('singleTryOn')}</TabsTrigger>
@@ -178,7 +174,7 @@ const VirtualTryOn = () => {
                 ) : <p className="text-muted-foreground text-sm">No recent jobs found for this mode.</p>}
               </CardContent>
             </Card>
-          </>
+          </div>
         )}
       </div>
     </div>
