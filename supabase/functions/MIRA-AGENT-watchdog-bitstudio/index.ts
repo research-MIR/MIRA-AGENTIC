@@ -9,7 +9,8 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const STALLED_THRESHOLD_MINUTES = 5;
+// A job is now considered stalled if it hasn't been polled in the last 5 seconds.
+const STALLED_THRESHOLD_SECONDS = 5;
 
 serve(async (req) => {
   console.log("BitStudio Watchdog: Function invoked.");
@@ -21,7 +22,7 @@ serve(async (req) => {
   try {
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
     
-    const threshold = new Date(Date.now() - STALLED_THRESHOLD_MINUTES * 60 * 1000).toISOString();
+    const threshold = new Date(Date.now() - STALLED_THRESHOLD_SECONDS * 1000).toISOString();
     console.log(`BitStudio Watchdog: Checking for jobs stalled since ${threshold}`);
 
     const { data: stalledJobs, error: queryError } = await supabase
