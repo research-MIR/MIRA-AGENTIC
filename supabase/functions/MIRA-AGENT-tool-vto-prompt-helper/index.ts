@@ -76,18 +76,37 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
 
   try {
-    const { person_image_url, garment_image_url } = await req.json();
-    if (!person_image_url || !garment_image_url) {
-      throw new Error("person_image_url and garment_image_url are required.");
+    const { 
+        person_image_url, garment_image_url,
+        person_image_base64, person_image_mime_type,
+        garment_image_base64, garment_image_mime_type
+    } = await req.json();
+
+    if (!(person_image_url && garment_image_url) && !(person_image_base64 && garment_image_base64)) {
+        throw new Error("Either image URLs or base64 data for both person and garment are required.");
     }
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-    
-    const [personParts, garmentParts] = await Promise.all([
-        downloadImageAsPart(person_image_url, "PERSON IMAGE"),
-        downloadImageAsPart(garment_image_url, "GARMENT IMAGE")
-    ]);
+    let personParts: Part[], garmentParts: Part[];
 
+    if (person_image_base64 && garment_image_base64) {
+        console.log("[VTO-PromptHelper] Using provided base64 data.");
+        personParts = [
+            { text: `--- PERSON IMAGE ---` },
+            { inlineData: { mimeType: person_image_mime_type || 'image/png', data: person_image_base64 } }
+        ];
+        garmentParts = [
+            { text: `--- GARMENT IMAGE ---` },
+            { inlineData: { mimeType: garment_image_mime_type || 'image/png', data: garment_image_base64 } }
+        ];
+    } else {
+        console.log("[VTO-PromptHelper] Using provided URLs.");
+        [personParts, garmentParts] = await Promise.all([
+            downloadImageAsPart(person_image_url, "PERSON IMAGE"),
+            downloadImageAsPart(garment_image_url, "GARMENT IMAGE")
+        ]);
+    }
+    
     const finalParts: Part[] = [...personParts, ...garmentParts];
 
     const result = await ai.models.generateContent({

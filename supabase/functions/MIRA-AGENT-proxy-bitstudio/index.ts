@@ -80,12 +80,17 @@ serve(async (req) => {
       }
 
       if (auto_prompt_enabled) {
-        console.log(`[Proxy][${requestId}] Auto-prompt enabled. Generating prompt from cropped source...`);
-        const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-auto-describe-image', {
-          body: { base64_image_data: cropped_source_image_base64, mime_type: 'image/png' }
+        console.log(`[Proxy][${requestId}] Auto-prompt enabled. Generating prompt from person and garment...`);
+        const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-prompt-helper', {
+          body: { 
+            person_image_base64: cropped_source_image_base64, 
+            person_image_mime_type: 'image/png',
+            garment_image_base64: reference_image_base64, // The reference image is the garment
+            garment_image_mime_type: 'image/png'
+          }
         });
         if (promptError) throw new Error(`Auto-prompt generation failed: ${promptError.message}`);
-        prompt = promptData.auto_prompt;
+        prompt = promptData.final_prompt;
         console.log(`[Proxy][${requestId}] Auto-generated prompt: "${prompt.substring(0, 50)}..."`);
       }
 
