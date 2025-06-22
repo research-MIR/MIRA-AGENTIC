@@ -76,24 +76,28 @@ export const vtoTranslations = {
 
 L'inpainting è uno strumento potente per sostituire parti di un'immagine, ma richiede un approccio specifico per ottenere i migliori risultati.
 
-#### 1. La Maschera è Tutto
-- **Sii generoso:** È meglio mascherare un'area leggermente più grande del necessario piuttosto che troppo piccola. Questo aiuta l'IA ad avere più spazio per fondere il nuovo contenuto.
-- **Usa l'Espansione:** L'impostazione "Espansione Maschera" è la tua migliore amica. Aumentala per ammorbidire i bordi e ottenere una transizione più naturale tra l'originale e il generato.
-
-#### 2. Il Prompt Preciso
-- **Descrivi solo la sostituzione:** Il tuo prompt dovrebbe descrivere solo ciò che vuoi che appaia *all'interno* dell'area mascherata. Non descrivere l'intera immagine.
-- **Sii dettagliato:** Includi dettagli su materiale, texture, stile e illuminazione.
-  - **❌ Esempio negativo:** "una maglietta blu"
+#### 1. Il Prompt Preciso: Lascia Fare all'IA
+- **Usa l'Auto-Prompt (Consigliato):** Per risultati ottimali, ti consigliamo vivamente di lasciare attiva l'opzione "Auto-Genera". L'IA analizzerà la tua immagine sorgente e quella di riferimento per creare un prompt tecnicamente perfetto.
+- **Se Scrivi Manualmente:** Se preferisci il controllo manuale, ricorda questa regola fondamentale: descrivi **solo** ciò che vuoi che appaia *all'interno* dell'area mascherata. Non descrivere l'intera scena.
+  - **❌ Esempio negativo:** "una donna che indossa una maglietta blu"
   - **✅ Esempio positivo:** "una maglietta blu in cotone fotorealistica con pieghe morbide, sotto una luce da studio diffusa"
 
-#### 3. Il Riferimento Stilistico (Opzionale)
-- **È per lo stile, non per la forma:** L'immagine di riferimento guida lo stile (colori, texture, illuminazione), non la forma esatta dell'oggetto.
-- **Esempio:** Se fornisci l'immagine di una giacca di pelle, l'IA cercherà di creare una *nuova texture* di pelle nell'area mascherata, non di copiare esattamente quella giacca.
+#### 2. La Maschera è Tutto: Strategie per il Try-On
+- **Sii Generoso:** È meglio mascherare un'area leggermente più grande del necessario. Questo aiuta l'IA ad avere più spazio per fondere il nuovo contenuto.
+- **Usa l'Espansione:** L'impostazione "Espansione Maschera" è la tua migliore amica. Aumentala per ammorbidire i bordi e ottenere una transizione più naturale.
+- **Strategie di Copertura per Indumenti:**
+  1.  **Se il nuovo indumento è più piccolo del vecchio:** Assicurati di coprire completamente l'intero indumento originale per rimuoverlo del tutto.
+  2.  **Se il nuovo indumento è più grande del vecchio:** Maschera l'area che il nuovo indumento andrebbe a coprire. (Es: per aggiungere maniche a una canottiera, maschera anche le spalle).
+  3.  **Se le forme sono diverse:** Maschera l'area totale che entrambi gli indumenti coprirebbero. Questo garantisce che il vecchio venga rimosso e il nuovo abbia lo spazio necessario.
+
+#### 3. Il Riferimento Prodotto (Opzionale)
+- **È per il Prodotto, non per lo Stile:** A differenza di altri strumenti, qui l'immagine di riferimento serve a mostrare all'IA il **prodotto specifico** che vuoi inserire nell'area mascherata. L'IA cercherà di replicare l'indumento di riferimento.
+- **Esempio:** Se fornisci l'immagine di una specifica giacca di pelle, l'IA tenterà di ricreare *quella giacca* nell'area che hai disegnato, adattandola alla posa e all'illuminazione del modello.
 
 #### 4. Denoise e Creatività
 - **Controlla la libertà dell'IA:** L'impostazione "Intensità Denoise" determina quanto l'IA può deviare dall'immagine originale all'interno della maschera.
-  - **Basso Denoise (es. 0.5-0.7):** Ideale per cambiamenti sottili come colore o texture, mantenendo la forma originale dell'indumento.
-  - **Alto Denoise (es. 0.8-1.0):** Concede all'IA più libertà creativa. Usalo se vuoi cambiare la forma dell'indumento (es. trasformare una t-shirt in una giacca).
+  - **Basso Denoise (es. 0.5-0.7):** Ideale quando la forma dell'indumento originale è simile a quella desiderata. Ottimo per cambi di texture o colore, aiuta a fondere meglio il risultato.
+  - **Alto Denoise (es. 0.8-1.0):** Concede all'IA più libertà creativa. Usalo se vuoi cambiare significativamente la forma dell'indumento (es. trasformare una t-shirt in una giacca) o se l'impostazione più bassa non è abbastanza forte.
 `
   },
   en: {
@@ -173,24 +177,28 @@ L'inpainting è uno strumento potente per sostituire parti di un'immagine, ma ri
 
 Inpainting is a powerful tool for replacing parts of an image, but it requires a specific approach to get the best results.
 
-#### 1. The Mask is Everything
-- **Be generous:** It's better to mask a slightly larger area than necessary rather than too small. This helps the AI have more room to blend the new content.
-- **Use Expansion:** The "Mask Expansion" setting is your best friend. Increase it to soften the edges and achieve a more natural transition between the original and the generated content.
-
-#### 2. The Precise Prompt
-- **Describe only the replacement:** Your prompt should only describe what you want to appear *inside* the masked area. Do not describe the entire image.
-- **Be detailed:** Include details about material, texture, style, and lighting.
-  - **❌ Bad example:** "a blue shirt"
+#### 1. The Precise Prompt: Let the AI Do the Work
+- **Use Auto-Prompt (Recommended):** For optimal results, we strongly recommend leaving the "Auto-Generate" option enabled. The AI will analyze your source and reference images to create a technically perfect prompt.
+- **If Writing Manually:** If you prefer manual control, remember this fundamental rule: describe **only** what you want to appear *inside* the masked area. Do not describe the entire scene.
+  - **❌ Bad example:** "a woman wearing a blue t-shirt"
   - **✅ Good example:** "a photorealistic blue cotton t-shirt with soft wrinkles, under diffused studio lighting"
 
-#### 3. The Style Reference (Optional)
-- **It's for style, not shape:** The reference image guides the style (colors, textures, lighting), not the exact shape of the object.
-- **Example:** If you provide an image of a leather jacket, the AI will try to create a *new* leather texture in the masked area, not copy that exact jacket.
+#### 2. The Mask is Everything: Try-On Strategies
+- **Be Generous:** It's better to mask a slightly larger area than necessary. This helps the AI have more room to blend the new content.
+- **Use Expansion:** The "Mask Expansion" setting is your best friend. Increase it to soften the edges and achieve a more natural transition.
+- **Garment Coverage Strategies:**
+  1.  **If the new garment is smaller than the old one:** Make sure to completely cover the entire original garment to remove it fully.
+  2.  **If the new garment is larger than the old one:** Mask the area the new garment would cover. (e.g., to add sleeves to a tank top, mask the shoulders as well).
+  3.  **If shapes differ:** Mask the total area that both garments would cover. This ensures the old one is removed and the new one has the necessary space.
+
+#### 3. The Product Reference (Optional)
+- **It's for the Product, not the Style:** Unlike other tools, the reference image here serves to show the AI the **specific product** you want to inpaint. The AI will try to replicate the reference garment.
+- **Example:** If you provide an image of a specific leather jacket, the AI will attempt to recreate *that jacket* in the area you've drawn, fitting it to the model's pose and lighting.
 
 #### 4. Denoise and Creativity
 - **Control the AI's freedom:** The "Denoise Strength" setting determines how much the AI can deviate from the original image within the mask.
-  - **Low Denoise (e.g., 0.5-0.7):** Ideal for subtle changes like color or texture, while keeping the original shape of the garment.
-  - **High Denoise (e.g., 0.8-1.0):** Gives the AI more creative freedom. Use this if you want to change the shape of the garment (e.g., turning a t-shirt into a jacket).
+  - **Low Denoise (e.g., 0.5-0.7):** Ideal when the original garment's shape is consistent with the desired output. Great for texture or color changes, as it helps blend the result better.
+  - **High Denoise (e.g., 0.8-1.0):** Gives the AI more creative freedom. Use this if you want to significantly change the garment's shape (e.g., turning a t-shirt into a jacket) or if the lower setting isn't strong enough.
 `
   },
 };
