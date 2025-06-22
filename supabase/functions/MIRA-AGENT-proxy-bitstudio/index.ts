@@ -147,10 +147,37 @@ serve(async (req) => {
       if (!croppedDilatedMaskBuffer) throw new Error("Failed to create buffer from cropped mask canvas.");
       const croppedDilatedMaskBase64 = encodeBase64(croppedDilatedMaskBuffer);
 
+      // --- New Upscaling Logic ---
+      let sourceToSendBase64 = croppedSourceBase64;
+      let maskToSendBase64 = croppedDilatedMaskBase64;
+      const pixelThreshold = 768 * 768;
+      const currentPixels = bbox.width * bbox.height;
+
+      if (currentPixels <= pixelThreshold) {
+          console.log(`[BitStudioProxy][${requestId}] Crop size (${bbox.width}x${bbox.height}) is below threshold. Upscaling...`);
+          const upscaleFactor = 2.0;
+          const { data: upscaleData, error: upscaleError } = await supabase.functions.invoke('MIRA-AGENT-tool-upscale-crop', {
+              body: {
+                  source_crop_base64: croppedSourceBase64,
+                  mask_crop_base64: croppedDilatedMaskBase64,
+                  upscale_factor: upscaleFactor
+              }
+          });
+
+          if (upscaleError) throw new Error(`Upscaling failed: ${upscaleError.message}`);
+          
+          sourceToSendBase64 = upscaleData.upscaled_source_base64;
+          maskToSendBase64 = upscaleData.upscaled_mask_base64;
+          console.log(`[BitStudioProxy][${requestId}] Upscaling complete. New dimensions will be approx ${Math.round(bbox.width * upscaleFactor)}x${Math.round(bbox.height * upscaleFactor)}.`);
+      } else {
+          console.log(`[BitStudioProxy][${requestId}] Crop size (${bbox.width}x${bbox.height}) is sufficient. Skipping upscale.`);
+      }
+      // --- End Upscaling Logic ---
+
       if (auto_prompt_enabled) {
         const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-prompt-helper', {
           body: { 
-            person_image_base64: croppedSourceBase64, 
+            person_image_base64: sourceToSendBase64, 
             person_image_mime_type: 'image/png',
             garment_image_base64: reference_image_base64,
             garment_image_mime_type: 'image/png'
@@ -163,8 +190,8 @@ serve(async (req) => {
       if (!prompt) throw new Error("Prompt is required for inpainting.");
 
       for (let i = 0; i < num_attempts; i++) {
-        const sourceBlob = new Blob([decodeBase64(croppedSourceBase64)], { type: 'image/png' });
-        const maskBlob = new Blob([decodeBase64(croppedDilatedMaskBase64)], { type: 'image/png' });
+        const sourceBlob = new Blob([decodeBase64(sourceToSendBase64)], { type: 'image/png' });
+        const maskBlob = new Blob([decodeBase64(maskToSendBase64)], { type: 'image/png' });
 
         const uploadPromises: Promise<string | null>[] = [
           uploadToBitStudio(sourceBlob, 'inpaint-base', `source_${i}.png`),
