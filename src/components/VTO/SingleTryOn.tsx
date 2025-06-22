@@ -57,7 +57,7 @@ const SecureImageDisplay = ({ imageUrl, alt, onClick }: { imageUrl: string | nul
     if (isLoading) return <div className="w-full h-full bg-muted rounded-md flex items-center justify-center"><Loader2 className="h-6 w-6 animate-spin" /></div>;
     if (error) return <div className="w-full h-full bg-muted rounded-md flex items-center justify-center"><AlertTriangle className="h-6 w-6 text-destructive" /></div>;
     
-    return <img src={displayUrl} alt={alt} className={cn("w-full h-full object-contain rounded-md", hasClickHandler && "cursor-pointer")} onClick={onClick} />;
+    return <img src={displayUrl} alt={alt} className={cn("max-w-full max-h-full object-contain rounded-md", hasClickHandler && "cursor-pointer")} onClick={onClick} />;
 };
 
 interface SingleTryOnProps {
@@ -250,7 +250,7 @@ export const SingleTryOn = ({ selectedJob, resetForm }: SingleTryOnProps) => {
               </Button>
             </div>
             <div className="lg:col-span-2">
-              <Card className="h-full flex flex-col">
+              <Card className="h-full flex flex-col min-h-[500px]">
                 <CardHeader><CardTitle>Result</CardTitle></CardHeader>
                 <CardContent className="flex-1 flex items-center justify-center overflow-hidden p-2">
                   {selectedJob ? renderJobResult(selectedJob) : <div className="text-center text-muted-foreground"><ImageIcon className="h-16 w-16 mx-auto mb-4" /><p>Your result will appear here.</p></div>}
