@@ -13,6 +13,7 @@ import { optimizeImage, sanitizeFilename } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "../ui/textarea";
+import { Label } from "@/components/ui/label";
 
 const ImageUploader = ({ onFileSelect, title, imageUrl, onClear }: { onFileSelect: (file: File) => void, title: string, imageUrl: string | null, onClear: () => void }) => {
     const inputRef = useRef<HTMLInputElement>(null);
