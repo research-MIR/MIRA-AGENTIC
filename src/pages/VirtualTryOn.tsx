@@ -61,8 +61,9 @@ const VirtualTryOn = () => {
 
   useEffect(() => {
     console.log('[VTO Page] Image transfer effect triggered.');
-    if (imageUrlToTransfer && vtoTarget) {
-      console.log(`[VTO Page] Received transferred image for target: ${vtoTarget}`);
+    // Only act if there's a new transfer request and we are not already handling one.
+    if (imageUrlToTransfer && vtoTarget && !transferredImage) {
+      console.log(`[VTO Page] Received new transferred image for target: ${vtoTarget}`);
       setTransferredImage({ url: imageUrlToTransfer, target: vtoTarget });
       if (vtoTarget === 'pro-source' && !isProMode) {
         console.log('[VTO Page] Switching to PRO mode for transferred image.');
@@ -72,9 +73,8 @@ const VirtualTryOn = () => {
         console.log('[VTO Page] Switching to Base mode for transferred image.');
         toggleProMode();
       }
-      // NOTE: We no longer consume the image here. The child component will do it.
     }
-  }, [imageUrlToTransfer, vtoTarget, isProMode, toggleProMode]);
+  }, [imageUrlToTransfer, vtoTarget, isProMode, toggleProMode, transferredImage]);
 
   const onTransferConsumed = useCallback(() => {
     console.log('[VTO Page] Child component consumed the image. Clearing store.');
