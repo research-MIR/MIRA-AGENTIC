@@ -136,12 +136,17 @@ serve(async (req) => {
       const croppedCanvas = createCanvas(bbox.width, bbox.height);
       const cropCtx = croppedCanvas.getContext('2d');
       cropCtx.drawImage(fullSourceImage, bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
-      const croppedSourceBase64 = encodeBase64(croppedCanvas.toBuffer('image/png'));
+      const croppedSourceBuffer = croppedCanvas.toBuffer('image/png');
+      if (!croppedSourceBuffer) throw new Error("Failed to create buffer from cropped source canvas.");
+      const croppedSourceBase64 = encodeBase64(croppedSourceBuffer);
 
       const croppedMaskCanvas = createCanvas(bbox.width, bbox.height);
       const cropMaskCtx = croppedMaskCanvas.getContext('2d');
-      cropMaskCtx.drawImage(dilatedCanvas, bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
-      const croppedDilatedMaskBase64 = encodeBase64(croppedMaskCanvas.toBuffer('image/jpeg'));
+      const sourceMaskData = dilateCtx.getImageData(bbox.x, bbox.y, bbox.width, bbox.height);
+      cropMaskCtx.putImageData(sourceMaskData, 0, 0);
+      const croppedDilatedMaskBuffer = croppedMaskCanvas.toBuffer('image/png');
+      if (!croppedDilatedMaskBuffer) throw new Error("Failed to create buffer from cropped mask canvas.");
+      const croppedDilatedMaskBase64 = encodeBase64(croppedDilatedMaskBuffer);
 
       if (auto_prompt_enabled) {
         const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-prompt-helper', {
@@ -160,7 +165,7 @@ serve(async (req) => {
 
       for (let i = 0; i < num_attempts; i++) {
         const sourceBlob = new Blob([decodeBase64(croppedSourceBase64)], { type: 'image/png' });
-        const maskBlob = new Blob([decodeBase64(croppedDilatedMaskBase64)], { type: 'image/jpeg' });
+        const maskBlob = new Blob([decodeBase64(croppedDilatedMaskBase64)], { type: 'image/png' });
 
         const uploadPromises: Promise<string | null>[] = [
           uploadToBitStudio(sourceBlob, 'inpaint-base', `source_${i}.png`),
