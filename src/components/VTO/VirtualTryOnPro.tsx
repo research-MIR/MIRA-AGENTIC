@@ -61,7 +61,7 @@ const ImageUploader = ({ onFileSelect, title, imageUrl, onClear, icon }: { onFil
   
     if (imageUrl) {
       return (
-        <div className="relative aspect-square">
+        <div className="relative h-32">
           <img src={imageUrl} alt={title} className="w-full h-full object-cover rounded-md" />
           <Button variant="destructive" size="icon" className="absolute top-2 right-2 h-6 w-6 z-10" onClick={onClear}><X className="h-4 w-4" /></Button>
         </div>
@@ -69,7 +69,7 @@ const ImageUploader = ({ onFileSelect, title, imageUrl, onClear, icon }: { onFil
     }
   
     return (
-      <div {...dropzoneProps} className={cn("flex flex-col aspect-square justify-center items-center rounded-lg border border-dashed p-4 text-center transition-colors cursor-pointer", isDraggingOver && "border-primary bg-primary/10")} onClick={() => inputRef.current?.click()}>
+      <div {...dropzoneProps} className={cn("flex flex-col h-32 justify-center items-center rounded-lg border border-dashed p-4 text-center transition-colors cursor-pointer", isDraggingOver && "border-primary bg-primary/10")} onClick={() => inputRef.current?.click()}>
         <div className="text-center pointer-events-none">{icon}<p className="mt-2 text-sm font-semibold">{title}</p></div>
         <Input ref={inputRef} type="file" className="hidden" accept="image/*" onChange={(e) => e.target.files && onFileSelect(e.target.files[0])} />
       </div>
@@ -225,10 +225,10 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
 
   return (
     <>
-      <div className="flex flex-col lg:flex-row gap-4 h-full">
-        {/* Left Column */}
-        <div className="lg:w-96 xl:w-[450px] flex-shrink-0 flex flex-col gap-4">
-          <ScrollArea className="h-full pr-4">
+      <div className="flex flex-col gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          {/* Left Column: All Controls */}
+          <div className="lg:col-span-1 flex flex-col gap-4">
             <div className="space-y-4">
               <Card>
                 <CardHeader>
@@ -278,12 +278,10 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
                 Generate
               </Button>
             </div>
-          </ScrollArea>
-        </div>
+          </div>
 
-        {/* Right Column */}
-        <div className="flex-1 flex flex-col gap-4 overflow-hidden">
-          <div className="flex-1 bg-muted rounded-lg flex items-center justify-center relative">
+          {/* Right Column: Workbench/Result */}
+          <div className="lg:col-span-2 bg-muted rounded-lg flex items-center justify-center relative min-h-[60vh] lg:min-h-0">
             {sourceImageUrl && !selectedJob ? (
               <div className="w-full h-full max-h-[80vh] aspect-square relative">
                 <MaskCanvas 
@@ -310,26 +308,27 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
               </div>
             )}
           </div>
-          <Card>
-            <CardHeader><CardTitle><div className="flex items-center gap-2"><History className="h-4 w-4" />Recent Jobs</div></CardTitle></CardHeader>
-            <CardContent>
-              {isLoadingRecentJobs ? <Skeleton className="h-24 w-full" /> : proJobs.length > 0 ? (
-                <ScrollArea className="h-32">
-                  <div className="flex gap-4 pb-2">
-                    {proJobs.map(job => {
-                      const urlToPreview = job.final_image_url || job.source_person_image_url;
-                      return (
-                        <button key={job.id} onClick={() => handleSelectJob(job)} className={cn("border-2 rounded-lg p-0.5 flex-shrink-0 aspect-square", selectedJob?.id === job.id ? "border-primary" : "border-transparent")}>
-                          <SecureImageDisplay imageUrl={urlToPreview} alt="Recent job" className="w-full h-full object-cover" />
-                        </button>
-                      )
-                    })}
-                  </div>
-                </ScrollArea>
-              ) : <p className="text-muted-foreground text-sm">No recent PRO jobs found.</p>}
-            </CardContent>
-          </Card>
         </div>
+        
+        <Card className="mt-4">
+          <CardHeader><CardTitle><div className="flex items-center gap-2"><History className="h-4 w-4" />Recent Jobs</div></CardTitle></CardHeader>
+          <CardContent>
+            {isLoadingRecentJobs ? <Skeleton className="h-24 w-full" /> : proJobs.length > 0 ? (
+              <ScrollArea className="h-32">
+                <div className="flex gap-4 pb-2">
+                  {proJobs.map(job => {
+                    const urlToPreview = job.final_image_url || job.source_person_image_url;
+                    return (
+                      <button key={job.id} onClick={() => handleSelectJob(job)} className={cn("border-2 rounded-lg p-0.5 flex-shrink-0 aspect-square", selectedJob?.id === job.id ? "border-primary" : "border-transparent")}>
+                        <SecureImageDisplay imageUrl={urlToPreview} alt="Recent job" className="w-full h-full object-cover" />
+                      </button>
+                    )
+                  })}
+                </div>
+              </ScrollArea>
+            ) : <p className="text-muted-foreground text-sm">No recent PRO jobs found.</p>}
+          </CardContent>
+        </Card>
       </div>
       
       <DebugStepsModal 
