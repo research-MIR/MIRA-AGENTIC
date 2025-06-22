@@ -86,9 +86,10 @@ interface VirtualTryOnProProps {
   selectedJob: BitStudioJob | undefined;
   handleSelectJob: (job: BitStudioJob) => void;
   resetForm: () => void;
+  transferredImageUrl?: string | null;
 }
 
-export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, handleSelectJob, resetForm }: VirtualTryOnProProps) => {
+export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, handleSelectJob, resetForm, transferredImageUrl }: VirtualTryOnProProps) => {
   const { supabase, session } = useSession();
   const { t } = useLanguage();
   const { showImage } = useImagePreview();
@@ -104,7 +105,6 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
   const [isAutoPromptEnabled, setIsAutoPromptEnabled] = useState(true);
   const [isGuideOpen, setIsGuideOpen] = useState(false);
 
-  // New settings state
   const [numAttempts, setNumAttempts] = useState(1);
   const [denoise, setDenoise] = useState(0.90);
   const [isHighQuality, setIsHighQuality] = useState(false);
@@ -112,6 +112,24 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
 
   const sourceImageUrl = useMemo(() => sourceImageFile ? URL.createObjectURL(sourceImageFile) : null, [sourceImageFile]);
   const referenceImageUrl = useMemo(() => referenceImageFile ? URL.createObjectURL(referenceImageFile) : null, [referenceImageFile]);
+
+  useEffect(() => {
+    if (transferredImageUrl) {
+      const fetchImageAsFile = async (imageUrl: string) => {
+        try {
+          const response = await fetch(imageUrl);
+          const blob = await response.blob();
+          const filename = imageUrl.split('/').pop() || 'image.png';
+          const file = new File([blob], filename, { type: blob.type });
+          setSourceImageFile(file);
+        } catch (e) {
+          console.error("Failed to fetch transferred image for VTO Pro:", e);
+          showError("Could not load the transferred image.");
+        }
+      };
+      fetchImageAsFile(transferredImageUrl);
+    }
+  }, [transferredImageUrl]);
 
   useEffect(() => {
     return () => {
@@ -233,7 +251,6 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
     <>
       <div className="flex flex-col gap-4">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {/* Left Column: All Controls */}
           <div className="lg:col-span-1 flex flex-col gap-4">
             <div className="space-y-4">
               <Card>
@@ -277,7 +294,7 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
                         <AccordionTrigger>{t('inputs')}</AccordionTrigger>
                         <AccordionContent className="pt-4">
                           <div className="grid grid-cols-2 gap-4">
-                            <ImageUploader onFileSelect={setSourceImageFile} title={t('sourceImage')} imageUrl={sourceImageUrl} onClear={resetForm} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
+                            <ImageUploader onFileSelect={handleFileSelect} title={t('sourceImage')} imageUrl={sourceImageUrl} onClear={resetForm} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
                             <ImageUploader onFileSelect={setReferenceImageFile} title={t('garmentReference')} imageUrl={referenceImageUrl} onClear={() => setReferenceImageFile(null)} icon={<Shirt className="h-8 w-8 text-muted-foreground" />} />
                           </div>
                         </AccordionContent>
@@ -324,7 +341,6 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
             </div>
           </div>
 
-          {/* Right Column: Workbench/Result */}
           <div className="lg:col-span-2 bg-muted rounded-lg flex items-center justify-center relative min-h-[60vh] lg:min-h-0">
             {sourceImageUrl && !selectedJob ? (
               <div className="w-full h-full max-h-[80vh] aspect-square relative">

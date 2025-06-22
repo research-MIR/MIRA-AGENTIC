@@ -12,6 +12,8 @@ import { useDropzone } from "@/hooks/useDropzone";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { ViewportControls } from "@/components/Editor/ViewportControls";
+import { useImageTransferStore } from "@/store/imageTransferStore";
+import { showError } from "@/utils/toast";
 
 const Editor = () => {
   const { t } = useLanguage();
@@ -30,6 +32,46 @@ const Editor = () => {
   const lastMousePosition = useRef({ x: 0, y: 0 });
 
   const processedCanvas = useImageProcessor(baseImage, layers);
+  const { consumeImageUrl } = useImageTransferStore();
+
+  const handleImageUpload = useCallback((file: File) => {
+    if (file && file.type.startsWith("image/")) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          setBaseImage(img);
+          setLayers([]);
+          setSelectedLayerId(null);
+        };
+        img.src = e.target?.result as string;
+      };
+      reader.readAsDataURL(file);
+    }
+  }, []);
+
+  useEffect(() => {
+    const { url } = consumeImageUrl();
+    if (url) {
+      const fetchImageAsFile = async (imageUrl: string) => {
+        try {
+          const response = await fetch(imageUrl);
+          const blob = await response.blob();
+          const filename = imageUrl.split('/').pop() || 'image.png';
+          const file = new File([blob], filename, { type: blob.type });
+          handleImageUpload(file);
+        } catch (e) {
+          console.error("Failed to fetch transferred image:", e);
+          showError("Could not load the transferred image.");
+        }
+      };
+      fetchImageAsFile(url);
+    }
+  }, [consumeImageUrl, handleImageUpload]);
+
+  const { isDraggingOver, dropzoneProps } = useDropzone({
+    onDrop: (files) => handleImageUpload(files[0]),
+  });
 
   const fitToView = useCallback(() => {
     if (!baseImage || !mainContainerRef.current) return;
@@ -71,26 +113,6 @@ const Editor = () => {
     ctx.drawImage(processedCanvas, 0, 0);
     ctx.restore();
   }, [processedCanvas, zoom, pan]);
-
-  const handleImageUpload = useCallback((file: File) => {
-    if (file && file.type.startsWith("image/")) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const img = new Image();
-        img.onload = () => {
-          setBaseImage(img);
-          setLayers([]);
-          setSelectedLayerId(null);
-        };
-        img.src = e.target?.result as string;
-      };
-      reader.readAsDataURL(file);
-    }
-  }, []);
-
-  const { isDraggingOver, dropzoneProps } = useDropzone({
-    onDrop: (files) => handleImageUpload(files[0]),
-  });
 
   // Keyboard listeners for spacebar
   useEffect(() => {
@@ -220,7 +242,7 @@ const Editor = () => {
                 onMouseMove={handleMouseMove}
                 onMouseUp={handleMouseUp}
               />
-              <ViewportControls zoom={zoom} onZoomChange={setZoom} onFitToView={fitToView} />
+              <ViewportControls zoom={zoom} setZoom={setZoom} fitToView={fitToView} />
             </>
           ) : (
             <div {...dropzoneProps} className={cn("w-full h-full flex items-center justify-center p-8", isDraggingOver && "bg-primary/10")}>

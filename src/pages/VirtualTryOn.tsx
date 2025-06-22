@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import ReactMarkdown from "react-markdown";
+import { useImageTransferStore } from "@/store/imageTransferStore";
 
 interface BitStudioJob {
   id: string;
@@ -52,6 +53,22 @@ const VirtualTryOn = () => {
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
   const channelRef = useRef<RealtimeChannel | null>(null);
+  const { consumeImageUrl } = useImageTransferStore();
+  const [transferredImage, setTransferredImage] = useState<{ url: string; target: 'base' | 'pro-source' } | null>(null);
+
+  useEffect(() => {
+    const { url, vtoTarget } = consumeImageUrl();
+    if (url && vtoTarget) {
+      console.log(`[VTO Page] Received transferred image for target: ${vtoTarget}`);
+      setTransferredImage({ url, target: vtoTarget });
+      if (vtoTarget === 'pro-source' && !isProMode) {
+        toggleProMode();
+      }
+      if (vtoTarget === 'base' && isProMode) {
+        toggleProMode();
+      }
+    }
+  }, [consumeImageUrl]);
 
   const { data: recentJobs, isLoading: isLoadingRecentJobs } = useQuery<BitStudioJob[]>({
     queryKey: ['bitstudioJobs', session?.user?.id],
@@ -71,8 +88,6 @@ const VirtualTryOn = () => {
   }, []);
 
   useEffect(() => {
-    // When switching between Pro and Standard mode, reset the selected job
-    // to prevent state leakage between the two different UIs.
     resetForm();
   }, [isProMode, resetForm]);
 
@@ -155,6 +170,7 @@ const VirtualTryOn = () => {
               selectedJob={selectedJob}
               handleSelectJob={handleSelectJob}
               resetForm={resetForm}
+              transferredImageUrl={transferredImage?.target === 'pro-source' ? transferredImage.url : null}
             />
           ) : (
             <div className="h-full">
@@ -165,7 +181,11 @@ const VirtualTryOn = () => {
                 </TabsList>
                 <TabsContent value="single" className="pt-6">
                   <p className="text-sm text-muted-foreground mb-6">{t('singleVtoDescription')}</p>
-                  <SingleTryOn selectedJob={selectedJob} resetForm={resetForm} />
+                  <SingleTryOn 
+                    selectedJob={selectedJob} 
+                    resetForm={resetForm} 
+                    transferredImageUrl={transferredImage?.target === 'base' ? transferredImage.url : null}
+                  />
                 </TabsContent>
                 <TabsContent value="batch" className="pt-6">
                   <p className="text-sm text-muted-foreground mb-6">{t('batchVtoDescription')}</p>

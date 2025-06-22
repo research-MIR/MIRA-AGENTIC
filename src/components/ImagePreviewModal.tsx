@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Download, Wand2, Loader2, AlertTriangle, X, ChevronLeft, ChevronRight } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
+import { Download, Wand2, Loader2, AlertTriangle, X, ChevronLeft, ChevronRight, PencilRuler, Shirt } from "lucide-react";
 import { downloadImage } from "@/lib/utils";
 import { useSession } from "./Auth/SessionContextProvider";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
@@ -9,6 +9,8 @@ import { useLanguage } from "@/context/LanguageContext";
 import { useQueryClient } from "@tanstack/react-query";
 import { type PreviewData } from "@/context/ImagePreviewContext";
 import { useSecureImage } from "@/hooks/useSecureImage";
+import { useNavigate } from "react-router-dom";
+import { useImageTransferStore } from "@/store/imageTransferStore";
 
 interface ImagePreviewModalProps {
   data: PreviewData | null;
@@ -50,6 +52,8 @@ export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => 
   const [isUpscaling, setIsUpscaling] = useState(false);
   const queryClient = useQueryClient();
   const [currentIndex, setCurrentIndex] = useState(0);
+  const navigate = useNavigate();
+  const { setImageUrlToTransfer } = useImageTransferStore();
 
   useEffect(() => {
     if (data) {
@@ -91,12 +95,16 @@ export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => 
 
   const currentImage = data.images[currentIndex];
 
-  // Add a final safeguard before trying to access properties on currentImage
   if (!currentImage) {
-    // This can happen briefly if the data changes and currentIndex is temporarily invalid.
-    // Returning null is a safe way to handle it.
     return null;
   }
+
+  const handleSendTo = (path: string, vtoTarget?: 'base' | 'pro-source') => {
+    if (!currentImage) return;
+    setImageUrlToTransfer(currentImage.url, vtoTarget);
+    navigate(path);
+    onClose();
+  };
 
   const handleDownload = () => {
     if (!currentImage) return;
@@ -161,12 +169,10 @@ export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => 
 
   return (
     <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 animate-in fade-in-0" onClick={handleClose}>
-      {/* Main content area that stops propagation */}
       <div className="relative" onClick={(e) => e.stopPropagation()}>
         <ImageWithLoader imageUrl={currentImage.url} />
       </div>
 
-      {/* Action Buttons */}
       <div className="absolute top-4 right-4 flex gap-2">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -180,6 +186,20 @@ export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => 
               <Download className="mr-2 h-4 w-4" />
               {t('download')}
             </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => handleSendTo('/editor')}>
+              <PencilRuler className="mr-2 h-4 w-4" />
+              <span>{t('sendToEditor')}</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => handleSendTo('/virtual-try-on', 'base')}>
+              <Shirt className="mr-2 h-4 w-4" />
+              <span>{t('sendToVTO')}</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => handleSendTo('/virtual-try-on', 'pro-source')}>
+              <Wand2 className="mr-2 h-4 w-4" />
+              <span>{t('sendToVTOPro')}</span>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={() => handleUpscale(1.5)} disabled={isUpscaling || !currentImage}>
               {t('upscaleAndDownload')} x1.5
             </DropdownMenuItem>
@@ -203,7 +223,6 @@ export const ImagePreviewModal = ({ data, onClose }: ImagePreviewModalProps) => 
         <Button variant="secondary" size="icon" onClick={handleClose}><X className="h-4 w-4" /></Button>
       </div>
 
-      {/* Navigation Buttons */}
       {data.images.length > 1 && (
         <>
           <Button variant="secondary" size="icon" className="absolute left-4 top-1/2 -translate-y-1/2" onClick={handlePrev}><ChevronLeft className="h-6 w-6" /></Button>

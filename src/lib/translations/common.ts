@@ -39,6 +39,9 @@ export const commonTranslations = {
     inProgress: "In corso...",
     generating: "Generazione in corso...",
     promptReady: "Prompt Pronto",
+    sendToEditor: "Modifica nell'Editor",
+    sendToVTO: "Usa come Persona nel VTO",
+    sendToVTOPro: "Usa come Sorgente nel VTO Pro",
   },
   en: {
     greeting: "Hi! How can I help you today?",
@@ -80,5 +83,8 @@ export const commonTranslations = {
     inProgress: "In progress...",
     generating: "Generating...",
     promptReady: "Prompt Ready",
+    sendToEditor: "Edit in Editor",
+    sendToVTO: "Use as Person in VTO",
+    sendToVTOPro: "Use as Source in VTO Pro",
   },
 };

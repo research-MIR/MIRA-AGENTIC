@@ -63,9 +63,10 @@ const SecureImageDisplay = ({ imageUrl, alt, onClick }: { imageUrl: string | nul
 interface SingleTryOnProps {
     selectedJob: BitStudioJob | undefined;
     resetForm: () => void;
+    transferredImageUrl?: string | null;
 }
 
-export const SingleTryOn = ({ selectedJob, resetForm }: SingleTryOnProps) => {
+export const SingleTryOn = ({ selectedJob, resetForm, transferredImageUrl }: SingleTryOnProps) => {
     const { supabase, session } = useSession();
     const { t } = useLanguage();
     const queryClient = useQueryClient();
@@ -84,6 +85,24 @@ export const SingleTryOn = ({ selectedJob, resetForm }: SingleTryOnProps) => {
 
     const personImageUrl = useMemo(() => personImageFile ? URL.createObjectURL(personImageFile) : null, [personImageFile]);
     const garmentImageUrl = useMemo(() => garmentImageFile ? URL.createObjectURL(garmentImageFile) : null, [garmentImageFile]);
+
+    useEffect(() => {
+        if (transferredImageUrl) {
+          const fetchImageAsFile = async (imageUrl: string) => {
+            try {
+              const response = await fetch(imageUrl);
+              const blob = await response.blob();
+              const filename = imageUrl.split('/').pop() || 'image.png';
+              const file = new File([blob], filename, { type: blob.type });
+              setPersonImageFile(file);
+            } catch (e) {
+              console.error("Failed to fetch transferred image for VTO:", e);
+              showError("Could not load the transferred image.");
+            }
+          };
+          fetchImageAsFile(transferredImageUrl);
+        }
+    }, [transferredImageUrl]);
 
     const uploadFile = async (file: File, type: 'person' | 'garment') => {
         if (!session?.user) throw new Error("User session not found.");
