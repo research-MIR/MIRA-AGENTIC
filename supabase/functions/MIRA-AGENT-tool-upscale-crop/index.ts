@@ -15,8 +15,15 @@ const corsHeaders = {
  */
 async function upscaleImage(base64: string, factor: number): Promise<string> {
   const image = await loadImage(`data:image/png;base64,${base64}`);
-  const newWidth = image.width() * factor;
-  const newHeight = image.height() * factor;
+  
+  // FIX: Round dimensions to the nearest integer as createCanvas may not support floats.
+  const newWidth = Math.round(image.width() * factor);
+  const newHeight = Math.round(image.height() * factor);
+
+  // Add a check for valid dimensions before creating the canvas.
+  if (newWidth <= 0 || newHeight <= 0) {
+    throw new Error(`Invalid upscaled dimensions: ${newWidth}x${newHeight}`);
+  }
 
   const canvas = createCanvas(newWidth, newHeight);
   const ctx = canvas.getContext('2d');
