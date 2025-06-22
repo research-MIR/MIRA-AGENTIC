@@ -48,6 +48,8 @@ export const vtoTranslations = {
     oneGarment: "Un Indumento",
     randomPairs: "Coppie Casuali",
     precisePairs: "Coppie Precise",
+    uploadImages: "1. Carica Immagini",
+    batchProcess: "Processo Multiplo",
   },
   en: {
     proMode: "Pro Mode",
@@ -98,5 +100,7 @@ export const vtoTranslations = {
     oneGarment: "One Garment",
     randomPairs: "Random Pairs",
     precisePairs: "Precise Pairs",
+    uploadImages: "1. Upload Images",
+    batchProcess: "Batch Process",
   },
 };
