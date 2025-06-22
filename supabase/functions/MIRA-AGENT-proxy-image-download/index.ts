@@ -1,4 +1,4 @@
-import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
+import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const corsHeaders = {
@@ -17,8 +17,12 @@ serve(async (req) => {
       throw new Error("URL parameter is required.");
     }
 
+    console.log(`[ImageProxy] Fetching URL: ${url}`);
+
     const response = await fetch(url);
     if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`[ImageProxy] Failed to fetch. Status: ${response.status}. Body: ${errorText}`);
       throw new Error(`Failed to fetch image from ${url}. Status: ${response.status}`);
     }
 
@@ -26,6 +30,8 @@ serve(async (req) => {
     const buffer = await blob.arrayBuffer();
     const base64 = encodeBase64(buffer);
     
+    console.log(`[ImageProxy] Successfully fetched and encoded image. Mime-type: ${blob.type}, Base64 length: ${base64.length}`);
+
     return new Response(JSON.stringify({ base64, mimeType: blob.type }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
