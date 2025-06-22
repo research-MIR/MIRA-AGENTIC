@@ -101,9 +101,9 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
 
   // New settings state
   const [numAttempts, setNumAttempts] = useState(1);
-  const [denoise, setDenoise] = useState(1.0);
+  const [denoise, setDenoise] = useState(0.90);
   const [isHighQuality, setIsHighQuality] = useState(false);
-  const [maskExpansion, setMaskExpansion] = useState(2);
+  const [maskExpansion, setMaskExpansion] = useState(3);
 
   const sourceImageUrl = useMemo(() => sourceImageFile ? URL.createObjectURL(sourceImageFile) : null, [sourceImageFile]);
   const referenceImageUrl = useMemo(() => referenceImageFile ? URL.createObjectURL(referenceImageFile) : null, [referenceImageFile]);
