@@ -110,7 +110,7 @@ export const SingleTryOn = ({ selectedJob, resetForm }: SingleTryOnProps) => {
         }
         setIsGeneratingPrompt(true);
         setPromptReady(false);
-        const toastId = showLoading("Generating detailed prompt...");
+        const toastId = showLoading(t('generatingPrompt'));
         try {
           const person_image_url = await uploadFile(personImageFile, 'person');
           const garment_image_url = await uploadFile(garmentImageFile, 'garment');
@@ -123,14 +123,14 @@ export const SingleTryOn = ({ selectedJob, resetForm }: SingleTryOnProps) => {
           setPrompt(data.final_prompt);
           setPromptReady(true);
           dismissToast(toastId);
-          showSuccess("Prompt generated!");
+          showSuccess(t('promptReady'));
         } catch (err: any) {
           dismissToast(toastId);
           showError(`Failed to generate prompt: ${err.message}`);
         } finally {
           setIsGeneratingPrompt(false);
         }
-    }, [personImageFile, garmentImageFile, session, supabase]);
+    }, [personImageFile, garmentImageFile, session, supabase, t]);
 
     useEffect(() => {
         if (personImageFile && garmentImageFile && isAutoPromptEnabled) {
