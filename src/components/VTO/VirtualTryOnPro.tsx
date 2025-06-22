@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -165,6 +165,11 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
     setResetTrigger(c => c + 1);
   };
 
+  const handleClearSourceImage = () => {
+    setSourceImageFile(null);
+    resetForm();
+  };
+
   const handleGenerate = async () => {
     if (!sourceImageFile || !maskImage) {
       showError("Please provide a source image and draw a mask.");
@@ -266,7 +271,7 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
                         <Button variant="ghost" size="icon" onClick={() => setIsGuideOpen(true)}>
                             <HelpCircle className="h-5 w-5" />
                         </Button>
-                        {selectedJob && <Button variant="outline" size="sm" onClick={resetForm}><PlusCircle className="h-4 w-4 mr-2" />{t('new')}</Button>}
+                        {(selectedJob || sourceImageFile) && <Button variant="outline" size="sm" onClick={handleClearSourceImage}><PlusCircle className="h-4 w-4 mr-2" />{t('new')}</Button>}
                     </div>
                   </div>
                 </CardHeader>
@@ -299,7 +304,7 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
                         <AccordionTrigger>{t('inputs')}</AccordionTrigger>
                         <AccordionContent className="pt-4">
                           <div className="grid grid-cols-2 gap-4">
-                            <ImageUploader onFileSelect={handleFileSelect} title={t('sourceImage')} imageUrl={sourceImageUrl} onClear={resetForm} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
+                            <ImageUploader onFileSelect={handleFileSelect} title={t('sourceImage')} imageUrl={sourceImageUrl} onClear={handleClearSourceImage} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
                             <ImageUploader onFileSelect={setReferenceImageFile} title={t('garmentReference')} imageUrl={referenceImageUrl} onClear={() => setReferenceImageFile(null)} icon={<Shirt className="h-8 w-8 text-muted-foreground" />} />
                           </div>
                         </AccordionContent>
