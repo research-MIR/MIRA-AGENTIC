@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Wand2, Brush, Palette, UploadCloud, Sparkles, Loader2, Image as ImageIcon, X, PlusCircle, AlertTriangle, Eye } from "lucide-react";
+import { Wand2, Brush, Palette, UploadCloud, Sparkles, Loader2, Image as ImageIcon, X, PlusCircle, AlertTriangle, Eye, Settings } from "lucide-react";
 import { MaskCanvas } from "@/components/Editor/MaskCanvas";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -18,6 +18,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { DebugStepsModal } from "./DebugStepsModal";
 import { Switch } from "../ui/switch";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { ProModeSettings } from "./ProModeSettings";
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -98,6 +99,12 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
   const [isDebugModalOpen, setIsDebugModalOpen] = useState(false);
   const [isAutoPromptEnabled, setIsAutoPromptEnabled] = useState(true);
 
+  // New settings state
+  const [numAttempts, setNumAttempts] = useState(1);
+  const [denoise, setDenoise] = useState(1.0);
+  const [isHighQuality, setIsHighQuality] = useState(false);
+  const [maskExpansion, setMaskExpansion] = useState(2);
+
   const sourceImageUrl = useMemo(() => sourceImageFile ? URL.createObjectURL(sourceImageFile) : null, [sourceImageFile]);
   const referenceImageUrl = useMemo(() => referenceImageFile ? URL.createObjectURL(referenceImageFile) : null, [referenceImageFile]);
 
@@ -145,90 +152,21 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
       return;
     }
     setIsLoading(true);
-    const toastId = showLoading("Preparing images for inpainting...");
+    const toastId = showLoading("Sending job to inpainting service...");
 
     try {
-      const sourceImg = new Image();
-      sourceImg.src = URL.createObjectURL(sourceImageFile);
-      await new Promise(resolve => sourceImg.onload = resolve);
-
-      const maskImg = new Image();
-      maskImg.src = maskImage;
-      await new Promise(resolve => maskImg.onload = resolve);
-
-      const dilatedCanvas = document.createElement('canvas');
-      dilatedCanvas.width = maskImg.width;
-      dilatedCanvas.height = maskImg.height;
-      const dilateCtx = dilatedCanvas.getContext('2d');
-      if (!dilateCtx) throw new Error("Could not get canvas context for dilation.");
-      
-      const dilationAmount = Math.max(10, Math.round(maskImg.width * 0.02));
-      dilateCtx.filter = `blur(${dilationAmount}px)`;
-      dilateCtx.drawImage(maskImg, 0, 0);
-      dilateCtx.filter = 'none';
-      
-      const dilatedImageData = dilateCtx.getImageData(0, 0, dilatedCanvas.width, dilatedCanvas.height);
-      const data = dilatedImageData.data;
-      for (let i = 0; i < data.length; i += 4) {
-        if (data[i] > 128) {
-          data[i] = data[i+1] = data[i+2] = 255;
-        } else {
-          data[i] = data[i+1] = data[i+2] = 0;
-        }
-      }
-      dilateCtx.putImageData(dilatedImageData, 0, 0);
-
-      let minX = dilatedCanvas.width, minY = dilatedCanvas.height, maxX = 0, maxY = 0;
-      for (let y = 0; y < dilatedCanvas.height; y++) {
-        for (let x = 0; x < dilatedCanvas.width; x++) {
-          const i = (y * dilatedCanvas.width + x) * 4;
-          if (data[i] === 255) {
-            if (x < minX) minX = x;
-            if (x > maxX) maxX = x;
-            if (y < minY) minY = y;
-            if (y > maxY) maxY = y;
-          }
-        }
-      }
-
-      if (maxX < minX) throw new Error("The mask is empty. Please draw on the image.");
-
-      const padding = Math.round(Math.max(maxX - minX, maxY - minY) * 0.05);
-      const bbox = {
-        x: Math.max(0, minX - padding),
-        y: Math.max(0, minY - padding),
-        width: Math.min(sourceImg.width - (minX - padding), (maxX - minX) + padding * 2),
-        height: Math.min(sourceImg.height - (minY - padding), (maxY - minY) + padding * 2)
-      };
-
-      const croppedCanvas = document.createElement('canvas');
-      croppedCanvas.width = bbox.width;
-      croppedCanvas.height = bbox.height;
-      const cropCtx = croppedCanvas.getContext('2d');
-      if (!cropCtx) throw new Error("Could not get canvas context for cropping.");
-      cropCtx.drawImage(sourceImg, bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
-      const croppedSourceBase64 = croppedCanvas.toDataURL('image/png').split(',')[1];
-
-      const croppedMaskCanvas = document.createElement('canvas');
-      croppedMaskCanvas.width = bbox.width;
-      croppedMaskCanvas.height = bbox.height;
-      const cropMaskCtx = croppedMaskCanvas.getContext('2d');
-      if (!cropMaskCtx) throw new Error("Could not get canvas context for mask cropping.");
-      cropMaskCtx.drawImage(dilatedCanvas, bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
-      const croppedDilatedMaskBase64 = croppedMaskCanvas.toDataURL('image/jpeg').split(',')[1];
-
-      dismissToast(toastId);
-      showLoading("Sending job to inpainting service...");
-
       const payload: any = {
         mode: 'inpaint',
         full_source_image_base64: await fileToBase64(sourceImageFile),
-        cropped_source_image_base64: croppedSourceBase64,
-        cropped_dilated_mask_base64: croppedDilatedMaskBase64,
+        mask_image_base64: maskImage.split(',')[1], // Send raw mask
         prompt: isAutoPromptEnabled ? "" : prompt,
         auto_prompt_enabled: isAutoPromptEnabled,
-        bbox,
-        user_id: session?.user.id
+        user_id: session?.user.id,
+        // New settings
+        num_attempts: numAttempts,
+        denoise: denoise,
+        resolution: isHighQuality ? 'high' : 'standard',
+        mask_expansion_percent: maskExpansion,
       };
 
       if (referenceImageFile) {
@@ -242,7 +180,7 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
       if (error) throw error;
 
       dismissToast(toastId);
-      showSuccess("Inpainting job started! You can track its progress in the sidebar.");
+      showSuccess(`${numAttempts} inpainting job(s) started! You can track progress in the sidebar.`);
       queryClient.invalidateQueries({ queryKey: ['activeJobs'] });
       queryClient.invalidateQueries({ queryKey: ['bitstudioJobs', session?.user?.id] });
       resetForm();
@@ -293,41 +231,61 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
     <>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-1 space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Wand2 className="h-5 w-5" />
-                Inpainting Prompt
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center space-x-2">
-                <Switch id="auto-prompt-pro" checked={isAutoPromptEnabled} onCheckedChange={setIsAutoPromptEnabled} />
-                <Label htmlFor="auto-prompt-pro">Auto-Generate Prompt</Label>
-              </div>
-              <Textarea id="pro-prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="e.g., a red silk shirt, a leather jacket with zippers..." rows={4} disabled={isAutoPromptEnabled} />
-              <Button className="w-full" onClick={handleGenerate} disabled={isLoading}>
-                {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-                Generate
-              </Button>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Palette className="h-5 w-5" />
-                Style Reference (Optional)
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ImageUploader 
-                onFileSelect={setReferenceImageFile} 
-                title="Upload Reference" 
-                imageUrl={referenceImageUrl} 
-                onClear={() => setReferenceImageFile(null)} 
-              />
-            </CardContent>
-          </Card>
+          <Accordion type="multiple" defaultValue={['item-1', 'item-2']} className="w-full space-y-4">
+            <Card>
+              <AccordionItem value="item-1" className="border-none">
+                <AccordionTrigger className="p-4 text-base font-semibold">
+                  <div className="flex items-center gap-2"><Wand2 className="h-5 w-5" />Inpainting Prompt</div>
+                </AccordionTrigger>
+                <AccordionContent className="p-4 pt-0 space-y-4">
+                  <div className="flex items-center space-x-2">
+                    <Switch id="auto-prompt-pro" checked={isAutoPromptEnabled} onCheckedChange={setIsAutoPromptEnabled} />
+                    <Label htmlFor="auto-prompt-pro">Auto-Generate Prompt</Label>
+                  </div>
+                  <Textarea id="pro-prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="e.g., a red silk shirt, a leather jacket with zippers..." rows={4} disabled={isAutoPromptEnabled} />
+                </AccordionContent>
+              </AccordionItem>
+            </Card>
+            <Card>
+              <AccordionItem value="item-2" className="border-none">
+                <AccordionTrigger className="p-4 text-base font-semibold">
+                  <div className="flex items-center gap-2"><Palette className="h-5 w-5" />Style Reference (Optional)</div>
+                </AccordionTrigger>
+                <AccordionContent className="p-4 pt-0">
+                  <ImageUploader 
+                    onFileSelect={setReferenceImageFile} 
+                    title="Upload Reference" 
+                    imageUrl={referenceImageUrl} 
+                    onClear={() => setReferenceImageFile(null)} 
+                  />
+                </AccordionContent>
+              </AccordionItem>
+            </Card>
+            <Card>
+              <AccordionItem value="item-3" className="border-none">
+                <AccordionTrigger className="p-4 text-base font-semibold">
+                  <div className="flex items-center gap-2"><Settings className="h-5 w-5" />PRO Settings</div>
+                </AccordionTrigger>
+                <AccordionContent className="p-4 pt-0">
+                  <ProModeSettings
+                    numAttempts={numAttempts}
+                    setNumAttempts={setNumAttempts}
+                    denoise={denoise}
+                    setDenoise={setDenoise}
+                    isHighQuality={isHighQuality}
+                    setIsHighQuality={setIsHighQuality}
+                    maskExpansion={maskExpansion}
+                    setMaskExpansion={setMaskExpansion}
+                    disabled={isLoading}
+                  />
+                </AccordionContent>
+              </AccordionItem>
+            </Card>
+          </Accordion>
+          <Button size="lg" className="w-full" onClick={handleGenerate} disabled={isLoading}>
+            {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+            Generate
+          </Button>
         </div>
         <div className="lg:col-span-2 space-y-6">
           <Card>
