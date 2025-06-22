@@ -132,7 +132,7 @@ const VirtualTryOn = () => {
         </div>
       </header>
       
-      <div className="flex-1 overflow-hidden">
+      <div className="flex-1 overflow-y-auto">
         {isProMode ? (
           <VirtualTryOnPro 
             recentJobs={recentJobs}
@@ -142,7 +142,7 @@ const VirtualTryOn = () => {
             resetForm={resetForm}
           />
         ) : (
-          <div className="h-full overflow-y-auto">
+          <div className="h-full">
             <Tabs defaultValue="single" className="w-full">
               <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="single">{t('singleTryOn')}</TabsTrigger>
