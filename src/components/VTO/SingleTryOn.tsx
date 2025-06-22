@@ -49,15 +49,15 @@ const ImageUploader = ({ onFileSelect, title, imageUrl, onClear }: { onFileSelec
   );
 };
 
-const SecureImageDisplay = ({ imageUrl, alt, onClick }: { imageUrl: string | null, alt: string, onClick?: (e: React.MouseEvent<HTMLImageElement>) => void }) => {
+const SecureImageDisplay = ({ imageUrl, alt, onClick, className }: { imageUrl: string | null, alt: string, onClick?: (e: React.MouseEvent<HTMLImageElement>) => void, className?: string }) => {
     const { displayUrl, isLoading, error } = useSecureImage(imageUrl);
     const hasClickHandler = !!onClick;
   
-    if (!imageUrl) return <div className="w-full h-full bg-muted rounded-md flex items-center justify-center"><ImageIcon className="h-6 w-6 text-muted-foreground" /></div>;
-    if (isLoading) return <div className="w-full h-full bg-muted rounded-md flex items-center justify-center"><Loader2 className="h-6 w-6 animate-spin" /></div>;
-    if (error) return <div className="w-full h-full bg-muted rounded-md flex items-center justify-center"><AlertTriangle className="h-6 w-6 text-destructive" /></div>;
+    if (!imageUrl) return <div className={cn("w-full h-full bg-muted rounded-md flex items-center justify-center", className)}><ImageIcon className="h-6 w-6 text-muted-foreground" /></div>;
+    if (isLoading) return <div className={cn("w-full h-full bg-muted rounded-md flex items-center justify-center", className)}><Loader2 className="h-6 w-6 animate-spin" /></div>;
+    if (error) return <div className={cn("w-full h-full bg-muted rounded-md flex items-center justify-center", className)}><AlertTriangle className="h-6 w-6 text-destructive" /></div>;
     
-    return <img src={displayUrl} alt={alt} className={cn("max-w-full max-h-full object-contain rounded-md", hasClickHandler && "cursor-pointer")} onClick={onClick} />;
+    return <img src={displayUrl} alt={alt} className={cn("max-w-full max-h-full object-contain rounded-md", hasClickHandler && "cursor-pointer", className)} onClick={onClick} />;
 };
 
 interface SingleTryOnProps {
@@ -90,8 +90,23 @@ export const SingleTryOn = ({ selectedJob, resetForm, transferredImageUrl }: Sin
         if (transferredImageUrl) {
           const fetchImageAsFile = async (imageUrl: string) => {
             try {
-              const response = await fetch(imageUrl);
-              const blob = await response.blob();
+              const url = new URL(imageUrl);
+              const pathSegments = url.pathname.split('/');
+              const objectIndex = pathSegments.indexOf('object');
+              if (objectIndex === -1 || objectIndex + 2 > pathSegments.length) {
+                throw new Error("Invalid Supabase URL format.");
+              }
+              const bucketName = pathSegments[objectIndex + 2];
+              const pathStartIndex = url.pathname.indexOf(bucketName) + bucketName.length + 1;
+              const storagePath = decodeURIComponent(url.pathname.substring(pathStartIndex));
+    
+              const { data: blob, error } = await supabase.storage
+                .from(bucketName)
+                .download(storagePath);
+    
+              if (error) throw error;
+              if (!blob) throw new Error("Downloaded blob is null.");
+    
               const filename = imageUrl.split('/').pop() || 'image.png';
               const file = new File([blob], filename, { type: blob.type });
               setPersonImageFile(file);
@@ -102,7 +117,7 @@ export const SingleTryOn = ({ selectedJob, resetForm, transferredImageUrl }: Sin
           };
           fetchImageAsFile(transferredImageUrl);
         }
-    }, [transferredImageUrl]);
+      }, [transferredImageUrl, supabase]);
 
     const uploadFile = async (file: File, type: 'person' | 'garment') => {
         if (!session?.user) throw new Error("User session not found.");

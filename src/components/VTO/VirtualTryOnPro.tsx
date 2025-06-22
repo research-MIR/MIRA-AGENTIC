@@ -118,8 +118,23 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
     if (transferredImageUrl) {
       const fetchImageAsFile = async (imageUrl: string) => {
         try {
-          const response = await fetch(imageUrl);
-          const blob = await response.blob();
+          const url = new URL(imageUrl);
+          const pathSegments = url.pathname.split('/');
+          const objectIndex = pathSegments.indexOf('object');
+          if (objectIndex === -1 || objectIndex + 2 > pathSegments.length) {
+            throw new Error("Invalid Supabase URL format.");
+          }
+          const bucketName = pathSegments[objectIndex + 2];
+          const pathStartIndex = url.pathname.indexOf(bucketName) + bucketName.length + 1;
+          const storagePath = decodeURIComponent(url.pathname.substring(pathStartIndex));
+
+          const { data: blob, error } = await supabase.storage
+            .from(bucketName)
+            .download(storagePath);
+
+          if (error) throw error;
+          if (!blob) throw new Error("Downloaded blob is null.");
+
           const filename = imageUrl.split('/').pop() || 'image.png';
           const file = new File([blob], filename, { type: blob.type });
           setSourceImageFile(file);
@@ -130,7 +145,7 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
       };
       fetchImageAsFile(transferredImageUrl);
     }
-  }, [transferredImageUrl]);
+  }, [transferredImageUrl, supabase]);
 
   useEffect(() => {
     return () => {
