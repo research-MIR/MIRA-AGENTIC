@@ -24,6 +24,7 @@ import { useLanguage } from "@/context/LanguageContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import ReactMarkdown from "react-markdown";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { optimizeImage } from "@/lib/utils";
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -190,7 +191,8 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
       };
 
       if (referenceImageFile) {
-        payload.reference_image_base64 = await fileToBase64(referenceImageFile);
+        const optimizedReference = await optimizeImage(referenceImageFile);
+        payload.reference_image_base64 = await fileToBase64(optimizedReference);
       }
 
       const { error } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
