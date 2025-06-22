@@ -71,6 +71,7 @@ export const vtoTranslations = {
     viewingJob: "Stai visualizzando un job completato. Clicca 'Nuovo' per iniziarne un altro.",
     inpaintingGuide: "Guida all'Inpainting",
     inpaintingGuideTitle: "Guida all'Inpainting Avanzato",
+    proSettingsTooltip: "Clicca per sbloccare controlli avanzati per l'inpainting.",
     inpaintingGuideContent: `
 ### Strategie per Risultati Migliori
 
@@ -103,6 +104,12 @@ L'inpainting è uno strumento potente per sostituire parti di un'immagine, ma ri
 - **Controlla la libertà dell'IA:** L'impostazione "Intensità Denoise" determina quanto l'IA può deviare dall'immagine originale all'interno della maschera.
   - **Basso Denoise (es. 0.5-0.7):** Ideale quando la forma dell'indumento originale è simile a quella desiderata. Ottimo per cambi di texture o colore, aiuta a fondere meglio il risultato.
   - **Alto Denoise (es. 0.8-1.0):** Concede all'IA più libertà creativa. Usalo se vuoi cambiare significativamente la forma dell'indumento (es. trasformare una t-shirt in una giacca) o se l'impostazione più bassa non è abbastanza forte.
+
+#### 5. Impostazioni PRO Spiegate
+- **Numero di Tentativi:** Genera più variazioni della stessa richiesta di inpainting. Utile per ottenere diverse interpretazioni dall'IA.
+- **Alta Risoluzione:** Aumenta la risoluzione dell'output. Richiede più tempo ma produce risultati di qualità superiore.
+- **Intensità Denoise:** Controlla la libertà creativa dell'IA. Un valore basso (es. 0.5) mantiene la struttura originale, ideale per cambi di texture. Un valore alto (es. 0.9) permette all'IA di essere più creativa, utile per cambiare la forma di un indumento.
+- **Espansione Maschera:** Ammorbidisce i bordi della maschera, creando una fusione più naturale tra l'area generata e l'immagine originale. Aumenta questo valore se noti bordi netti nel risultato.
 `
   },
   en: {
@@ -177,6 +184,7 @@ L'inpainting è uno strumento potente per sostituire parti di un'immagine, ma ri
     viewingJob: "You are viewing a completed job. Click 'New' to start another.",
     inpaintingGuide: "Inpainting Guide",
     inpaintingGuideTitle: "Advanced Inpainting Guide",
+    proSettingsTooltip: "Click to unlock advanced controls for inpainting.",
     inpaintingGuideContent: `
 ### Strategies for Better Results
 
@@ -209,6 +217,12 @@ Inpainting is a powerful tool for replacing parts of an image, but it requires a
 - **Control the AI's freedom:** The "Denoise Strength" setting determines how much the AI can deviate from the original image within the mask.
   - **Low Denoise (e.g., 0.5-0.7):** Ideal when the original garment's shape is consistent with the desired output. Great for texture or color changes, as it helps blend the result better.
   - **High Denoise (e.g., 0.8-1.0):** Gives the AI more creative freedom. Use this if you want to significantly change the garment's shape (e.g., turning a t-shirt into a jacket) or if the lower setting isn't strong enough.
+
+#### 5. Pro Settings Explained
+- **Number of Attempts:** Generate multiple variations of the same inpainting request. Useful for getting different interpretations from the AI.
+- **High Resolution:** Increases the output resolution. It takes longer but produces higher quality results.
+- **Denoise Strength:** Controls the AI's creative freedom. A low value (e.g., 0.5) preserves the original structure, ideal for texture changes. A high value (e.g., 0.9) allows the AI to be more creative, useful for changing a garment's shape.
+- **Mask Expansion:** Softens the edges of your mask, creating a more natural blend between the generated area and the original image. Increase this value if you notice hard edges in your result.
 `
   },
 };

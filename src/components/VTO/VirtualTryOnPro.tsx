@@ -23,6 +23,7 @@ import { ScrollArea } from "../ui/scroll-area";
 import { useLanguage } from "@/context/LanguageContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import ReactMarkdown from "react-markdown";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -292,7 +293,16 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
                         </AccordionContent>
                       </AccordionItem>
                       <AccordionItem value="item-3">
-                        <AccordionTrigger>{t('proSettings')}</AccordionTrigger>
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <AccordionTrigger>{t('proSettings')}</AccordionTrigger>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>{t('proSettingsTooltip')}</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
                         <AccordionContent className="pt-4">
                           <ProModeSettings
                             numAttempts={numAttempts} setNumAttempts={setNumAttempts}
