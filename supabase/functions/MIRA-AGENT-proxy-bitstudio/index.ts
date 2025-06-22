@@ -73,6 +73,7 @@ serve(async (req) => {
     const jobIds: string[] = [];
 
     if (mode === 'inpaint') {
+      console.log(`[BitStudioProxy][${requestId}] Starting inpaint workflow.`);
       let { 
         full_source_image_base64, mask_image_base64, prompt, reference_image_base64, 
         auto_prompt_enabled, num_attempts = 1, denoise = 1.0, resolution = 'standard', mask_expansion_percent = 2 
@@ -86,6 +87,7 @@ serve(async (req) => {
       
       const fullSourceImage = await loadImage(`data:image/png;base64,${full_source_image_base64}`);
       const rawMaskImage = await loadImage(`data:image/jpeg;base64,${mask_image_base64}`);
+      console.log(`[BitStudioProxy][${requestId}] Source and mask images loaded into memory.`);
 
       const dilatedCanvas = createCanvas(rawMaskImage.width(), rawMaskImage.height());
       const dilateCtx = dilatedCanvas.getContext('2d');
@@ -94,6 +96,7 @@ serve(async (req) => {
       dilateCtx.filter = `blur(${dilationAmount}px)`;
       dilateCtx.drawImage(rawMaskImage, 0, 0);
       dilateCtx.filter = 'none';
+      console.log(`[BitStudioProxy][${requestId}] Mask dilated by ${dilationAmount}px.`);
       
       const dilatedImageData = dilateCtx.getImageData(0, 0, dilatedCanvas.width, dilatedCanvas.height);
       const data = dilatedImageData.data;
@@ -132,6 +135,7 @@ serve(async (req) => {
       }
 
       const bbox = { x: x1, y: y1, width, height };
+      console.log(`[BitStudioProxy][${requestId}] Calculated bounding box: ${JSON.stringify(bbox)}`);
 
       const croppedCanvas = createCanvas(bbox.width, bbox.height);
       const cropCtx = croppedCanvas.getContext('2d');
@@ -146,15 +150,15 @@ serve(async (req) => {
       const croppedDilatedMaskBuffer = croppedMaskCanvas.toBuffer('image/png');
       if (!croppedDilatedMaskBuffer) throw new Error("Failed to create buffer from cropped mask canvas.");
       const croppedDilatedMaskBase64 = encodeBase64(croppedDilatedMaskBuffer);
+      console.log(`[BitStudioProxy][${requestId}] Cropped source and mask to bounding box.`);
 
-      // --- New Upscaling Logic ---
       let sourceToSendBase64 = croppedSourceBase64;
       let maskToSendBase64 = croppedDilatedMaskBase64;
       const pixelThreshold = 768 * 768;
       const currentPixels = bbox.width * bbox.height;
 
       if (currentPixels <= pixelThreshold) {
-          console.log(`[BitStudioProxy][${requestId}] Crop size (${bbox.width}x${bbox.height}) is below threshold. Upscaling...`);
+          console.log(`[BitStudioProxy][${requestId}] Crop size (${bbox.width}x${bbox.height} = ${currentPixels}px) is below threshold of ${pixelThreshold}px. Upscaling crops...`);
           const upscaleFactor = 2.0;
           const { data: upscaleData, error: upscaleError } = await supabase.functions.invoke('MIRA-AGENT-tool-upscale-crop', {
               body: {
@@ -168,13 +172,13 @@ serve(async (req) => {
           
           sourceToSendBase64 = upscaleData.upscaled_source_base64;
           maskToSendBase64 = upscaleData.upscaled_mask_base64;
-          console.log(`[BitStudioProxy][${requestId}] Upscaling complete. New dimensions will be approx ${Math.round(bbox.width * upscaleFactor)}x${Math.round(bbox.height * upscaleFactor)}.`);
+          console.log(`[BitStudioProxy][${requestId}] Upscaling complete. New crop dimensions will be approx ${Math.round(bbox.width * upscaleFactor)}x${Math.round(bbox.height * upscaleFactor)}.`);
       } else {
           console.log(`[BitStudioProxy][${requestId}] Crop size (${bbox.width}x${bbox.height}) is sufficient. Skipping upscale.`);
       }
-      // --- End Upscaling Logic ---
 
       if (auto_prompt_enabled) {
+        console.log(`[BitStudioProxy][${requestId}] Auto-prompt is enabled. Generating prompt...`);
         const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-prompt-helper', {
           body: { 
             person_image_base64: sourceToSendBase64, 
@@ -185,11 +189,13 @@ serve(async (req) => {
         });
         if (promptError) throw new Error(`Auto-prompt generation failed: ${promptError.message}`);
         prompt = promptData.final_prompt;
+        console.log(`[BitStudioProxy][${requestId}] Auto-prompt generated successfully.`);
       }
 
       if (!prompt) throw new Error("Prompt is required for inpainting.");
 
       for (let i = 0; i < num_attempts; i++) {
+        console.log(`[BitStudioProxy][${requestId}] Starting attempt ${i + 1}/${num_attempts}.`);
         const sourceBlob = new Blob([decodeBase64(sourceToSendBase64)], { type: 'image/png' });
         const maskBlob = new Blob([decodeBase64(maskToSendBase64)], { type: 'image/png' });
 
@@ -204,6 +210,7 @@ serve(async (req) => {
           uploadPromises.push(Promise.resolve(null));
         }
         const [sourceImageId, maskImageId, referenceImageId] = await Promise.all(uploadPromises);
+        console.log(`[BitStudioProxy][${requestId}] Attempt ${i + 1}: Images uploaded to BitStudio.`);
 
         const inpaintUrl = `${BITSTUDIO_API_BASE}/images/${sourceImageId}/inpaint`;
         const inpaintPayload: any = { 
@@ -211,7 +218,7 @@ serve(async (req) => {
             prompt, 
             resolution, 
             denoise,
-            seed: Math.floor(Math.random() * 1000000000) // Add unique seed for each attempt
+            seed: Math.floor(Math.random() * 1000000000)
         };
         if (referenceImageId) inpaintPayload.reference_image_id = referenceImageId;
         
@@ -226,6 +233,7 @@ serve(async (req) => {
         const inpaintResult = JSON.parse(responseText);
         const newVersion = inpaintResult.versions?.[0];
         if (!newVersion || !newVersion.id) throw new Error("BitStudio did not return a valid version object for the inpainting job.");
+        console.log(`[BitStudioProxy][${requestId}] Attempt ${i + 1}: Inpainting job queued with BitStudio. Version ID: ${newVersion.id}`);
         
         const metadataToSave = {
           bitstudio_version_id: newVersion.id,
@@ -242,6 +250,7 @@ serve(async (req) => {
         }).select('id').single();
         if (insertError) throw insertError;
         jobIds.push(newJob.id);
+        console.log(`[BitStudioProxy][${requestId}] Attempt ${i + 1}: Job record created in DB with ID: ${newJob.id}`);
       }
 
     } else { // Default to virtual-try-on

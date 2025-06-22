@@ -58,22 +58,22 @@ serve(async (req) => {
     const inpaintedCropResponse = await fetch(job.final_image_url);
     if (!inpaintedCropResponse.ok) throw new Error("Failed to download inpainted crop from BitStudio.");
     
-    // Read the body ONCE and store it.
     const inpaintedCropArrayBuffer = await inpaintedCropResponse.arrayBuffer();
-    
-    // Use the stored buffer to load the image for compositing.
     const inpaintedCropImage = await loadImage(new Uint8Array(inpaintedCropArrayBuffer));
 
     const canvas = createCanvas(fullSourceImage.width(), fullSourceImage.height());
     const ctx = canvas.getContext('2d');
     ctx.drawImage(fullSourceImage, 0, 0);
+    
+    // This is the key change: we draw the (potentially larger) inpainted image
+    // into the original bounding box area. The canvas API handles the downscaling
+    // to fit, preserving the detail within the original dimensions.
     ctx.drawImage(inpaintedCropImage, job.metadata.bbox.x, job.metadata.bbox.y, job.metadata.bbox.width, job.metadata.bbox.height);
+    
     const finalImageBuffer = canvas.toBuffer('image/png');
 
-    // Debug asset generation (optional)
     const croppedSourceBuffer = metadata.cropped_source_image_base64 ? decodeBase64(metadata.cropped_source_image_base64) : null;
     const dilatedMaskBuffer = metadata.cropped_dilated_mask_base64 ? decodeBase64(metadata.cropped_dilated_mask_base64) : null;
-    // Reuse the stored buffer for the debug asset.
     const inpaintedCropBuffer = new Uint8Array(inpaintedCropArrayBuffer);
 
     const [
