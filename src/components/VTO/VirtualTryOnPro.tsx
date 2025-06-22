@@ -88,9 +88,10 @@ interface VirtualTryOnProProps {
   handleSelectJob: (job: BitStudioJob) => void;
   resetForm: () => void;
   transferredImageUrl?: string | null;
+  onTransferConsumed: () => void;
 }
 
-export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, handleSelectJob, resetForm, transferredImageUrl }: VirtualTryOnProProps) => {
+export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, handleSelectJob, resetForm, transferredImageUrl, onTransferConsumed }: VirtualTryOnProProps) => {
   const { supabase, session } = useSession();
   const { t } = useLanguage();
   const { showImage } = useImagePreview();
@@ -140,7 +141,8 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
           const filename = imageUrl.split('/').pop() || 'image.png';
           const file = new File([blob], filename, { type: blob.type });
           setSourceImageFile(file);
-          console.log('[VirtualTryOnPro] State updated with new source image file.');
+          console.log('[VirtualTryOnPro] State updated with new source image file. Consuming transfer.');
+          onTransferConsumed();
         } catch (e) {
           console.error("Failed to fetch transferred image for VTO Pro:", e);
           showError("Could not load the transferred image.");
@@ -148,7 +150,7 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
       };
       fetchImageAsFile(transferredImageUrl);
     }
-  }, [transferredImageUrl, supabase]);
+  }, [transferredImageUrl, supabase, onTransferConsumed]);
 
   useEffect(() => {
     return () => {

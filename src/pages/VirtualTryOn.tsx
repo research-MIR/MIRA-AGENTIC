@@ -72,10 +72,15 @@ const VirtualTryOn = () => {
         console.log('[VTO Page] Switching to Base mode for transferred image.');
         toggleProMode();
       }
-      console.log('[VTO Page] Consuming image URL from store.');
-      consumeImageUrl();
+      // NOTE: We no longer consume the image here. The child component will do it.
     }
-  }, [imageUrlToTransfer, vtoTarget, isProMode, toggleProMode, consumeImageUrl]);
+  }, [imageUrlToTransfer, vtoTarget, isProMode, toggleProMode]);
+
+  const onTransferConsumed = useCallback(() => {
+    console.log('[VTO Page] Child component consumed the image. Clearing store.');
+    consumeImageUrl();
+    setTransferredImage(null);
+  }, [consumeImageUrl]);
 
   const { data: recentJobs, isLoading: isLoadingRecentJobs } = useQuery<BitStudioJob[]>({
     queryKey: ['bitstudioJobs', session?.user?.id],
@@ -179,6 +184,7 @@ const VirtualTryOn = () => {
               handleSelectJob={handleSelectJob}
               resetForm={resetForm}
               transferredImageUrl={transferredImage?.target === 'pro-source' ? transferredImage.url : null}
+              onTransferConsumed={onTransferConsumed}
             />
           ) : (
             <div className="h-full">
@@ -193,6 +199,7 @@ const VirtualTryOn = () => {
                     selectedJob={selectedJob} 
                     resetForm={resetForm} 
                     transferredImageUrl={transferredImage?.target === 'base' ? transferredImage.url : null}
+                    onTransferConsumed={onTransferConsumed}
                   />
                 </TabsContent>
                 <TabsContent value="batch" className="pt-6">

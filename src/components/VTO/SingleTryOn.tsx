@@ -64,9 +64,10 @@ interface SingleTryOnProps {
     selectedJob: BitStudioJob | undefined;
     resetForm: () => void;
     transferredImageUrl?: string | null;
+    onTransferConsumed: () => void;
 }
 
-export const SingleTryOn = ({ selectedJob, resetForm, transferredImageUrl }: SingleTryOnProps) => {
+export const SingleTryOn = ({ selectedJob, resetForm, transferredImageUrl, onTransferConsumed }: SingleTryOnProps) => {
     const { supabase, session } = useSession();
     const { t } = useLanguage();
     const queryClient = useQueryClient();
@@ -112,7 +113,8 @@ export const SingleTryOn = ({ selectedJob, resetForm, transferredImageUrl }: Sin
               const filename = imageUrl.split('/').pop() || 'image.png';
               const file = new File([blob], filename, { type: blob.type });
               setPersonImageFile(file);
-              console.log('[SingleTryOn] State updated with new person image file.');
+              console.log('[SingleTryOn] State updated with new person image file. Consuming transfer.');
+              onTransferConsumed();
             } catch (e) {
               console.error("Failed to fetch transferred image for VTO:", e);
               showError("Could not load the transferred image.");
@@ -120,7 +122,7 @@ export const SingleTryOn = ({ selectedJob, resetForm, transferredImageUrl }: Sin
           };
           fetchImageAsFile(transferredImageUrl);
         }
-      }, [transferredImageUrl, supabase]);
+      }, [transferredImageUrl, supabase, onTransferConsumed]);
 
     const uploadFile = async (file: File, type: 'person' | 'garment') => {
         if (!session?.user) throw new Error("User session not found.");
