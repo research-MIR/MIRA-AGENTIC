@@ -106,7 +106,7 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
   const [isGuideOpen, setIsGuideOpen] = useState(false);
 
   const [numAttempts, setNumAttempts] = useState(1);
-  const [denoise, setDenoise] = useState(0.90);
+  const [denoise, setDenoise] = useState(0.99);
   const [isHighQuality, setIsHighQuality] = useState(false);
   const [maskExpansion, setMaskExpansion] = useState(3);
 
@@ -313,7 +313,7 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
                         <TooltipProvider>
                           <Tooltip>
                             <TooltipTrigger asChild>
-                              <AccordionTrigger>{t('proSettings')}</AccordionTrigger>
+                              <AccordionTrigger className="text-primary animate-pulse">{t('proSettings')}</AccordionTrigger>
                             </TooltipTrigger>
                             <TooltipContent>
                               <p>{t('proSettingsTooltip')}</p>
