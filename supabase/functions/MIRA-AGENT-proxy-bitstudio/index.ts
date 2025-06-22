@@ -154,12 +154,14 @@ serve(async (req) => {
 
       let sourceToSendBase64 = croppedSourceBase64;
       let maskToSendBase64 = croppedDilatedMaskBase64;
-      const pixelThreshold = 768 * 768;
-      const currentPixels = bbox.width * bbox.height;
+      
+      const TARGET_LONG_SIDE = 768;
+      const longestSide = Math.max(bbox.width, bbox.height);
 
-      if (currentPixels <= pixelThreshold) {
-          console.log(`[BitStudioProxy][${requestId}] Crop size (${bbox.width}x${bbox.height} = ${currentPixels}px) is below threshold of ${pixelThreshold}px. Upscaling crops...`);
-          const upscaleFactor = 2.0;
+      if (longestSide < TARGET_LONG_SIDE) {
+          const upscaleFactor = TARGET_LONG_SIDE / longestSide;
+          console.log(`[BitStudioProxy][${requestId}] Crop's longest side (${longestSide}px) is below target of ${TARGET_LONG_SIDE}px. Upscaling by a factor of ${upscaleFactor.toFixed(2)}...`);
+          
           const { data: upscaleData, error: upscaleError } = await supabase.functions.invoke('MIRA-AGENT-tool-upscale-crop', {
               body: {
                   source_crop_base64: croppedSourceBase64,
@@ -174,7 +176,7 @@ serve(async (req) => {
           maskToSendBase64 = upscaleData.upscaled_mask_base64;
           console.log(`[BitStudioProxy][${requestId}] Upscaling complete. New crop dimensions will be approx ${Math.round(bbox.width * upscaleFactor)}x${Math.round(bbox.height * upscaleFactor)}.`);
       } else {
-          console.log(`[BitStudioProxy][${requestId}] Crop size (${bbox.width}x${bbox.height}) is sufficient. Skipping upscale.`);
+          console.log(`[BitStudioProxy][${requestId}] Crop's longest side (${longestSide}px) is sufficient. Skipping upscale.`);
       }
 
       if (auto_prompt_enabled) {
