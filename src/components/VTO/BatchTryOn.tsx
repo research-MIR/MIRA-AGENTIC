@@ -162,7 +162,7 @@ export const BatchTryOn = () => {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div className="lg:col-span-1 space-y-6">
               <Card>
-                <CardHeader><CardTitle>Batch Mode</CardTitle><CardDescription>Choose a method for batch processing.</CardDescription></CardHeader>
+                <CardHeader><CardTitle>{t('batchMode')}</CardTitle><CardDescription>{t('batchModeDescription')}</CardDescription></CardHeader>
                 <CardContent>
                   <Tabs defaultValue="one-garment" onValueChange={setBatchMode}>
                     <TabsList className="grid w-full grid-cols-3">
@@ -173,22 +173,22 @@ export const BatchTryOn = () => {
                     <TabsContent value="one-garment" className="pt-4 space-y-4">
                       <p className="text-sm text-muted-foreground">{t('oneGarmentDescription')}</p>
                       <div className="grid grid-cols-2 gap-4">
-                        <ImageUploader onFileSelect={setBatchGarmentFile} title="Upload Garment" imageUrl={batchGarmentFile ? URL.createObjectURL(batchGarmentFile) : null} onClear={() => setBatchGarmentFile(null)} />
-                        <MultiImageUploader onFilesSelect={setBatchPersonFiles} title="Upload People" icon={<Users />} description="Select multiple person images." />
+                        <ImageUploader onFileSelect={setBatchGarmentFile} title={t('uploadGarment')} imageUrl={batchGarmentFile ? URL.createObjectURL(batchGarmentFile) : null} onClear={() => setBatchGarmentFile(null)} />
+                        <MultiImageUploader onFilesSelect={setBatchPersonFiles} title={t('uploadPeople')} icon={<Users />} description={t('selectMultiplePeople')} />
                       </div>
                     </TabsContent>
                     <TabsContent value="random" className="pt-4 space-y-4">
                       <p className="text-sm text-muted-foreground">{t('randomPairsDescription')}</p>
                       <div className="grid grid-cols-2 gap-4">
-                        <MultiImageUploader onFilesSelect={setBatchRandomGarmentFiles} title="Upload Garments" icon={<Shirt />} description="Select multiple garment images." />
-                        <MultiImageUploader onFilesSelect={setBatchRandomPersonFiles} title="Upload People" icon={<Users />} description="Select multiple person images." />
+                        <MultiImageUploader onFilesSelect={setBatchRandomGarmentFiles} title={t('uploadGarments')} icon={<Shirt />} description={t('selectMultipleGarments')} />
+                        <MultiImageUploader onFilesSelect={setBatchRandomPersonFiles} title={t('uploadPeople')} icon={<Users />} description={t('selectMultiplePeople')} />
                       </div>
                     </TabsContent>
                     <TabsContent value="precise" className="pt-4 space-y-4">
                       <p className="text-sm text-muted-foreground">{t('precisePairsDescription')}</p>
                       <div className="grid grid-cols-2 gap-2">
-                        <ImageUploader onFileSelect={setTempPairPerson} title="Person" imageUrl={tempPairPerson ? URL.createObjectURL(tempPairPerson) : null} onClear={() => setTempPairPerson(null)} />
-                        <ImageUploader onFileSelect={setTempPairGarment} title="Garment" imageUrl={tempPairGarment ? URL.createObjectURL(tempPairGarment) : null} onClear={() => setTempPairGarment(null)} />
+                        <ImageUploader onFileSelect={setTempPairPerson} title={t('person')} imageUrl={tempPairPerson ? URL.createObjectURL(tempPairPerson) : null} onClear={() => setTempPairPerson(null)} />
+                        <ImageUploader onFileSelect={setTempPairGarment} title={t('garment')} imageUrl={tempPairGarment ? URL.createObjectURL(tempPairGarment) : null} onClear={() => setTempPairGarment(null)} />
                       </div>
                       <Button className="w-full" onClick={addPrecisePair} disabled={!tempPairPerson || !tempPairGarment}>{t('addPair')}</Button>
                     </TabsContent>
@@ -213,11 +213,11 @@ export const BatchTryOn = () => {
                     {batchMode === 'random' && (batchRandomPersonFiles.length > 0 || batchRandomGarmentFiles.length > 0) && (
                       <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">
-                          <h3 className="font-semibold">People ({batchRandomPersonFiles.length})</h3>
+                          <h3 className="font-semibold">{t('peopleCount', { count: batchRandomPersonFiles.length })}</h3>
                           <div className="grid grid-cols-3 gap-2">{batchRandomPersonFiles.map((f, i) => <img key={i} src={URL.createObjectURL(f)} className="w-full h-full object-cover rounded-md aspect-square" />)}</div>
                         </div>
                         <div className="space-y-2">
-                          <h3 className="font-semibold">Garments ({batchRandomGarmentFiles.length})</h3>
+                          <h3 className="font-semibold">{t('garmentsCount', { count: batchRandomGarmentFiles.length })}</h3>
                           <div className="grid grid-cols-3 gap-2">{batchRandomGarmentFiles.map((f, i) => <img key={i} src={URL.createObjectURL(f)} className="w-full h-full object-cover rounded-md aspect-square" />)}</div>
                         </div>
                       </div>

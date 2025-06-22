@@ -20,6 +20,7 @@ import { Switch } from "../ui/switch";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { ProModeSettings } from "./ProModeSettings";
 import { ScrollArea } from "../ui/scroll-area";
+import { useLanguage } from "@/context/LanguageContext";
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -88,6 +89,7 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
   const { supabase, session } = useSession();
   const { showImage } = useImagePreview();
   const queryClient = useQueryClient();
+  const { t } = useLanguage();
   const [sourceImageFile, setSourceImageFile] = useState<File | null>(null);
   const [referenceImageFile, setReferenceImageFile] = useState<File | null>(null);
   const [maskImage, setMaskImage] = useState<string | null>(null);
@@ -233,33 +235,33 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
               <Card>
                 <CardHeader>
                   <div className="flex justify-between items-center">
-                    <CardTitle>Setup</CardTitle>
-                    {selectedJob && <Button variant="outline" size="sm" onClick={resetForm}><PlusCircle className="h-4 w-4 mr-2" />New</Button>}
+                    <CardTitle>{selectedJob ? t('selectedJob') : t('setup')}</CardTitle>
+                    {selectedJob && <Button variant="outline" size="sm" onClick={resetForm}><PlusCircle className="h-4 w-4 mr-2" />{t('new')}</Button>}
                   </div>
                 </CardHeader>
                 <CardContent>
                   <Accordion type="multiple" defaultValue={['item-1']} className="w-full">
                     <AccordionItem value="item-1">
-                      <AccordionTrigger>1. Inputs</AccordionTrigger>
+                      <AccordionTrigger>{t('inputsStep1')}</AccordionTrigger>
                       <AccordionContent className="pt-4">
                         <div className="grid grid-cols-2 gap-4">
-                          <ImageUploader onFileSelect={setSourceImageFile} title="Source Image" imageUrl={sourceImageUrl} onClear={resetForm} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
-                          <ImageUploader onFileSelect={setReferenceImageFile} title="Style Reference" imageUrl={referenceImageUrl} onClear={() => setReferenceImageFile(null)} icon={<Palette className="h-8 w-8 text-muted-foreground" />} />
+                          <ImageUploader onFileSelect={setSourceImageFile} title={t('sourceImage')} imageUrl={sourceImageUrl} onClear={resetForm} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
+                          <ImageUploader onFileSelect={setReferenceImageFile} title={t('styleReference')} imageUrl={referenceImageUrl} onClear={() => setReferenceImageFile(null)} icon={<Palette className="h-8 w-8 text-muted-foreground" />} />
                         </div>
                       </AccordionContent>
                     </AccordionItem>
                     <AccordionItem value="item-2">
-                      <AccordionTrigger>2. Prompt</AccordionTrigger>
+                      <AccordionTrigger>{t('promptStep2')}</AccordionTrigger>
                       <AccordionContent className="pt-4 space-y-2">
                         <div className="flex items-center space-x-2">
                           <Switch id="auto-prompt-pro" checked={isAutoPromptEnabled} onCheckedChange={setIsAutoPromptEnabled} />
-                          <Label htmlFor="auto-prompt-pro">Auto-Generate</Label>
+                          <Label htmlFor="auto-prompt-pro">{t('autoGenerate')}</Label>
                         </div>
-                        <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="e.g., a red silk shirt..." rows={4} disabled={isAutoPromptEnabled} />
+                        <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t('promptPlaceholderPro')} rows={4} disabled={isAutoPromptEnabled} />
                       </AccordionContent>
                     </AccordionItem>
                     <AccordionItem value="item-3">
-                      <AccordionTrigger>3. PRO Settings</AccordionTrigger>
+                      <AccordionTrigger>{t('proSettingsStep3')}</AccordionTrigger>
                       <AccordionContent className="pt-4">
                         <ProModeSettings
                           numAttempts={numAttempts} setNumAttempts={setNumAttempts}
@@ -275,7 +277,7 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
               </Card>
               <Button size="lg" className="w-full" onClick={handleGenerate} disabled={isLoading || !!selectedJob}>
                 {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-                Generate
+                {t('generate')}
               </Button>
             </div>
           </div>
@@ -303,15 +305,15 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
             ) : (
               <div {...dropzoneProps} className={cn("w-full h-full flex flex-col items-center justify-center cursor-pointer border-2 border-dashed rounded-lg", isDraggingOver && "border-primary")}>
                 <UploadCloud className="h-12 w-12 text-muted-foreground" />
-                <p className="mt-4 font-semibold">Upload an image in the 'Setup' panel to begin</p>
-                <p className="text-sm text-muted-foreground">Or select a recent job to view the result</p>
+                <p className="mt-4 font-semibold">{t('uploadToBegin')}</p>
+                <p className="text-sm text-muted-foreground">{t('orSelectRecent')}</p>
               </div>
             )}
           </div>
         </div>
         
         <Card className="mt-4">
-          <CardHeader><CardTitle><div className="flex items-center gap-2"><History className="h-4 w-4" />Recent Jobs</div></CardTitle></CardHeader>
+          <CardHeader><CardTitle><div className="flex items-center gap-2"><History className="h-4 w-4" />{t('recentJobs')}</div></CardTitle></CardHeader>
           <CardContent>
             {isLoadingRecentJobs ? <Skeleton className="h-24 w-full" /> : proJobs.length > 0 ? (
               <ScrollArea className="h-32">
@@ -326,7 +328,7 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
                   })}
                 </div>
               </ScrollArea>
-            ) : <p className="text-muted-foreground text-sm">No recent PRO jobs found.</p>}
+            ) : <p className="text-muted-foreground text-sm">{t('noRecentProJobs')}</p>}
           </CardContent>
         </Card>
       </div>
