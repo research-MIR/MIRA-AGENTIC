@@ -42,6 +42,9 @@ export const commonTranslations = {
     sendToEditor: "Modifica nell'Editor",
     sendToVTO: "Usa come Persona nel VTO",
     sendToVTOPro: "Usa come Sorgente nel VTO Pro",
+    download: "Scarica",
+    upscaleAndDownload: "Migliora e Scarica",
+    upscaleAndDownloadSkin: "Migliora (Pelle) e Scarica",
   },
   en: {
     greeting: "Hi! How can I help you today?",
@@ -86,5 +89,8 @@ export const commonTranslations = {
     sendToEditor: "Edit in Editor",
     sendToVTO: "Use as Person in VTO",
     sendToVTOPro: "Use as Source in VTO Pro",
+    download: "Download",
+    upscaleAndDownload: "Upscale & Download",
+    upscaleAndDownloadSkin: "Upscale (Skin) & Download",
   },
 };
