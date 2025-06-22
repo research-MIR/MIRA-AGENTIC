@@ -235,44 +235,68 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
               <Card>
                 <CardHeader>
                   <div className="flex justify-between items-center">
-                    <CardTitle>{t('setup')}</CardTitle>
+                    <CardTitle>{selectedJob ? t('selectedJob') : t('setup')}</CardTitle>
                     {selectedJob && <Button variant="outline" size="sm" onClick={resetForm}><PlusCircle className="h-4 w-4 mr-2" />{t('new')}</Button>}
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <Accordion type="multiple" defaultValue={['item-1']} className="w-full">
-                    <AccordionItem value="item-1">
-                      <AccordionTrigger>{t('inputs')}</AccordionTrigger>
-                      <AccordionContent className="pt-4">
-                        <div className="grid grid-cols-2 gap-4">
-                          <ImageUploader onFileSelect={setSourceImageFile} title={t('sourceImage')} imageUrl={sourceImageUrl} onClear={resetForm} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
-                          <ImageUploader onFileSelect={setReferenceImageFile} title={t('styleReference')} imageUrl={referenceImageUrl} onClear={() => setReferenceImageFile(null)} icon={<Palette className="h-8 w-8 text-muted-foreground" />} />
+                  {selectedJob ? (
+                    <div className="space-y-4">
+                      <p className="text-sm text-muted-foreground">{t('viewingJob')}</p>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <Label>{t('sourceImage')}</Label>
+                          <div className="mt-1 aspect-square w-full bg-muted rounded-md overflow-hidden">
+                            <SecureImageDisplay imageUrl={selectedJob.source_person_image_url} alt="Source Person" />
+                          </div>
                         </div>
-                      </AccordionContent>
-                    </AccordionItem>
-                    <AccordionItem value="item-2">
-                      <AccordionTrigger>{t('promptSectionTitle')}</AccordionTrigger>
-                      <AccordionContent className="pt-4 space-y-2">
-                        <div className="flex items-center space-x-2">
-                          <Switch id="auto-prompt-pro" checked={isAutoPromptEnabled} onCheckedChange={setIsAutoPromptEnabled} />
-                          <Label htmlFor="auto-prompt-pro">{t('autoGenerate')}</Label>
+                        <div>
+                          <Label>{t('styleReference')}</Label>
+                          <div className="mt-1 aspect-square w-full bg-muted rounded-md overflow-hidden">
+                            <SecureImageDisplay imageUrl={selectedJob.source_garment_image_url} alt="Source Garment" />
+                          </div>
                         </div>
-                        <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t('promptPlaceholderVTO')} rows={4} disabled={isAutoPromptEnabled} />
-                      </AccordionContent>
-                    </AccordionItem>
-                    <AccordionItem value="item-3">
-                      <AccordionTrigger>{t('proSettings')}</AccordionTrigger>
-                      <AccordionContent className="pt-4">
-                        <ProModeSettings
-                          numAttempts={numAttempts} setNumAttempts={setNumAttempts}
-                          denoise={denoise} setDenoise={setDenoise}
-                          isHighQuality={isHighQuality} setIsHighQuality={setIsHighQuality}
-                          maskExpansion={maskExpansion} setMaskExpansion={setMaskExpansion}
-                          disabled={isLoading}
-                        />
-                      </AccordionContent>
-                    </AccordionItem>
-                  </Accordion>
+                      </div>
+                      <div>
+                        <Label>{t('prompt')}</Label>
+                        <p className="text-sm p-2 bg-muted rounded-md mt-1">{selectedJob.metadata?.prompt_used || "N/A"}</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <Accordion type="multiple" defaultValue={['item-1']} className="w-full">
+                      <AccordionItem value="item-1">
+                        <AccordionTrigger>{t('inputs')}</AccordionTrigger>
+                        <AccordionContent className="pt-4">
+                          <div className="grid grid-cols-2 gap-4">
+                            <ImageUploader onFileSelect={setSourceImageFile} title={t('sourceImage')} imageUrl={sourceImageUrl} onClear={resetForm} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
+                            <ImageUploader onFileSelect={setReferenceImageFile} title={t('styleReference')} imageUrl={referenceImageUrl} onClear={() => setReferenceImageFile(null)} icon={<Palette className="h-8 w-8 text-muted-foreground" />} />
+                          </div>
+                        </AccordionContent>
+                      </AccordionItem>
+                      <AccordionItem value="item-2">
+                        <AccordionTrigger>{t('promptSectionTitle')}</AccordionTrigger>
+                        <AccordionContent className="pt-4 space-y-2">
+                          <div className="flex items-center space-x-2">
+                            <Switch id="auto-prompt-pro" checked={isAutoPromptEnabled} onCheckedChange={setIsAutoPromptEnabled} />
+                            <Label htmlFor="auto-prompt-pro">{t('autoGenerate')}</Label>
+                          </div>
+                          <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t('promptPlaceholderVTO')} rows={4} disabled={isAutoPromptEnabled} />
+                        </AccordionContent>
+                      </AccordionItem>
+                      <AccordionItem value="item-3">
+                        <AccordionTrigger>{t('proSettings')}</AccordionTrigger>
+                        <AccordionContent className="pt-4">
+                          <ProModeSettings
+                            numAttempts={numAttempts} setNumAttempts={setNumAttempts}
+                            denoise={denoise} setDenoise={setDenoise}
+                            isHighQuality={isHighQuality} setIsHighQuality={setIsHighQuality}
+                            maskExpansion={maskExpansion} setMaskExpansion={setMaskExpansion}
+                            disabled={isLoading}
+                          />
+                        </AccordionContent>
+                      </AccordionItem>
+                    </Accordion>
+                  )}
                 </CardContent>
               </Card>
               <Button size="lg" className="w-full" onClick={handleGenerate} disabled={isLoading || !!selectedJob}>

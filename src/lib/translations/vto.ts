@@ -68,6 +68,7 @@ export const vtoTranslations = {
     vtoHelpProMasking: "**Mascheratura:** Usa il pennello per disegnare sull'area dell'immagine sorgente che vuoi sostituire. Puoi regolare la dimensione del pennello per una maggiore precisione.",
     vtoHelpProReference: "**Immagine di Riferimento (Opzionale):** Fornisci un'immagine di un indumento o di una texture da applicare all'area mascherata. Se non viene fornita, l'IA riempirà l'area in base al prompt.",
     vtoHelpProSettings: "**Impostazioni Pro:** Controlla il numero di tentativi, la forza del 'denoise' (quanto l'IA si discosta dall'immagine originale) e l'espansione della maschera per una migliore fusione.",
+    viewingJob: "Stai visualizzando un job completato. Clicca 'Nuovo' per iniziarne un altro.",
   },
   en: {
     proMode: "Pro Mode",
@@ -138,5 +139,6 @@ export const vtoTranslations = {
     vtoHelpProMasking: "**Masking:** Use the brush tool to draw over the area of the source image you want to replace. You can adjust the brush size for precision.",
     vtoHelpProReference: "**Reference Image (Optional):** Provide an image of a garment or texture to apply to the masked area. If none is provided, the AI will fill the area based on the prompt.",
     vtoHelpProSettings: "**Pro Settings:** Control the number of attempts, the 'denoise' strength (how much the AI deviates from the original), and mask expansion for better blending.",
+    viewingJob: "You are viewing a completed job. Click 'New' to start another.",
   },
 };
