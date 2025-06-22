@@ -32,7 +32,7 @@ export const ProModeSettings = ({
   return (
     <div className="space-y-4">
       <div>
-        <Label htmlFor="num-images-select">Number of Images</Label>
+        <Label htmlFor="num-images-select">{t('numberOfImages')}</Label>
         <Select
           value={String(numAttempts)}
           onValueChange={(value) => setNumAttempts(Number(value))}
@@ -49,7 +49,7 @@ export const ProModeSettings = ({
         </Select>
       </div>
       <div className="flex items-center justify-between">
-        <Label htmlFor="resolution-switch">High Quality</Label>
+        <Label htmlFor="resolution-switch">{t('highResolution')}</Label>
         <Switch
           id="resolution-switch"
           checked={isHighQuality}
@@ -58,7 +58,7 @@ export const ProModeSettings = ({
         />
       </div>
       <div>
-        <Label>Denoise Strength: {denoise.toFixed(2)}</Label>
+        <Label>{t('denoiseStrength', { denoise: denoise.toFixed(2) })}</Label>
         <Slider
           value={[denoise]}
           onValueChange={(v) => setDenoise(v[0])}
@@ -69,7 +69,7 @@ export const ProModeSettings = ({
         />
       </div>
       <div>
-        <Label>Mask Expansion: {maskExpansion}%</Label>
+        <Label>{t('maskExpansion', { maskExpansion })}</Label>
         <Slider
           value={[maskExpansion]}
           onValueChange={(v) => setMaskExpansion(v[0])}

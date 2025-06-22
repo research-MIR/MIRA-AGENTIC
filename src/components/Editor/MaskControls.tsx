@@ -1,6 +1,7 @@
 import { Slider } from "@/components/ui/slider";
 import { Button } from "@/components/ui/button";
 import { Brush, RotateCcw } from "lucide-react";
+import { useLanguage } from "@/context/LanguageContext";
 
 interface MaskControlsProps {
   brushSize: number;
@@ -9,6 +10,7 @@ interface MaskControlsProps {
 }
 
 export const MaskControls = ({ brushSize, onBrushSizeChange, onReset }: MaskControlsProps) => {
+  const { t } = useLanguage();
   return (
     <div className="p-2 bg-background/80 backdrop-blur-sm rounded-lg shadow-lg flex items-center gap-4">
       <div className="flex items-center gap-2">
@@ -22,7 +24,7 @@ export const MaskControls = ({ brushSize, onBrushSizeChange, onReset }: MaskCont
           className="w-32"
         />
       </div>
-      <Button variant="outline" size="icon" onClick={onReset} title="Reset Mask">
+      <Button variant="outline" size="icon" onClick={onReset} title={t('resetMask')}>
         <RotateCcw className="h-4 w-4" />
       </Button>
     </div>

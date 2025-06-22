@@ -132,7 +132,7 @@ const VirtualTryOn = () => {
         <div className="flex items-center space-x-2">
           <Label htmlFor="pro-mode-switch" className="flex items-center gap-2">
             <Star className="text-yellow-500" />
-            Pro Mode
+            {t('proMode')}
           </Label>
           <Switch id="pro-mode-switch" checked={isProMode} onCheckedChange={toggleProMode} />
         </div>
@@ -164,7 +164,7 @@ const VirtualTryOn = () => {
               </TabsContent>
             </Tabs>
             <Card className="mt-8">
-              <CardHeader><CardTitle>Recent Jobs</CardTitle></CardHeader>
+              <CardHeader><CardTitle>{t('recentJobs')}</CardTitle></CardHeader>
               <CardContent>
                 {isLoadingRecentJobs ? <Skeleton className="h-24 w-full" /> : recentJobs && recentJobs.length > 0 ? (
                   <div className="flex gap-4 overflow-x-auto pb-2">
@@ -177,7 +177,7 @@ const VirtualTryOn = () => {
                       )
                     })}
                   </div>
-                ) : <p className="text-muted-foreground text-sm">No recent jobs found for this mode.</p>}
+                ) : <p className="text-muted-foreground text-sm">{t('noRecentJobsVTO')}</p>}
               </CardContent>
             </Card>
           </div>
