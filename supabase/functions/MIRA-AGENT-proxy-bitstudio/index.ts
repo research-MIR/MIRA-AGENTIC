@@ -142,8 +142,7 @@ serve(async (req) => {
 
       const croppedMaskCanvas = createCanvas(bbox.width, bbox.height);
       const cropMaskCtx = croppedMaskCanvas.getContext('2d');
-      const sourceMaskData = dilateCtx.getImageData(bbox.x, bbox.y, bbox.width, bbox.height);
-      cropMaskCtx.putImageData(sourceMaskData, 0, 0);
+      cropMaskCtx.drawImage(dilatedCanvas, bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
       const croppedDilatedMaskBuffer = croppedMaskCanvas.toBuffer('image/png');
       if (!croppedDilatedMaskBuffer) throw new Error("Failed to create buffer from cropped mask canvas.");
       const croppedDilatedMaskBase64 = encodeBase64(croppedDilatedMaskBuffer);
@@ -204,8 +203,8 @@ serve(async (req) => {
         const metadataToSave = {
           bitstudio_version_id: newVersion.id,
           full_source_image_base64,
-          cropped_source_image_base64,
-          cropped_dilated_mask_base64,
+          cropped_source_image_base64: croppedSourceBase64,
+          cropped_dilated_mask_base64: croppedDilatedMaskBase64,
           bbox,
           prompt_used: prompt,
         };
