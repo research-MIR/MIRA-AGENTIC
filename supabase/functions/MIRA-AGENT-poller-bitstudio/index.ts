@@ -10,7 +10,6 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const BITSTUDIO_API_KEY = Deno.env.get('BITSTUDIO_API_KEY');
 const BITSTUDIO_API_BASE = 'https://api.bitstudio.ai';
-const POLLING_INTERVAL_MS = 3000; // 3 seconds
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
@@ -70,8 +69,8 @@ serve(async (req) => {
       if (job.mode === 'inpaint') {
         console.log(`[BitStudioPoller][${job.id}] Inpaint job complete. Triggering compositor...`);
         await supabase.from('mira-agent-bitstudio-jobs').update({
-          status: 'compositing', // Set intermediate status
-          final_image_url: finalImageUrl, // Temporarily store the crop URL
+          status: 'compositing',
+          final_image_url: finalImageUrl,
         }).eq('id', job_id);
         supabase.functions.invoke('MIRA-AGENT-compositor-inpaint', { body: { job_id } }).catch(console.error);
       } else {
@@ -90,11 +89,8 @@ serve(async (req) => {
         error_message: 'BitStudio processing failed.',
       }).eq('id', job_id);
     } else {
-      console.log(`[BitStudioPoller][${job.id}] Status is '${jobStatus}'. Re-polling in ${POLLING_INTERVAL_MS}ms.`);
+      console.log(`[BitStudioPoller][${job.id}] Status is '${jobStatus}'. Updating status to 'processing' and awaiting next watchdog cycle.`);
       await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'processing' }).eq('id', job_id);
-      setTimeout(() => {
-        supabase.functions.invoke('MIRA-AGENT-poller-bitstudio', { body: { job_id } }).catch(console.error);
-      }, POLLING_INTERVAL_MS);
     }
 
     return new Response(JSON.stringify({ success: true, status: jobStatus }), { headers: corsHeaders });
