@@ -53,22 +53,25 @@ const VirtualTryOn = () => {
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
   const channelRef = useRef<RealtimeChannel | null>(null);
+  
   const { consumeImageUrl } = useImageTransferStore();
+  const imageUrlToTransfer = useImageTransferStore((state) => state.imageUrlToTransfer);
+  const vtoTarget = useImageTransferStore((state) => state.vtoTarget);
   const [transferredImage, setTransferredImage] = useState<{ url: string; target: 'base' | 'pro-source' } | null>(null);
 
   useEffect(() => {
-    const { url, vtoTarget } = consumeImageUrl();
-    if (url && vtoTarget) {
+    if (imageUrlToTransfer && vtoTarget) {
       console.log(`[VTO Page] Received transferred image for target: ${vtoTarget}`);
-      setTransferredImage({ url, target: vtoTarget });
+      setTransferredImage({ url: imageUrlToTransfer, target: vtoTarget });
       if (vtoTarget === 'pro-source' && !isProMode) {
         toggleProMode();
       }
       if (vtoTarget === 'base' && isProMode) {
         toggleProMode();
       }
+      consumeImageUrl();
     }
-  }, [consumeImageUrl]);
+  }, [imageUrlToTransfer, vtoTarget, isProMode, toggleProMode, consumeImageUrl]);
 
   const { data: recentJobs, isLoading: isLoadingRecentJobs } = useQuery<BitStudioJob[]>({
     queryKey: ['bitstudioJobs', session?.user?.id],
