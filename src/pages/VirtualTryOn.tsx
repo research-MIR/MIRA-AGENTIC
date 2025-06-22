@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { useLanguage } from "@/context/LanguageContext";
@@ -61,6 +61,16 @@ const VirtualTryOn = () => {
 
   const selectedJob = useMemo(() => recentJobs?.find(job => job.id === selectedJobId), [recentJobs, selectedJobId]);
 
+  const resetForm = useCallback(() => {
+    setSelectedJobId(null);
+  }, []);
+
+  useEffect(() => {
+    // When switching between Pro and Standard mode, reset the selected job
+    // to prevent state leakage between the two different UIs.
+    resetForm();
+  }, [isProMode, resetForm]);
+
   useEffect(() => {
     if (!session?.user?.id) {
       return;
@@ -110,10 +120,6 @@ const VirtualTryOn = () => {
 
   const handleSelectJob = (job: BitStudioJob) => {
     setSelectedJobId(job.id);
-  };
-
-  const resetForm = () => {
-    setSelectedJobId(null);
   };
 
   return (
