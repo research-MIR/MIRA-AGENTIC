@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Wand2, Brush, Palette, UploadCloud, Sparkles, Loader2, Image as ImageIcon, X, PlusCircle, AlertTriangle, Eye, Settings, History } from "lucide-react";
+import { Wand2, Brush, Palette, UploadCloud, Sparkles, Loader2, Image as ImageIcon, X, PlusCircle, AlertTriangle, Eye, Settings, History, HelpCircle } from "lucide-react";
 import { MaskCanvas } from "@/components/Editor/MaskCanvas";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -21,6 +21,8 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { ProModeSettings } from "./ProModeSettings";
 import { ScrollArea } from "../ui/scroll-area";
 import { useLanguage } from "@/context/LanguageContext";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import ReactMarkdown from "react-markdown";
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -99,6 +101,7 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
   const [isLoading, setIsLoading] = useState(false);
   const [isDebugModalOpen, setIsDebugModalOpen] = useState(false);
   const [isAutoPromptEnabled, setIsAutoPromptEnabled] = useState(true);
+  const [isGuideOpen, setIsGuideOpen] = useState(false);
 
   // New settings state
   const [numAttempts, setNumAttempts] = useState(1);
@@ -236,7 +239,12 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
                 <CardHeader>
                   <div className="flex justify-between items-center">
                     <CardTitle>{selectedJob ? t('selectedJob') : t('setup')}</CardTitle>
-                    {selectedJob && <Button variant="outline" size="sm" onClick={resetForm}><PlusCircle className="h-4 w-4 mr-2" />{t('new')}</Button>}
+                    <div className="flex items-center gap-2">
+                        <Button variant="ghost" size="icon" onClick={() => setIsGuideOpen(true)}>
+                            <HelpCircle className="h-5 w-5" />
+                        </Button>
+                        {selectedJob && <Button variant="outline" size="sm" onClick={resetForm}><PlusCircle className="h-4 w-4 mr-2" />{t('new')}</Button>}
+                    </div>
                   </div>
                 </CardHeader>
                 <CardContent>
@@ -362,6 +370,22 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
         onClose={() => setIsDebugModalOpen(false)}
         assets={selectedJob?.metadata?.debug_assets || null}
       />
+
+      <Dialog open={isGuideOpen} onOpenChange={setIsGuideOpen}>
+        <DialogContent className="max-w-2xl">
+            <DialogHeader>
+                <DialogTitle>{t('inpaintingGuideTitle')}</DialogTitle>
+            </DialogHeader>
+            <ScrollArea className="max-h-[70vh] pr-4">
+                <div className="space-y-4 markdown-content">
+                    <ReactMarkdown>{t('inpaintingGuideContent')}</ReactMarkdown>
+                </div>
+            </ScrollArea>
+            <DialogFooter>
+                <Button onClick={() => setIsGuideOpen(false)}>{t('done')}</Button>
+            </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 };

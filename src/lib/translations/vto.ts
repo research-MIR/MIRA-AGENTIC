@@ -69,6 +69,32 @@ export const vtoTranslations = {
     vtoHelpProReference: "**Immagine di Riferimento (Opzionale):** Fornisci un'immagine di un indumento o di una texture da applicare all'area mascherata. Se non viene fornita, l'IA riempirà l'area in base al prompt.",
     vtoHelpProSettings: "**Impostazioni Pro:** Controlla il numero di tentativi, la forza del 'denoise' (quanto l'IA si discosta dall'immagine originale) e l'espansione della maschera per una migliore fusione.",
     viewingJob: "Stai visualizzando un job completato. Clicca 'Nuovo' per iniziarne un altro.",
+    inpaintingGuide: "Guida all'Inpainting",
+    inpaintingGuideTitle: "Guida all'Inpainting Avanzato",
+    inpaintingGuideContent: `
+### Strategie per Risultati Migliori
+
+L'inpainting è uno strumento potente per sostituire parti di un'immagine, ma richiede un approccio specifico per ottenere i migliori risultati.
+
+#### 1. La Maschera è Tutto
+- **Sii generoso:** È meglio mascherare un'area leggermente più grande del necessario piuttosto che troppo piccola. Questo aiuta l'IA ad avere più spazio per fondere il nuovo contenuto.
+- **Usa l'Espansione:** L'impostazione "Espansione Maschera" è la tua migliore amica. Aumentala per ammorbidire i bordi e ottenere una transizione più naturale tra l'originale e il generato.
+
+#### 2. Il Prompt Preciso
+- **Descrivi solo la sostituzione:** Il tuo prompt dovrebbe descrivere solo ciò che vuoi che appaia *all'interno* dell'area mascherata. Non descrivere l'intera immagine.
+- **Sii dettagliato:** Includi dettagli su materiale, texture, stile e illuminazione.
+  - **❌ Esempio negativo:** "una maglietta blu"
+  - **✅ Esempio positivo:** "una maglietta blu in cotone fotorealistica con pieghe morbide, sotto una luce da studio diffusa"
+
+#### 3. Il Riferimento Stilistico (Opzionale)
+- **È per lo stile, non per la forma:** L'immagine di riferimento guida lo stile (colori, texture, illuminazione), non la forma esatta dell'oggetto.
+- **Esempio:** Se fornisci l'immagine di una giacca di pelle, l'IA cercherà di creare una *nuova texture* di pelle nell'area mascherata, non di copiare esattamente quella giacca.
+
+#### 4. Denoise e Creatività
+- **Controlla la libertà dell'IA:** L'impostazione "Intensità Denoise" determina quanto l'IA può deviare dall'immagine originale all'interno della maschera.
+  - **Basso Denoise (es. 0.5-0.7):** Ideale per cambiamenti sottili come colore o texture, mantenendo la forma originale dell'indumento.
+  - **Alto Denoise (es. 0.8-1.0):** Concede all'IA più libertà creativa. Usalo se vuoi cambiare la forma dell'indumento (es. trasformare una t-shirt in una giacca).
+`
   },
   en: {
     proMode: "Pro Mode",
@@ -140,5 +166,31 @@ export const vtoTranslations = {
     vtoHelpProReference: "**Reference Image (Optional):** Provide an image of a garment or texture to apply to the masked area. If none is provided, the AI will fill the area based on the prompt.",
     vtoHelpProSettings: "**Pro Settings:** Control the number of attempts, the 'denoise' strength (how much the AI deviates from the original), and mask expansion for better blending.",
     viewingJob: "You are viewing a completed job. Click 'New' to start another.",
+    inpaintingGuide: "Inpainting Guide",
+    inpaintingGuideTitle: "Advanced Inpainting Guide",
+    inpaintingGuideContent: `
+### Strategies for Better Results
+
+Inpainting is a powerful tool for replacing parts of an image, but it requires a specific approach to get the best results.
+
+#### 1. The Mask is Everything
+- **Be generous:** It's better to mask a slightly larger area than necessary rather than too small. This helps the AI have more room to blend the new content.
+- **Use Expansion:** The "Mask Expansion" setting is your best friend. Increase it to soften the edges and achieve a more natural transition between the original and the generated content.
+
+#### 2. The Precise Prompt
+- **Describe only the replacement:** Your prompt should only describe what you want to appear *inside* the masked area. Do not describe the entire image.
+- **Be detailed:** Include details about material, texture, style, and lighting.
+  - **❌ Bad example:** "a blue shirt"
+  - **✅ Good example:** "a photorealistic blue cotton t-shirt with soft wrinkles, under diffused studio lighting"
+
+#### 3. The Style Reference (Optional)
+- **It's for style, not shape:** The reference image guides the style (colors, textures, lighting), not the exact shape of the object.
+- **Example:** If you provide an image of a leather jacket, the AI will try to create a *new* leather texture in the masked area, not copy that exact jacket.
+
+#### 4. Denoise and Creativity
+- **Control the AI's freedom:** The "Denoise Strength" setting determines how much the AI can deviate from the original image within the mask.
+  - **Low Denoise (e.g., 0.5-0.7):** Ideal for subtle changes like color or texture, while keeping the original shape of the garment.
+  - **High Denoise (e.g., 0.8-1.0):** Gives the AI more creative freedom. Use this if you want to change the shape of the garment (e.g., turning a t-shirt into a jacket).
+`
   },
 };
