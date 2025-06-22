@@ -225,102 +225,106 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
 
   return (
     <>
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Left Column: All Controls */}
-        <div className="lg:col-span-1 flex flex-col gap-4">
-          <Card>
-            <CardHeader>
-              <div className="flex justify-between items-center">
-                <CardTitle>Setup</CardTitle>
-                {selectedJob && <Button variant="outline" size="sm" onClick={resetForm}><PlusCircle className="h-4 w-4 mr-2" />New</Button>}
-              </div>
-            </CardHeader>
-            <CardContent>
-              <Accordion type="multiple" defaultValue={['item-1', 'item-2']} className="w-full">
-                <AccordionItem value="item-1">
-                  <AccordionTrigger>1. Inputs</AccordionTrigger>
-                  <AccordionContent className="pt-4 space-y-4">
-                    <ImageUploader onFileSelect={setSourceImageFile} title="Source Image" imageUrl={sourceImageUrl} onClear={resetForm} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
-                    <ImageUploader onFileSelect={setReferenceImageFile} title="Style Reference" imageUrl={referenceImageUrl} onClear={() => setReferenceImageFile(null)} icon={<Palette className="h-8 w-8 text-muted-foreground" />} />
-                  </AccordionContent>
-                </AccordionItem>
-                <AccordionItem value="item-2">
-                  <AccordionTrigger>2. Masking</AccordionTrigger>
-                  <AccordionContent className="pt-4">
-                    <MaskControls brushSize={brushSize} onBrushSizeChange={setBrushSize} onReset={handleResetMask} />
-                  </AccordionContent>
-                </AccordionItem>
-                <AccordionItem value="item-3">
-                  <AccordionTrigger>3. Prompt</AccordionTrigger>
-                  <AccordionContent className="pt-4 space-y-2">
-                    <div className="flex items-center space-x-2">
-                      <Switch id="auto-prompt-pro" checked={isAutoPromptEnabled} onCheckedChange={setIsAutoPromptEnabled} />
-                      <Label htmlFor="auto-prompt-pro">Auto-Generate</Label>
-                    </div>
-                    <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="e.g., a red silk shirt..." rows={4} disabled={isAutoPromptEnabled} />
-                  </AccordionContent>
-                </AccordionItem>
-                <AccordionItem value="item-4">
-                  <AccordionTrigger>4. PRO Settings</AccordionTrigger>
-                  <AccordionContent className="pt-4">
-                    <ProModeSettings
-                      numAttempts={numAttempts} setNumAttempts={setNumAttempts}
-                      denoise={denoise} setDenoise={setDenoise}
-                      isHighQuality={isHighQuality} setIsHighQuality={setIsHighQuality}
-                      maskExpansion={maskExpansion} setMaskExpansion={setMaskExpansion}
-                      disabled={isLoading}
-                    />
-                  </AccordionContent>
-                </AccordionItem>
-              </Accordion>
-            </CardContent>
-          </Card>
-          <Button size="lg" className="w-full" onClick={handleGenerate} disabled={isLoading || !!selectedJob}>
-            {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-            Generate
-          </Button>
-          <Card className="flex-1 flex flex-col">
-            <CardHeader><CardTitle><div className="flex items-center gap-2"><History className="h-4 w-4" />Recent Jobs</div></CardTitle></CardHeader>
-            <CardContent className="flex-1 overflow-hidden">
-              <ScrollArea className="h-full max-h-48">
-                {isLoadingRecentJobs ? <Skeleton className="h-24 w-full" /> : proJobs.length > 0 ? (
-                  <div className="grid grid-cols-3 gap-2 pr-2">
-                    {proJobs.map(job => {
-                      const urlToPreview = job.final_image_url || job.source_person_image_url;
-                      return (
-                        <button key={job.id} onClick={() => handleSelectJob(job)} className={cn("border-2 rounded-lg p-0.5 flex-shrink-0 aspect-square", selectedJob?.id === job.id ? "border-primary" : "border-transparent")}>
-                          <SecureImageDisplay imageUrl={urlToPreview} alt="Recent job" className="w-full h-full object-cover" />
-                        </button>
-                      )
-                    })}
-                  </div>
-                ) : <p className="text-muted-foreground text-sm">No recent PRO jobs found.</p>}
-              </ScrollArea>
-            </CardContent>
-          </Card>
-        </div>
+      <div className="flex flex-col gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          {/* Left Column: All Controls */}
+          <div className="lg:col-span-1 flex flex-col gap-4">
+            <Card>
+              <CardHeader>
+                <div className="flex justify-between items-center">
+                  <CardTitle>Setup</CardTitle>
+                  {selectedJob && <Button variant="outline" size="sm" onClick={resetForm}><PlusCircle className="h-4 w-4 mr-2" />New</Button>}
+                </div>
+              </CardHeader>
+              <CardContent>
+                <Accordion type="multiple" defaultValue={['item-1']} className="w-full">
+                  <AccordionItem value="item-1">
+                    <AccordionTrigger>1. Inputs</AccordionTrigger>
+                    <AccordionContent className="pt-4 space-y-4">
+                      <ImageUploader onFileSelect={setSourceImageFile} title="Source Image" imageUrl={sourceImageUrl} onClear={resetForm} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
+                      <ImageUploader onFileSelect={setReferenceImageFile} title="Style Reference" imageUrl={referenceImageUrl} onClear={() => setReferenceImageFile(null)} icon={<Palette className="h-8 w-8 text-muted-foreground" />} />
+                    </AccordionContent>
+                  </AccordionItem>
+                  <AccordionItem value="item-2">
+                    <AccordionTrigger>2. Prompt</AccordionTrigger>
+                    <AccordionContent className="pt-4 space-y-2">
+                      <div className="flex items-center space-x-2">
+                        <Switch id="auto-prompt-pro" checked={isAutoPromptEnabled} onCheckedChange={setIsAutoPromptEnabled} />
+                        <Label htmlFor="auto-prompt-pro">Auto-Generate</Label>
+                      </div>
+                      <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="e.g., a red silk shirt..." rows={4} disabled={isAutoPromptEnabled} />
+                    </AccordionContent>
+                  </AccordionItem>
+                  <AccordionItem value="item-3">
+                    <AccordionTrigger>3. PRO Settings</AccordionTrigger>
+                    <AccordionContent className="pt-4">
+                      <ProModeSettings
+                        numAttempts={numAttempts} setNumAttempts={setNumAttempts}
+                        denoise={denoise} setDenoise={setDenoise}
+                        isHighQuality={isHighQuality} setIsHighQuality={setIsHighQuality}
+                        maskExpansion={maskExpansion} setMaskExpansion={setMaskExpansion}
+                        disabled={isLoading}
+                      />
+                    </AccordionContent>
+                  </AccordionItem>
+                </Accordion>
+              </CardContent>
+            </Card>
+            <Button size="lg" className="w-full" onClick={handleGenerate} disabled={isLoading || !!selectedJob}>
+              {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+              Generate
+            </Button>
+          </div>
 
-        {/* Right Column: Workbench/Result */}
-        <div className="lg:col-span-2 bg-muted rounded-lg flex items-center justify-center relative min-h-[60vh] lg:min-h-0">
-          {sourceImageUrl && !selectedJob ? (
-            <div className="w-full h-full max-h-[80vh] aspect-square relative">
-              <MaskCanvas 
-                imageUrl={sourceImageUrl} 
-                onMaskChange={setMaskImage}
-                brushSize={brushSize}
-                resetTrigger={resetTrigger}
-              />
-            </div>
-          ) : selectedJob ? (
-            renderJobResult(selectedJob)
-          ) : (
-            <div {...dropzoneProps} className={cn("w-full h-full flex flex-col items-center justify-center cursor-pointer border-2 border-dashed rounded-lg", isDraggingOver && "border-primary")}>
-              <UploadCloud className="h-12 w-12 text-muted-foreground" />
-              <p className="mt-4 font-semibold">Upload an image in the 'Setup' panel to begin</p>
-              <p className="text-sm text-muted-foreground">Or select a recent job to view the result</p>
-            </div>
-          )}
+          {/* Right Column: Workbench/Result */}
+          <div className="lg:col-span-2 bg-muted rounded-lg flex items-center justify-center relative min-h-[60vh] lg:min-h-0">
+            {sourceImageUrl && !selectedJob ? (
+              <div className="w-full h-full max-h-[80vh] aspect-square relative">
+                <MaskCanvas 
+                  imageUrl={sourceImageUrl} 
+                  onMaskChange={setMaskImage}
+                  brushSize={brushSize}
+                  resetTrigger={resetTrigger}
+                />
+                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10">
+                  <MaskControls 
+                    brushSize={brushSize} 
+                    onBrushSizeChange={setBrushSize} 
+                    onReset={handleResetMask} 
+                  />
+                </div>
+              </div>
+            ) : selectedJob ? (
+              renderJobResult(selectedJob)
+            ) : (
+              <div {...dropzoneProps} className={cn("w-full h-full flex flex-col items-center justify-center cursor-pointer border-2 border-dashed rounded-lg", isDraggingOver && "border-primary")}>
+                <UploadCloud className="h-12 w-12 text-muted-foreground" />
+                <p className="mt-4 font-semibold">Upload an image in the 'Setup' panel to begin</p>
+                <p className="text-sm text-muted-foreground">Or select a recent job to view the result</p>
+              </div>
+            )}
+          </div>
         </div>
+        
+        <Card className="mt-4">
+          <CardHeader><CardTitle><div className="flex items-center gap-2"><History className="h-4 w-4" />Recent Jobs</div></CardTitle></CardHeader>
+          <CardContent>
+            {isLoadingRecentJobs ? <Skeleton className="h-24 w-full" /> : proJobs.length > 0 ? (
+              <ScrollArea className="h-32">
+                <div className="flex gap-4 pb-2">
+                  {proJobs.map(job => {
+                    const urlToPreview = job.final_image_url || job.source_person_image_url;
+                    return (
+                      <button key={job.id} onClick={() => handleSelectJob(job)} className={cn("border-2 rounded-lg p-0.5 flex-shrink-0 aspect-square", selectedJob?.id === job.id ? "border-primary" : "border-transparent")}>
+                        <SecureImageDisplay imageUrl={urlToPreview} alt="Recent job" className="w-full h-full object-cover" />
+                      </button>
+                    )
+                  })}
+                </div>
+              </ScrollArea>
+            ) : <p className="text-muted-foreground text-sm">No recent PRO jobs found.</p>}
+          </CardContent>
+        </Card>
       </div>
       
       <DebugStepsModal 

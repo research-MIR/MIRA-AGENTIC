@@ -29,6 +29,17 @@ interface BitStudioJob {
   }
 }
 
+const SecureImageDisplay = ({ imageUrl, alt, onClick, className }: { imageUrl: string | null, alt: string, onClick?: (e: React.MouseEvent<HTMLImageElement>) => void, className?: string }) => {
+    const { displayUrl, isLoading, error } = useSecureImage(imageUrl);
+    const hasClickHandler = !!onClick;
+  
+    if (!imageUrl) return <div className={cn("w-full h-full bg-muted rounded-md flex items-center justify-center", className)}><ImageIcon className="h-6 w-6 text-muted-foreground" /></div>;
+    if (isLoading) return <div className={cn("w-full h-full bg-muted rounded-md flex items-center justify-center", className)}><Loader2 className="h-6 w-6 animate-spin" /></div>;
+    if (error) return <div className={cn("w-full h-full bg-muted rounded-md flex items-center justify-center", className)}><AlertTriangle className="h-6 w-6 text-destructive" /></div>;
+    
+    return <img src={displayUrl} alt={alt} className={cn("max-w-full max-h-full object-contain rounded-md", hasClickHandler && "cursor-pointer", className)} onClick={onClick} />;
+};
+
 const VirtualTryOn = () => {
   const { supabase, session, isProMode, toggleProMode } = useSession();
   const { t } = useLanguage();
@@ -104,6 +115,10 @@ const VirtualTryOn = () => {
   const resetForm = () => {
     setSelectedJobId(null);
   };
+
+  const jobsToDisplay = isProMode 
+    ? recentJobs?.filter(job => job.mode === 'inpaint') 
+    : recentJobs?.filter(job => job.mode === 'base');
 
   return (
     <div className="p-4 md:p-8 h-screen flex flex-col">
