@@ -319,7 +319,7 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
                   {proJobs.map(job => {
                     const urlToPreview = job.final_image_url || job.source_person_image_url;
                     return (
-                      <button key={job.id} onClick={() => handleSelectJob(job)} className={cn("border-2 rounded-lg p-0.5 flex-shrink-0 aspect-square", selectedJob?.id === job.id ? "border-primary" : "border-transparent")}>
+                      <button key={job.id} onClick={() => handleSelectJob(job)} className={cn("border-2 rounded-lg p-0.5 flex-shrink-0 w-24 h-24", selectedJob?.id === job.id ? "border-primary" : "border-transparent")}>
                         <SecureImageDisplay imageUrl={urlToPreview} alt="Recent job" className="w-full h-full object-cover" />
                       </button>
                     )
