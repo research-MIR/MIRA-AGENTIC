@@ -54,17 +54,11 @@ const VirtualTryOn = () => {
   const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
   const channelRef = useRef<RealtimeChannel | null>(null);
   
-  const { consumeImageUrl } = useImageTransferStore();
-  const imageUrlToTransfer = useImageTransferStore((state) => state.imageUrlToTransfer);
-  const vtoTarget = useImageTransferStore((state) => state.vtoTarget);
-  const [transferredImage, setTransferredImage] = useState<{ url: string; target: 'base' | 'pro-source' } | null>(null);
+  const { consumeImageUrl, imageUrlToTransfer, vtoTarget } = useImageTransferStore();
 
   useEffect(() => {
     console.log('[VTO Page] Image transfer effect triggered.');
-    // Only act if there's a new transfer request and we are not already handling one.
-    if (imageUrlToTransfer && vtoTarget && !transferredImage) {
-      console.log(`[VTO Page] Received new transferred image for target: ${vtoTarget}`);
-      setTransferredImage({ url: imageUrlToTransfer, target: vtoTarget });
+    if (imageUrlToTransfer && vtoTarget) {
       if (vtoTarget === 'pro-source' && !isProMode) {
         console.log('[VTO Page] Switching to PRO mode for transferred image.');
         toggleProMode();
@@ -74,13 +68,7 @@ const VirtualTryOn = () => {
         toggleProMode();
       }
     }
-  }, [imageUrlToTransfer, vtoTarget, isProMode, toggleProMode, transferredImage]);
-
-  const onTransferConsumed = useCallback(() => {
-    console.log('[VTO Page] Child component consumed the image. Clearing store.');
-    consumeImageUrl();
-    setTransferredImage(null);
-  }, [consumeImageUrl]);
+  }, [imageUrlToTransfer, vtoTarget, isProMode, toggleProMode]);
 
   const { data: recentJobs, isLoading: isLoadingRecentJobs } = useQuery<BitStudioJob[]>({
     queryKey: ['bitstudioJobs', session?.user?.id],
@@ -97,8 +85,8 @@ const VirtualTryOn = () => {
 
   const resetForm = useCallback(() => {
     setSelectedJobId(null);
-    setTransferredImage(null);
-  }, []);
+    consumeImageUrl();
+  }, [consumeImageUrl]);
 
   useEffect(() => {
     resetForm();
@@ -183,8 +171,8 @@ const VirtualTryOn = () => {
               selectedJob={selectedJob}
               handleSelectJob={handleSelectJob}
               resetForm={resetForm}
-              transferredImageUrl={transferredImage?.target === 'pro-source' ? transferredImage.url : null}
-              onTransferConsumed={onTransferConsumed}
+              transferredImageUrl={vtoTarget === 'pro-source' ? imageUrlToTransfer : null}
+              onTransferConsumed={consumeImageUrl}
             />
           ) : (
             <div className="h-full">
@@ -198,8 +186,8 @@ const VirtualTryOn = () => {
                   <SingleTryOn 
                     selectedJob={selectedJob} 
                     resetForm={resetForm} 
-                    transferredImageUrl={transferredImage?.target === 'base' ? transferredImage.url : null}
-                    onTransferConsumed={onTransferConsumed}
+                    transferredImageUrl={vtoTarget === 'base' ? imageUrlToTransfer : null}
+                    onTransferConsumed={consumeImageUrl}
                   />
                 </TabsContent>
                 <TabsContent value="batch" className="pt-6">
