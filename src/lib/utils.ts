@@ -51,10 +51,12 @@ export const downloadImage = async (url: string, filename: string) => {
   }
 };
 
-export const optimizeImage = (file: File, quality = 0.9): Promise<File> => {
+export const optimizeImage = (file: File, options?: { quality?: number; forceOriginalDimensions?: boolean }): Promise<File> => {
   return new Promise((resolve, reject) => {
     const originalSize = file.size;
     const MAX_DIMENSION = 1440;
+    const quality = options?.quality || 0.9;
+    const forceOriginalDimensions = options?.forceOriginalDimensions || false;
 
     if (!file.type.startsWith('image/')) {
       console.log(`[ImageOptimizer] Skipped optimization for non-image file: ${file.type}. Passing through original file.`);
@@ -71,7 +73,7 @@ export const optimizeImage = (file: File, quality = 0.9): Promise<File> => {
         const canvas = document.createElement('canvas');
         
         const longestSide = Math.max(img.width, img.height);
-        const scale = longestSide > MAX_DIMENSION ? MAX_DIMENSION / longestSide : 1;
+        const scale = forceOriginalDimensions ? 1 : (longestSide > MAX_DIMENSION ? MAX_DIMENSION / longestSide : 1);
         
         const newWidth = img.width * scale;
         const newHeight = img.height * scale;
@@ -96,7 +98,7 @@ export const optimizeImage = (file: File, quality = 0.9): Promise<File> => {
               lastModified: Date.now(),
             });
             
-            console.log(`[ImageOptimizer] Optimized ${file.name} to WebP: ${formatBytes(originalSize)} -> ${formatBytes(newFile.size)}`);
+            console.log(`[ImageOptimizer] Optimized ${file.name} to WebP: ${formatBytes(originalSize)} -> ${formatBytes(newFile.size)}. Resized: ${!forceOriginalDimensions && scale < 1}`);
 
             resolve(newFile);
           },

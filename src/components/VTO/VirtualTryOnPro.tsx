@@ -178,9 +178,11 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
     const toastId = showLoading(t('sendingJob'));
 
     try {
+      const optimizedSource = await optimizeImage(sourceImageFile, { forceOriginalDimensions: true });
+
       const payload: any = {
         mode: 'inpaint',
-        full_source_image_base64: await fileToBase64(sourceImageFile),
+        full_source_image_base64: await fileToBase64(optimizedSource),
         mask_image_base64: maskImage.split(',')[1],
         prompt: isAutoPromptEnabled ? "" : prompt,
         auto_prompt_enabled: isAutoPromptEnabled,
@@ -250,11 +252,6 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
     );
   };
 
-  const handleClearSourceImage = () => {
-    setSourceImageFile(null);
-    resetForm();
-  };
-
   return (
     <>
       <div className="flex flex-col gap-4">
@@ -302,7 +299,7 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
                         <AccordionTrigger>{t('inputs')}</AccordionTrigger>
                         <AccordionContent className="pt-4">
                           <div className="grid grid-cols-2 gap-4">
-                            <ImageUploader onFileSelect={handleFileSelect} title={t('sourceImage')} imageUrl={sourceImageUrl} onClear={handleClearSourceImage} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
+                            <ImageUploader onFileSelect={handleFileSelect} title={t('sourceImage')} imageUrl={sourceImageUrl} onClear={resetForm} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
                             <ImageUploader onFileSelect={setReferenceImageFile} title={t('garmentReference')} imageUrl={referenceImageUrl} onClear={() => setReferenceImageFile(null)} icon={<Shirt className="h-8 w-8 text-muted-foreground" />} />
                           </div>
                         </AccordionContent>
