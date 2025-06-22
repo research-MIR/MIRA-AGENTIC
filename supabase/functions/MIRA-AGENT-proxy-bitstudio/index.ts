@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
+import { decodeBase64, encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -126,12 +126,12 @@ serve(async (req) => {
       const croppedCanvas = createCanvas(bbox.width, bbox.height);
       const cropCtx = croppedCanvas.getContext('2d');
       cropCtx.drawImage(fullSourceImage, bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
-      const croppedSourceBase64 = croppedCanvas.toBuffer('image/png').toString('base64');
+      const croppedSourceBase64 = encodeBase64(croppedCanvas.toBuffer('image/png'));
 
       const croppedMaskCanvas = createCanvas(bbox.width, bbox.height);
       const cropMaskCtx = croppedMaskCanvas.getContext('2d');
       cropMaskCtx.drawImage(dilatedCanvas, bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
-      const croppedDilatedMaskBase64 = croppedMaskCanvas.toBuffer('image/jpeg').toString('base64');
+      const croppedDilatedMaskBase64 = encodeBase64(croppedMaskCanvas.toBuffer('image/jpeg'));
 
       if (auto_prompt_enabled) {
         const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-prompt-helper', {
