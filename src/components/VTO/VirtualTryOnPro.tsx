@@ -225,12 +225,12 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
 
   return (
     <>
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 h-full">
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-2 h-full">
         {/* Left Column */}
-        <div className="lg:col-span-1 flex flex-col gap-4">
+        <div className="lg:col-span-1 flex flex-col gap-2">
           <Card>
             <CardHeader><CardTitle>Inputs</CardTitle></CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-2">
               <ImageUploader onFileSelect={setSourceImageFile} title="Source Image" imageUrl={sourceImageUrl} onClear={resetForm} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
               <ImageUploader onFileSelect={setReferenceImageFile} title="Style Reference" imageUrl={referenceImageUrl} onClear={() => setReferenceImageFile(null)} icon={<Palette className="h-8 w-8 text-muted-foreground" />} />
             </CardContent>
@@ -266,7 +266,7 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
         </div>
 
         {/* Right Column */}
-        <div className="lg:col-span-1 flex flex-col gap-4">
+        <div className="lg:col-span-1 flex flex-col gap-2">
           <Card className="flex-1 flex flex-col">
             <CardHeader>
               <div className="flex justify-between items-center">
@@ -274,7 +274,7 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
                 {selectedJob && <Button variant="outline" size="sm" onClick={resetForm}><PlusCircle className="h-4 w-4 mr-2" />New</Button>}
               </div>
             </CardHeader>
-            <CardContent className="flex-1 space-y-4">
+            <CardContent className="flex-1 space-y-2">
               <Accordion type="multiple" defaultValue={['item-1', 'item-2']} className="w-full">
                 <AccordionItem value="item-1">
                   <AccordionTrigger><div className="flex items-center gap-2"><Wand2 className="h-4 w-4" />Inpainting Prompt</div></AccordionTrigger>
