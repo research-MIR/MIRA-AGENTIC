@@ -225,24 +225,34 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
 
   return (
     <>
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 h-full">
-        {/* Main Workbench */}
-        <div className="lg:col-span-2 bg-muted rounded-lg flex items-center justify-center relative min-h-[400px] lg:min-h-0 p-2">
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-2 h-full">
+        {/* Left Column */}
+        <div className="lg:col-span-1 flex flex-col gap-2">
+          <Card>
+            <CardHeader><CardTitle>Inputs</CardTitle></CardHeader>
+            <CardContent className="space-y-2">
+              <ImageUploader onFileSelect={setSourceImageFile} title="Source Image" imageUrl={sourceImageUrl} onClear={resetForm} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
+              <ImageUploader onFileSelect={setReferenceImageFile} title="Style Reference" imageUrl={referenceImageUrl} onClear={() => setReferenceImageFile(null)} icon={<Palette className="h-8 w-8 text-muted-foreground" />} />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader><CardTitle>Masking</CardTitle></CardHeader>
+            <CardContent>
+              <MaskControls brushSize={brushSize} onBrushSizeChange={setBrushSize} onReset={handleResetMask} />
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Center Column */}
+        <div className="lg:col-span-2 bg-muted rounded-lg flex items-center justify-center relative min-h-[400px] lg:min-h-0">
           {sourceImageUrl && !selectedJob ? (
-            <div className="relative w-full h-full">
+            <div className="w-full h-full max-h-[80vh] aspect-square relative">
               <MaskCanvas 
                 imageUrl={sourceImageUrl} 
                 onMaskChange={setMaskImage}
                 brushSize={brushSize}
                 resetTrigger={resetTrigger}
               />
-              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10">
-                <MaskControls 
-                  brushSize={brushSize} 
-                  onBrushSizeChange={setBrushSize} 
-                  onReset={handleResetMask} 
-                />
-              </div>
             </div>
           ) : selectedJob ? (
             renderJobResult(selectedJob)
@@ -256,7 +266,7 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
         </div>
 
         {/* Right Column */}
-        <div className="lg:col-span-1 flex flex-col gap-4">
+        <div className="lg:col-span-1 flex flex-col gap-2">
           <Card className="flex-1 flex flex-col">
             <CardHeader>
               <div className="flex justify-between items-center">
@@ -264,15 +274,9 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
                 {selectedJob && <Button variant="outline" size="sm" onClick={resetForm}><PlusCircle className="h-4 w-4 mr-2" />New</Button>}
               </div>
             </CardHeader>
-            <CardContent className="flex-1 space-y-4">
-              <Accordion type="multiple" defaultValue={['item-1', 'item-2', 'item-3']} className="w-full">
+            <CardContent className="flex-1 space-y-2">
+              <Accordion type="multiple" defaultValue={['item-1', 'item-2']} className="w-full">
                 <AccordionItem value="item-1">
-                  <AccordionTrigger><div className="flex items-center gap-2"><Palette className="h-4 w-4" />Reference Image</div></AccordionTrigger>
-                  <AccordionContent className="pt-4">
-                    <ImageUploader onFileSelect={setReferenceImageFile} title="Style Reference" imageUrl={referenceImageUrl} onClear={() => setReferenceImageFile(null)} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
-                  </AccordionContent>
-                </AccordionItem>
-                <AccordionItem value="item-2">
                   <AccordionTrigger><div className="flex items-center gap-2"><Wand2 className="h-4 w-4" />Inpainting Prompt</div></AccordionTrigger>
                   <AccordionContent className="pt-4 space-y-2">
                     <div className="flex items-center space-x-2">
@@ -282,7 +286,7 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
                     <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="e.g., a red silk shirt..." rows={4} disabled={isAutoPromptEnabled} />
                   </AccordionContent>
                 </AccordionItem>
-                <AccordionItem value="item-3">
+                <AccordionItem value="item-2">
                   <AccordionTrigger><div className="flex items-center gap-2"><Settings className="h-4 w-4" />PRO Settings</div></AccordionTrigger>
                   <AccordionContent className="pt-4">
                     <ProModeSettings
