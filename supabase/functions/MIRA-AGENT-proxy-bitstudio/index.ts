@@ -113,15 +113,25 @@ serve(async (req) => {
       }
       dilateCtx.putImageData(dilatedImageData, 0, 0);
 
-      if (maxX < minX) throw new Error("The provided mask is empty.");
+      if (maxX < minX || maxY < minY) {
+        throw new Error("The provided mask is empty or invalid after processing.");
+      }
 
       const padding = Math.round(Math.max(maxX - minX, maxY - minY) * 0.05);
-      const bbox = {
-        x: Math.max(0, minX - padding),
-        y: Math.max(0, minY - padding),
-        width: Math.min(fullSourceImage.width() - (minX - padding), (maxX - minX) + padding * 2),
-        height: Math.min(fullSourceImage.height() - (minY - padding), (maxY - minY) + padding * 2)
-      };
+
+      const x1 = Math.max(0, minX - padding);
+      const y1 = Math.max(0, minY - padding);
+      const x2 = Math.min(fullSourceImage.width(), maxX + padding);
+      const y2 = Math.min(fullSourceImage.height(), maxY + padding);
+
+      const width = x2 - x1;
+      const height = y2 - y1;
+
+      if (width <= 0 || height <= 0) {
+        throw new Error(`Invalid bounding box dimensions calculated: ${width}x${height}. The mask might be too small or at the very edge of the image.`);
+      }
+
+      const bbox = { x: x1, y: y1, width, height };
 
       const croppedCanvas = createCanvas(bbox.width, bbox.height);
       const cropCtx = croppedCanvas.getContext('2d');
