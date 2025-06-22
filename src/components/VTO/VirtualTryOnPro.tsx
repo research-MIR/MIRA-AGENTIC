@@ -55,6 +55,27 @@ const SecureImageDisplay = ({ imageUrl, alt, onClick, className }: { imageUrl: s
     return <img src={displayUrl} alt={alt} className={cn("max-w-full max-h-full object-contain rounded-md", hasClickHandler && "cursor-pointer", className)} onClick={onClick} />;
 };
 
+const ImageUploader = ({ onFileSelect, title, imageUrl, onClear, icon }: { onFileSelect: (file: File) => void, title: string, imageUrl: string | null, onClear: () => void, icon: React.ReactNode }) => {
+    const inputRef = useRef<HTMLInputElement>(null);
+    const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: (e) => e.dataTransfer.files && onFileSelect(e.dataTransfer.files[0]) });
+  
+    if (imageUrl) {
+      return (
+        <div className="relative aspect-square">
+          <img src={imageUrl} alt={title} className="w-full h-full object-cover rounded-md" />
+          <Button variant="destructive" size="icon" className="absolute top-2 right-2 h-6 w-6 z-10" onClick={onClear}><X className="h-4 w-4" /></Button>
+        </div>
+      );
+    }
+  
+    return (
+      <div {...dropzoneProps} className={cn("flex flex-col aspect-square justify-center items-center rounded-lg border border-dashed p-4 text-center transition-colors cursor-pointer", isDraggingOver && "border-primary bg-primary/10")} onClick={() => inputRef.current?.click()}>
+        <div className="text-center pointer-events-none">{icon}<p className="mt-2 text-sm font-semibold">{title}</p></div>
+        <Input ref={inputRef} type="file" className="hidden" accept="image/*" onChange={(e) => e.target.files && onFileSelect(e.target.files[0])} />
+      </div>
+    );
+};
+
 interface VirtualTryOnProProps {
   recentJobs: BitStudioJob[] | undefined;
   isLoadingRecentJobs: boolean;
@@ -84,12 +105,14 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
   const [maskExpansion, setMaskExpansion] = useState(3);
 
   const sourceImageUrl = useMemo(() => sourceImageFile ? URL.createObjectURL(sourceImageFile) : null, [sourceImageFile]);
+  const referenceImageUrl = useMemo(() => referenceImageFile ? URL.createObjectURL(referenceImageFile) : null, [referenceImageFile]);
 
   useEffect(() => {
     return () => {
       if (sourceImageUrl) URL.revokeObjectURL(sourceImageUrl);
+      if (referenceImageUrl) URL.revokeObjectURL(referenceImageUrl);
     };
-  }, [sourceImageUrl]);
+  }, [sourceImageUrl, referenceImageUrl]);
 
   useEffect(() => {
     if (selectedJob) {
@@ -242,8 +265,14 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
               </div>
             </CardHeader>
             <CardContent className="flex-1 space-y-4">
-              <Accordion type="multiple" defaultValue={['item-1', 'item-2']} className="w-full">
+              <Accordion type="multiple" defaultValue={['item-1', 'item-2', 'item-3']} className="w-full">
                 <AccordionItem value="item-1">
+                  <AccordionTrigger><div className="flex items-center gap-2"><Palette className="h-4 w-4" />Reference Image</div></AccordionTrigger>
+                  <AccordionContent className="pt-4">
+                    <ImageUploader onFileSelect={setReferenceImageFile} title="Style Reference" imageUrl={referenceImageUrl} onClear={() => setReferenceImageFile(null)} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
+                  </AccordionContent>
+                </AccordionItem>
+                <AccordionItem value="item-2">
                   <AccordionTrigger><div className="flex items-center gap-2"><Wand2 className="h-4 w-4" />Inpainting Prompt</div></AccordionTrigger>
                   <AccordionContent className="pt-4 space-y-2">
                     <div className="flex items-center space-x-2">
@@ -253,7 +282,7 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
                     <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="e.g., a red silk shirt..." rows={4} disabled={isAutoPromptEnabled} />
                   </AccordionContent>
                 </AccordionItem>
-                <AccordionItem value="item-2">
+                <AccordionItem value="item-3">
                   <AccordionTrigger><div className="flex items-center gap-2"><Settings className="h-4 w-4" />PRO Settings</div></AccordionTrigger>
                   <AccordionContent className="pt-4">
                     <ProModeSettings
