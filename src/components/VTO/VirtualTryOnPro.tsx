@@ -19,6 +19,7 @@ import { DebugStepsModal } from "./DebugStepsModal";
 import { Switch } from "../ui/switch";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { ProModeSettings } from "./ProModeSettings";
+import { ScrollArea } from "../ui/scroll-area";
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -76,12 +77,14 @@ const ImageUploader = ({ onFileSelect, title, imageUrl, onClear, icon }: { onFil
 };
 
 interface VirtualTryOnProProps {
+  recentJobs: BitStudioJob[] | undefined;
+  isLoadingRecentJobs: boolean;
   selectedJob: BitStudioJob | undefined;
   handleSelectJob: (job: BitStudioJob) => void;
   resetForm: () => void;
 }
 
-export const VirtualTryOnPro = ({ selectedJob, handleSelectJob, resetForm }: VirtualTryOnProProps) => {
+export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, handleSelectJob, resetForm }: VirtualTryOnProProps) => {
   const { supabase, session } = useSession();
   const { showImage } = useImagePreview();
   const queryClient = useQueryClient();
@@ -120,6 +123,8 @@ export const VirtualTryOnPro = ({ selectedJob, handleSelectJob, resetForm }: Vir
       setResetTrigger(c => c + 1);
     }
   }, [selectedJob]);
+
+  const proJobs = useMemo(() => recentJobs?.filter(job => job.mode === 'inpaint') || [], [recentJobs]);
 
   const handleFileSelect = (file: File | null) => {
     if (file && file.type.startsWith("image/")) {
@@ -274,6 +279,25 @@ export const VirtualTryOnPro = ({ selectedJob, handleSelectJob, resetForm }: Vir
             {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
             Generate
           </Button>
+          <Card className="flex-1 flex flex-col">
+            <CardHeader><CardTitle><div className="flex items-center gap-2"><History className="h-4 w-4" />Recent Jobs</div></CardTitle></CardHeader>
+            <CardContent className="flex-1 overflow-hidden">
+              <ScrollArea className="h-full max-h-48">
+                {isLoadingRecentJobs ? <Skeleton className="h-24 w-full" /> : proJobs.length > 0 ? (
+                  <div className="grid grid-cols-3 gap-2 pr-2">
+                    {proJobs.map(job => {
+                      const urlToPreview = job.final_image_url || job.source_person_image_url;
+                      return (
+                        <button key={job.id} onClick={() => handleSelectJob(job)} className={cn("border-2 rounded-lg p-0.5 flex-shrink-0 aspect-square", selectedJob?.id === job.id ? "border-primary" : "border-transparent")}>
+                          <SecureImageDisplay imageUrl={urlToPreview} alt="Recent job" className="w-full h-full object-cover" />
+                        </button>
+                      )
+                    })}
+                  </div>
+                ) : <p className="text-muted-foreground text-sm">No recent PRO jobs found.</p>}
+              </ScrollArea>
+            </CardContent>
+          </Card>
         </div>
 
         {/* Right Column: Workbench/Result */}
@@ -292,8 +316,8 @@ export const VirtualTryOnPro = ({ selectedJob, handleSelectJob, resetForm }: Vir
           ) : (
             <div {...dropzoneProps} className={cn("w-full h-full flex flex-col items-center justify-center cursor-pointer border-2 border-dashed rounded-lg", isDraggingOver && "border-primary")}>
               <UploadCloud className="h-12 w-12 text-muted-foreground" />
-              <p className="mt-4 font-semibold">Upload an image to start</p>
-              <p className="text-sm text-muted-foreground">Drag & drop or click to select a file</p>
+              <p className="mt-4 font-semibold">Upload an image in the 'Setup' panel to begin</p>
+              <p className="text-sm text-muted-foreground">Or select a recent job to view the result</p>
             </div>
           )}
         </div>
