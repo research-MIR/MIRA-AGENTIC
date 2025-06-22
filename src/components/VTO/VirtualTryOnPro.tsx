@@ -155,6 +155,7 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
     if (file && file.type.startsWith("image/")) {
       resetForm();
       setSourceImageFile(file);
+      setReferenceImageFile(null);
       setMaskImage(null);
       setResetTrigger(c => c + 1);
     }
@@ -249,6 +250,11 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
     );
   };
 
+  const handleClearSourceImage = () => {
+    setSourceImageFile(null);
+    resetForm();
+  };
+
   return (
     <>
       <div className="flex flex-col gap-4">
@@ -296,7 +302,7 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
                         <AccordionTrigger>{t('inputs')}</AccordionTrigger>
                         <AccordionContent className="pt-4">
                           <div className="grid grid-cols-2 gap-4">
-                            <ImageUploader onFileSelect={handleFileSelect} title={t('sourceImage')} imageUrl={sourceImageUrl} onClear={resetForm} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
+                            <ImageUploader onFileSelect={handleFileSelect} title={t('sourceImage')} imageUrl={sourceImageUrl} onClear={handleClearSourceImage} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
                             <ImageUploader onFileSelect={setReferenceImageFile} title={t('garmentReference')} imageUrl={referenceImageUrl} onClear={() => setReferenceImageFile(null)} icon={<Shirt className="h-8 w-8 text-muted-foreground" />} />
                           </div>
                         </AccordionContent>

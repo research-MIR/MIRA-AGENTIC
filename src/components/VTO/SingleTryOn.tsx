@@ -207,6 +207,11 @@ export const SingleTryOn = ({ selectedJob, resetForm, transferredImageUrl }: Sin
         );
     };
 
+    const handleClearPersonImage = () => {
+        setPersonImageFile(null);
+        resetForm();
+    };
+
     const isTryOnDisabled = isLoading || !personImageFile || !garmentImageFile || (isAutoPromptEnabled ? !promptReady : !prompt.trim());
 
     return (
@@ -231,7 +236,7 @@ export const SingleTryOn = ({ selectedJob, resetForm, transferredImageUrl }: Sin
                         <AccordionTrigger>{t('uploadImages')}</AccordionTrigger>
                         <AccordionContent className="pt-4">
                           <div className="grid grid-cols-2 gap-4">
-                            <ImageUploader onFileSelect={setPersonImageFile} title={t('personImage')} imageUrl={personImageUrl} onClear={() => setPersonImageFile(null)} />
+                            <ImageUploader onFileSelect={setPersonImageFile} title={t('personImage')} imageUrl={personImageUrl} onClear={handleClearPersonImage} />
                             <ImageUploader onFileSelect={setGarmentImageFile} title={t('garmentImage')} imageUrl={garmentImageUrl} onClear={() => setGarmentImageFile(null)} />
                           </div>
                         </AccordionContent>
