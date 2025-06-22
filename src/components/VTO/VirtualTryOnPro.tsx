@@ -235,24 +235,25 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
               <ImageUploader onFileSelect={setReferenceImageFile} title="Style Reference" imageUrl={referenceImageUrl} onClear={() => setReferenceImageFile(null)} icon={<Palette className="h-8 w-8 text-muted-foreground" />} />
             </CardContent>
           </Card>
-          <Card>
-            <CardHeader><CardTitle>Masking</CardTitle></CardHeader>
-            <CardContent>
-              <MaskControls brushSize={brushSize} onBrushSizeChange={setBrushSize} onReset={handleResetMask} />
-            </CardContent>
-          </Card>
         </div>
 
         {/* Center Column */}
-        <div className="lg:col-span-2 bg-muted rounded-lg flex items-center justify-center relative min-h-[400px] lg:min-h-0">
+        <div className="lg:col-span-2 bg-muted rounded-lg flex items-center justify-center relative min-h-[400px] lg:min-h-0 p-2">
           {sourceImageUrl && !selectedJob ? (
-            <div className="w-full h-full max-h-[80vh] aspect-square relative">
+            <div className="relative w-full h-full">
               <MaskCanvas 
                 imageUrl={sourceImageUrl} 
                 onMaskChange={setMaskImage}
                 brushSize={brushSize}
                 resetTrigger={resetTrigger}
               />
+              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10">
+                <MaskControls 
+                  brushSize={brushSize} 
+                  onBrushSizeChange={setBrushSize} 
+                  onReset={handleResetMask} 
+                />
+              </div>
             </div>
           ) : selectedJob ? (
             renderJobResult(selectedJob)
