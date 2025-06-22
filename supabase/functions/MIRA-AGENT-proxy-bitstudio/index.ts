@@ -133,6 +133,7 @@ serve(async (req) => {
         cropped_source_image_base64,
         cropped_dilated_mask_base64,
         bbox,
+        prompt_used: prompt,
       };
 
       console.log(`[Proxy][${requestId}] Saving metadata with keys:`, Object.keys(metadataToSave));

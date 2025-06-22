@@ -17,6 +17,7 @@ import { Skeleton } from "../ui/skeleton";
 import { useQueryClient } from "@tanstack/react-query";
 import { DebugStepsModal } from "./DebugStepsModal";
 import { Switch } from "../ui/switch";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -37,6 +38,7 @@ interface BitStudioJob {
   mode: 'base' | 'inpaint';
   metadata?: {
     debug_assets?: any;
+    prompt_used?: string;
   }
 }
 
@@ -337,7 +339,19 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
             </CardHeader>
             <CardContent className="flex items-center justify-center">
               {selectedJob ? (
-                renderJobResult(selectedJob)
+                <div className="w-full space-y-4">
+                  {renderJobResult(selectedJob)}
+                  {selectedJob.metadata?.prompt_used && (
+                    <Accordion type="single" collapsible>
+                      <AccordionItem value="item-1">
+                        <AccordionTrigger>View Prompt Used</AccordionTrigger>
+                        <AccordionContent>
+                          <p className="text-sm p-2 bg-muted rounded-md">{selectedJob.metadata.prompt_used}</p>
+                        </AccordionContent>
+                      </AccordionItem>
+                    </Accordion>
+                  )}
+                </div>
               ) : sourceImageUrl ? (
                 <div className="w-full max-h-[70vh] aspect-square relative">
                   <MaskCanvas 
