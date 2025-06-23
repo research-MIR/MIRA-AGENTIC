@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { GoogleGenAI, Content, Part } from 'https://esm.sh/@google/genai@0.15.0';
+import { GoogleGenAI, Content, Part, HarmCategory, HarmBlockThreshold } from 'https://esm.sh/@google/genai@0.15.0';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
@@ -13,6 +13,25 @@ const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
+
+const safetySettings = [
+    {
+      category: HarmCategory.HARM_CATEGORY_HARASSMENT,
+      threshold: HarmBlockThreshold.BLOCK_NONE,
+    },
+    {
+      category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+      threshold: HarmBlockThreshold.BLOCK_NONE,
+    },
+    {
+      category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+      threshold: HarmBlockThreshold.BLOCK_NONE,
+    },
+    {
+      category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+      threshold: HarmBlockThreshold.BLOCK_NONE,
+    },
+];
 
 const systemPrompt = `You are an expert fashion stylist and photo analyst. Your task is to combine two images and an optional user instruction into a single, coherent, and detailed text-to-image prompt. The final prompt MUST be in English.
 
@@ -120,6 +139,7 @@ serve(async (req) => {
         model: MODEL_NAME,
         contents: [{ role: 'user', parts: finalParts }],
         generationConfig: { responseMimeType: "application/json" },
+        safetySettings,
         config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
     });
 

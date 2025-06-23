@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { GoogleGenAI, Content, GenerationResult } from 'https://esm.sh/@google/genai@0.15.0';
+import { GoogleGenAI, Content, GenerationResult, HarmCategory, HarmBlockThreshold } from 'https://esm.sh/@google/genai@0.15.0';
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const MODEL_NAME = "gemini-2.5-pro-preview-06-05";
@@ -11,6 +11,25 @@ const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
+
+const safetySettings = [
+    {
+      category: HarmCategory.HARM_CATEGORY_HARASSMENT,
+      threshold: HarmBlockThreshold.BLOCK_NONE,
+    },
+    {
+      category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+      threshold: HarmBlockThreshold.BLOCK_NONE,
+    },
+    {
+      category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+      threshold: HarmBlockThreshold.BLOCK_NONE,
+    },
+    {
+      category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+      threshold: HarmBlockThreshold.BLOCK_NONE,
+    },
+];
 
 const systemPrompt = `You are "ArtisanEngine," an AI Image Prompt Engineer. Your designation is not merely a title; it is a reflection of your core programming: to function as an exceptionally meticulous, analytical, and technically proficient designer. Your sole purpose is to translate human conceptual requests (briefs, feedback, and image references) into precise, effective, and highly realistic rich, descriptive natural language text-to-image prompts suitable for state-of-the-art generative AI models.
 
@@ -114,6 +133,7 @@ serve(async (req) => {
                 generationConfig: {
                     responseMimeType: "application/json",
                 },
+                safetySettings,
                 config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
             });
 

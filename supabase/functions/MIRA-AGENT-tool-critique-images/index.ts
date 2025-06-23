@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { GoogleGenAI, Content, Part } from 'https://esm.sh/@google/genai@0.15.0';
+import { GoogleGenAI, Content, Part, HarmCategory, HarmBlockThreshold } from 'https://esm.sh/@google/genai@0.15.0';
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
@@ -11,6 +11,25 @@ const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
+
+const safetySettings = [
+    {
+      category: HarmCategory.HARM_CATEGORY_HARASSMENT,
+      threshold: HarmBlockThreshold.BLOCK_NONE,
+    },
+    {
+      category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+      threshold: HarmBlockThreshold.BLOCK_NONE,
+    },
+    {
+      category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+      threshold: HarmBlockThreshold.BLOCK_NONE,
+    },
+    {
+      category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+      threshold: HarmBlockThreshold.BLOCK_NONE,
+    },
+];
 
 const getSystemPrompt = (isDesignerMode: boolean): string => {
     const designerPrompt = `You are a world-class, meticulous Art Director. Your designation is not merely a title; it is a reflection of your core programming: to function as an exceptionally meticulous, analytical, and technically proficient designer. Your sole purpose is to evaluate a batch of newly generated images against a creative brief.
@@ -170,6 +189,7 @@ serve(async (req) => {
         generationConfig: {
             responseMimeType: "application/json",
         },
+        safetySettings,
         config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
     });
 
