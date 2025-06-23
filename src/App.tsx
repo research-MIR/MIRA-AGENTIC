@@ -9,7 +9,8 @@ import Login from "./pages/Login";
 import Layout from "./components/Layout";
 import ProtectedRoute from "./components/Auth/ProtectedRoute";
 import VirtualTryOn from "./pages/VirtualTryOn";
-import Refine from "./pages/Refine";
+import Upscale from "./pages/Upscale";
+import Inpainting from "./pages/Inpainting";
 import Editor from "./pages/Editor";
 import Projects from "./pages/Projects";
 import ProjectDetail from "./pages/ProjectDetail";
@@ -87,7 +88,8 @@ const App = () => {
             <Route path="/chat/:jobId" element={<Index />} />
             <Route path="/gallery" element={<Gallery />} />
             <Route path="/generator" element={<Generator />} />
-            <Route path="/refine" element={<Refine />} />
+            <Route path="/upscale" element={<Upscale />} />
+            <Route path="/inpainting" element={<Inpainting />} />
             <Route path="/editor" element={<Editor />} />
             <Route path="/projects" element={<Projects />} />
             <Route path="/projects/:projectId" element={<ProjectDetail />} />

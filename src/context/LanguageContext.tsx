@@ -9,6 +9,7 @@ import { vtoTranslations } from '@/lib/translations/vto';
 import { editorTranslations } from '@/lib/translations/editor';
 import { errorTranslations } from '@/lib/translations/errors';
 import { onboardingTranslations } from '@/lib/translations/onboarding';
+import { inpaintingTranslations } from '@/lib/translations/inpainting';
 
 // Aggregate translations directly in this file
 const modules = [
@@ -22,6 +23,7 @@ const modules = [
   editorTranslations,
   errorTranslations,
   onboardingTranslations,
+  inpaintingTranslations,
 ];
 
 const translations = modules.reduce((acc, module) => {
