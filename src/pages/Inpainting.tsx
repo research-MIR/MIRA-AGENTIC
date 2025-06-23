@@ -16,7 +16,6 @@ import { useSecureImage } from "@/hooks/useSecureImage";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DebugStepsModal } from "@/components/VTO/DebugStepsModal";
-import { Switch } from "@/components/ui/switch";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { ProModeSettings } from "@/components/VTO/ProModeSettings";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -99,7 +98,6 @@ const Inpainting = () => {
   const [resetTrigger, setResetTrigger] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [isDebugModalOpen, setIsDebugModalOpen] = useState(false);
-  const [isGarmentMode, setIsGarmentMode] = useState(true);
   const [isGuideOpen, setIsGuideOpen] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
 
@@ -215,7 +213,7 @@ const Inpainting = () => {
         source_image_base64: await fileToBase64(optimizedSource),
         mask_image_base64: maskImage.split(',')[1],
         prompt: prompt,
-        is_garment_mode: isGarmentMode,
+        is_garment_mode: false, // Always use general mode for this tool
         user_id: session?.user.id,
         denoise: denoise,
       };
@@ -337,10 +335,6 @@ const Inpainting = () => {
                         <AccordionItem value="item-2">
                           <AccordionTrigger>{t('promptSectionTitle')}</AccordionTrigger>
                           <AccordionContent className="pt-4 space-y-2">
-                            <div className="flex items-center space-x-2">
-                              <Switch id="garment-mode" checked={isGarmentMode} onCheckedChange={setIsGarmentMode} />
-                              <Label htmlFor="garment-mode">{t('garmentMode')}</Label>
-                            </div>
                             <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t('promptPlaceholderInpainting')} rows={4} />
                           </AccordionContent>
                         </AccordionItem>

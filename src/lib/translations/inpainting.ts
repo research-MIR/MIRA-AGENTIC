@@ -78,7 +78,6 @@ export const inpaintingTranslations = {
     promptAppendixPlaceholder: "es. indossa jeans chiari, con i capelli raccolti",
     promptAppendixPair: "Istruzione Specifica per la Coppia",
     promptAppendixPairPlaceholder: "es. indossa jeans chiari",
-    garmentMode: "Modalità Indumento",
     referenceImage: "Immagine di Riferimento",
     promptOptional: "Prompt (Opzionale)",
     promptPlaceholderInpainting: "Descrivi cosa vuoi cambiare nell'area mascherata. Lascia vuoto per lasciare che l'IA decida in base all'immagine di riferimento.",
@@ -201,7 +200,6 @@ L'inpainting è uno strumento potente per sostituire parti di un'immagine, ma ri
     promptAppendixPlaceholder: "e.g. wearing light jeans, with hair up",
     promptAppendixPair: "Pair-Specific Instruction",
     promptAppendixPairPlaceholder: "e.g. wearing light jeans",
-    garmentMode: "Garment Mode",
     referenceImage: "Reference Image",
     promptOptional: "Prompt (Optional)",
     promptPlaceholderInpainting: "Describe what you want to change in the masked area. Leave blank to let the AI decide based on the reference image.",
@@ -233,10 +231,10 @@ Inpainting is a powerful tool for replacing parts of an image, but it requires a
 - **It's for the Product, Not the Style:** Unlike other tools, the reference image here is used to show the AI the **specific product** you want to insert into the masked area. The AI will try to replicate the reference garment.
 - **Example:** If you provide an image of a specific leather jacket, the AI will attempt to recreate *that jacket* in the area you've drawn, adapting it to the model's pose and lighting.
 
-#### 4. Denoise and Creativity
-- **Control the AI's Freedom:** The "Denoise Strength" setting determines how much the AI can deviate from the original image within the mask.
-  - **Low Denoise (e.g., 0.5-0.7):** Ideal when the shape of the original garment is similar to the desired one. Great for texture or color changes, helps to blend the result better.
-  - **High Denoise (e.g., 0.8-1.0):** Gives the AI more creative freedom. Use this if you want to significantly change the shape of the garment (e.g., turning a t-shirt into a jacket) or if the lower setting isn't strong enough.
+#### 4. Denoise e Creatività
+- **Controlla la libertà dell'IA:** L'impostazione "Intensità Denoise" determina quanto l'IA può deviare dall'immagine originale all'interno della maschera.
+  - **Basso Denoise (es. 0.5-0.7):** Ideale quando la forma dell'indumento originale è simile a quella desiderata. Ottimo per cambi di texture o colore, aiuta a fondere meglio il risultato.
+  - **Alto Denoise (es. 0.8-1.0):** Concede all'IA più libertà creativa. Usalo se vuoi cambiare significativamente la forma dell'indumento (es. trasformare una t-shirt in una giacca) o se l'impostazione più bassa non è abbastanza forte.
 
 #### 5. Impostazioni PRO Spiegate
 - **Numero di Tentativi:** Genera più variazioni della stessa richiesta di inpainting. Utile per ottenere diverse interpretazioni dall'IA.
