@@ -36,14 +36,13 @@ const fileToBase64 = (file: File): Promise<string> => {
   });
 };
 
-interface BitStudioJob {
+interface InpaintingJob {
   id: string;
   status: 'queued' | 'processing' | 'complete' | 'failed';
-  source_person_image_url: string;
-  source_garment_image_url: string;
-  final_image_url?: string;
+  final_result?: {
+    publicUrl: string;
+  };
   error_message?: string;
-  mode: 'base' | 'inpaint';
   metadata?: {
     debug_assets?: any;
     prompt_used?: string;
@@ -111,7 +110,7 @@ const Inpainting = () => {
   const sourceImageUrl = useMemo(() => sourceImageFile ? URL.createObjectURL(sourceImageFile) : null, [sourceImageFile]);
   const referenceImageUrl = useMemo(() => referenceImageFile ? URL.createObjectURL(referenceImageFile) : null, [referenceImageFile]);
 
-  const { data: recentJobs, isLoading: isLoadingRecentJobs } = useQuery<BitStudioJob[]>({
+  const { data: recentJobs, isLoading: isLoadingRecentJobs } = useQuery<InpaintingJob[]>({
     queryKey: ['inpaintingJobs', session?.user?.id],
     queryFn: async () => {
       if (!session?.user) return [];
@@ -134,7 +133,7 @@ const Inpainting = () => {
     consumeImageUrl();
   }, [consumeImageUrl]);
 
-  const handleSelectJob = (job: BitStudioJob) => {
+  const handleSelectJob = (job: InpaintingJob) => {
     setSelectedJobId(job.id);
   };
 
@@ -179,7 +178,7 @@ const Inpainting = () => {
     if (channelRef.current) supabase.removeChannel(channelRef.current);
 
     const channel = supabase.channel(`inpainting-jobs-tracker-${session.user.id}`)
-      .on<BitStudioJob>('postgres_changes', { event: '*', schema: 'public', table: 'mira-agent-inpainting-jobs', filter: `user_id=eq.${session.user.id}` },
+      .on<InpaintingJob>('postgres_changes', { event: '*', schema: 'public', table: 'mira-agent-inpainting-jobs', filter: `user_id=eq.${session.user.id}` },
         (payload) => {
           console.log('[Inpainting Realtime] Received payload:', payload);
           queryClient.invalidateQueries({ queryKey: ['inpaintingJobs', session.user.id] });
@@ -251,12 +250,12 @@ const Inpainting = () => {
     onDrop: (e) => handleFileSelect(e.target.files?.[0]),
   });
 
-  const renderJobResult = (job: BitStudioJob) => {
+  const renderJobResult = (job: InpaintingJob) => {
     if (job.status === 'failed') return <p className="text-destructive text-sm p-2">{t('jobFailed', { errorMessage: job.error_message })}</p>;
-    if (job.status === 'complete' && job.final_image_url) {
+    if (job.status === 'complete' && job.final_result?.publicUrl) {
       return (
         <div className="relative group w-full h-full">
-          <SecureImageDisplay imageUrl={job.final_image_url} alt="Final Result" onClick={() => showImage({ images: [{ url: job.final_image_url! }], currentIndex: 0 })} />
+          <SecureImageDisplay imageUrl={job.final_result.publicUrl} alt="Final Result" onClick={() => showImage({ images: [{ url: job.final_result!.publicUrl }], currentIndex: 0 })} />
           {job.metadata?.debug_assets && (
             <Button 
               variant="secondary" 
@@ -412,7 +411,7 @@ const Inpainting = () => {
                 <ScrollArea className="h-32">
                   <div className="flex gap-4 pb-2">
                     {recentJobs.map(job => {
-                      const urlToPreview = job.final_image_url || job.metadata?.source_image_url;
+                      const urlToPreview = job.final_result?.publicUrl || job.metadata?.source_image_url;
                       return (
                         <button key={job.id} onClick={() => handleSelectJob(job)} className={cn("border-2 rounded-lg p-0.5 flex-shrink-0 w-24 h-24", selectedJob?.id === job.id ? "border-primary" : "border-transparent")}>
                           <SecureImageDisplay imageUrl={urlToPreview || null} alt="Recent job" className="w-full h-full object-cover" />
