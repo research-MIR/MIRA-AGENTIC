@@ -7,6 +7,8 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+const UPLOAD_BUCKET = 'mira-agent-user-uploads';
+
 const workflowTemplate = {
   "3": { "inputs": { "seed": 1062983749859779, "steps": 20, "cfg": 1, "sampler_name": "euler", "scheduler": "normal", "denoise": 1, "model": ["39", 0], "positive": ["38", 0], "negative": ["38", 1], "latent_image": ["38", 2] }, "class_type": "KSampler", "_meta": { "title": "KSampler" } },
   "7": { "inputs": { "text": "", "clip": ["34", 0] }, "class_type": "CLIPTextEncode", "_meta": { "title": "CLIP Text Encode (Negative Prompt)" } },
@@ -73,7 +75,7 @@ serve(async (req) => {
             person_image_mime_type: 'image/png',
             garment_image_base64: reference_image_base64,
             garment_image_mime_type: 'image/png',
-            is_garment_mode: is_garment_mode ?? true
+            is_garment_mode: is_garment_mode ?? false
           }
         });
         if (promptError) throw new Error(`Auto-prompt generation failed: ${promptError.message}`);
@@ -86,6 +88,12 @@ serve(async (req) => {
     const sourceBlob = new Blob([decodeBase64(source_image_base64)], { type: 'image/png' });
     const maskBlob = new Blob([decodeBase64(mask_image_base64)], { type: 'image/png' });
     
+    // Upload source to Supabase storage to get a persistent URL for the thumbnail
+    const sourceStoragePath = `${user_id}/inpainting-source/${Date.now()}_source.png`;
+    const { error: sourceUploadError } = await supabase.storage.from(UPLOAD_BUCKET).upload(sourceStoragePath, sourceBlob, { upsert: true });
+    if (sourceUploadError) throw new Error(`Failed to upload source image to storage: ${sourceUploadError.message}`);
+    const { data: { publicUrl: sourceImageUrlForMetadata } } = supabase.storage.from(UPLOAD_BUCKET).getPublicUrl(sourceStoragePath);
+
     const [sourceFilename, maskFilename] = await Promise.all([
       uploadImageToComfyUI(sanitizedAddress, sourceBlob, 'source.png'),
       uploadImageToComfyUI(sanitizedAddress, maskBlob, 'mask.png')
@@ -127,7 +135,12 @@ serve(async (req) => {
       comfyui_address: sanitizedAddress,
       comfyui_prompt_id: data.prompt_id,
       status: 'queued',
-      metadata: { prompt: finalPrompt, denoise, style_strength }
+      metadata: { 
+        prompt: finalPrompt, 
+        denoise, 
+        style_strength,
+        source_image_url: sourceImageUrlForMetadata 
+      }
     }).select('id').single();
     if (insertError) throw insertError;
 
