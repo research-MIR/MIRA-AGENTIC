@@ -169,7 +169,8 @@ export const useChatManager = () => {
         });
 
         const historyLength = data.context?.history?.length || 0;
-        setIsTurnLimitReached(historyLength >= MAX_TURNS);
+        const isFinalStatus = ['complete', 'awaiting_feedback', 'failed'].includes(data.status);
+        setIsTurnLimitReached(historyLength >= MAX_TURNS && isFinalStatus);
 
         let conversationMessages = parseHistoryToMessages(data, t);
         const isRunning = data.status === 'processing' || data.status === 'awaiting_refinement';
