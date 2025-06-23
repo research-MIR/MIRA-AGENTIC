@@ -27,6 +27,8 @@ export const chatTranslations = {
     sortChatsBy: "Ordina Per",
     lastUpdated: "Ultimo Aggiornamento",
     creationDate: "Data di Creazione",
+    turnLimitReachedTitle: "Limite di turni raggiunto",
+    turnLimitReachedDescription: "Questa conversazione ha raggiunto il limite massimo di 60 turni per garantire prestazioni ottimali. Per favore, inizia una nuova chat per continuare.",
   },
   en: {
     agentInteraction: "Agent Interaction",
@@ -56,5 +58,7 @@ export const chatTranslations = {
     sortChatsBy: "Sort Chats By",
     lastUpdated: "Last Updated",
     creationDate: "Creation Date",
+    turnLimitReachedTitle: "Turn Limit Reached",
+    turnLimitReachedDescription: "This conversation has reached the maximum limit of 60 turns to ensure optimal performance. Please start a new chat to continue.",
   },
 };

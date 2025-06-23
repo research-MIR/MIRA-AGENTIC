@@ -9,6 +9,8 @@ import { useLanguage } from '@/context/LanguageContext';
 import { UploadedFile } from './useFileUpload';
 import { translateErrorMessage } from '@/lib/errors';
 
+const MAX_TURNS = 60;
+
 const parseHistoryToMessages = (jobData: any, t: (key: string) => string): Message[] => {
     const history = jobData?.context?.history;
     const messages: Message[] = [];
@@ -89,6 +91,7 @@ export const useChatManager = () => {
     const [isJobRunning, setIsJobRunning] = useState(false);
     const [isSending, setIsSending] = useState(false);
     const [isOwner, setIsOwner] = useState(true);
+    const [isTurnLimitReached, setIsTurnLimitReached] = useState(false);
     const [jobSettings, setJobSettings] = useState({
         isDesignerMode: false,
         selectedModelId: null as string | null,
@@ -130,6 +133,9 @@ export const useChatManager = () => {
             numImagesMode: data.context?.numImagesMode ?? 'auto',
         });
 
+        const historyLength = data.context?.history?.length || 0;
+        setIsTurnLimitReached(historyLength >= MAX_TURNS);
+
         let conversationMessages = parseHistoryToMessages(data, t);
         const isRunning = data.status === 'processing' || data.status === 'awaiting_refinement';
         setIsJobRunning(isRunning);
@@ -154,6 +160,7 @@ export const useChatManager = () => {
             setIsJobRunning(false);
             setIsSending(false);
             setIsOwner(true);
+            setIsTurnLimitReached(false);
         }
     }, [jobId, jobData, processJobData, t]);
 
@@ -275,6 +282,7 @@ export const useChatManager = () => {
         isJobRunning,
         isSending,
         isOwner,
+        isTurnLimitReached,
         jobSettings,
         setJobSettings,
         sendMessage,

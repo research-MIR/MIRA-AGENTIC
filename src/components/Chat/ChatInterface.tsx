@@ -9,6 +9,7 @@ import { useChatManager } from "@/hooks/useChatManager";
 import { useFileUpload } from "@/hooks/useFileUpload";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertTriangle } from "lucide-react";
+import { TurnLimitReachedPrompt } from "./TurnLimitReachedPrompt";
 
 export const ChatInterface = () => {
   const {
@@ -19,6 +20,7 @@ export const ChatInterface = () => {
     isJobRunning,
     isSending,
     isOwner,
+    isTurnLimitReached,
     jobSettings,
     setJobSettings,
     sendMessage,
@@ -113,7 +115,9 @@ export const ChatInterface = () => {
           onNumImagesModeChange={(val) => setJobSettings(s => ({ ...s, numImagesMode: val }))}
           isJobActive={!!jobId}
         />
-        {isOwner ? (
+        {isTurnLimitReached ? (
+          <TurnLimitReachedPrompt />
+        ) : isOwner ? (
           <PromptInput
             input={input}
             onInputChange={setInput}
