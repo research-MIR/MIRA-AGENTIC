@@ -132,6 +132,10 @@ const Inpainting = () => {
     consumeImageUrl();
   }, [consumeImageUrl]);
 
+  const handleSelectJob = (job: BitStudioJob) => {
+    setSelectedJobId(job.id);
+  };
+
   useEffect(() => {
     const { url } = consumeImageUrl();
     if (url) {
@@ -230,7 +234,7 @@ const Inpainting = () => {
       dismissToast(toastId);
       showSuccess("Inpainting job started! You can track progress in the sidebar.");
       queryClient.invalidateQueries({ queryKey: ['activeJobs'] });
-      queryClient.invalidateQueries({ queryKey: ['inpaintingJobs', session?.user?.id] });
+      queryClient.invalidateQueries({ queryKey: ['inpaintingJobs', session.user.id] });
       resetForm();
 
     } catch (err: any) {
@@ -333,7 +337,7 @@ const Inpainting = () => {
                           </AccordionContent>
                         </AccordionItem>
                         <AccordionItem value="item-2">
-                          <AccordionTrigger>{t('promptSectionTitle')}</AccordionTrigger>
+                          <AccordionTrigger>{t('promptOptional')}</AccordionTrigger>
                           <AccordionContent className="pt-4 space-y-2">
                             <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t('promptPlaceholderInpainting')} rows={4} />
                           </AccordionContent>
