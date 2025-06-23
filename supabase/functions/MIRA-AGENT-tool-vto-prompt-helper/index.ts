@@ -33,7 +33,7 @@ const safetySettings = [
     },
 ];
 
-const systemPrompt = `You are an expert fashion stylist and photo analyst. Your task is to combine two images and an optional user instruction into a single, coherent, and detailed text-to-image prompt. The final prompt MUST be in English.
+const garmentSystemPrompt = `You are an expert fashion stylist and photo analyst. Your task is to combine two images and an optional user instruction into a single, coherent, and detailed text-to-image prompt. The final prompt MUST be in English.
 
 ### Your Inputs:
 You will be given:
@@ -53,6 +53,29 @@ Your entire response MUST be a single, valid JSON object with ONE key, "final_pr
 \`\`\`json
 {
   "final_prompt": "A photorealistic, cinematic shot of a woman standing with her hands on her hips in a dimly lit urban alleyway. She is wearing a vintage, slightly oversized, faded blue denim jacket with worn-out elbows and brass buttons, paired with light blue jeans. The lighting is dramatic, with a single light source from the side creating long shadows."
+}
+\`\`\`
+`;
+
+const generalSystemPrompt = `You are an expert image analyst and prompt crafter. Your task is to combine two images and an optional user instruction into a single, coherent, and detailed text-to-image prompt for an inpainting task. The final prompt MUST be in English.
+
+### Your Inputs:
+You will be given:
+1.  **SOURCE IMAGE:** This is the base image that will be modified. It contains the overall scene, lighting, and context.
+2.  **REFERENCE IMAGE:** This image contains the object, texture, or concept that needs to be integrated into the SOURCE IMAGE.
+3.  **PROMPT APPENDIX (Optional, HIGH PRIORITY):** A specific, non-negotiable instruction from the user.
+
+### Your Internal Thought Process (Do not include this in the output):
+1.  **Analyze the SOURCE IMAGE:** Deconstruct the scene. Describe the lighting style (e.g., "soft studio lighting," "harsh outdoor sunlight"), the background details, and the overall mood or aesthetic.
+2.  **Analyze the REFERENCE IMAGE:** Describe the object or concept in the reference image with extreme detail. Mention its key characteristics, texture, color, and style.
+3.  **Synthesize with Appendix:** Create a new, single prompt that describes how the object/concept from the REFERENCE IMAGE should be realistically integrated into the SOURCE IMAGE. The goal is a seamless blend. **You MUST incorporate the user's PROMPT APPENDIX instruction into the main body of your description.** Do not just append it.
+### Your Output:
+Your entire response MUST be a single, valid JSON object with ONE key, "final_prompt".
+
+**Example Output (with appendix "make it look like a tattoo on the arm"):**
+\`\`\`json
+{
+  "final_prompt": "A photorealistic, detailed tattoo of a roaring lion's head on a person's bicep. The tattoo ink is dark black, with sharp lines and soft shading that follows the contours of the muscle. The lighting is soft and natural, casting a gentle highlight on the skin and the tattoo."
 }
 \`\`\`
 `;
@@ -100,7 +123,8 @@ serve(async (req) => {
         person_image_url, garment_image_url,
         person_image_base64, person_image_mime_type,
         garment_image_base64, garment_image_mime_type,
-        prompt_appendix
+        prompt_appendix,
+        is_garment_mode
     } = await req.json();
 
     if (!(person_image_url && garment_image_url) && !(person_image_base64 && garment_image_base64)) {
@@ -109,22 +133,29 @@ serve(async (req) => {
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
     let personParts: Part[], garmentParts: Part[];
+    
+    const useGarmentMode = is_garment_mode ?? true;
+    const systemPrompt = useGarmentMode ? garmentSystemPrompt : generalSystemPrompt;
+    const personLabel = useGarmentMode ? "PERSON IMAGE" : "SOURCE IMAGE";
+    const garmentLabel = useGarmentMode ? "GARMENT IMAGE" : "REFERENCE IMAGE";
+
+    console.log(`[VTO-PromptHelper] Mode: ${useGarmentMode ? 'Garment' : 'General'}`);
 
     if (person_image_base64 && garment_image_base64) {
         console.log("[VTO-PromptHelper] Using provided base64 data.");
         personParts = [
-            { text: `--- PERSON IMAGE ---` },
+            { text: `--- ${personLabel} ---` },
             { inlineData: { mimeType: person_image_mime_type || 'image/png', data: person_image_base64 } }
         ];
         garmentParts = [
-            { text: `--- GARMENT IMAGE ---` },
+            { text: `--- ${garmentLabel} ---` },
             { inlineData: { mimeType: garment_image_mime_type || 'image/png', data: garment_image_base64 } }
         ];
     } else {
         console.log("[VTO-PromptHelper] Using provided URLs.");
         [personParts, garmentParts] = await Promise.all([
-            downloadImageAsPart(person_image_url, "PERSON IMAGE"),
-            downloadImageAsPart(garment_image_url, "GARMENT IMAGE")
+            downloadImageAsPart(person_image_url, personLabel),
+            downloadImageAsPart(garment_image_url, garmentLabel)
         ]);
     }
     

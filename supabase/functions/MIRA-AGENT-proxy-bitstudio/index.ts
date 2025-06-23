@@ -76,7 +76,8 @@ serve(async (req) => {
       console.log(`[BitStudioProxy][${requestId}] Starting inpaint workflow.`);
       let { 
         full_source_image_base64, mask_image_base64, prompt, reference_image_base64, 
-        auto_prompt_enabled, num_attempts = 1, denoise = 1.0, resolution = 'standard', mask_expansion_percent = 2 
+        auto_prompt_enabled, is_garment_mode,
+        num_attempts = 1, denoise = 1.0, resolution = 'standard', mask_expansion_percent = 2 
       } = body;
       
       if (!full_source_image_base64 || !mask_image_base64) {
@@ -186,7 +187,8 @@ serve(async (req) => {
             person_image_base64: sourceToSendBase64, 
             person_image_mime_type: 'image/png',
             garment_image_base64: reference_image_base64,
-            garment_image_mime_type: 'image/png'
+            garment_image_mime_type: 'image/png',
+            is_garment_mode: is_garment_mode ?? true
           }
         });
         if (promptError) throw new Error(`Auto-prompt generation failed: ${promptError.message}`);

@@ -76,6 +76,8 @@ export const vtoTranslations = {
     promptAppendixPlaceholder: "es. indossa jeans chiari, con i capelli raccolti",
     promptAppendixPair: "Istruzione Specifica per la Coppia",
     promptAppendixPairPlaceholder: "es. indossa jeans chiari",
+    garmentMode: "Modalità Indumento",
+    referenceImage: "Immagine di Riferimento",
     inpaintingGuideContent: `
 ### Strategie per Risultati Migliori
 
@@ -193,6 +195,8 @@ L'inpainting è uno strumento potente per sostituire parti di un'immagine, ma ri
     promptAppendixPlaceholder: "e.g. wearing light jeans, with hair up",
     promptAppendixPair: "Pair-Specific Instruction",
     promptAppendixPairPlaceholder: "e.g. wearing light jeans",
+    garmentMode: "Garment Mode",
+    referenceImage: "Reference Image",
     inpaintingGuideContent: `
 ### Strategie per Risultati Migliori
 
