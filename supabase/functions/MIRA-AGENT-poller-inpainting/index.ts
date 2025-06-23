@@ -10,7 +10,7 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
 const POLLING_INTERVAL_MS = 5000;
-const FINAL_OUTPUT_NODE_ID = "9"; // Corrected node ID for the SaveImage node in the new workflow
+const FINAL_OUTPUT_NODE_ID = "9"; // From the workflow.json
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
@@ -85,6 +85,6 @@ serve(async (req) => {
   } catch (error) {
     console.error(`[InpaintingPoller][${job_id}] Error:`, error);
     await supabase.from('mira-agent-inpainting-jobs').update({ status: 'failed', error_message: error.message }).eq('id', job_id);
-    return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: corsHeaders });
+    return new Response(JSON.stringify({ error: error.message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
   }
 });

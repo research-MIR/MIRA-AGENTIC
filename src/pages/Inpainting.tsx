@@ -26,7 +26,6 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { optimizeImage } from "@/lib/utils";
 import { useImageTransferStore } from "@/store/imageTransferStore";
 import { RealtimeChannel } from "@supabase/supabase-js";
-import { InpaintingJobThumbnail } from "@/components/Jobs/InpaintingJobThumbnail";
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -37,18 +36,18 @@ const fileToBase64 = (file: File): Promise<string> => {
   });
 };
 
-interface InpaintingJob {
+interface BitStudioJob {
   id: string;
   status: 'queued' | 'processing' | 'complete' | 'failed';
-  final_result?: {
-    publicUrl: string;
-  };
-  metadata?: {
-    prompt_used?: string;
-    source_image_url?: string;
-    debug_assets?: any;
-  };
+  source_person_image_url: string;
+  source_garment_image_url: string;
+  final_image_url?: string;
   error_message?: string;
+  mode: 'base' | 'inpaint';
+  metadata?: {
+    debug_assets?: any;
+    prompt_used?: string;
+  }
 }
 
 const SecureImageDisplay = ({ imageUrl, alt, onClick, className }: { imageUrl: string | null, alt: string, onClick?: (e: React.MouseEvent<HTMLImageElement>) => void, className?: string }) => {
@@ -110,7 +109,7 @@ const Inpainting = () => {
   const sourceImageUrl = useMemo(() => sourceImageFile ? URL.createObjectURL(sourceImageFile) : null, [sourceImageFile]);
   const referenceImageUrl = useMemo(() => referenceImageFile ? URL.createObjectURL(referenceImageFile) : null, [referenceImageFile]);
 
-  const { data: recentJobs, isLoading: isLoadingRecentJobs } = useQuery<InpaintingJob[]>({
+  const { data: recentJobs, isLoading: isLoadingRecentJobs } = useQuery<BitStudioJob[]>({
     queryKey: ['inpaintingJobs', session?.user?.id],
     queryFn: async () => {
       if (!session?.user) return [];
@@ -132,10 +131,6 @@ const Inpainting = () => {
     setResetTrigger(c => c + 1);
     consumeImageUrl();
   }, [consumeImageUrl]);
-
-  const handleSelectJob = (job: InpaintingJob) => {
-    setSelectedJobId(job.id);
-  };
 
   useEffect(() => {
     const { url } = consumeImageUrl();
@@ -178,7 +173,7 @@ const Inpainting = () => {
     if (channelRef.current) supabase.removeChannel(channelRef.current);
 
     const channel = supabase.channel(`inpainting-jobs-tracker-${session.user.id}`)
-      .on<InpaintingJob>('postgres_changes', { event: '*', schema: 'public', table: 'mira-agent-inpainting-jobs', filter: `user_id=eq.${session.user.id}` },
+      .on<BitStudioJob>('postgres_changes', { event: '*', schema: 'public', table: 'mira-agent-inpainting-jobs', filter: `user_id=eq.${session.user.id}` },
         (payload) => {
           console.log('[Inpainting Realtime] Received payload:', payload);
           queryClient.invalidateQueries({ queryKey: ['inpaintingJobs', session.user.id] });
@@ -250,12 +245,12 @@ const Inpainting = () => {
     onDrop: (e) => handleFileSelect(e.target.files?.[0]),
   });
 
-  const renderJobResult = (job: InpaintingJob) => {
+  const renderJobResult = (job: BitStudioJob) => {
     if (job.status === 'failed') return <p className="text-destructive text-sm p-2">{t('jobFailed', { errorMessage: job.error_message })}</p>;
-    if (job.status === 'complete' && job.final_result?.publicUrl) {
+    if (job.status === 'complete' && job.final_image_url) {
       return (
         <div className="relative group w-full h-full">
-          <SecureImageDisplay imageUrl={job.final_result.publicUrl} alt="Final Result" onClick={() => showImage({ images: [{ url: job.final_result!.publicUrl }], currentIndex: 0 })} />
+          <SecureImageDisplay imageUrl={job.final_image_url} alt="Final Result" onClick={() => showImage({ images: [{ url: job.final_image_url! }], currentIndex: 0 })} />
           {job.metadata?.debug_assets && (
             <Button 
               variant="secondary" 
@@ -311,7 +306,13 @@ const Inpainting = () => {
                           <div>
                             <Label>{t('sourceImage')}</Label>
                             <div className="mt-1 aspect-square w-full bg-muted rounded-md overflow-hidden">
-                              <SecureImageDisplay imageUrl={selectedJob.metadata?.source_image_url || null} alt="Source" />
+                              <SecureImageDisplay imageUrl={selectedJob.source_person_image_url} alt="Source Person" />
+                            </div>
+                          </div>
+                          <div>
+                            <Label>{t('referenceImage')}</Label>
+                            <div className="mt-1 aspect-square w-full bg-muted rounded-md overflow-hidden">
+                              <SecureImageDisplay imageUrl={selectedJob.source_garment_image_url} alt="Source Garment" />
                             </div>
                           </div>
                         </div>
@@ -332,7 +333,7 @@ const Inpainting = () => {
                           </AccordionContent>
                         </AccordionItem>
                         <AccordionItem value="item-2">
-                          <AccordionTrigger>{t('promptOptional')}</AccordionTrigger>
+                          <AccordionTrigger>{t('promptSectionTitle')}</AccordionTrigger>
                           <AccordionContent className="pt-4 space-y-2">
                             <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t('promptPlaceholderInpainting')} rows={4} />
                           </AccordionContent>
@@ -362,7 +363,7 @@ const Inpainting = () => {
                     )}
                   </CardContent>
                 </Card>
-                <Button size="lg" className="w-full" onClick={handleGenerate} disabled={isLoading || !!selectedJob || !sourceImageFile || !maskImage}>
+                <Button size="lg" className="w-full" onClick={handleGenerate} disabled={isLoading || !!selectedJob}>
                   {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
                   {t('generate')}
                 </Button>
@@ -404,14 +405,14 @@ const Inpainting = () => {
               {isLoadingRecentJobs ? <Skeleton className="h-24 w-full" /> : recentJobs && recentJobs.length > 0 ? (
                 <ScrollArea className="h-32">
                   <div className="flex gap-4 pb-2">
-                    {recentJobs.map(job => (
-                      <InpaintingJobThumbnail
-                        key={job.id}
-                        job={job}
-                        onClick={() => handleSelectJob(job)}
-                        isSelected={selectedJob?.id === job.id}
-                      />
-                    ))}
+                    {recentJobs.map(job => {
+                      const urlToPreview = job.final_image_url || job.source_person_image_url;
+                      return (
+                        <button key={job.id} onClick={() => handleSelectJob(job)} className={cn("border-2 rounded-lg p-0.5 flex-shrink-0 w-24 h-24", selectedJob?.id === job.id ? "border-primary" : "border-transparent")}>
+                          <SecureImageDisplay imageUrl={urlToPreview} alt="Recent job" className="w-full h-full object-cover" />
+                        </button>
+                      )
+                    })}
                   </div>
                 </ScrollArea>
               ) : <p className="text-muted-foreground text-sm">{t('noRecentProJobs')}</p>}
