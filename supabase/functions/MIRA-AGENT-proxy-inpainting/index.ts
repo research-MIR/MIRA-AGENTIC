@@ -11,91 +11,270 @@ const workflowTemplate = `
 {
   "3": {
     "inputs": {
-      "image": "source_image.png"
+      "seed": 527229883475207,
+      "steps": 20,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "normal",
+      "denoise": 1,
+      "model": [
+        "39",
+        0
+      ],
+      "positive": [
+        "38",
+        0
+      ],
+      "negative": [
+        "38",
+        1
+      ],
+      "latent_image": [
+        "38",
+        2
+      ]
     },
-    "class_type": "LoadImage",
-    "_meta": { "title": "Load Source Image" }
-  },
-  "4": {
-    "inputs": {
-      "image": "mask_image.png"
-    },
-    "class_type": "LoadImage",
-    "_meta": { "title": "Load Mask Image" }
-  },
-  "5": {
-    "inputs": {
-      "grow": 6,
-      "blur": 6,
-      "threshold": 0.5,
-      "replace_alpha": true,
-      "image": [ "4", 0 ]
-    },
-    "class_type": "ImageToMask",
-    "_meta": { "title": "Convert Mask Image to Mask" }
-  },
-  "6": {
-    "inputs": {
-      "ckpt_name": "flux1-dev.safetensors"
-    },
-    "class_type": "CheckpointLoaderSimple",
-    "_meta": { "title": "Load Checkpoint" }
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
   },
   "7": {
     "inputs": {
-      "text": "positive prompt here",
-      "clip": [ "6", 1 ]
+      "text": "",
+      "clip": [
+        "34",
+        0
+      ]
     },
     "class_type": "CLIPTextEncode",
-    "_meta": { "title": "Positive Prompt" }
+    "_meta": {
+      "title": "CLIP Text Encode (Negative Prompt)"
+    }
   },
   "8": {
     "inputs": {
-      "text": "negative prompt here",
-      "clip": [ "6", 1 ]
+      "samples": [
+        "3",
+        0
+      ],
+      "vae": [
+        "32",
+        0
+      ]
     },
-    "class_type": "CLIPTextEncode",
-    "_meta": { "title": "Negative Prompt" }
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
   },
   "9": {
     "inputs": {
-      "pixels": [ "3", 0 ],
-      "vae": [ "6", 2 ]
-    },
-    "class_type": "VAEEncode",
-    "_meta": { "title": "VAE Encode" }
-  },
-  "10": {
-    "inputs": {
-      "seed": 12345,
-      "steps": 25,
-      "cfg": 1.8,
-      "sampler_name": "dpmpp_2m_sde",
-      "scheduler": "karras",
-      "denoise": 1,
-      "model": [ "6", 0 ],
-      "positive": [ "7", 0 ],
-      "negative": [ "8", 0 ],
-      "latent_image": [ "9", 0 ]
-    },
-    "class_type": "KSampler",
-    "_meta": { "title": "KSampler" }
-  },
-  "11": {
-    "inputs": {
-      "samples": [ "10", 0 ],
-      "vae": [ "6", 2 ]
-    },
-    "class_type": "VAEDecode",
-    "_meta": { "title": "VAE Decode" }
-  },
-  "12": {
-    "inputs": {
-      "filename_prefix": "ComfyUI_Inpaint",
-      "images": [ "11", 0 ]
+      "filename_prefix": "ComfyUI",
+      "images": [
+        "8",
+        0
+      ]
     },
     "class_type": "SaveImage",
-    "_meta": { "title": "Save Image" }
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "17": {
+    "inputs": {
+      "image": "fd909d80-9830-42ae-a221-35478e6c69ef.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Input Image"
+    }
+  },
+  "23": {
+    "inputs": {
+      "text": "Wearing pink Maxi Dress",
+      "clip": [
+        "34",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "PROMPT"
+    }
+  },
+  "26": {
+    "inputs": {
+      "guidance": 30,
+      "conditioning": [
+        "23",
+        0
+      ]
+    },
+    "class_type": "FluxGuidance",
+    "_meta": {
+      "title": "FluxGuidance"
+    }
+  },
+  "31": {
+    "inputs": {
+      "unet_name": "fluxfill.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Load Diffusion Model"
+    }
+  },
+  "32": {
+    "inputs": {
+      "vae_name": "ae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "34": {
+    "inputs": {
+      "clip_name1": "clip_l.safetensors",
+      "clip_name2": "t5xxl_fp16.safetensors",
+      "type": "flux",
+      "device": "default"
+    },
+    "class_type": "DualCLIPLoader",
+    "_meta": {
+      "title": "DualCLIPLoader"
+    }
+  },
+  "38": {
+    "inputs": {
+      "noise_mask": false,
+      "positive": [
+        "51",
+        0
+      ],
+      "negative": [
+        "7",
+        0
+      ],
+      "vae": [
+        "32",
+        0
+      ],
+      "pixels": [
+        "17",
+        0
+      ],
+      "mask": [
+        "47",
+        0
+      ]
+    },
+    "class_type": "InpaintModelConditioning",
+    "_meta": {
+      "title": "InpaintModelConditioning"
+    }
+  },
+  "39": {
+    "inputs": {
+      "model": [
+        "31",
+        0
+      ]
+    },
+    "class_type": "DifferentialDiffusion",
+    "_meta": {
+      "title": "Differential Diffusion"
+    }
+  },
+  "45": {
+    "inputs": {
+      "image": "e7fc70ad-63e9-4457-9d35-aeac7365a079.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Input Mask"
+    }
+  },
+  "47": {
+    "inputs": {
+      "channel": "red",
+      "image": [
+        "45",
+        0
+      ]
+    },
+    "class_type": "ImageToMask",
+    "_meta": {
+      "title": "Convert Image to Mask"
+    }
+  },
+  "48": {
+    "inputs": {
+      "style_model_name": "fluxcontrolnetupscale.safetensors"
+    },
+    "class_type": "StyleModelLoader",
+    "_meta": {
+      "title": "Load Style Model"
+    }
+  },
+  "49": {
+    "inputs": {
+      "clip_name": "sigclip_vision_patch14_384.safetensors"
+    },
+    "class_type": "CLIPVisionLoader",
+    "_meta": {
+      "title": "Load CLIP Vision"
+    }
+  },
+  "50": {
+    "inputs": {
+      "crop": "center",
+      "clip_vision": [
+        "49",
+        0
+      ],
+      "image": [
+        "52",
+        0
+      ]
+    },
+    "class_type": "CLIPVisionEncode",
+    "_meta": {
+      "title": "CLIP Vision Encode"
+    }
+  },
+  "51": {
+    "inputs": {
+      "strength": 0.30000000000000004,
+      "strength_type": "attn_bias",
+      "conditioning": [
+        "26",
+        0
+      ],
+      "style_model": [
+        "48",
+        0
+      ],
+      "clip_vision_output": [
+        "50",
+        0
+      ]
+    },
+    "class_type": "StyleModelApply",
+    "_meta": {
+      "title": "Apply Style Model"
+    }
+  },
+  "52": {
+    "inputs": {
+      "image": "61rtzqla9LL._AC_SX679_.jpg"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Input Reference"
+    }
   }
 }
 `;
@@ -136,30 +315,55 @@ serve(async (req) => {
       user_id,
       source_image_base64,
       mask_image_base64,
+      reference_image_base64, // Optional
       prompt,
       denoise,
     } = await req.json();
 
     if (!user_id || !source_image_base64 || !mask_image_base64) {
-      throw new Error("Missing required parameters.");
+      throw new Error("Missing required parameters: user_id, source_image_base64, and mask_image_base64 are required.");
     }
 
     const sourceBlob = new Blob([decodeBase64(source_image_base64)], { type: 'image/png' });
     const maskBlob = new Blob([decodeBase64(mask_image_base64)], { type: 'image/png' });
 
-    const [sourceFilename, maskFilename] = await Promise.all([
+    const uploadPromises = [
       uploadImageToComfyUI(sanitizedAddress, sourceBlob, 'source.png'),
       uploadImageToComfyUI(sanitizedAddress, maskBlob, 'mask.png')
-    ]);
+    ];
+
+    if (reference_image_base64) {
+      const referenceBlob = new Blob([decodeBase64(reference_image_base64)], { type: 'image/png' });
+      uploadPromises.push(uploadImageToComfyUI(sanitizedAddress, referenceBlob, 'reference.png'));
+    }
+
+    const [sourceFilename, maskFilename, referenceFilename] = await Promise.all(uploadPromises);
 
     const finalWorkflow = JSON.parse(workflowTemplate);
-    finalWorkflow['3'].inputs.image = sourceFilename;
-    finalWorkflow['4'].inputs.image = maskFilename;
-    finalWorkflow['7'].inputs.text = prompt || "masterpiece, best quality";
-    finalWorkflow['8'].inputs.text = "ugly, blurry, deformed";
-    finalWorkflow['10'].inputs.seed = Math.floor(Math.random() * 1e15);
+    
+    // Populate required inputs
+    finalWorkflow['17'].inputs.image = sourceFilename;
+    finalWorkflow['45'].inputs.image = maskFilename;
+    finalWorkflow['23'].inputs.text = prompt || "masterpiece, best quality";
+    finalWorkflow['7'].inputs.text = "ugly, blurry, deformed, text, watermark";
+    finalWorkflow['3'].inputs.seed = Math.floor(Math.random() * 1e15);
     if (denoise) {
-      finalWorkflow['10'].inputs.denoise = denoise;
+      finalWorkflow['3'].inputs.denoise = denoise;
+    }
+
+    // Handle optional reference image
+    if (referenceFilename) {
+      finalWorkflow['52'].inputs.image = referenceFilename;
+    } else {
+      // If no reference image, we need to bypass the style model application
+      // and connect the prompt directly to the inpainting conditioning.
+      delete finalWorkflow['52'];
+      delete finalWorkflow['50'];
+      delete finalWorkflow['49'];
+      delete finalWorkflow['48'];
+      delete finalWorkflow['51'];
+      // Reroute the positive conditioning
+      finalWorkflow['38'].inputs.positive = ["26", 0];
     }
 
     const queueUrl = `${sanitizedAddress}/prompt`;
