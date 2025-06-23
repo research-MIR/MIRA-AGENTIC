@@ -5,12 +5,18 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { useLanguage } from "@/context/LanguageContext";
-import { Loader2, AlertTriangle } from "lucide-react";
+import { Loader2, AlertTriangle, RefreshCw } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SegmentationMask } from "@/components/SegmentationMask";
 import { useSecureImage } from "@/hooks/useSecureImage";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { Badge } from "@/components/ui/badge";
+import { Link } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
+import { cn } from "@/lib/utils";
+import { Alert, AlertTitle } from "@/components/ui/alert";
 
 const SecureImageDisplay = ({ imageUrl, alt }: { imageUrl: string | null, alt: string }) => {
   const { displayUrl, isLoading, error } = useSecureImage(imageUrl);
@@ -20,6 +26,88 @@ const SecureImageDisplay = ({ imageUrl, alt }: { imageUrl: string | null, alt: s
   if (!displayUrl) return null;
 
   return <img src={displayUrl} alt={alt} className="w-full h-full object-contain" />;
+};
+
+const AdminChatDashboard = () => {
+  const { supabase } = useSession();
+  const { t } = useLanguage();
+
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ['adminChatDashboard'],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('get_admin_chat_dashboard_data');
+      if (error) throw new Error(error.message);
+      return data;
+    },
+    retry: false,
+  });
+
+  const getStatusVariant = (status: string) => {
+    switch (status) {
+      case 'complete': return 'default';
+      case 'processing': return 'secondary';
+      case 'awaiting_feedback': return 'secondary';
+      case 'failed': return 'destructive';
+      default: return 'outline';
+    }
+  };
+
+  return (
+    <Card className="lg:col-span-2">
+      <CardHeader className="flex flex-row items-center justify-between">
+        <div>
+          <CardTitle>User Chat Dashboard</CardTitle>
+          <CardDescription>Monitor all user conversations and job statuses.</CardDescription>
+        </div>
+        <Button variant="outline" size="icon" onClick={() => refetch()} disabled={isLoading}>
+          <RefreshCw className={cn("h-4 w-4", isLoading && "animate-spin")} />
+        </Button>
+      </CardHeader>
+      <CardContent>
+        {isLoading && (
+          <div className="flex items-center justify-center p-8">
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          </div>
+        )}
+        {error && (
+          <Alert variant="destructive">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>Error</AlertTitle>
+            <AlertDescription>{error.message}</AlertDescription>
+          </Alert>
+        )}
+        {data && (
+          <Accordion type="multiple" className="w-full">
+            {data.map((user: any) => (
+              <AccordionItem key={user.user_id} value={user.user_id}>
+                <AccordionTrigger>
+                  <div className="flex items-center gap-4">
+                    <span>{user.email}</span>
+                    <Badge variant="outline">{user.jobs.length} chats</Badge>
+                  </div>
+                </AccordionTrigger>
+                <AccordionContent>
+                  <div className="space-y-2 max-h-96 overflow-y-auto pr-2">
+                    {user.jobs.map((job: any) => (
+                      <Link to={`/chat/${job.id}`} key={job.id} className="block p-2 rounded-md hover:bg-muted border">
+                        <div className="flex justify-between items-start">
+                          <p className="font-medium text-sm truncate pr-4">{job.original_prompt || "Untitled Chat"}</p>
+                          <Badge variant={getStatusVariant(job.status)}>{job.status}</Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Last updated: {new Date(job.updated_at).toLocaleString()}
+                        </p>
+                      </Link>
+                    ))}
+                  </div>
+                </AccordionContent>
+              </AccordionItem>
+            ))}
+          </Accordion>
+        )}
+      </CardContent>
+    </Card>
+  );
 };
 
 const Developer = () => {
@@ -203,6 +291,7 @@ const Developer = () => {
         <p className="text-muted-foreground">{t('developerToolsDescription')}</p>
       </header>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <AdminChatDashboard />
         <div className="space-y-4">
           <Card>
             <CardHeader>
