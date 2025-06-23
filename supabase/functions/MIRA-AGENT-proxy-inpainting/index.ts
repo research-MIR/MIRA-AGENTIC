@@ -332,7 +332,8 @@ serve(async (req) => {
       uploadImageToComfyUI(sanitizedAddress, maskBlob, 'mask.png')
     ];
 
-    if (reference_image_base64) {
+    let hasReferenceImage = !!reference_image_base64;
+    if (hasReferenceImage) {
       const referenceBlob = new Blob([decodeBase64(reference_image_base64)], { type: 'image/png' });
       uploadPromises.push(uploadImageToComfyUI(sanitizedAddress, referenceBlob, 'reference.png'));
     }
@@ -352,18 +353,19 @@ serve(async (req) => {
     }
 
     // Handle optional reference image
-    if (referenceFilename) {
+    if (hasReferenceImage && referenceFilename) {
       finalWorkflow['52'].inputs.image = referenceFilename;
+      // Use default strength from template
     } else {
-      // If no reference image, we need to bypass the style model application
-      // and connect the prompt directly to the inpainting conditioning.
-      delete finalWorkflow['52'];
-      delete finalWorkflow['50'];
-      delete finalWorkflow['49'];
-      delete finalWorkflow['48'];
-      delete finalWorkflow['51'];
-      // Reroute the positive conditioning
-      finalWorkflow['38'].inputs.positive = ["26", 0];
+      // No reference image provided. We must still provide a dummy input to the style model nodes
+      // and set the strength to 0 to nullify its effect.
+      const dummyPngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+      const dummyBlob = new Blob([decodeBase64(dummyPngBase64)], { type: 'image/png' });
+      const dummyFilename = await uploadImageToComfyUI(sanitizedAddress, dummyBlob, 'dummy.png');
+      
+      finalWorkflow['52'].inputs.image = dummyFilename;
+      finalWorkflow['51'].inputs.strength = 0.0; // Set strength to zero
+      console.log("[InpaintingProxy] No reference image provided. Using dummy image and setting style strength to 0.");
     }
 
     const queueUrl = `${sanitizedAddress}/prompt`;
