@@ -58,7 +58,7 @@ export const PromptInput = ({
           id="file-upload"
           multiple
         />
-        <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()}>
+        <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()} disabled={true}>
           <Paperclip className="h-4 w-4" />
         </Button>
       </div>
@@ -67,9 +67,10 @@ export const PromptInput = ({
           value={input}
           onChange={(e) => onInputChange(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Ask about the file(s) or type a message... (Enter to send, Shift+Enter for new line)"
+          placeholder="Chat is currently disabled for maintenance."
           className="pr-4 min-h-[40px] max-h-40"
           rows={1}
+          disabled={true}
         />
         {uploadedFiles.length > 0 && (
           <div className="absolute right-2 top-2 flex items-center gap-2 bg-muted p-1 rounded-md text-sm max-w-[50%]">
@@ -97,7 +98,7 @@ export const PromptInput = ({
         )}
       </div>
       <div id="send-button">
-        <Button type="button" onClick={onSendMessage} disabled={isJobRunning || isSending}>
+        <Button type="button" onClick={onSendMessage} disabled={true}>
           <Send className="h-4 w-4" />
           <span className="sr-only">Send</span>
         </Button>
