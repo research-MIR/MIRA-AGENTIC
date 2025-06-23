@@ -104,7 +104,6 @@ const Inpainting = () => {
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [isAutoPromptEnabled, setIsAutoPromptEnabled] = useState(true);
 
-  const [denoise, setDenoise] = useState(0.99);
   const [styleStrength, setStyleStrength] = useState(0.3);
 
   const sourceImageUrl = useMemo(() => sourceImageFile ? URL.createObjectURL(sourceImageFile) : null, [sourceImageFile]);
@@ -213,7 +212,7 @@ const Inpainting = () => {
       showError("Please provide a source image and draw a mask.");
       return;
     }
-    if (!isAutoPromptEnabled && !prompt.trim()) {
+    if (!isAutoPromptEnabled && !prompt.trim() && !referenceImageFile) {
       showError("Please provide a prompt or enable auto-prompt.");
       return;
     }
@@ -245,7 +244,7 @@ const Inpainting = () => {
         prompt: finalPrompt,
         is_garment_mode: false,
         user_id: session?.user.id,
-        denoise: denoise,
+        denoise: 1.0,
         style_strength: styleStrength,
       };
 
@@ -389,7 +388,6 @@ const Inpainting = () => {
                           </TooltipProvider>
                           <AccordionContent className="pt-4">
                             <InpaintingSettings
-                              denoise={denoise} setDenoise={setDenoise}
                               styleStrength={styleStrength} setStyleStrength={setStyleStrength}
                               disabled={isLoading}
                             />

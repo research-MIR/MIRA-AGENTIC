@@ -83,6 +83,7 @@ export const inpaintingTranslations = {
     promptPlaceholderInpaintingOptional: "Descrivi cosa vuoi cambiare nell'area mascherata. Lascia vuoto per lasciare che l'IA decida in base all'immagine di riferimento.",
     promptPlaceholderInpaintingRequired: "Descrivi cosa vuoi inserire nell'area mascherata. Questo campo è obbligatorio senza un'immagine di riferimento.",
     enhancingPrompt: "Miglioramento prompt...",
+    styleStrength: "Influenza Stile: {strength}",
     inpaintingGuideContent: `
 ### Strategie per Risultati Migliori
 
@@ -207,6 +208,7 @@ L'inpainting è uno strumento potente per sostituire parti di un'immagine, ma ri
     promptPlaceholderInpaintingOptional: "Describe what you want to change in the masked area. Leave blank to let the AI decide based on the reference image.",
     promptPlaceholderInpaintingRequired: "Describe what to inpaint in the masked area. This is required without a reference image.",
     enhancingPrompt: "Enhancing prompt...",
+    styleStrength: "Style Influence: {strength}",
     inpaintingGuideContent: `
 ### Strategies for Better Results
 
