@@ -40,7 +40,8 @@ serve(async (req) => {
     const fullSourceImage = await loadImage(`data:image/png;base64,${metadata.full_source_image_base64}`);
     const inpaintedCropResponse = await fetch(job.final_result.publicUrl);
     if (!inpaintedCropResponse.ok) throw new Error(`Failed to download inpainted crop from ComfyUI: ${inpaintedCropResponse.statusText}`);
-    const inpaintedCropImage = await loadImage(await inpaintedCropResponse.arrayBuffer());
+    const inpaintedCropArrayBuffer = await inpaintedCropResponse.arrayBuffer();
+    const inpaintedCropImage = await loadImage(new Uint8Array(inpaintedCropArrayBuffer));
 
     const canvas = createCanvas(fullSourceImage.width(), fullSourceImage.height());
     const ctx = canvas.getContext('2d');
