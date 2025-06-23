@@ -86,9 +86,31 @@ serve(async (req) => {
 
       const { createCanvas, loadImage } = await import('https://deno.land/x/canvas@v1.4.1/mod.ts');
       
-      const fullSourceImage = await loadImage(`data:image/png;base64,${full_source_image_base64}`);
+      let fullSourceImage = await loadImage(`data:image/png;base64,${full_source_image_base64}`);
+      console.log(`[BitStudioProxy][${requestId}] Initial source image loaded. Dimensions: ${fullSourceImage.width()}x${fullSourceImage.height()}`);
+
+      // Enforce maximum resolution of 3000px on the longest side
+      const MAX_LONG_SIDE = 3000;
+      const longestSide = Math.max(fullSourceImage.width(), fullSourceImage.height());
+
+      if (longestSide > MAX_LONG_SIDE) {
+        console.log(`[BitStudioProxy][${requestId}] Image is too large (${longestSide}px). Resizing to max ${MAX_LONG_SIDE}px.`);
+        const scaleFactor = MAX_LONG_SIDE / longestSide;
+        const newWidth = Math.round(fullSourceImage.width() * scaleFactor);
+        const newHeight = Math.round(fullSourceImage.height() * scaleFactor);
+
+        const resizeCanvas = createCanvas(newWidth, newHeight);
+        const resizeCtx = resizeCanvas.getContext('2d');
+        resizeCtx.drawImage(fullSourceImage, 0, 0, newWidth, newHeight);
+        
+        const resizedBase64 = resizeCanvas.toDataURL().split(',')[1];
+        full_source_image_base64 = resizedBase64; // Update the base64 variable for later use
+        fullSourceImage = await loadImage(`data:image/png;base64,${resizedBase64}`); // Reload the image object
+        console.log(`[BitStudioProxy][${requestId}] Image resized to ${newWidth}x${newHeight}.`);
+      }
+
       const rawMaskImage = await loadImage(`data:image/jpeg;base64,${mask_image_base64}`);
-      console.log(`[BitStudioProxy][${requestId}] Source and mask images loaded into memory.`);
+      console.log(`[BitStudioProxy][${requestId}] Mask image loaded into memory.`);
 
       const dilatedCanvas = createCanvas(rawMaskImage.width(), rawMaskImage.height());
       const dilateCtx = dilatedCanvas.getContext('2d');
@@ -157,11 +179,11 @@ serve(async (req) => {
       let maskToSendBase64 = croppedDilatedMaskBase64;
       
       const TARGET_LONG_SIDE = 768;
-      const longestSide = Math.max(bbox.width, bbox.height);
+      const cropLongestSide = Math.max(bbox.width, bbox.height);
 
-      if (longestSide < TARGET_LONG_SIDE) {
-          const upscaleFactor = TARGET_LONG_SIDE / longestSide;
-          console.log(`[BitStudioProxy][${requestId}] Crop's longest side (${longestSide}px) is below target of ${TARGET_LONG_SIDE}px. Upscaling by a factor of ${upscaleFactor.toFixed(2)}...`);
+      if (cropLongestSide < TARGET_LONG_SIDE) {
+          const upscaleFactor = TARGET_LONG_SIDE / cropLongestSide;
+          console.log(`[BitStudioProxy][${requestId}] Crop's longest side (${cropLongestSide}px) is below target of ${TARGET_LONG_SIDE}px. Upscaling by a factor of ${upscaleFactor.toFixed(2)}...`);
           
           const { data: upscaleData, error: upscaleError } = await supabase.functions.invoke('MIRA-AGENT-tool-upscale-crop', {
               body: {
@@ -177,7 +199,7 @@ serve(async (req) => {
           maskToSendBase64 = upscaleData.upscaled_mask_base64;
           console.log(`[BitStudioProxy][${requestId}] Upscaling complete. New crop dimensions will be approx ${Math.round(bbox.width * upscaleFactor)}x${Math.round(bbox.height * upscaleFactor)}.`);
       } else {
-          console.log(`[BitStudioProxy][${requestId}] Crop's longest side (${longestSide}px) is sufficient. Skipping upscale.`);
+          console.log(`[BitStudioProxy][${requestId}] Crop's longest side (${cropLongestSide}px) is sufficient. Skipping upscale.`);
       }
 
       if (auto_prompt_enabled) {
