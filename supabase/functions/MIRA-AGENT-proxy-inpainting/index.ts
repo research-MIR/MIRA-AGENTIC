@@ -55,13 +55,37 @@ serve(async (req) => {
       mask_image_base64,
       reference_image_base64, // Optional
       prompt,
+      auto_prompt_enabled,
+      is_garment_mode,
       denoise,
       style_strength
     } = await req.json();
 
-    if (!user_id || !source_image_base64 || !mask_image_base64 || !prompt) {
-      throw new Error("Missing required parameters: user_id, source_image_base64, mask_image_base64, and prompt are required.");
+    if (!user_id || !source_image_base64 || !mask_image_base64) {
+      throw new Error("Missing required parameters: user_id, source_image_base64, and mask_image_base64 are required.");
     }
+    if (!auto_prompt_enabled && !prompt) {
+      throw new Error("A prompt is required when auto-prompt is disabled.");
+    }
+
+    let finalPrompt = prompt;
+    if (auto_prompt_enabled) {
+        console.log(`[InpaintingProxy] Auto-prompt is enabled. Generating prompt...`);
+        const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-prompt-helper', {
+          body: { 
+            person_image_base64: source_image_base64, 
+            person_image_mime_type: 'image/png',
+            garment_image_base64: reference_image_base64,
+            garment_image_mime_type: 'image/png',
+            is_garment_mode: is_garment_mode ?? false
+          }
+        });
+        if (promptError) throw new Error(`Auto-prompt generation failed: ${promptError.message}`);
+        finalPrompt = promptData.final_prompt;
+        console.log(`[InpaintingProxy] Auto-prompt generated successfully.`);
+    }
+
+    if (!finalPrompt) throw new Error("Prompt is required for inpainting.");
 
     const sourceBlob = new Blob([decodeBase64(source_image_base64)], { type: 'image/png' });
     const maskBlob = new Blob([decodeBase64(mask_image_base64)], { type: 'image/png' });
@@ -74,7 +98,7 @@ serve(async (req) => {
     const finalWorkflow = JSON.parse(JSON.stringify(workflowTemplate));
     finalWorkflow['17'].inputs.image = sourceFilename;
     finalWorkflow['45'].inputs.image = maskFilename;
-    finalWorkflow['23'].inputs.text = prompt;
+    finalWorkflow['23'].inputs.text = finalPrompt;
     if (denoise) finalWorkflow['3'].inputs.denoise = denoise;
     if (style_strength) finalWorkflow['51'].inputs.strength = style_strength;
 
@@ -83,7 +107,6 @@ serve(async (req) => {
       const referenceFilename = await uploadImageToComfyUI(sanitizedAddress, referenceBlob, 'reference.png');
       finalWorkflow['52'].inputs.image = referenceFilename;
     } else {
-      // If no reference is provided, we must disconnect the style model nodes
       delete finalWorkflow['38'].inputs.positive;
       finalWorkflow['38'].inputs.positive = ["26", 0];
       delete finalWorkflow['48'];
@@ -108,7 +131,7 @@ serve(async (req) => {
       comfyui_address: sanitizedAddress,
       comfyui_prompt_id: data.prompt_id,
       status: 'queued',
-      metadata: { prompt, denoise, style_strength }
+      metadata: { prompt: finalPrompt, denoise, style_strength }
     }).select('id').single();
     if (insertError) throw insertError;
 

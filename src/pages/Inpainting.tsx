@@ -26,6 +26,7 @@ import ReactMarkdown from "react-markdown";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { optimizeImage } from "@/lib/utils";
 import { useImageTransferStore } from "@/store/imageTransferStore";
+import { RealtimeChannel } from "@supabase/supabase-js";
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -88,6 +89,7 @@ const Inpainting = () => {
   const { showImage } = useImagePreview();
   const queryClient = useQueryClient();
   const { consumeImageUrl } = useImageTransferStore();
+  const channelRef = useRef<RealtimeChannel | null>(null);
 
   const [sourceImageFile, setSourceImageFile] = useState<File | null>(null);
   const [referenceImageFile, setReferenceImageFile] = useState<File | null>(null);
@@ -98,6 +100,7 @@ const Inpainting = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isDebugModalOpen, setIsDebugModalOpen] = useState(false);
   const [isAutoPromptEnabled, setIsAutoPromptEnabled] = useState(true);
+  const [isGarmentMode, setIsGarmentMode] = useState(true);
   const [isGuideOpen, setIsGuideOpen] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
 
@@ -113,7 +116,7 @@ const Inpainting = () => {
     queryKey: ['inpaintingJobs', session?.user?.id],
     queryFn: async () => {
       if (!session?.user) return [];
-      const { data, error } = await supabase.from('mira-agent-bitstudio-jobs').select('*').eq('user_id', session.user.id).eq('mode', 'inpaint').order('created_at', { ascending: false }).limit(20);
+      const { data, error } = await supabase.from('mira-agent-inpainting-jobs').select('*').eq('user_id', session.user.id).order('created_at', { ascending: false }).limit(20);
       if (error) throw error;
       return data;
     },
@@ -168,6 +171,24 @@ const Inpainting = () => {
     }
   }, [selectedJob]);
 
+  useEffect(() => {
+    if (!session?.user?.id) return;
+    if (channelRef.current) supabase.removeChannel(channelRef.current);
+
+    const channel = supabase.channel(`inpainting-jobs-tracker-${session.user.id}`)
+      .on<BitStudioJob>('postgres_changes', { event: '*', schema: 'public', table: 'mira-agent-inpainting-jobs', filter: `user_id=eq.${session.user.id}` },
+        (payload) => {
+          console.log('[Inpainting Realtime] Received payload:', payload);
+          queryClient.invalidateQueries({ queryKey: ['inpaintingJobs', session.user.id] });
+        }
+      ).subscribe();
+    channelRef.current = channel;
+
+    return () => {
+      if (channelRef.current) supabase.removeChannel(channelRef.current);
+    };
+  }, [session?.user?.id, supabase, queryClient]);
+
   const handleFileSelect = (file: File | null) => {
     if (file && file.type.startsWith("image/")) {
       resetForm();
@@ -195,17 +216,13 @@ const Inpainting = () => {
       const optimizedSource = await optimizeImage(sourceImageFile, { forceOriginalDimensions: true });
 
       const payload: any = {
-        mode: 'inpaint',
-        full_source_image_base64: await fileToBase64(optimizedSource),
+        source_image_base64: await fileToBase64(optimizedSource),
         mask_image_base64: maskImage.split(',')[1],
         prompt: isAutoPromptEnabled ? "" : prompt,
         auto_prompt_enabled: isAutoPromptEnabled,
-        is_garment_mode: true,
+        is_garment_mode: isGarmentMode,
         user_id: session?.user.id,
-        num_attempts: numAttempts,
         denoise: denoise,
-        resolution: isHighQuality ? 'high' : 'standard',
-        mask_expansion_percent: maskExpansion,
       };
 
       if (referenceImageFile) {
@@ -213,12 +230,12 @@ const Inpainting = () => {
         payload.reference_image_base64 = await fileToBase64(optimizedReference);
       }
 
-      const { error } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', { body: payload });
+      const { error } = await supabase.functions.invoke('MIRA-AGENT-proxy-inpainting', { body: payload });
 
       if (error) throw error;
 
       dismissToast(toastId);
-      showSuccess(`${numAttempts} inpainting job(s) started! You can track progress in the sidebar.`);
+      showSuccess("Inpainting job started! You can track progress in the sidebar.");
       queryClient.invalidateQueries({ queryKey: ['activeJobs'] });
       queryClient.invalidateQueries({ queryKey: ['inpaintingJobs', session?.user?.id] });
       resetForm();
@@ -300,7 +317,7 @@ const Inpainting = () => {
                             </div>
                           </div>
                           <div>
-                            <Label>{t('garmentReference')}</Label>
+                            <Label>{t('referenceImage')}</Label>
                             <div className="mt-1 aspect-square w-full bg-muted rounded-md overflow-hidden">
                               <SecureImageDisplay imageUrl={selectedJob.source_garment_image_url} alt="Source Garment" />
                             </div>
@@ -328,6 +345,10 @@ const Inpainting = () => {
                             <div className="flex items-center space-x-2">
                               <Switch id="auto-prompt-pro" checked={isAutoPromptEnabled} onCheckedChange={setIsAutoPromptEnabled} />
                               <Label htmlFor="auto-prompt-pro">{t('autoGenerate')}</Label>
+                            </div>
+                            <div className="flex items-center space-x-2">
+                              <Switch id="garment-mode" checked={isGarmentMode} onCheckedChange={setIsGarmentMode} disabled={!isAutoPromptEnabled} />
+                              <Label htmlFor="garment-mode">{t('garmentMode')}</Label>
                             </div>
                             <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t('promptPlaceholderVTO')} rows={4} disabled={isAutoPromptEnabled} />
                           </AccordionContent>
