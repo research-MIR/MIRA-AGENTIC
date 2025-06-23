@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const corsHeaders = {
@@ -9,146 +9,209 @@ const corsHeaders = {
 
 const UPLOAD_BUCKET = 'mira-agent-user-uploads';
 
-const workflowTemplate = {
-  "3": { "inputs": { "seed": 1062983749859779, "steps": 20, "cfg": 1, "sampler_name": "euler", "scheduler": "normal", "denoise": 1, "model": ["39", 0], "positive": ["38", 0], "negative": ["38", 1], "latent_image": ["38", 2] }, "class_type": "KSampler", "_meta": { "title": "KSampler" } },
-  "7": { "inputs": { "text": "", "clip": ["34", 0] }, "class_type": "CLIPTextEncode", "_meta": { "title": "CLIP Text Encode (Negative Prompt)" } },
-  "8": { "inputs": { "samples": ["3", 0], "vae": ["32", 0] }, "class_type": "VAEDecode", "_meta": { "title": "VAE Decode" } },
-  "9": { "inputs": { "filename_prefix": "ComfyUI_Inpaint", "images": ["8", 0] }, "class_type": "SaveImage", "_meta": { "title": "Save Image" } },
-  "17": { "inputs": { "image": "source_image.png" }, "class_type": "LoadImage", "_meta": { "title": "Input Image" } },
-  "23": { "inputs": { "text": "Wearing pink Maxi Dress", "clip": ["34", 0] }, "class_type": "CLIPTextEncode", "_meta": { "title": "PROMPT" } },
-  "26": { "inputs": { "guidance": 30, "conditioning": ["23", 0] }, "class_type": "FluxGuidance", "_meta": { "title": "FluxGuidance" } },
-  "31": { "inputs": { "unet_name": "fluxfill.safetensors", "weight_dtype": "default" }, "class_type": "UNETLoader", "_meta": { "title": "Load Diffusion Model" } },
-  "32": { "inputs": { "vae_name": "ae.safetensors" }, "class_type": "VAELoader", "_meta": { "title": "Load VAE" } },
-  "34": { "inputs": { "clip_name1": "clip_l.safetensors", "clip_name2": "t5xxl_fp16.safetensors", "type": "flux", "device": "default" }, "class_type": "DualCLIPLoader", "_meta": { "title": "DualCLIPLoader" } },
-  "38": { "inputs": { "noise_mask": false, "positive": ["51", 0], "negative": ["7", 0], "vae": ["32", 0], "pixels": ["17", 0], "mask": ["47", 0] }, "class_type": "InpaintModelConditioning", "_meta": { "title": "InpaintModelConditioning" } },
-  "39": { "inputs": { "model": ["31", 0] }, "class_type": "DifferentialDiffusion", "_meta": { "title": "Differential Diffusion" } },
-  "45": { "inputs": { "image": "mask_image.png" }, "class_type": "LoadImage", "_meta": { "title": "Input Mask" } },
-  "47": { "inputs": { "channel": "red", "image": ["45", 0] }, "class_type": "ImageToMask", "_meta": { "title": "Convert Image to Mask" } },
-  "48": { "inputs": { "style_model_name": "fluxcontrolnetupscale.safetensors" }, "class_type": "StyleModelLoader", "_meta": { "title": "Load Style Model" } },
-  "49": { "inputs": { "clip_name": "sigclip_vision_patch14_384.safetensors" }, "class_type": "CLIPVisionLoader", "_meta": { "title": "Load CLIP Vision" } },
-  "50": { "inputs": { "crop": "center", "clip_vision": ["49", 0], "image": ["52", 0] }, "class_type": "CLIPVisionEncode", "_meta": { "title": "CLIP Vision Encode" } },
-  "51": { "inputs": { "strength": 0.3, "strength_type": "attn_bias", "conditioning": ["26", 0], "style_model": ["48", 0], "clip_vision_output": ["50", 0] }, "class_type": "StyleModelApply", "_meta": { "title": "Apply Style Model" } },
-  "52": { "inputs": { "image": "reference_image.png" }, "class_type": "LoadImage", "_meta": { "title": "Input Reference" } }
-};
-
-async function uploadImageToComfyUI(comfyUiUrl: string, imageBlob: Blob, filename: string) {
+async function uploadToBitStudio(fileBlob: Blob, type: 'inpaint-base' | 'inpaint-mask' | 'inpaint-reference', filename: string): Promise<string> {
+  const BITSTUDIO_API_KEY = Deno.env.get('BITSTUDIO_API_KEY');
+  const BITSTUDIO_API_BASE = 'https://api.bitstudio.ai';
   const formData = new FormData();
-  formData.append('image', imageBlob, filename);
-  formData.append('overwrite', 'true');
-  const uploadUrl = `${comfyUiUrl}/upload/image`;
-  const response = await fetch(uploadUrl, { method: 'POST', body: formData });
-  if (!response.ok) throw new Error(`ComfyUI upload failed: ${await response.text()}`);
-  const data = await response.json();
-  return data.name;
+  formData.append('file', fileBlob, filename);
+  formData.append('type', type);
+
+  const response = await fetch(`${BITSTUDIO_API_BASE}/images`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}` },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`BitStudio upload failed for type ${type}: ${errorText}`);
+  }
+  const result = await response.json();
+  if (!result.id) throw new Error(`BitStudio upload for ${type} did not return an ID.`);
+  return result.id;
 }
 
 serve(async (req) => {
-  const COMFYUI_ENDPOINT_URL = Deno.env.get('COMFYUI_ENDPOINT_URL');
+  const requestId = `inpainting-proxy-${Date.now()}`;
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
-  if (!COMFYUI_ENDPOINT_URL) throw new Error("COMFYUI_ENDPOINT_URL is not set.");
 
   const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
-  const sanitizedAddress = COMFYUI_ENDPOINT_URL.replace(/\/+$/, "");
 
   try {
     const {
       user_id,
       source_image_base64,
       mask_image_base64,
-      reference_image_base64, // Optional
+      reference_image_base64,
       prompt,
-      is_garment_mode,
       denoise,
-      style_strength
+      is_high_quality,
+      mask_expansion_percent,
+      num_attempts = 1,
     } = await req.json();
 
     if (!user_id || !source_image_base64 || !mask_image_base64) {
       throw new Error("Missing required parameters: user_id, source_image_base64, and mask_image_base64 are required.");
     }
 
+    const { createCanvas, loadImage } = await import('https://deno.land/x/canvas@v1.4.1/mod.ts');
+    
+    let fullSourceImage = await loadImage(`data:image/png;base64,${source_image_base64}`);
+    const MAX_LONG_SIDE = 3000;
+    const longestSide = Math.max(fullSourceImage.width(), fullSourceImage.height());
+
+    if (longestSide > MAX_LONG_SIDE) {
+      const scaleFactor = MAX_LONG_SIDE / longestSide;
+      const newWidth = Math.round(fullSourceImage.width() * scaleFactor);
+      const newHeight = Math.round(fullSourceImage.height() * scaleFactor);
+      const resizeCanvas = createCanvas(newWidth, newHeight);
+      const resizeCtx = resizeCanvas.getContext('2d');
+      resizeCtx.drawImage(fullSourceImage, 0, 0, newWidth, newHeight);
+      const resizedBase64 = resizeCanvas.toDataURL().split(',')[1];
+      fullSourceImage = await loadImage(`data:image/png;base64,${resizedBase64}`);
+    }
+
+    const rawMaskImage = await loadImage(`data:image/jpeg;base64,${mask_image_base64}`);
+    const dilatedCanvas = createCanvas(rawMaskImage.width(), rawMaskImage.height());
+    const dilateCtx = dilatedCanvas.getContext('2d');
+    const dilationAmount = Math.max(10, Math.round(rawMaskImage.width() * (mask_expansion_percent / 100)));
+    dilateCtx.filter = `blur(${dilationAmount}px)`;
+    dilateCtx.drawImage(rawMaskImage, 0, 0);
+    dilateCtx.filter = 'none';
+    
+    const dilatedImageData = dilateCtx.getImageData(0, 0, dilatedCanvas.width, dilatedCanvas.height);
+    const data = dilatedImageData.data;
+    let minX = dilatedCanvas.width, minY = dilatedCanvas.height, maxX = 0, maxY = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i] > 128) {
+        data[i] = data[i+1] = data[i+2] = 255;
+        const x = (i / 4) % dilatedCanvas.width;
+        const y = Math.floor((i / 4) / dilatedCanvas.width);
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      } else {
+        data[i] = data[i+1] = data[i+2] = 0;
+      }
+    }
+    dilateCtx.putImageData(dilatedImageData, 0, 0);
+
+    if (maxX < minX || maxY < minY) throw new Error("The provided mask is empty or invalid.");
+
+    const padding = Math.round(Math.max(maxX - minX, maxY - minY) * 0.05);
+    const x1 = Math.max(0, minX - padding);
+    const y1 = Math.max(0, minY - padding);
+    const x2 = Math.min(fullSourceImage.width(), maxX + padding);
+    const y2 = Math.min(fullSourceImage.height(), maxY + padding);
+    const width = x2 - x1;
+    const height = y2 - y1;
+    if (width <= 0 || height <= 0) throw new Error(`Invalid bounding box dimensions: ${width}x${height}.`);
+    const bbox = { x: x1, y: y1, width, height };
+
+    const croppedCanvas = createCanvas(bbox.width, bbox.height);
+    const cropCtx = croppedCanvas.getContext('2d');
+    cropCtx.drawImage(fullSourceImage, bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
+    const croppedSourceBase64 = croppedCanvas.toDataURL().split(',')[1];
+
+    const croppedMaskCanvas = createCanvas(bbox.width, bbox.height);
+    const cropMaskCtx = croppedMaskCanvas.getContext('2d');
+    cropMaskCtx.drawImage(dilatedCanvas, bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
+    const croppedDilatedMaskBase64 = croppedMaskCanvas.toDataURL().split(',')[1];
+
+    let sourceToSendBase64 = croppedSourceBase64;
+    let maskToSendBase64 = croppedDilatedMaskBase64;
+    
+    const TARGET_LONG_SIDE = 768;
+    const cropLongestSide = Math.max(bbox.width, bbox.height);
+    if (cropLongestSide < TARGET_LONG_SIDE) {
+        const upscaleFactor = TARGET_LONG_SIDE / cropLongestSide;
+        const { data: upscaleData, error: upscaleError } = await supabase.functions.invoke('MIRA-AGENT-tool-upscale-crop', {
+            body: { source_crop_base64: croppedSourceBase64, mask_crop_base64: croppedDilatedMaskBase64, upscale_factor: upscaleFactor }
+        });
+        if (upscaleError) throw new Error(`Upscaling failed: ${upscaleError.message}`);
+        sourceToSendBase64 = upscaleData.upscaled_source_base64;
+        maskToSendBase64 = upscaleData.upscaled_mask_base64;
+    }
+
     let finalPrompt = prompt;
     if (!finalPrompt || finalPrompt.trim() === "") {
-        console.log(`[InpaintingProxy] No prompt provided. Auto-generating...`);
         const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-prompt-helper', {
           body: { 
-            person_image_base64: source_image_base64, 
+            person_image_base64: sourceToSendBase64, 
             person_image_mime_type: 'image/png',
             garment_image_base64: reference_image_base64,
             garment_image_mime_type: 'image/png',
-            is_garment_mode: is_garment_mode ?? false
+            is_garment_mode: false
           }
         });
         if (promptError) throw new Error(`Auto-prompt generation failed: ${promptError.message}`);
         finalPrompt = promptData.final_prompt;
-        console.log(`[InpaintingProxy] Auto-prompt generated successfully.`);
     }
 
     if (!finalPrompt) throw new Error("Prompt is required for inpainting.");
 
-    const sourceBlob = new Blob([decodeBase64(source_image_base64)], { type: 'image/png' });
-    const maskBlob = new Blob([decodeBase64(mask_image_base64)], { type: 'image/png' });
-    
-    // Upload source to Supabase storage to get a persistent URL for the thumbnail
-    const sourceStoragePath = `${user_id}/inpainting-source/${Date.now()}_source.png`;
-    const { error: sourceUploadError } = await supabase.storage.from(UPLOAD_BUCKET).upload(sourceStoragePath, sourceBlob, { upsert: true });
-    if (sourceUploadError) throw new Error(`Failed to upload source image to storage: ${sourceUploadError.message}`);
-    const { data: { publicUrl: sourceImageUrlForMetadata } } = supabase.storage.from(UPLOAD_BUCKET).getPublicUrl(sourceStoragePath);
+    const jobIds: string[] = [];
+    for (let i = 0; i < num_attempts; i++) {
+      const sourceBlob = new Blob([decodeBase64(sourceToSendBase64)], { type: 'image/png' });
+      const maskBlob = new Blob([decodeBase64(maskToSendBase64)], { type: 'image/png' });
 
-    const [sourceFilename, maskFilename] = await Promise.all([
-      uploadImageToComfyUI(sanitizedAddress, sourceBlob, 'source.png'),
-      uploadImageToComfyUI(sanitizedAddress, maskBlob, 'mask.png')
-    ]);
+      const uploadPromises: Promise<string | null>[] = [
+        uploadToBitStudio(sourceBlob, 'inpaint-base', `source_${i}.png`),
+        uploadToBitStudio(maskBlob, 'inpaint-mask', `mask_${i}.png`)
+      ];
+      if (reference_image_base64) {
+        const referenceBlob = new Blob([decodeBase64(reference_image_base64)], { type: 'image/png' });
+        uploadPromises.push(uploadToBitStudio(referenceBlob, 'inpaint-reference', `reference_${i}.png`));
+      } else {
+        uploadPromises.push(Promise.resolve(null));
+      }
+      const [sourceImageId, maskImageId, referenceImageId] = await Promise.all(uploadPromises);
 
-    const finalWorkflow = JSON.parse(JSON.stringify(workflowTemplate));
-    finalWorkflow['17'].inputs.image = sourceFilename;
-    finalWorkflow['45'].inputs.image = maskFilename;
-    finalWorkflow['23'].inputs.text = finalPrompt;
-    if (denoise) finalWorkflow['3'].inputs.denoise = denoise;
-    if (style_strength) finalWorkflow['51'].inputs.strength = style_strength;
-
-    if (reference_image_base64) {
-      const referenceBlob = new Blob([decodeBase64(reference_image_base64)], { type: 'image/png' });
-      const referenceFilename = await uploadImageToComfyUI(sanitizedAddress, referenceBlob, 'reference.png');
-      finalWorkflow['52'].inputs.image = referenceFilename;
-    } else {
-      delete finalWorkflow['38'].inputs.positive;
-      finalWorkflow['38'].inputs.positive = ["26", 0];
-      delete finalWorkflow['48'];
-      delete finalWorkflow['49'];
-      delete finalWorkflow['50'];
-      delete finalWorkflow['51'];
-      delete finalWorkflow['52'];
+      const inpaintUrl = `${Deno.env.get('BITSTUDIO_API_BASE')}/images/${sourceImageId}/inpaint`;
+      const inpaintPayload: any = { 
+          mask_image_id: maskImageId, 
+          prompt: finalPrompt, 
+          resolution: is_high_quality ? 'high' : 'standard', 
+          denoise,
+          seed: Math.floor(Math.random() * 1000000000)
+      };
+      if (referenceImageId) inpaintPayload.reference_image_id = referenceImageId;
+      
+      const inpaintResponse = await fetch(inpaintUrl, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${Deno.env.get('BITSTUDIO_API_KEY')}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(inpaintPayload)
+      });
+      const responseText = await inpaintResponse.text();
+      if (!inpaintResponse.ok) throw new Error(`BitStudio inpainting request failed: ${responseText}`);
+      
+      const inpaintResult = JSON.parse(responseText);
+      const newVersion = inpaintResult.versions?.[0];
+      if (!newVersion || !newVersion.id) throw new Error("BitStudio did not return a valid version object.");
+      
+      const { data: newJob, error: insertError } = await supabase.from('mira-agent-bitstudio-jobs').insert({
+        user_id, mode: 'inpaint', status: 'queued', bitstudio_task_id: inpaintResult.id,
+        metadata: {
+          bitstudio_version_id: newVersion.id,
+          full_source_image_base64: source_image_base64,
+          cropped_source_image_base64: croppedSourceBase64,
+          cropped_dilated_mask_base64: croppedDilatedMaskBase64,
+          bbox,
+          prompt_used: finalPrompt,
+        }
+      }).select('id').single();
+      if (insertError) throw insertError;
+      jobIds.push(newJob.id);
     }
 
-    const queueUrl = `${sanitizedAddress}/prompt`;
-    const response = await fetch(queueUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: finalWorkflow })
+    jobIds.forEach(jobId => {
+      supabase.functions.invoke('MIRA-AGENT-poller-bitstudio', { body: { job_id: jobId } }).catch(console.error);
     });
-    if (!response.ok) throw new Error(`ComfyUI server error: ${await response.text()}`);
-    const data = await response.json();
-    if (!data.prompt_id) throw new Error("ComfyUI did not return a prompt_id.");
 
-    const { data: newJob, error: insertError } = await supabase.from('mira-agent-inpainting-jobs').insert({
-      user_id,
-      comfyui_address: sanitizedAddress,
-      comfyui_prompt_id: data.prompt_id,
-      status: 'queued',
-      metadata: { 
-        prompt: finalPrompt, 
-        denoise, 
-        style_strength,
-        source_image_url: sourceImageUrlForMetadata 
-      }
-    }).select('id').single();
-    if (insertError) throw insertError;
-
-    supabase.functions.invoke('MIRA-AGENT-poller-inpainting', { body: { job_id: newJob.id } }).catch(console.error);
-
-    return new Response(JSON.stringify({ success: true, jobId: newJob.id }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ success: true, jobIds }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (error) {
-    console.error("[InpaintingProxy] Error:", error);
+    console.error(`[InpaintingProxy][${requestId}] Error:`, error);
     return new Response(JSON.stringify({ error: error.message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
   }
 });
