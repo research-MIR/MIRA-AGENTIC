@@ -2,6 +2,7 @@ import { useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Send, Paperclip, X } from "lucide-react";
+import { useLanguage } from "@/context/LanguageContext";
 
 interface UploadedFile {
   name: string;
@@ -33,6 +34,7 @@ export const PromptInput = ({
 }: PromptInputProps) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const onSendMessageRef = useRef(onSendMessage);
+  const { t } = useLanguage();
 
   useEffect(() => {
     onSendMessageRef.current = onSendMessage;
@@ -58,7 +60,7 @@ export const PromptInput = ({
           id="file-upload"
           multiple
         />
-        <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()} disabled={true}>
+        <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()} disabled={isJobRunning || isSending}>
           <Paperclip className="h-4 w-4" />
         </Button>
       </div>
@@ -67,10 +69,10 @@ export const PromptInput = ({
           value={input}
           onChange={(e) => onInputChange(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Chat is currently disabled for maintenance."
+          placeholder={t('promptPlaceholder')}
           className="pr-4 min-h-[40px] max-h-40"
           rows={1}
-          disabled={true}
+          disabled={isJobRunning || isSending}
         />
         {uploadedFiles.length > 0 && (
           <div className="absolute right-2 top-2 flex items-center gap-2 bg-muted p-1 rounded-md text-sm max-w-[50%]">
@@ -98,7 +100,7 @@ export const PromptInput = ({
         )}
       </div>
       <div id="send-button">
-        <Button type="button" onClick={onSendMessage} disabled={true}>
+        <Button type="button" onClick={onSendMessage} disabled={isJobRunning || isSending || (!input.trim() && uploadedFiles.length === 0)}>
           <Send className="h-4 w-4" />
           <span className="sr-only">Send</span>
         </Button>
