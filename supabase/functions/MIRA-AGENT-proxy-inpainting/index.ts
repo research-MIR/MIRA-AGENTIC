@@ -49,10 +49,6 @@ async function uploadToSupabaseStorage(supabase: SupabaseClient, blob: Blob, use
     return publicUrl;
 }
 
-function createDummyWhiteImageBase64(): string {
-    return "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/wcAAwAB/epv2AAAAABJRU5ErkJggg==";
-}
-
 serve(async (req) => {
   const COMFYUI_ENDPOINT_URL = Deno.env.get('COMFYUI_ENDPOINT_URL');
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
@@ -181,16 +177,15 @@ serve(async (req) => {
     if (denoise) finalWorkflow['3'].inputs.denoise = denoise;
 
     if (reference_image_base64) {
+        console.log(`[InpaintingProxy] Reference image provided. Using full style model workflow.`);
         const referenceBlob = new Blob([decodeBase64(reference_image_base64)], { type: 'image/png' });
         referenceImageUrl = await uploadToSupabaseStorage(supabase, referenceBlob, user_id, 'reference.png');
         const referenceFilename = await uploadImageToComfyUI(sanitizedAddress, referenceBlob, 'reference.png');
         finalWorkflow['52'].inputs.image = referenceFilename;
         if (style_strength) finalWorkflow['51'].inputs.strength = style_strength;
     } else {
-        const dummyBlob = new Blob([decodeBase64(createDummyWhiteImageBase64())], { type: 'image/png' });
-        const dummyFilename = await uploadImageToComfyUI(sanitizedAddress, dummyBlob, 'dummy_white.png');
-        finalWorkflow['52'].inputs.image = dummyFilename;
-        finalWorkflow['51'].inputs.strength = 0.0;
+        console.log(`[InpaintingProxy] No reference image. Bypassing style model nodes.`);
+        finalWorkflow['38'].inputs.positive = ["26", 0];
     }
 
     const queueUrl = `${sanitizedAddress}/prompt`;
