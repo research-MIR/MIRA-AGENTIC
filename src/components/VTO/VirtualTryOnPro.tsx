@@ -105,7 +105,6 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
   const [isLoading, setIsLoading] = useState(false);
   const [isDebugModalOpen, setIsDebugModalOpen] = useState(false);
   const [isAutoPromptEnabled, setIsAutoPromptEnabled] = useState(true);
-  const [isGarmentMode, setIsGarmentMode] = useState(true);
   const [isGuideOpen, setIsGuideOpen] = useState(false);
 
   const [numAttempts, setNumAttempts] = useState(1);
@@ -212,7 +211,7 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
         mask_image_base64: maskImage.split(',')[1],
         prompt: isAutoPromptEnabled ? "" : prompt,
         auto_prompt_enabled: isAutoPromptEnabled,
-        is_garment_mode: isGarmentMode,
+        is_garment_mode: true, // Always use garment mode
         user_id: session?.user.id,
         num_attempts: numAttempts,
         denoise: denoise,
@@ -325,11 +324,7 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
                         <AccordionContent className="pt-4 space-y-4">
                           <div className="grid grid-cols-2 gap-4">
                             <ImageUploader onFileSelect={handleFileSelect} title={t('sourceImage')} imageUrl={sourceImageUrl} onClear={handleClearSourceImage} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
-                            <ImageUploader onFileSelect={setReferenceImageFile} title={isGarmentMode ? t('garmentReference') : t('referenceImage')} imageUrl={referenceImageUrl} onClear={() => setReferenceImageFile(null)} icon={isGarmentMode ? <Shirt className="h-8 w-8 text-muted-foreground" /> : <Palette className="h-8 w-8 text-muted-foreground" />} />
-                          </div>
-                          <div className="flex items-center space-x-2 mt-4">
-                            <Switch id="garment-mode" checked={isGarmentMode} onCheckedChange={setIsGarmentMode} />
-                            <Label htmlFor="garment-mode">{t('garmentMode')}</Label>
+                            <ImageUploader onFileSelect={setReferenceImageFile} title={t('garmentReference')} imageUrl={referenceImageUrl} onClear={() => setReferenceImageFile(null)} icon={<Shirt className="h-8 w-8 text-muted-foreground" />} />
                           </div>
                         </AccordionContent>
                       </AccordionItem>
