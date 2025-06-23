@@ -7,6 +7,8 @@ import { BranchPrompt } from "./BranchPrompt";
 import { ChatHeader } from "./ChatHeader";
 import { useChatManager } from "@/hooks/useChatManager";
 import { useFileUpload } from "@/hooks/useFileUpload";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { AlertTriangle } from "lucide-react";
 
 export const ChatInterface = () => {
   const {
@@ -80,6 +82,13 @@ export const ChatInterface = () => {
 
       <div className="flex-1 overflow-y-auto">
         <div className="p-4 md:p-6 space-y-4">
+          <Alert variant="destructive" className="bg-yellow-50 border-yellow-200 text-yellow-800 dark:bg-yellow-900/20 dark:border-yellow-800/40 dark:text-yellow-300">
+            <AlertTriangle className="h-4 w-4 !text-yellow-500" />
+            <AlertTitle>In Manutenzione</AlertTitle>
+            <AlertDescription>
+              Questa sezione è attualmente in manutenzione. Alcune funzionalità potrebbero non essere disponibili.
+            </AlertDescription>
+          </Alert>
           <MessageList 
             messages={messages} 
             jobId={jobId} 
