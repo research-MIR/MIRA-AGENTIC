@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, ReactNode } from 'react';
+import { ImagePreviewModal } from '@/components/ImagePreviewModal';
 
 export interface PreviewImage {
   url: string;
@@ -27,10 +28,9 @@ export const useImagePreview = () => {
 
 interface ImagePreviewProviderProps {
   children: ReactNode;
-  modal: (data: PreviewData | null, onClose: () => void) => ReactNode;
 }
 
-export const ImagePreviewProvider = ({ children, modal }: ImagePreviewProviderProps) => {
+export const ImagePreviewProvider = ({ children }: ImagePreviewProviderProps) => {
   const [previewData, setPreviewData] = useState<PreviewData | null>(null);
 
   const showImage = (data: PreviewData) => setPreviewData(data);
@@ -41,7 +41,7 @@ export const ImagePreviewProvider = ({ children, modal }: ImagePreviewProviderPr
   return (
     <ImagePreviewContext.Provider value={value}>
       {children}
-      {modal(previewData, hideImage)}
+      <ImagePreviewModal data={previewData} onClose={hideImage} />
     </ImagePreviewContext.Provider>
   );
 };
