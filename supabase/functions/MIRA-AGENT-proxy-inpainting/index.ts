@@ -55,7 +55,6 @@ serve(async (req) => {
       mask_image_base64,
       reference_image_base64, // Optional
       prompt,
-      auto_prompt_enabled,
       is_garment_mode,
       denoise,
       style_strength
@@ -64,20 +63,17 @@ serve(async (req) => {
     if (!user_id || !source_image_base64 || !mask_image_base64) {
       throw new Error("Missing required parameters: user_id, source_image_base64, and mask_image_base64 are required.");
     }
-    if (!auto_prompt_enabled && !prompt) {
-      throw new Error("A prompt is required when auto-prompt is disabled.");
-    }
 
     let finalPrompt = prompt;
-    if (auto_prompt_enabled) {
-        console.log(`[InpaintingProxy] Auto-prompt is enabled. Generating prompt...`);
+    if (!finalPrompt || finalPrompt.trim() === "") {
+        console.log(`[InpaintingProxy] No prompt provided. Auto-generating...`);
         const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-prompt-helper', {
           body: { 
             person_image_base64: source_image_base64, 
             person_image_mime_type: 'image/png',
             garment_image_base64: reference_image_base64,
             garment_image_mime_type: 'image/png',
-            is_garment_mode: is_garment_mode ?? false
+            is_garment_mode: is_garment_mode ?? true
           }
         });
         if (promptError) throw new Error(`Auto-prompt generation failed: ${promptError.message}`);

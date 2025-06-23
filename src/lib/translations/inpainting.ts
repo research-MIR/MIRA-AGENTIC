@@ -80,6 +80,8 @@ export const inpaintingTranslations = {
     promptAppendixPairPlaceholder: "es. indossa jeans chiari",
     garmentMode: "Modalità Indumento",
     referenceImage: "Immagine di Riferimento",
+    promptOptional: "Prompt (Opzionale)",
+    promptPlaceholderInpainting: "Descrivi cosa vuoi cambiare nell'area mascherata. Lascia vuoto per lasciare che l'IA decida in base all'immagine di riferimento.",
     inpaintingGuideContent: `
 ### Strategie per Risultati Migliori
 
@@ -201,6 +203,8 @@ L'inpainting è uno strumento potente per sostituire parti di un'immagine, ma ri
     promptAppendixPairPlaceholder: "e.g. wearing light jeans",
     garmentMode: "Garment Mode",
     referenceImage: "Reference Image",
+    promptOptional: "Prompt (Optional)",
+    promptPlaceholderInpainting: "Describe what you want to change in the masked area. Leave blank to let the AI decide based on the reference image.",
     inpaintingGuideContent: `
 ### Strategies for Better Results
 
@@ -234,11 +238,11 @@ Inpainting is a powerful tool for replacing parts of an image, but it requires a
   - **Low Denoise (e.g., 0.5-0.7):** Ideal when the shape of the original garment is similar to the desired one. Great for texture or color changes, helps to blend the result better.
   - **High Denoise (e.g., 0.8-1.0):** Gives the AI more creative freedom. Use this if you want to significantly change the shape of the garment (e.g., turning a t-shirt into a jacket) or if the lower setting isn't strong enough.
 
-#### 5. PRO Settings Explained
-- **Number of Images:** Generate multiple variations of the same inpainting request. Useful for getting different interpretations from the AI.
-- **High Resolution:** Increases the output resolution. Takes longer but produces higher quality results.
-- **Denoise Strength:** Controls the AI's creative freedom. A low value (e.g., 0.5) preserves the original structure, ideal for texture changes. A high value (e.g., 0.9) allows the AI to be more creative, useful for changing the shape of a garment.
-- **Mask Expansion:** Softens the edges of the mask, creating a more natural blend between the generated area and the original image. Increase this value if you notice sharp edges in your result.
+#### 5. Impostazioni PRO Spiegate
+- **Numero di Tentativi:** Genera più variazioni della stessa richiesta di inpainting. Utile per ottenere diverse interpretazioni dall'IA.
+- **Alta Risoluzione:** Aumenta la risoluzione dell'output. Richiede più tempo ma produce risultati di qualità superiore.
+- **Intensità Denoise:** Controlla la libertà creativa dell'IA. Un valore basso (es. 0.5) preserva la struttura originale, ideale per texture changes. Un valore alto (es. 0.9) permette all'IA di essere più creativa, utile per cambiare la forma di un indumento.
+- **Espansione Maschera:** Ammorbidisce i bordi della maschera, creando una fusione più naturale tra l'area generata e l'immagine originale. Aumenta questo valore se noti bordi netti nel risultato.
 `
   },
 };

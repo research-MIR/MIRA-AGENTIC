@@ -99,7 +99,6 @@ const Inpainting = () => {
   const [resetTrigger, setResetTrigger] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [isDebugModalOpen, setIsDebugModalOpen] = useState(false);
-  const [isAutoPromptEnabled, setIsAutoPromptEnabled] = useState(true);
   const [isGarmentMode, setIsGarmentMode] = useState(true);
   const [isGuideOpen, setIsGuideOpen] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
@@ -205,10 +204,7 @@ const Inpainting = () => {
       showError("Please provide a source image and draw a mask.");
       return;
     }
-    if (!isAutoPromptEnabled && !prompt.trim()) {
-      showError("Please provide a prompt or enable auto-prompt.");
-      return;
-    }
+    
     setIsLoading(true);
     const toastId = showLoading(t('sendingJob'));
 
@@ -218,8 +214,7 @@ const Inpainting = () => {
       const payload: any = {
         source_image_base64: await fileToBase64(optimizedSource),
         mask_image_base64: maskImage.split(',')[1],
-        prompt: isAutoPromptEnabled ? "" : prompt,
-        auto_prompt_enabled: isAutoPromptEnabled,
+        prompt: prompt,
         is_garment_mode: isGarmentMode,
         user_id: session?.user.id,
         denoise: denoise,
@@ -343,14 +338,10 @@ const Inpainting = () => {
                           <AccordionTrigger>{t('promptSectionTitle')}</AccordionTrigger>
                           <AccordionContent className="pt-4 space-y-2">
                             <div className="flex items-center space-x-2">
-                              <Switch id="auto-prompt-pro" checked={isAutoPromptEnabled} onCheckedChange={setIsAutoPromptEnabled} />
-                              <Label htmlFor="auto-prompt-pro">{t('autoGenerate')}</Label>
-                            </div>
-                            <div className="flex items-center space-x-2">
-                              <Switch id="garment-mode" checked={isGarmentMode} onCheckedChange={setIsGarmentMode} disabled={!isAutoPromptEnabled} />
+                              <Switch id="garment-mode" checked={isGarmentMode} onCheckedChange={setIsGarmentMode} />
                               <Label htmlFor="garment-mode">{t('garmentMode')}</Label>
                             </div>
-                            <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t('promptPlaceholderVTO')} rows={4} disabled={isAutoPromptEnabled} />
+                            <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t('promptPlaceholderInpainting')} rows={4} />
                           </AccordionContent>
                         </AccordionItem>
                         <AccordionItem value="item-3">
