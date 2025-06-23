@@ -47,6 +47,8 @@ interface BitStudioJob {
   metadata?: {
     debug_assets?: any;
     prompt_used?: string;
+    source_image_url?: string;
+    reference_image_url?: string;
   }
 }
 
@@ -310,13 +312,13 @@ const Inpainting = () => {
                           <div>
                             <Label>{t('sourceImage')}</Label>
                             <div className="mt-1 aspect-square w-full bg-muted rounded-md overflow-hidden">
-                              <SecureImageDisplay imageUrl={selectedJob.source_person_image_url} alt="Source Person" />
+                              <SecureImageDisplay imageUrl={selectedJob.metadata?.source_image_url || null} alt="Source Person" />
                             </div>
                           </div>
                           <div>
                             <Label>{t('referenceImage')}</Label>
                             <div className="mt-1 aspect-square w-full bg-muted rounded-md overflow-hidden">
-                              <SecureImageDisplay imageUrl={selectedJob.source_garment_image_url} alt="Source Garment" />
+                              <SecureImageDisplay imageUrl={selectedJob.metadata?.reference_image_url || null} alt="Source Garment" />
                             </div>
                           </div>
                         </div>
@@ -410,10 +412,10 @@ const Inpainting = () => {
                 <ScrollArea className="h-32">
                   <div className="flex gap-4 pb-2">
                     {recentJobs.map(job => {
-                      const urlToPreview = job.final_image_url || job.source_person_image_url;
+                      const urlToPreview = job.final_image_url || job.metadata?.source_image_url;
                       return (
                         <button key={job.id} onClick={() => handleSelectJob(job)} className={cn("border-2 rounded-lg p-0.5 flex-shrink-0 w-24 h-24", selectedJob?.id === job.id ? "border-primary" : "border-transparent")}>
-                          <SecureImageDisplay imageUrl={urlToPreview} alt="Recent job" className="w-full h-full object-cover" />
+                          <SecureImageDisplay imageUrl={urlToPreview || null} alt="Recent job" className="w-full h-full object-cover" />
                         </button>
                       )
                     })}

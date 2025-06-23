@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const corsHeaders = {
@@ -38,6 +38,14 @@ async function uploadImageToComfyUI(comfyUiUrl: string, imageBlob: Blob, filenam
   if (!response.ok) throw new Error(`ComfyUI upload failed: ${await response.text()}`);
   const data = await response.json();
   return data.name;
+}
+
+async function uploadToSupabaseStorage(supabase: SupabaseClient, blob: Blob, userId: string, filename: string): Promise<string> {
+    const filePath = `${userId}/inpainting-sources/${Date.now()}-${filename}`;
+    const { error } = await supabase.storage.from('mira-agent-user-uploads').upload(filePath, blob, { upsert: true });
+    if (error) throw new Error(`Supabase storage upload failed: ${error.message}`);
+    const { data: { publicUrl } } = supabase.storage.from('mira-agent-user-uploads').getPublicUrl(filePath);
+    return publicUrl;
 }
 
 serve(async (req) => {
@@ -85,6 +93,16 @@ serve(async (req) => {
 
     const sourceBlob = new Blob([decodeBase64(source_image_base64)], { type: 'image/png' });
     const maskBlob = new Blob([decodeBase64(mask_image_base64)], { type: 'image/png' });
+    let referenceBlob: Blob | null = null;
+    if (reference_image_base64) {
+        referenceBlob = new Blob([decodeBase64(reference_image_base64)], { type: 'image/png' });
+    }
+
+    const sourceImageUrl = await uploadToSupabaseStorage(supabase, sourceBlob, user_id, 'source.png');
+    let referenceImageUrl: string | null = null;
+    if (referenceBlob) {
+        referenceImageUrl = await uploadToSupabaseStorage(supabase, referenceBlob, user_id, 'reference.png');
+    }
     
     const [sourceFilename, maskFilename] = await Promise.all([
       uploadImageToComfyUI(sanitizedAddress, sourceBlob, 'source.png'),
@@ -98,8 +116,7 @@ serve(async (req) => {
     if (denoise) finalWorkflow['3'].inputs.denoise = denoise;
     if (style_strength) finalWorkflow['51'].inputs.strength = style_strength;
 
-    if (reference_image_base64) {
-      const referenceBlob = new Blob([decodeBase64(reference_image_base64)], { type: 'image/png' });
+    if (reference_image_base64 && referenceBlob) {
       const referenceFilename = await uploadImageToComfyUI(sanitizedAddress, referenceBlob, 'reference.png');
       finalWorkflow['52'].inputs.image = referenceFilename;
     } else {
@@ -127,7 +144,13 @@ serve(async (req) => {
       comfyui_address: sanitizedAddress,
       comfyui_prompt_id: data.prompt_id,
       status: 'queued',
-      metadata: { prompt: finalPrompt, denoise, style_strength }
+      metadata: { 
+        prompt: finalPrompt, 
+        denoise, 
+        style_strength,
+        source_image_url: sourceImageUrl,
+        reference_image_url: referenceImageUrl
+      }
     }).select('id').single();
     if (insertError) throw insertError;
 
