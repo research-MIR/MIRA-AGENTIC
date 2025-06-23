@@ -111,11 +111,11 @@ serve(async (req) => {
     dilateCtx.filter = 'none';
     
     const dilatedImageData = dilateCtx.getImageData(0, 0, dilatedCanvas.width, dilatedCanvas.height);
-    const data = dilatedImageData.data;
+    const imageData = dilatedImageData.data;
     let minX = dilatedCanvas.width, minY = dilatedCanvas.height, maxX = 0, maxY = 0;
-    for (let i = 0; i < data.length; i += 4) {
-      if (data[i] > 128) {
-        data[i] = data[i+1] = data[i+2] = 255;
+    for (let i = 0; i < imageData.length; i += 4) {
+      if (imageData[i] > 128) {
+        imageData[i] = imageData[i+1] = imageData[i+2] = 255;
         const x = (i / 4) % dilatedCanvas.width;
         const y = Math.floor((i / 4) / dilatedCanvas.width);
         if (x < minX) minX = x;
@@ -123,7 +123,7 @@ serve(async (req) => {
         if (y < minY) minY = y;
         if (y > maxY) maxY = y;
       } else {
-        data[i] = data[i+1] = data[i+2] = 0;
+        imageData[i] = imageData[i+1] = imageData[i+2] = 0;
       }
     }
     dilateCtx.putImageData(dilatedImageData, 0, 0);
@@ -200,13 +200,14 @@ serve(async (req) => {
       body: JSON.stringify({ prompt: finalWorkflow })
     });
     if (!response.ok) throw new Error(`ComfyUI server error: ${await response.text()}`);
-    const data = await response.json();
-    if (!data.prompt_id) throw new Error("ComfyUI did not return a prompt_id.");
+    
+    const comfyUIResponse = await response.json();
+    if (!comfyUIResponse.prompt_id) throw new Error("ComfyUI did not return a prompt_id.");
 
     const { data: newJob, error: insertError } = await supabase.from('mira-agent-inpainting-jobs').insert({
       user_id,
       comfyui_address: sanitizedAddress,
-      comfyui_prompt_id: data.prompt_id,
+      comfyui_prompt_id: comfyUIResponse.prompt_id,
       status: 'queued',
       metadata: { 
         prompt: finalPrompt, 
@@ -225,6 +226,9 @@ serve(async (req) => {
     return new Response(JSON.stringify({ success: true, jobId: newJob.id }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (error) {
     console.error("[InpaintingProxy] Error:", error);
-    return new Response(JSON.stringify({ error: error.message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
+    return new Response(JSON.stringify({ error: error.message }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      status: 500,
+    });
   }
 });
