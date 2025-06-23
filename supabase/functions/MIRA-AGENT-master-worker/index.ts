@@ -450,9 +450,19 @@ serve(async (req) => {
 
     } else if (call.name === 'dispatch_to_artisan_engine' || call.name === 'critique_images') {
         const toolName = call.name === 'dispatch_to_artisan_engine' ? 'MIRA-AGENT-tool-generate-image-prompt' : 'MIRA-AGENT-tool-critique-images';
-        const prunedHistory = history.slice(-HISTORY_SLICE_FOR_TOOLS);
+        
+        const fullHistorySlice = history.slice(-HISTORY_SLICE_FOR_TOOLS);
+        let firstValidIndex = -1;
+        for (let i = 0; i < fullHistorySlice.length; i++) {
+            if (fullHistorySlice[i].role === 'user') {
+                firstValidIndex = i;
+                break;
+            }
+        }
+        const prunedHistory = firstValidIndex !== -1 ? fullHistorySlice.slice(firstValidIndex) : [];
+
         const payload = { body: { history: prunedHistory, iteration_number: iterationNumber, is_designer_mode: currentContext.isDesignerMode } };
-        console.log(`[MasterWorker][${currentJobId}] Invoking ${toolName} with pruned history (last ${HISTORY_SLICE_FOR_TOOLS} turns)...`);
+        console.log(`[MasterWorker][${currentJobId}] Invoking ${toolName} with pruned history (last ${prunedHistory.length} valid turns)...`);
         const { data, error } = await supabase.functions.invoke(toolName, { body: payload.body });
         if (error) throw error;
         toolResponseData = data;
