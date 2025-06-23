@@ -2,15 +2,58 @@ import { useState, useCallback } from 'react';
 import { useSession } from '@/components/Auth/SessionContextProvider';
 import { showError, showSuccess, showLoading, dismissToast } from '@/utils/toast';
 import { optimizeImage, sanitizeFilename } from '@/lib/utils';
+import * as pdfjsLib from 'pdfjs-dist';
+
+// Set up the PDF.js worker. This is necessary for the library to work correctly.
+pdfjsLib.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
 
 export interface UploadedFile {
-  file: File; // Added the file object itself
+  file: File;
   name: string;
   path: string;
   previewUrl: string;
   isImage: boolean;
   upload: (supabase: any, bucket: string) => Promise<{ path: string, publicUrl: string }>;
 }
+
+const convertPdfToImages = async (file: File): Promise<File[]> => {
+  const toastId = showLoading(`Processing PDF: ${file.name}...`);
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
+    const imageFiles: File[] = [];
+
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const viewport = page.getViewport({ scale: 1.5 }); // Use a higher scale for better quality
+      const canvas = document.createElement('canvas');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      const context = canvas.getContext('2d');
+      if (!context) continue;
+
+      await page.render({ canvasContext: context, viewport: viewport }).promise;
+      
+      const blob = await new Promise<Blob | null>((resolve) => {
+        canvas.toBlob(resolve, 'image/webp', 0.9); // High quality WebP
+      });
+
+      if (blob) {
+        const originalName = file.name.replace(/\.pdf$/i, '');
+        const newFile = new File([blob], `${sanitizeFilename(originalName)}_page_${i}.webp`, { type: 'image/webp' });
+        imageFiles.push(newFile);
+      }
+    }
+    dismissToast(toastId);
+    showSuccess(`Converted ${file.name} into ${imageFiles.length} image(s).`);
+    return imageFiles;
+  } catch (error) {
+    console.error("Failed to process PDF:", error);
+    dismissToast(toastId);
+    showError(`Could not process PDF "${file.name}". It may be corrupted or protected.`);
+    return [];
+  }
+};
 
 export const useFileUpload = () => {
   const { supabase, session } = useSession();
@@ -20,14 +63,21 @@ export const useFileUpload = () => {
   const handleFileUpload = useCallback(async (files: FileList | null, isBatch = false): Promise<UploadedFile[]> => {
     if (!files || files.length === 0) return [];
     
-    const validFiles: File[] = [];
+    const imageFiles: File[] = [];
+    const pdfFiles: File[] = [];
     const invalidFiles: string[] = [];
 
     Array.from(files).forEach(file => {
-      if (file.type.startsWith('video/') || file.type === 'image/avif') {
-        invalidFiles.push(file.name);
+      if (file.type.startsWith('image/')) {
+        if (file.type === 'image/avif') {
+          invalidFiles.push(file.name);
+        } else {
+          imageFiles.push(file);
+        }
+      } else if (file.type === 'application/pdf') {
+        pdfFiles.push(file);
       } else {
-        validFiles.push(file);
+        invalidFiles.push(file.name);
       }
     });
 
@@ -35,11 +85,15 @@ export const useFileUpload = () => {
       showError(`Unsupported file type(s): ${invalidFiles.join(', ')}. AVIF and video formats are not allowed.`);
     }
 
-    if (validFiles.length === 0) return [];
+    const pdfConversionPromises = pdfFiles.map(convertPdfToImages);
+    const convertedImageArrays = await Promise.all(pdfConversionPromises);
+    const allNewImages = [...imageFiles, ...convertedImageArrays.flat()];
 
-    const newFiles: UploadedFile[] = validFiles.map(file => {
-      const isImage = file.type.startsWith('image/');
-      const previewUrl = isImage ? URL.createObjectURL(file) : '';
+    if (allNewImages.length === 0) return [];
+
+    const newFiles: UploadedFile[] = allNewImages.map(file => {
+      const isImage = true; // All files are now images
+      const previewUrl = URL.createObjectURL(file);
       
       const upload = async (supabaseClient: any, bucket: string) => {
         const toastId = showLoading(`Uploading ${file.name}...`);
@@ -63,10 +117,8 @@ export const useFileUpload = () => {
     });
 
     if (isBatch) {
-      // For batch mode, we just return the files to be managed by the component state
       return newFiles;
     } else {
-      // For single/chat mode, we update the hook's internal state
       setUploadedFiles(prev => [...prev, ...newFiles]);
       return newFiles;
     }
