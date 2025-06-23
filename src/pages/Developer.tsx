@@ -16,7 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
-import { Alert, AlertTitle } from "@/components/ui/alert";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 const SecureImageDisplay = ({ imageUrl, alt }: { imageUrl: string | null, alt: string }) => {
   const { displayUrl, isLoading, error } = useSecureImage(imageUrl);
