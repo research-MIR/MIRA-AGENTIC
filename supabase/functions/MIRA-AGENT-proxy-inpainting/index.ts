@@ -48,6 +48,11 @@ async function uploadToSupabaseStorage(supabase: SupabaseClient, blob: Blob, use
     return publicUrl;
 }
 
+// Creates a 1x1 pure white PNG as a base64 string.
+function createDummyWhiteImageBase64(): string {
+    return "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/wcAAwAB/epv2AAAAABJRU5ErkJggg==";
+}
+
 serve(async (req) => {
   const COMFYUI_ENDPOINT_URL = Deno.env.get('COMFYUI_ENDPOINT_URL');
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
@@ -96,16 +101,9 @@ serve(async (req) => {
 
     const sourceBlob = new Blob([decodeBase64(source_image_base64)], { type: 'image/png' });
     const maskBlob = new Blob([decodeBase64(mask_image_base64)], { type: 'image/png' });
-    let referenceBlob: Blob | null = null;
-    if (reference_image_base64) {
-        referenceBlob = new Blob([decodeBase64(reference_image_base64)], { type: 'image/png' });
-    }
-
+    
     const sourceImageUrl = await uploadToSupabaseStorage(supabase, sourceBlob, user_id, 'source.png');
     let referenceImageUrl: string | null = null;
-    if (referenceBlob) {
-        referenceImageUrl = await uploadToSupabaseStorage(supabase, referenceBlob, user_id, 'reference.png');
-    }
     
     const [sourceFilename, maskFilename] = await Promise.all([
       uploadImageToComfyUI(sanitizedAddress, sourceBlob, 'source.png'),
@@ -117,19 +115,20 @@ serve(async (req) => {
     finalWorkflow['45'].inputs.image = maskFilename;
     finalWorkflow['23'].inputs.text = finalPrompt;
     if (denoise) finalWorkflow['3'].inputs.denoise = denoise;
-    if (style_strength) finalWorkflow['51'].inputs.strength = style_strength;
 
-    if (reference_image_base64 && referenceBlob) {
-      const referenceFilename = await uploadImageToComfyUI(sanitizedAddress, referenceBlob, 'reference.png');
-      finalWorkflow['52'].inputs.image = referenceFilename;
+    if (reference_image_base64) {
+        console.log("[InpaintingProxy] Reference image provided. Using full style workflow.");
+        const referenceBlob = new Blob([decodeBase64(reference_image_base64)], { type: 'image/png' });
+        referenceImageUrl = await uploadToSupabaseStorage(supabase, referenceBlob, user_id, 'reference.png');
+        const referenceFilename = await uploadImageToComfyUI(sanitizedAddress, referenceBlob, 'reference.png');
+        finalWorkflow['52'].inputs.image = referenceFilename;
+        if (style_strength) finalWorkflow['51'].inputs.strength = style_strength;
     } else {
-      delete finalWorkflow['38'].inputs.positive;
-      finalWorkflow['38'].inputs.positive = ["26", 0];
-      delete finalWorkflow['48'];
-      delete finalWorkflow['49'];
-      delete finalWorkflow['50'];
-      delete finalWorkflow['51'];
-      delete finalWorkflow['52'];
+        console.log("[InpaintingProxy] No reference image. Using dummy image and setting style strength to 0.");
+        const dummyBlob = new Blob([decodeBase64(createDummyWhiteImageBase64())], { type: 'image/png' });
+        const dummyFilename = await uploadImageToComfyUI(sanitizedAddress, dummyBlob, 'dummy_white.png');
+        finalWorkflow['52'].inputs.image = dummyFilename;
+        finalWorkflow['51'].inputs.strength = 0.0;
     }
 
     const queueUrl = `${sanitizedAddress}/prompt`;
