@@ -1,57 +1,29 @@
-**Oggetto: Aggiornamento Piattaforma MIRA: Rivoluzione del Virtual Try-On e Inpainting Avanzato**
+**Oggetto: Aggiornamento Piattaforma MIRA: Specializzazione di Virtual Try-On, Nuova Pagina Inpainting e Miglioramenti di Stabilità**
 
-Ho appena rilasciato un aggiornamento significativo che riorganizza e potenzia i nostri strumenti creativi. L'obiettivo di questa release è duplice: specializzare i nostri tool per darti risultati superiori e introdurre nuove funzionalità per l'efficienza su larga scala.
+Ho rilasciato un aggiornamento architetturale che specializza i nostri strumenti creativi, introducendo una nuova pagina dedicata all'inpainting e focalizzando la sezione Virtual Try-On esclusivamente sugli indumenti.
 
-Ecco le novità in dettaglio:
+### 1. Specializzazione della Pagina Virtual Try-On
 
-### 1. Nuova Pagina: Camerino Virtuale (Virtual Try-On)
+**Cosa è cambiato:** La pagina "Virtual Try-On" è stata ottimizzata per essere lo strumento dedicato esclusivamente alla prova virtuale di **indumenti e accessori**.
 
-**Come funziona:** Ho creato una sezione interamente dedicata al Virtual Try-On, accessibile dalla barra laterale. Questa pagina è il tuo nuovo centro di comando per "far indossare" virtualmente qualsiasi indumento a qualsiasi modello. È importante notare che questa pagina è ora **esclusivamente dedicata al try-on di indumenti e accessori**, utilizzando il collaudato workflow di BitStudio, ora potenziato dalla mia logica di costruzione automatica del prompt.
+-   **Modalità Base e Batch:** Le funzionalità esistenti per la prova singola e l'elaborazione multipla (batch) rimangono, ma sono ora focalizzate sull'applicazione di capi di abbigliamento a modelli.
+-   **Modalità Pro (VTO):** La "Modalità Pro" all'interno di questa pagina è stata ricalibrata. Ora è uno strumento di inpainting avanzato specificamente per **intervenire su indumenti**, sfruttando il workflow di BitStudio per risultati ottimali in questo contesto.
 
-**Come si usa (Prova Singola):**
-1.  Vai alla nuova pagina "Camerino Virtuale".
-2.  Carica un'immagine di una persona nel riquadro "Person Image".
-3.  Carica un'immagine di un indumento nel riquadro "Garment Image".
-4.  L'AI analizzerà entrambe le immagini e genererà automaticamente un prompt dettagliato per combinarle.
-5.  Clicca su "Start Virtual Try-On" per avviare il processo.
+**Cosa significa:** Quando la necessità è applicare o modificare un capo di abbigliamento, il "Camerino Virtuale" è lo strumento corretto e più performante da utilizzare.
 
-**Cosa succede:** In pochi istanti, otterrai un'immagine fotorealistica del modello che indossa l'indumento specificato, con un allineamento e un'illuminazione coerenti.
+### 2. Nuova Pagina Dedicata: Inpainting
 
-#### Elaborazione Multipla (Batch): Efficienza e Creatività su Larga Scala
+**Nuova Funzionalità:** Ho introdotto una nuova pagina "Inpainting" nella barra laterale. Questa sezione ora ospita il nostro workflow di inpainting interno basato su ComfyUI, che offre massima flessibilità per tutte le modifiche non legate all'abbigliamento.
 
-All'interno della pagina del Camerino Virtuale, troverai una nuova scheda "Processo Multiplo". Questa modalità ti permette di automatizzare la creazione di decine di immagini di prova in una sola volta, secondo tre logiche diverse:
+-   **Scopo:** Questo è lo strumento da utilizzare per modifiche dettagliate e creative su qualsiasi parte di un'immagine.
+-   **Casi d'uso:**
+    -   Modifica di volti e acconciature.
+    -   Alterazione di sfondi.
+    -   Aggiunta o rimozione di oggetti.
+    -   Qualsiasi altra attività di fotoritocco avanzato che richieda un controllo preciso.
 
--   **Un Indumento, Tanti Modelli:** Carica un singolo indumento e una serie di immagini di modelli diversi. Il sistema applicherà quell'unico capo a ogni persona. Perfetto per vedere la vestibilità di un articolo su diverse corporature.
--   **Coppie Casuali:** Carica una lista di indumenti e una lista di modelli. Il sistema li abbinerà in modo casuale, creando combinazioni inaspettate e stimolando la creatività.
--   **Coppie Precise:** Crea manualmente coppie specifiche persona-indumento. Hai il controllo totale su chi indossa cosa, ideale per campagne mirate.
+**Cosa significa:** Le potenti capacità di editing generico precedentemente associate alla "Modalità Pro" sono state migrate e potenziate in questa nuova sezione dedicata, garantendo lo strumento giusto per ogni tipo di lavoro.
 
-### 2. Nuova Pagina Dedicata: Inpainting per il Controllo Creativo Totale
+### 3. Miglioramenti di Stabilità e Performance
 
-**Come funziona:** Per darti un controllo ancora maggiore su modifiche non legate all'abbigliamento, ho separato il workflow di inpainting in una sua tab dedicata. Questa sezione utilizza il nostro workflow interno (basato su ComfyUI) che è molto più flessibile e potente per compiti di modifica generica.
-
-**Come si usa:**
-1.  Vai alla nuova pagina "Inpainting".
-2.  Carica la tua immagine sorgente.
-3.  Maschera l'area che vuoi modificare (es. capelli, un oggetto nello sfondo, una parte del viso).
-4.  Fornisci un prompt testuale o un'immagine di riferimento per guidare l'IA.
-
-**Cosa succede:** Questo strumento è ora ottimizzato per:
--   Modificare volti e acconciature.
--   Cambiare oggetti o sfondi.
--   Aggiungere o rimuovere dettagli specifici con precisione chirurgica.
-
-### 3. Nuova Modalità di Upscaling: "Conservative Skin" per Risultati Naturali
-
-**Come funziona:** Ho aggiunto una nuova opzione di upscaling specializzata per le immagini in cui è visibile molta pelle. Questa modalità utilizza un modello AI diverso (LDSR) che è stato addestrato per essere più conservativo e meno "creativo", preservando le texture e i toni naturali della pelle. Questo risolve il problema di artefatti o texture innaturali che a volte potevano apparire.
-
-**Come si usa:**
--   Quando esegui un upscale dalla Galleria o dalla pagina "Upscale", nel menu a tendina troverai ora opzioni come "Upscale x2.0 (Skin)".
--   Seleziona questa opzione per le immagini di ritratti, costumi da bagno, o qualsiasi scatto in cui la fedeltà della pelle è fondamentale.
-
-**Cosa succede:** L'AI migliorerà la risoluzione dell'immagine senza alterare o "inventare" dettagli indesiderati sulla pelle. Il risultato è un'immagine più pulita, naturale e fedele all'originale.
-
-### 4. Miglioramenti di Stabilità
-
-Oltre a queste nuove funzionalità, ho implementato una serie di miglioramenti alla stabilità dell'agente e delle singole pagine per garantire un'esperienza più fluida e affidabile.
-
-Buon lavoro.
+Ho implementato una serie di ottimizzazioni sia sul backend che sul frontend. Questo ha portato a un miglioramento generale della stabilità dell'agente e a una maggiore reattività delle singole pagine dell'applicazione.
