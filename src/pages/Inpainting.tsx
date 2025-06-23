@@ -362,7 +362,7 @@ const Inpainting = () => {
                     )}
                   </CardContent>
                 </Card>
-                <Button size="lg" className="w-full" onClick={handleGenerate} disabled={isLoading || !!selectedJob}>
+                <Button size="lg" className="w-full" onClick={handleGenerate} disabled={isLoading || !!selectedJob || !sourceImageFile || !maskImage}>
                   {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
                   {t('generate')}
                 </Button>
