@@ -311,17 +311,28 @@ serve(async (req) => {
   const sanitizedAddress = COMFYUI_ENDPOINT_URL.replace(/\/+$/, "");
 
   try {
-    const {
+    let {
       user_id,
       source_image_base64,
-      mask_image_base64,
+      mask_image_base64, // This is now optional
       reference_image_base64, // Optional
       prompt,
       denoise,
     } = await req.json();
 
-    if (!user_id || !source_image_base64 || !mask_image_base64) {
-      throw new Error("Missing required parameters: user_id, source_image_base64, and mask_image_base64 are required.");
+    if (!user_id || !source_image_base64) {
+      throw new Error("Missing required parameters: user_id and source_image_base64 are required.");
+    }
+
+    if (!mask_image_base64) {
+      console.log("[InpaintingProxy] No mask provided. Generating a full-image mask.");
+      const { createCanvas, loadImage } = await import('https://deno.land/x/canvas@v1.4.1/mod.ts');
+      const sourceImage = await loadImage(`data:image/png;base64,${source_image_base64}`);
+      const canvas = createCanvas(sourceImage.width(), sourceImage.height());
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = 'white';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      mask_image_base64 = canvas.toDataURL().split(',')[1];
     }
 
     const sourceBlob = new Blob([decodeBase64(source_image_base64)], { type: 'image/png' });
@@ -332,8 +343,7 @@ serve(async (req) => {
       uploadImageToComfyUI(sanitizedAddress, maskBlob, 'mask.png')
     ];
 
-    let hasReferenceImage = !!reference_image_base64;
-    if (hasReferenceImage) {
+    if (reference_image_base64) {
       const referenceBlob = new Blob([decodeBase64(reference_image_base64)], { type: 'image/png' });
       uploadPromises.push(uploadImageToComfyUI(sanitizedAddress, referenceBlob, 'reference.png'));
     }
@@ -342,7 +352,6 @@ serve(async (req) => {
 
     const finalWorkflow = JSON.parse(workflowTemplate);
     
-    // Populate required inputs
     finalWorkflow['17'].inputs.image = sourceFilename;
     finalWorkflow['45'].inputs.image = maskFilename;
     finalWorkflow['23'].inputs.text = prompt || "masterpiece, best quality";
@@ -352,19 +361,15 @@ serve(async (req) => {
       finalWorkflow['3'].inputs.denoise = denoise;
     }
 
-    // Handle optional reference image
-    if (hasReferenceImage && referenceFilename) {
+    if (referenceFilename) {
       finalWorkflow['52'].inputs.image = referenceFilename;
-      // Use default strength from template
     } else {
-      // No reference image provided. We must still provide a dummy input to the style model nodes
-      // and set the strength to 0 to nullify its effect.
       const dummyPngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
       const dummyBlob = new Blob([decodeBase64(dummyPngBase64)], { type: 'image/png' });
       const dummyFilename = await uploadImageToComfyUI(sanitizedAddress, dummyBlob, 'dummy.png');
       
       finalWorkflow['52'].inputs.image = dummyFilename;
-      finalWorkflow['51'].inputs.strength = 0.0; // Set strength to zero
+      finalWorkflow['51'].inputs.strength = 0.0;
       console.log("[InpaintingProxy] No reference image provided. Using dummy image and setting style strength to 0.");
     }
 
