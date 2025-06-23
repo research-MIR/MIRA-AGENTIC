@@ -5,6 +5,7 @@ const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const MODEL_NAME = "gemini-2.5-pro-preview-06-05";
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1000;
+const MAX_TOKEN_THRESHOLD = 130000;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -130,6 +131,12 @@ serve(async (req) => {
 
     const rawJsonResponse = result?.text;
     if (!rawJsonResponse) {
+        const usage = result?.usageMetadata;
+        if (usage && usage.promptTokenCount > MAX_TOKEN_THRESHOLD) {
+            const errorMessage = `The conversation history is too long for the Artisan Engine to process (Tokens: ${usage.promptTokenCount}). Please start a new chat.`;
+            console.error(`[ArtisanEngine] Gemini response was empty due to token limit. Full response:`, JSON.stringify(result, null, 2));
+            throw new Error(errorMessage);
+        }
         console.error("[ArtisanEngine] Gemini response was empty or blocked after all retries. Full response:", JSON.stringify(result, null, 2));
         throw new Error("The AI model failed to return a valid response. It may have been blocked due to safety settings.");
     }

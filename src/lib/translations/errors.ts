@@ -10,6 +10,7 @@ export const errorTranslations = {
     REFINEMENT_COMPLETE: "Ecco l'immagine rifinita. Cosa vuoi fare ora?",
     REFINEMENT_FURTHER: "Ecco l'immagine ulteriormente rifinita. Vuoi continuare?",
     ERROR_NO_IMAGE_TO_REFINE: "Mi dispiace, non ho trovato un'immagine nella nostra conversazione da rifinire. Per favore, caricane una o generane una prima.",
+    errorMaxContext: "Questa conversazione ha raggiunto la sua memoria massima. Per continuare, per favore inizia una nuova chat.",
   },
   en: {
     errorQuotaExceeded: "You have reached your image generation limit for this period. Please check your plan details.",
@@ -22,5 +23,6 @@ export const errorTranslations = {
     REFINEMENT_COMPLETE: "Here is the refined image. What would you like to do next?",
     REFINEMENT_FURTHER: "Here is the further refined image. Would you like to continue?",
     ERROR_NO_IMAGE_TO_REFINE: "I'm sorry, I couldn't find an image in our current conversation to refine. Please upload or generate one first.",
+    errorMaxContext: "This conversation has reached its maximum context memory. To continue, please start a new chat.",
   },
 };

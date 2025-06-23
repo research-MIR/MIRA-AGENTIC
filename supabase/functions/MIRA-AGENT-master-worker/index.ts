@@ -8,6 +8,8 @@ const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const MODEL_NAME = "gemini-2.5-pro-preview-06-05";
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1000;
+const HISTORY_SLICE_FOR_TOOLS = 20; // The number of recent turns to send to sub-agents
+const MAX_TOKEN_THRESHOLD = 130000; // A safety threshold to detect context limit errors
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -339,6 +341,14 @@ serve(async (req) => {
 
     const functionCalls = result.functionCalls;
     if (!functionCalls || functionCalls.length === 0) {
+        const usage = result?.usageMetadata;
+        if (usage && usage.promptTokenCount > MAX_TOKEN_THRESHOLD) {
+            const errorMessage = "This conversation has reached its maximum context memory. To continue, please start a new chat.";
+            console.error(`[MasterWorker][${currentJobId}] Orchestrator failed due to token limit. Tokens: ${usage.promptTokenCount}.`);
+            await supabase.from('mira-agent-jobs').update({ status: 'failed', error_message: errorMessage }).eq('id', currentJobId);
+            return new Response(JSON.stringify({ error: errorMessage }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
+        }
+
         console.error(`[MasterWorker][${currentJobId}] Orchestrator did not return a tool call. Finishing task with an error message.`);
         await supabase.from('mira-agent-jobs').update({ status: 'failed', error_message: "The agent could not decide on a next step." }).eq('id', currentJobId);
         return new Response(JSON.stringify({ error: "Agent failed to decide on a next step." }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
@@ -440,8 +450,9 @@ serve(async (req) => {
 
     } else if (call.name === 'dispatch_to_artisan_engine' || call.name === 'critique_images') {
         const toolName = call.name === 'dispatch_to_artisan_engine' ? 'MIRA-AGENT-tool-generate-image-prompt' : 'MIRA-AGENT-tool-critique-images';
-        const payload = { body: { history: history, iteration_number: iterationNumber, is_designer_mode: currentContext.isDesignerMode } };
-        console.log(`[MasterWorker][${currentJobId}] Invoking ${toolName} with payload...`);
+        const prunedHistory = history.slice(-HISTORY_SLICE_FOR_TOOLS);
+        const payload = { body: { history: prunedHistory, iteration_number: iterationNumber, is_designer_mode: currentContext.isDesignerMode } };
+        console.log(`[MasterWorker][${currentJobId}] Invoking ${toolName} with pruned history (last ${HISTORY_SLICE_FOR_TOOLS} turns)...`);
         const { data, error } = await supabase.functions.invoke(toolName, { body: payload.body });
         if (error) throw error;
         toolResponseData = data;

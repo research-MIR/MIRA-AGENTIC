@@ -7,6 +7,8 @@ const errorKeywordMap: Record<string, string> = {
     "ERROR_NO_IMAGE_TO_REFINE": "errorNoImageToRefine",
     "failed to fetch": "errorNetwork",
     "network request failed": "errorNetwork",
+    "maximum context memory": "errorMaxContext",
+    "history is too long": "errorMaxContext",
 };
 
 /**
