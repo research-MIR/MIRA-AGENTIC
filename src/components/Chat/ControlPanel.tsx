@@ -25,6 +25,25 @@ const modelAspectRatioMap: Record<string, string[]> = {
     'fal.ai': ['1:1', '3:4', '4:3', '16:9', '9:16', '2:3', '3:2', '21:9'],
 };
 
+const resolutionToRatioMap: { [key: string]: string } = {
+  '1024x1024': '1:1',
+  '1408x768': '16:9',
+  '768x1408': '9:16',
+  '1280x896': '4:3',
+  '896x1280': '3:4',
+  '1152x768': '3:2',
+  '768x1152': '2:3',
+  '1536x640': '21:9',
+  '1:1': '1:1',
+  '3:4': '3:4',
+  '4:3': '4:3',
+  '16:9': '16:9',
+  '9:16': '9:16',
+  '2:3': '2:3',
+  '3:2': '3:2',
+  '21:9': '21:9',
+};
+
 export const ControlPanel = ({
   models,
   selectedModelId,
@@ -59,7 +78,7 @@ export const ControlPanel = ({
             <SelectTrigger className="w-[100px]"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="auto">Auto</SelectItem>
-              {validRatios.map(ratio => <SelectItem key={ratio} value={ratio}>{ratio}</SelectItem>)}
+              {validRatios.map(ratio => <SelectItem key={ratio} value={ratio}>{resolutionToRatioMap[ratio] || ratio}</SelectItem>)}
             </SelectContent>
           </Select>
         </div>

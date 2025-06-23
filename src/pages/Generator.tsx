@@ -30,6 +30,17 @@ const FileUploader = ({ onFileSelect, children, multiple = false }: { onFileSele
   );
 };
 
+const aspectRatioOptions = [
+  { value: "1024x1024", label: "1:1" },
+  { value: "1408x768", label: "16:9" },
+  { value: "768x1408", label: "9:16" },
+  { value: "1280x896", label: "4:3" },
+  { value: "896x1280", label: "3:4" },
+  { value: "1152x768", label: "3:2" },
+  { value: "768x1152", label: "2:3" },
+  { value: "1536x640", label: "21:9" },
+];
+
 const Generator = () => {
   const { session, supabase } = useSession();
   const { t } = useLanguage();
@@ -171,14 +182,9 @@ const Generator = () => {
                     <Select value={state.aspectRatio} onValueChange={(val) => state.setField('aspectRatio', val)}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="1024x1024">1:1</SelectItem>
-                        <SelectItem value="1408x768">16:9</SelectItem>
-                        <SelectItem value="768x1408">9:16</SelectItem>
-                        <SelectItem value="1280x896">4:3</SelectItem>
-                        <SelectItem value="896x1280">3:4</SelectItem>
-                        <SelectItem value="1152x768">3:2</SelectItem>
-                        <SelectItem value="768x1152">2:3</SelectItem>
-                        <SelectItem value="1536x640">21:9</SelectItem>
+                        {aspectRatioOptions.map(option => (
+                          <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
