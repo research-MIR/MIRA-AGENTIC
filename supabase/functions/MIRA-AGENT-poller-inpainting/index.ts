@@ -10,7 +10,7 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
 const POLLING_INTERVAL_MS = 5000;
-const FINAL_OUTPUT_NODE_ID = "9"; // From the workflow.json
+const FINAL_OUTPUT_NODE_ID = "9";
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
@@ -32,9 +32,9 @@ serve(async (req) => {
 
     if (fetchError) throw new Error(`Failed to fetch job: ${fetchError.message}`);
     
-    if (job.status === 'complete' || job.status === 'failed') {
-        console.log(`[InpaintingPoller][${job.id}] Job already resolved. Halting.`);
-        return new Response(JSON.stringify({ success: true, message: "Job already resolved." }), { headers: corsHeaders });
+    if (job.status === 'complete' || job.status === 'failed' || job.status === 'compositing') {
+        console.log(`[InpaintingPoller][${job.id}] Job already resolved or being composited. Halting.`);
+        return new Response(JSON.stringify({ success: true, message: "Job already resolved or being composited." }), { headers: corsHeaders });
     }
 
     const historyUrl = `${job.comfyui_address}/history/${job.comfyui_prompt_id}`;
@@ -59,22 +59,16 @@ serve(async (req) => {
     if (outputImage) {
         console.log(`[InpaintingPoller][${job.id}] Image found! Filename: ${outputImage.filename}.`);
         const imageUrl = `${job.comfyui_address}/view?filename=${encodeURIComponent(outputImage.filename)}&subfolder=${encodeURIComponent(outputImage.subfolder)}&type=${outputImage.type}`;
-        const imageResponse = await fetch(imageUrl);
-        if (!imageResponse.ok) throw new Error("Failed to download final image from ComfyUI.");
-        const imageBuffer = await imageResponse.arrayBuffer();
         
-        const filePath = `${job.user_id}/inpainting/${Date.now()}_${outputImage.filename}`;
-        await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(filePath, imageBuffer, { contentType: 'image/png', upsert: true });
-        const { data: { publicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
-        
-        const finalResult = { publicUrl, storagePath: filePath };
         await supabase.from('mira-agent-inpainting-jobs').update({
-            status: 'complete',
-            final_result: finalResult
+            status: 'compositing',
+            final_result: { publicUrl: imageUrl } // Store the temporary URL of the crop
         }).eq('id', job_id);
+
+        console.log(`[InpaintingPoller][${job.id}] Inpainting complete. Triggering compositor...`);
+        supabase.functions.invoke('MIRA-AGENT-compositor-inpainting', { body: { job_id } }).catch(console.error);
         
-        console.log(`[InpaintingPoller][${job.id}] Job complete. Final URL: ${publicUrl}`);
-        return new Response(JSON.stringify({ success: true, status: 'complete', publicUrl }), { headers: corsHeaders });
+        return new Response(JSON.stringify({ success: true, status: 'compositing' }), { headers: corsHeaders });
     } else {
         console.log(`[InpaintingPoller][${job.id}] Job running, output not ready. Re-polling.`);
         await supabase.from('mira-agent-inpainting-jobs').update({ status: 'processing' }).eq('id', job_id);

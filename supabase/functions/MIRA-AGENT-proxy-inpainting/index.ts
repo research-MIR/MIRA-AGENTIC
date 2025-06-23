@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
+import { decodeBase64, encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
+import { createCanvas, loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -48,7 +49,6 @@ async function uploadToSupabaseStorage(supabase: SupabaseClient, blob: Blob, use
     return publicUrl;
 }
 
-// Creates a 1x1 pure white PNG as a base64 string.
 function createDummyWhiteImageBase64(): string {
     return "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/wcAAwAB/epv2AAAAABJRU5ErkJggg==";
 }
@@ -66,11 +66,12 @@ serve(async (req) => {
       user_id,
       source_image_base64,
       mask_image_base64,
-      reference_image_base64, // Optional
+      reference_image_base64,
       prompt,
       is_garment_mode,
       denoise,
-      style_strength
+      style_strength,
+      mask_expansion_percent = 2,
     } = await req.json();
 
     if (!user_id || !source_image_base64 || !mask_image_base64) {
@@ -99,8 +100,71 @@ serve(async (req) => {
 
     if (!finalPrompt) throw new Error("Prompt is required for inpainting.");
 
-    const sourceBlob = new Blob([decodeBase64(source_image_base64)], { type: 'image/png' });
-    const maskBlob = new Blob([decodeBase64(mask_image_base64)], { type: 'image/png' });
+    const fullSourceImage = await loadImage(`data:image/png;base64,${source_image_base64}`);
+    const rawMaskImage = await loadImage(`data:image/jpeg;base64,${mask_image_base64}`);
+
+    const dilatedCanvas = createCanvas(rawMaskImage.width(), rawMaskImage.height());
+    const dilateCtx = dilatedCanvas.getContext('2d');
+    const dilationAmount = Math.max(10, Math.round(rawMaskImage.width() * (mask_expansion_percent / 100)));
+    dilateCtx.filter = `blur(${dilationAmount}px)`;
+    dilateCtx.drawImage(rawMaskImage, 0, 0);
+    dilateCtx.filter = 'none';
+    
+    const dilatedImageData = dilateCtx.getImageData(0, 0, dilatedCanvas.width, dilatedCanvas.height);
+    const data = dilatedImageData.data;
+    let minX = dilatedCanvas.width, minY = dilatedCanvas.height, maxX = 0, maxY = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i] > 128) {
+        data[i] = data[i+1] = data[i+2] = 255;
+        const x = (i / 4) % dilatedCanvas.width;
+        const y = Math.floor((i / 4) / dilatedCanvas.width);
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      } else {
+        data[i] = data[i+1] = data[i+2] = 0;
+      }
+    }
+    dilateCtx.putImageData(dilatedImageData, 0, 0);
+
+    if (maxX < minX || maxY < minY) throw new Error("The provided mask is empty or invalid after processing.");
+
+    const padding = Math.round(Math.max(maxX - minX, maxY - minY) * 0.05);
+    const bbox = {
+      x: Math.max(0, minX - padding),
+      y: Math.max(0, minY - padding),
+      width: Math.min(fullSourceImage.width(), maxX + padding) - Math.max(0, minX - padding),
+      height: Math.min(fullSourceImage.height(), maxY + padding) - Math.max(0, minY - padding),
+    };
+
+    if (bbox.width <= 0 || bbox.height <= 0) throw new Error(`Invalid bounding box dimensions: ${bbox.width}x${bbox.height}.`);
+
+    const croppedCanvas = createCanvas(bbox.width, bbox.height);
+    croppedCanvas.getContext('2d').drawImage(fullSourceImage, bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
+    const croppedSourceBase64 = encodeBase64(croppedCanvas.toBuffer('image/png'));
+
+    const croppedMaskCanvas = createCanvas(bbox.width, bbox.height);
+    croppedMaskCanvas.getContext('2d').drawImage(dilatedCanvas, bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
+    const croppedDilatedMaskBase64 = encodeBase64(croppedMaskCanvas.toBuffer('image/png'));
+
+    let sourceToSendBase64 = croppedSourceBase64;
+    let maskToSendBase64 = croppedDilatedMaskBase64;
+    const TARGET_LONG_SIDE = 768;
+    const cropLongestSide = Math.max(bbox.width, bbox.height);
+
+    if (cropLongestSide < TARGET_LONG_SIDE) {
+        const upscaleFactor = TARGET_LONG_SIDE / cropLongestSide;
+        const { data: upscaleData, error: upscaleError } = await supabase.functions.invoke('MIRA-AGENT-tool-upscale-crop', {
+            body: { source_crop_base64: croppedSourceBase64, mask_crop_base64: croppedDilatedMaskBase64, upscale_factor: upscaleFactor }
+        });
+        if (upscaleError) throw new Error(`Upscaling failed: ${upscaleError.message}`);
+        sourceToSendBase64 = upscaleData.upscaled_source_base64;
+        maskToSendBase64 = upscaleData.upscaled_mask_base64;
+    }
+
+    const sourceBlob = new Blob([decodeBase64(sourceToSendBase64)], { type: 'image/png' });
+    const maskBlob = new Blob([decodeBase64(maskToSendBase64)], { type: 'image/png' });
     
     const sourceImageUrl = await uploadToSupabaseStorage(supabase, sourceBlob, user_id, 'source.png');
     let referenceImageUrl: string | null = null;
@@ -117,14 +181,12 @@ serve(async (req) => {
     if (denoise) finalWorkflow['3'].inputs.denoise = denoise;
 
     if (reference_image_base64) {
-        console.log("[InpaintingProxy] Reference image provided. Using full style workflow.");
         const referenceBlob = new Blob([decodeBase64(reference_image_base64)], { type: 'image/png' });
         referenceImageUrl = await uploadToSupabaseStorage(supabase, referenceBlob, user_id, 'reference.png');
         const referenceFilename = await uploadImageToComfyUI(sanitizedAddress, referenceBlob, 'reference.png');
         finalWorkflow['52'].inputs.image = referenceFilename;
         if (style_strength) finalWorkflow['51'].inputs.strength = style_strength;
     } else {
-        console.log("[InpaintingProxy] No reference image. Using dummy image and setting style strength to 0.");
         const dummyBlob = new Blob([decodeBase64(createDummyWhiteImageBase64())], { type: 'image/png' });
         const dummyFilename = await uploadImageToComfyUI(sanitizedAddress, dummyBlob, 'dummy_white.png');
         finalWorkflow['52'].inputs.image = dummyFilename;
@@ -151,7 +213,9 @@ serve(async (req) => {
         denoise, 
         style_strength,
         source_image_url: sourceImageUrl,
-        reference_image_url: referenceImageUrl
+        reference_image_url: referenceImageUrl,
+        full_source_image_base64: source_image_base64,
+        bbox: bbox,
       }
     }).select('id').single();
     if (insertError) throw insertError;
