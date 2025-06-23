@@ -221,16 +221,31 @@ const Inpainting = () => {
     }
     
     setIsLoading(true);
-    const toastId = showLoading(t('sendingJob'));
+    let toastId = showLoading(t('sendingJob'));
 
     try {
+      let finalPrompt = prompt;
+
+      if (!isAutoPromptEnabled && prompt.trim()) {
+        dismissToast(toastId);
+        toastId = showLoading(t('enhancingPrompt'));
+        const { data: enhancedData, error: enhancerError } = await supabase.functions.invoke('MIRA-AGENT-tool-text-prompt-enhancer', {
+          body: { user_prompt: prompt }
+        });
+        if (enhancerError) throw enhancerError;
+        finalPrompt = enhancedData.enhanced_prompt;
+        setPrompt(finalPrompt); // Update the UI with the enhanced prompt
+        dismissToast(toastId);
+        toastId = showLoading(t('sendingJob'));
+      }
+
       const optimizedSource = await optimizeImage(sourceImageFile, { forceOriginalDimensions: true });
 
       const payload: any = {
         source_image_base64: await fileToBase64(optimizedSource),
         mask_image_base64: maskImage.split(',')[1],
-        prompt: isAutoPromptEnabled ? "" : prompt,
-        is_garment_mode: false, // Always use general mode for this tool
+        prompt: finalPrompt,
+        is_garment_mode: false,
         user_id: session?.user.id,
         denoise: denoise,
       };
