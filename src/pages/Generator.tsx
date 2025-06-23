@@ -51,8 +51,9 @@ const Generator = () => {
   useEffect(() => {
     if (session?.user) {
       state.fetchRecentJobs(session.user.id);
+      state.fetchModels();
     }
-  }, [session?.user, state.fetchRecentJobs]);
+  }, [session?.user]);
 
   useEffect(() => {
     if (!session?.user?.id) return;
@@ -174,7 +175,7 @@ const Generator = () => {
               <CardContent className="space-y-4">
                 <div>
                   <Label>{t('model')}</Label>
-                  <ModelSelector selectedModelId={state.selectedModelId} onModelChange={(val) => state.setField('selectedModelId', val)} />
+                  <ModelSelector models={state.models} selectedModelId={state.selectedModelId} onModelChange={(val) => state.setField('selectedModelId', val)} />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>

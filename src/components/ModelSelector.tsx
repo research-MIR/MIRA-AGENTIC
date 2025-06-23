@@ -26,6 +26,16 @@ const modelAliases: { [key: string]: string } = {
 };
 
 export const ModelSelector = ({ models, selectedModelId, onModelChange, disabled = false }: ModelSelectorProps) => {
+  if (!models || models.length === 0) {
+    return (
+      <Select disabled={true}>
+        <SelectTrigger className="w-full md:w-[200px]">
+          <SelectValue placeholder="Loading models..." />
+        </SelectTrigger>
+      </Select>
+    );
+  }
+  
   const defaultModel = models.find(m => m.is_default);
   const currentSelection = selectedModelId || defaultModel?.model_id_string;
 

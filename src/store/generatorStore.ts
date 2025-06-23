@@ -20,6 +20,15 @@ interface Job {
   };
 }
 
+// Add Model interface
+export interface Model {
+  id: string;
+  model_id_string: string;
+  provider: string;
+  is_default: boolean;
+  supports_img2img: boolean;
+}
+
 // Define the state and actions for our store
 interface GeneratorState {
   // State
@@ -37,6 +46,7 @@ interface GeneratorState {
   recentJobs: Job[];
   selectedJobId: string | null;
   isFetchingJobs: boolean;
+  models: Model[];
 
   // Actions
   setField: <K extends keyof GeneratorState>(field: K, value: GeneratorState[K]) => void;
@@ -47,6 +57,7 @@ interface GeneratorState {
   fetchRecentJobs: (userId: string) => Promise<void>;
   selectJob: (job: Job) => void;
   generate: (userId: string) => Promise<{ success: boolean; message: string }>;
+  fetchModels: () => Promise<void>;
 }
 
 const initialState = {
@@ -64,6 +75,7 @@ const initialState = {
   recentJobs: [],
   selectedJobId: null,
   isFetchingJobs: true,
+  models: [],
 };
 
 export const useGeneratorStore = create<GeneratorState>((set, get) => ({
@@ -71,7 +83,10 @@ export const useGeneratorStore = create<GeneratorState>((set, get) => ({
 
   setField: (field, value) => set({ [field]: value }),
 
-  reset: () => set(initialState),
+  reset: () => {
+    const { models, recentJobs } = get();
+    set({ ...initialState, models, recentJobs, isFetchingJobs: false });
+  },
 
   handleFileSelect: (type, files) => {
     if (!files || files.length === 0) return;
@@ -122,6 +137,7 @@ export const useGeneratorStore = create<GeneratorState>((set, get) => ({
   selectJob: (job) => {
     set({
       ...initialState, // Reset everything first
+      models: get().models, // Keep the fetched models
       recentJobs: get().recentJobs, // Keep the fetched jobs
       isFetchingJobs: false, // We are not fetching
       prompt: job.context.prompt,
@@ -133,6 +149,26 @@ export const useGeneratorStore = create<GeneratorState>((set, get) => ({
       finalPromptUsed: job.context.final_prompt_used || null,
       selectedJobId: job.id,
     });
+  },
+
+  fetchModels: async () => {
+    try {
+      const { data, error } = await supabase
+        .from("mira-agent-models")
+        .select("id, model_id_string, provider, is_default, supports_img2img")
+        .eq("model_type", "image")
+        .not('provider', 'eq', 'OpenAI');
+      if (error) throw error;
+      if (data) {
+        const defaultModel = data.find(m => m.is_default);
+        set(state => ({
+          models: data,
+          selectedModelId: state.selectedModelId || defaultModel?.model_id_string || null,
+        }));
+      }
+    } catch (error) {
+      console.error("Failed to fetch models:", error);
+    }
   },
 
   generate: async (userId) => {
