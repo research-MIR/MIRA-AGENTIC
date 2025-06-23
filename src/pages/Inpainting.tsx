@@ -17,7 +17,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DebugStepsModal } from "@/components/VTO/DebugStepsModal";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { ProModeSettings } from "@/components/VTO/ProModeSettings";
+import { InpaintingSettings } from "@/components/Inpainting/InpaintingSettings";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useLanguage } from "@/context/LanguageContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -104,10 +104,8 @@ const Inpainting = () => {
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [isAutoPromptEnabled, setIsAutoPromptEnabled] = useState(true);
 
-  const [numAttempts, setNumAttempts] = useState(1);
   const [denoise, setDenoise] = useState(0.99);
-  const [isHighQuality, setIsHighQuality] = useState(false);
-  const [maskExpansion, setMaskExpansion] = useState(3);
+  const [styleStrength, setStyleStrength] = useState(0.3);
 
   const sourceImageUrl = useMemo(() => sourceImageFile ? URL.createObjectURL(sourceImageFile) : null, [sourceImageFile]);
   const referenceImageUrl = useMemo(() => referenceImageFile ? URL.createObjectURL(referenceImageFile) : null, [referenceImageFile]);
@@ -248,6 +246,7 @@ const Inpainting = () => {
         is_garment_mode: false,
         user_id: session?.user.id,
         denoise: denoise,
+        style_strength: styleStrength,
       };
 
       if (referenceImageFile) {
@@ -389,11 +388,9 @@ const Inpainting = () => {
                             </Tooltip>
                           </TooltipProvider>
                           <AccordionContent className="pt-4">
-                            <ProModeSettings
-                              numAttempts={numAttempts} setNumAttempts={setNumAttempts}
+                            <InpaintingSettings
                               denoise={denoise} setDenoise={setDenoise}
-                              isHighQuality={isHighQuality} setIsHighQuality={setIsHighQuality}
-                              maskExpansion={maskExpansion} setMaskExpansion={setMaskExpansion}
+                              styleStrength={styleStrength} setStyleStrength={setStyleStrength}
                               disabled={isLoading}
                             />
                           </AccordionContent>

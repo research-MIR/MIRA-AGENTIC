@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -185,11 +185,6 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
     setResetTrigger(c => c + 1);
   };
 
-  const handleClearSourceImage = () => {
-    setSourceImageFile(null);
-    resetForm();
-  };
-
   const handleGenerate = async () => {
     if (!sourceImageFile || !maskImage) {
       showError("Please provide a source image and draw a mask.");
@@ -211,7 +206,7 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
         mask_image_base64: maskImage.split(',')[1],
         prompt: isAutoPromptEnabled ? "" : prompt,
         auto_prompt_enabled: isAutoPromptEnabled,
-        is_garment_mode: true, // Always use garment mode
+        is_garment_mode: true, // VTO Pro Mode is always garment-focused
         user_id: session?.user.id,
         num_attempts: numAttempts,
         denoise: denoise,
@@ -276,6 +271,9 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
     );
   };
 
+  const isGenerateDisabled = isLoading || !!selectedJob || !sourceImageFile || !maskImage || (!isAutoPromptEnabled && !prompt.trim() && !referenceImageFile);
+  const placeholderText = isAutoPromptEnabled ? t('promptPlaceholderInpaintingOptional') : t('promptPlaceholderInpaintingRequired');
+
   return (
     <>
       <div className="flex flex-col gap-4">
@@ -290,7 +288,7 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
                         <Button variant="ghost" size="icon" onClick={() => setIsGuideOpen(true)}>
                             <HelpCircle className="h-5 w-5" />
                         </Button>
-                        {(selectedJob || sourceImageFile) && <Button variant="outline" size="sm" onClick={handleClearSourceImage}><PlusCircle className="h-4 w-4 mr-2" />{t('new')}</Button>}
+                        {(selectedJob || sourceImageFile) && <Button variant="outline" size="sm" onClick={resetForm}><PlusCircle className="h-4 w-4 mr-2" />{t('new')}</Button>}
                     </div>
                   </div>
                 </CardHeader>
@@ -323,19 +321,19 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
                         <AccordionTrigger>{t('inputs')}</AccordionTrigger>
                         <AccordionContent className="pt-4 space-y-4">
                           <div className="grid grid-cols-2 gap-4">
-                            <ImageUploader onFileSelect={handleFileSelect} title={t('sourceImage')} imageUrl={sourceImageUrl} onClear={handleClearSourceImage} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
+                            <ImageUploader onFileSelect={setSourceImageFile} title={t('sourceImage')} imageUrl={sourceImageUrl} onClear={resetForm} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
                             <ImageUploader onFileSelect={setReferenceImageFile} title={t('garmentReference')} imageUrl={referenceImageUrl} onClear={() => setReferenceImageFile(null)} icon={<Shirt className="h-8 w-8 text-muted-foreground" />} />
                           </div>
                         </AccordionContent>
                       </AccordionItem>
                       <AccordionItem value="item-2">
-                        <AccordionTrigger>{t('promptSectionTitle')}</AccordionTrigger>
+                        <AccordionTrigger>{t('promptOptional')}</AccordionTrigger>
                         <AccordionContent className="pt-4 space-y-2">
                           <div className="flex items-center space-x-2">
-                            <Switch id="auto-prompt-pro" checked={isAutoPromptEnabled} onCheckedChange={setIsAutoPromptEnabled} />
+                            <Switch id="auto-prompt-pro" checked={isAutoPromptEnabled} onCheckedChange={setIsAutoPromptEnabled} disabled={!referenceImageFile} />
                             <Label htmlFor="auto-prompt-pro">{t('autoGenerate')}</Label>
                           </div>
-                          <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t('promptPlaceholderVTO')} rows={4} disabled={isAutoPromptEnabled} />
+                          <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={placeholderText} rows={4} disabled={isAutoPromptEnabled} />
                         </AccordionContent>
                       </AccordionItem>
                       <AccordionItem value="item-3">
@@ -363,7 +361,7 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
                   )}
                 </CardContent>
               </Card>
-              <Button size="lg" className="w-full" onClick={handleGenerate} disabled={isLoading || !!selectedJob}>
+              <Button size="lg" className="w-full" onClick={handleGenerate} disabled={isGenerateDisabled}>
                 {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
                 {t('generate')}
               </Button>
