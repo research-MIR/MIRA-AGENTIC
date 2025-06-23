@@ -26,6 +26,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { optimizeImage } from "@/lib/utils";
 import { useImageTransferStore } from "@/store/imageTransferStore";
 import { RealtimeChannel } from "@supabase/supabase-js";
+import { Switch } from "@/components/ui/switch";
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -101,6 +102,7 @@ const Inpainting = () => {
   const [isDebugModalOpen, setIsDebugModalOpen] = useState(false);
   const [isGuideOpen, setIsGuideOpen] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [isAutoPromptEnabled, setIsAutoPromptEnabled] = useState(true);
 
   const [numAttempts, setNumAttempts] = useState(1);
   const [denoise, setDenoise] = useState(0.99);
@@ -136,6 +138,12 @@ const Inpainting = () => {
   const handleSelectJob = (job: InpaintingJob) => {
     setSelectedJobId(job.id);
   };
+
+  useEffect(() => {
+    if (!referenceImageFile) {
+      setIsAutoPromptEnabled(false);
+    }
+  }, [referenceImageFile]);
 
   useEffect(() => {
     const { url } = consumeImageUrl();
@@ -207,6 +215,10 @@ const Inpainting = () => {
       showError("Please provide a source image and draw a mask.");
       return;
     }
+    if (!isAutoPromptEnabled && !prompt.trim()) {
+      showError("Please provide a prompt or enable auto-prompt.");
+      return;
+    }
     
     setIsLoading(true);
     const toastId = showLoading(t('sendingJob'));
@@ -217,7 +229,7 @@ const Inpainting = () => {
       const payload: any = {
         source_image_base64: await fileToBase64(optimizedSource),
         mask_image_base64: maskImage.split(',')[1],
-        prompt: prompt,
+        prompt: isAutoPromptEnabled ? "" : prompt,
         is_garment_mode: false, // Always use general mode for this tool
         user_id: session?.user.id,
         denoise: denoise,
@@ -280,6 +292,9 @@ const Inpainting = () => {
     );
   };
 
+  const isGenerateDisabled = isLoading || !!selectedJob || !sourceImageFile || !maskImage || (!isAutoPromptEnabled && !prompt.trim());
+  const placeholderText = isAutoPromptEnabled ? t('promptPlaceholderInpaintingOptional') : t('promptPlaceholderInpaintingRequired');
+
   return (
     <>
       <div className="p-4 md:p-8 h-screen flex flex-col">
@@ -340,7 +355,11 @@ const Inpainting = () => {
                         <AccordionItem value="item-2">
                           <AccordionTrigger>{t('promptOptional')}</AccordionTrigger>
                           <AccordionContent className="pt-4 space-y-2">
-                            <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t('promptPlaceholderInpainting')} rows={4} />
+                            <div className="flex items-center space-x-2">
+                              <Switch id="auto-prompt-pro" checked={isAutoPromptEnabled} onCheckedChange={setIsAutoPromptEnabled} disabled={!referenceImageFile} />
+                              <Label htmlFor="auto-prompt-pro">{t('autoGenerate')}</Label>
+                            </div>
+                            <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={placeholderText} rows={4} disabled={isAutoPromptEnabled} />
                           </AccordionContent>
                         </AccordionItem>
                         <AccordionItem value="item-3">
@@ -368,7 +387,7 @@ const Inpainting = () => {
                     )}
                   </CardContent>
                 </Card>
-                <Button size="lg" className="w-full" onClick={handleGenerate} disabled={isLoading || !!selectedJob}>
+                <Button size="lg" className="w-full" onClick={handleGenerate} disabled={isGenerateDisabled}>
                   {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
                   {t('generate')}
                 </Button>

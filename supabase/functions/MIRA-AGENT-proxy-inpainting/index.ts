@@ -74,7 +74,10 @@ serve(async (req) => {
 
     let finalPrompt = prompt;
     if (!finalPrompt || finalPrompt.trim() === "") {
-        console.log(`[InpaintingProxy] No prompt provided. Auto-generating...`);
+        if (!reference_image_base64) {
+            throw new Error("A text prompt is required when no reference image is provided.");
+        }
+        console.log(`[InpaintingProxy] No prompt provided. Auto-generating from reference...`);
         const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-prompt-helper', {
           body: { 
             person_image_base64: source_image_base64, 
