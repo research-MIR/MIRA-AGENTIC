@@ -119,6 +119,10 @@ async function uploadImageToComfyUI(comfyUiUrl: string, image: Blob, filename: s
 }
 
 serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { headers: corsHeaders });
+  }
+
   const COMFYUI_ENDPOINT_URL = Deno.env.get('COMFYUI_ENDPOINT_URL');
   if (!COMFYUI_ENDPOINT_URL) {
     return new Response(JSON.stringify({ error: "Server configuration error: COMFYUI_ENDPOINT_URL is not set." }), { status: 500, headers: corsHeaders });
