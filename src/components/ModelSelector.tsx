@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import {
   Select,
   SelectContent,
@@ -6,20 +5,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { supabase } from "@/integrations/supabase/client";
-import { showError } from "@/utils/toast";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Badge } from "@/components/ui/badge";
-
-interface Model {
-  id: string;
-  model_id_string: string;
-  provider: string;
-  is_default: boolean;
-  supports_img2img: boolean;
-}
+import { Model } from "@/hooks/useChatManager";
 
 interface ModelSelectorProps {
+  models: Model[];
   selectedModelId: string | null;
   onModelChange: (modelId: string) => void;
   disabled?: boolean;
@@ -34,40 +25,9 @@ const modelAliases: { [key: string]: string } = {
   'fal-ai/bytedance/seedream/v3/text-to-image': 'Creative Model V3',
 };
 
-export const ModelSelector = ({ selectedModelId, onModelChange, disabled = false }: ModelSelectorProps) => {
-  const [models, setModels] = useState<Model[]>([]);
-  const [defaultModelId, setDefaultModelId] = useState<string | null>(null);
-
-  useEffect(() => {
-    const fetchModels = async () => {
-      try {
-        const { data, error } = await supabase
-          .from("mira-agent-models")
-          .select("id, model_id_string, provider, is_default, supports_img2img")
-          .eq("model_type", "image")
-          .not('provider', 'eq', 'OpenAI');
-
-        if (error) throw error;
-
-        if (data) {
-          setModels(data);
-          const defaultModel = data.find(m => m.is_default);
-          if (defaultModel) {
-            setDefaultModelId(defaultModel.model_id_string);
-            if (!selectedModelId) {
-              onModelChange(defaultModel.model_id_string);
-            }
-          }
-        }
-      } catch (error: any) {
-        showError("Failed to load image models: " + error.message);
-      }
-    };
-
-    fetchModels();
-  }, [onModelChange, selectedModelId]);
-
-  const currentSelection = selectedModelId || defaultModelId;
+export const ModelSelector = ({ models, selectedModelId, onModelChange, disabled = false }: ModelSelectorProps) => {
+  const defaultModel = models.find(m => m.is_default);
+  const currentSelection = selectedModelId || defaultModel?.model_id_string;
 
   const selector = (
     <Select onValueChange={onModelChange} value={currentSelection ?? undefined} disabled={disabled}>

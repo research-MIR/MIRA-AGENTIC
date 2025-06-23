@@ -11,6 +11,14 @@ import { translateErrorMessage } from '@/lib/errors';
 
 const MAX_TURNS = 60;
 
+export interface Model {
+  id: string;
+  model_id_string: string;
+  provider: string;
+  is_default: boolean;
+  supports_img2img: boolean;
+}
+
 const parseHistoryToMessages = (jobData: any, t: (key: string) => string): Message[] => {
     const history = jobData?.context?.history;
     const messages: Message[] = [];
@@ -92,12 +100,39 @@ export const useChatManager = () => {
     const [isSending, setIsSending] = useState(false);
     const [isOwner, setIsOwner] = useState(true);
     const [isTurnLimitReached, setIsTurnLimitReached] = useState(false);
+    const [models, setModels] = useState<Model[]>([]);
     const [jobSettings, setJobSettings] = useState({
         isDesignerMode: false,
         selectedModelId: null as string | null,
         ratioMode: 'auto' as 'auto' | string,
         numImagesMode: 'auto' as 'auto' | number,
     });
+
+    useEffect(() => {
+        const fetchModels = async () => {
+          try {
+            const { data, error } = await supabase
+              .from("mira-agent-models")
+              .select("id, model_id_string, provider, is_default, supports_img2img")
+              .eq("model_type", "image")
+              .not('provider', 'eq', 'OpenAI');
+    
+            if (error) throw error;
+    
+            if (data) {
+              setModels(data);
+              const defaultModel = data.find(m => m.is_default);
+              if (defaultModel && !jobSettings.selectedModelId) {
+                setJobSettings(s => ({ ...s, selectedModelId: defaultModel.model_id_string }));
+              }
+            }
+          } catch (error: any) {
+            showError("Failed to load image models: " + error.message);
+          }
+        };
+    
+        fetchModels();
+    }, [supabase, jobSettings.selectedModelId]);
 
     const fetchChatJob = useCallback(async (jobId: string | undefined) => {
         if (!jobId || !session?.user) return null;
@@ -289,5 +324,6 @@ export const useChatManager = () => {
         deleteChat,
         branchChat,
         isLoading,
+        models,
     };
 };

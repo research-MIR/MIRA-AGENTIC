@@ -24,6 +24,7 @@ export const ChatInterface = () => {
     sendMessage,
     deleteChat,
     branchChat,
+    models,
   } = useChatManager();
 
   const {
@@ -96,6 +97,7 @@ export const ChatInterface = () => {
 
       <div className="border-t shrink-0 sticky bottom-0 bg-background">
         <ControlPanel
+          models={models}
           selectedModelId={jobSettings.selectedModelId}
           onModelChange={(val) => setJobSettings(s => ({ ...s, selectedModelId: val }))}
           isDesignerMode={jobSettings.isDesignerMode}
