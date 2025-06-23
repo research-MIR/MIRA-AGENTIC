@@ -262,6 +262,43 @@ function assembleCreativeProcessResult(history: Content[]): any {
     };
 }
 
+function getValidHistorySliceForTool(fullHistory: Content[], maxLength: number): Content[] {
+    const slicedHistory: Content[] = [];
+    // Iterate backwards from the end of the history
+    for (let i = fullHistory.length - 1; i >= 0; i--) {
+        const currentTurn = fullHistory[i];
+        
+        // If the current turn is a function response, we MUST also include the preceding model's function call.
+        if (currentTurn.role === 'function') {
+            const modelTurn = fullHistory[i - 1];
+            if (i > 0 && modelTurn.role === 'model' && modelTurn.parts[0]?.functionCall) {
+                // Add both as a pair
+                slicedHistory.unshift(modelTurn, currentTurn);
+                i--; // Decrement i again because we've processed two turns
+            }
+            // If there's no preceding model/functionCall, this is an invalid turn, so we skip it.
+        } else {
+            // For user or model turns without function calls, just add them.
+            slicedHistory.unshift(currentTurn);
+        }
+
+        if (slicedHistory.length >= maxLength) {
+            break;
+        }
+    }
+
+    // Final cleanup: ensure the very first turn is a 'user' turn.
+    const firstUserIndex = slicedHistory.findIndex(turn => turn.role === 'user');
+    if (firstUserIndex > 0) {
+        return slicedHistory.slice(firstUserIndex);
+    } else if (firstUserIndex === -1) {
+        // This case should be rare, but if no user turn is in the slice, the context is likely invalid.
+        return []; 
+    }
+
+    return slicedHistory;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
   
@@ -451,15 +488,7 @@ serve(async (req) => {
     } else if (call.name === 'dispatch_to_artisan_engine' || call.name === 'critique_images') {
         const toolName = call.name === 'dispatch_to_artisan_engine' ? 'MIRA-AGENT-tool-generate-image-prompt' : 'MIRA-AGENT-tool-critique-images';
         
-        const fullHistorySlice = history.slice(-HISTORY_SLICE_FOR_TOOLS);
-        let firstValidIndex = -1;
-        for (let i = 0; i < fullHistorySlice.length; i++) {
-            if (fullHistorySlice[i].role === 'user') {
-                firstValidIndex = i;
-                break;
-            }
-        }
-        const prunedHistory = firstValidIndex !== -1 ? fullHistorySlice.slice(firstValidIndex) : [];
+        const prunedHistory = getValidHistorySliceForTool(history, HISTORY_SLICE_FOR_TOOLS);
 
         const payload = { body: { history: prunedHistory, iteration_number: iterationNumber, is_designer_mode: currentContext.isDesignerMode } };
         console.log(`[MasterWorker][${currentJobId}] Invoking ${toolName} with pruned history (last ${prunedHistory.length} valid turns)...`);
