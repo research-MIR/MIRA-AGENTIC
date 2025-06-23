@@ -19,6 +19,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { ScrollArea } from "@/components/ui/scroll-area";
 import ReactMarkdown from "react-markdown";
 import { useImageTransferStore } from "@/store/imageTransferStore";
+import { showError } from "@/utils/toast";
 
 interface BitStudioJob {
   id: string;
@@ -56,6 +57,22 @@ const VirtualTryOn = () => {
   
   const { consumeImageUrl, imageUrlToTransfer, vtoTarget } = useImageTransferStore();
 
+  // State lifted from VirtualTryOnPro
+  const [sourceImageFile, setSourceImageFile] = useState<File | null>(null);
+  const [referenceImageFile, setReferenceImageFile] = useState<File | null>(null);
+  const [maskImage, setMaskImage] = useState<string | null>(null);
+  const [prompt, setPrompt] = useState("");
+  const [brushSize, setBrushSize] = useState(30);
+  const [resetTrigger, setResetTrigger] = useState(0);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isDebugModalOpen, setIsDebugModalOpen] = useState(false);
+  const [isAutoPromptEnabled, setIsAutoPromptEnabled] = useState(true);
+  const [isGuideOpen, setIsGuideOpen] = useState(false);
+  const [numAttempts, setNumAttempts] = useState(1);
+  const [denoise, setDenoise] = useState(0.99);
+  const [isHighQuality, setIsHighQuality] = useState(false);
+  const [maskExpansion, setMaskExpansion] = useState(3);
+
   useEffect(() => {
     console.log('[VTO Page] Image transfer effect triggered.');
     if (imageUrlToTransfer && vtoTarget) {
@@ -85,6 +102,11 @@ const VirtualTryOn = () => {
 
   const resetForm = useCallback(() => {
     setSelectedJobId(null);
+    setSourceImageFile(null);
+    setReferenceImageFile(null);
+    setMaskImage(null);
+    setPrompt("");
+    setResetTrigger(c => c + 1);
     consumeImageUrl();
   }, [consumeImageUrl]);
 
@@ -173,6 +195,21 @@ const VirtualTryOn = () => {
               resetForm={resetForm}
               transferredImageUrl={vtoTarget === 'pro-source' ? imageUrlToTransfer : null}
               onTransferConsumed={consumeImageUrl}
+              // Pass state and setters down
+              sourceImageFile={sourceImageFile} setSourceImageFile={setSourceImageFile}
+              referenceImageFile={referenceImageFile} setReferenceImageFile={setReferenceImageFile}
+              maskImage={maskImage} setMaskImage={setMaskImage}
+              prompt={prompt} setPrompt={setPrompt}
+              brushSize={brushSize} setBrushSize={setBrushSize}
+              resetTrigger={resetTrigger} setResetTrigger={setResetTrigger}
+              isLoading={isLoading} setIsLoading={setIsLoading}
+              isDebugModalOpen={isDebugModalOpen} setIsDebugModalOpen={setIsDebugModalOpen}
+              isAutoPromptEnabled={isAutoPromptEnabled} setIsAutoPromptEnabled={setIsAutoPromptEnabled}
+              isGuideOpen={isGuideOpen} setIsGuideOpen={setIsGuideOpen}
+              numAttempts={numAttempts} setNumAttempts={setNumAttempts}
+              denoise={denoise} setDenoise={setDenoise}
+              isHighQuality={isHighQuality} setIsHighQuality={setIsHighQuality}
+              maskExpansion={maskExpansion} setMaskExpansion={setMaskExpansion}
             />
           ) : (
             <div className="h-full">

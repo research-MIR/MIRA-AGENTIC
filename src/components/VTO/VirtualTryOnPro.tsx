@@ -1,5 +1,5 @@
-import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import React, { useMemo, useEffect, useCallback, useRef } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -89,28 +89,48 @@ interface VirtualTryOnProProps {
   resetForm: () => void;
   transferredImageUrl?: string | null;
   onTransferConsumed: () => void;
+  // State and setters from parent
+  sourceImageFile: File | null;
+  setSourceImageFile: (file: File | null) => void;
+  referenceImageFile: File | null;
+  setReferenceImageFile: (file: File | null) => void;
+  maskImage: string | null;
+  setMaskImage: (mask: string | null) => void;
+  prompt: string;
+  setPrompt: (prompt: string) => void;
+  brushSize: number;
+  setBrushSize: (size: number) => void;
+  resetTrigger: number;
+  setResetTrigger: (cb: (c: number) => number) => void;
+  isLoading: boolean;
+  setIsLoading: (loading: boolean) => void;
+  isDebugModalOpen: boolean;
+  setIsDebugModalOpen: (open: boolean) => void;
+  isAutoPromptEnabled: boolean;
+  setIsAutoPromptEnabled: (enabled: boolean) => void;
+  isGuideOpen: boolean;
+  setIsGuideOpen: (open: boolean) => void;
+  numAttempts: number;
+  setNumAttempts: (n: number) => void;
+  denoise: number;
+  setDenoise: (d: number) => void;
+  isHighQuality: boolean;
+  setIsHighQuality: (hq: boolean) => void;
+  maskExpansion: number;
+  setMaskExpansion: (me: number) => void;
 }
 
-export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, handleSelectJob, resetForm, transferredImageUrl, onTransferConsumed }: VirtualTryOnProProps) => {
+export const VirtualTryOnPro = ({
+  recentJobs, isLoadingRecentJobs, selectedJob, handleSelectJob, resetForm, transferredImageUrl, onTransferConsumed,
+  sourceImageFile, setSourceImageFile, referenceImageFile, setReferenceImageFile, maskImage, setMaskImage,
+  prompt, setPrompt, brushSize, setBrushSize, resetTrigger, setResetTrigger, isLoading, setIsLoading,
+  isDebugModalOpen, setIsDebugModalOpen, isAutoPromptEnabled, setIsAutoPromptEnabled, isGuideOpen, setIsGuideOpen,
+  numAttempts, setNumAttempts, denoise, setDenoise, isHighQuality, setIsHighQuality, maskExpansion, setMaskExpansion
+}: VirtualTryOnProProps) => {
   const { supabase, session } = useSession();
   const { t } = useLanguage();
   const { showImage } = useImagePreview();
   const queryClient = useQueryClient();
-  const [sourceImageFile, setSourceImageFile] = useState<File | null>(null);
-  const [referenceImageFile, setReferenceImageFile] = useState<File | null>(null);
-  const [maskImage, setMaskImage] = useState<string | null>(null);
-  const [prompt, setPrompt] = useState("");
-  const [brushSize, setBrushSize] = useState(30);
-  const [resetTrigger, setResetTrigger] = useState(0);
-  const [isLoading, setIsLoading] = useState(false);
-  const [isDebugModalOpen, setIsDebugModalOpen] = useState(false);
-  const [isAutoPromptEnabled, setIsAutoPromptEnabled] = useState(true);
-  const [isGuideOpen, setIsGuideOpen] = useState(false);
-
-  const [numAttempts, setNumAttempts] = useState(1);
-  const [denoise, setDenoise] = useState(0.99);
-  const [isHighQuality, setIsHighQuality] = useState(false);
-  const [maskExpansion, setMaskExpansion] = useState(3);
 
   const sourceImageUrl = useMemo(() => sourceImageFile ? URL.createObjectURL(sourceImageFile) : null, [sourceImageFile]);
   const referenceImageUrl = useMemo(() => referenceImageFile ? URL.createObjectURL(referenceImageFile) : null, [referenceImageFile]);
@@ -150,7 +170,7 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
       };
       fetchImageAsFile(transferredImageUrl);
     }
-  }, [transferredImageUrl, supabase, onTransferConsumed]);
+  }, [transferredImageUrl, supabase, onTransferConsumed, setSourceImageFile]);
 
   useEffect(() => {
     return () => {
@@ -167,7 +187,7 @@ export const VirtualTryOnPro = ({ recentJobs, isLoadingRecentJobs, selectedJob, 
       setPrompt(selectedJob.metadata?.prompt_used || "");
       setResetTrigger(c => c + 1);
     }
-  }, [selectedJob]);
+  }, [selectedJob, setSourceImageFile, setReferenceImageFile, setMaskImage, setPrompt, setResetTrigger]);
 
   const proJobs = useMemo(() => recentJobs?.filter(job => job.mode === 'inpaint') || [], [recentJobs]);
 
