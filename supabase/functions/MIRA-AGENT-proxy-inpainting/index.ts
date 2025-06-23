@@ -8,10 +8,10 @@ const corsHeaders = {
 };
 
 const UPLOAD_BUCKET = 'mira-agent-user-uploads';
+const BITSTUDIO_API_BASE = 'https://api.bitstudio.ai';
 
 async function uploadToBitStudio(fileBlob: Blob, type: 'inpaint-base' | 'inpaint-mask' | 'inpaint-reference', filename: string): Promise<string> {
   const BITSTUDIO_API_KEY = Deno.env.get('BITSTUDIO_API_KEY');
-  const BITSTUDIO_API_BASE = 'https://api.bitstudio.ai';
   const formData = new FormData();
   formData.append('file', fileBlob, filename);
   formData.append('type', type);
@@ -168,7 +168,7 @@ serve(async (req) => {
       }
       const [sourceImageId, maskImageId, referenceImageId] = await Promise.all(uploadPromises);
 
-      const inpaintUrl = `${Deno.env.get('BITSTUDIO_API_BASE')}/images/${sourceImageId}/inpaint`;
+      const inpaintUrl = `${BITSTUDIO_API_BASE}/images/${sourceImageId}/inpaint`;
       const inpaintPayload: any = { 
           mask_image_id: maskImageId, 
           prompt: finalPrompt, 
