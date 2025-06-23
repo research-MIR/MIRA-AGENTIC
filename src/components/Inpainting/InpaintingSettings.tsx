@@ -1,16 +1,20 @@
-import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
+import { Label } from "@/components/ui/label";
 import { useLanguage } from "@/context/LanguageContext";
 
 interface InpaintingSettingsProps {
   styleStrength: number;
   setStyleStrength: (s: number) => void;
+  maskExpansion: number;
+  setMaskExpansion: (me: number) => void;
   disabled: boolean;
 }
 
 export const InpaintingSettings = ({
   styleStrength,
   setStyleStrength,
+  maskExpansion,
+  setMaskExpansion,
   disabled,
 }: InpaintingSettingsProps) => {
   const { t } = useLanguage();
@@ -25,6 +29,17 @@ export const InpaintingSettings = ({
           min={0.0}
           max={1.0}
           step={0.01}
+          disabled={disabled}
+        />
+      </div>
+      <div>
+        <Label>{t('maskExpansion', { maskExpansion })}</Label>
+        <Slider
+          value={[maskExpansion]}
+          onValueChange={(v) => setMaskExpansion(v[0])}
+          min={0}
+          max={10}
+          step={1}
           disabled={disabled}
         />
       </div>

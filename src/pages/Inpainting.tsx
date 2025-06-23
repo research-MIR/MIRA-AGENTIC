@@ -105,6 +105,7 @@ const Inpainting = () => {
   const [isAutoPromptEnabled, setIsAutoPromptEnabled] = useState(true);
 
   const [styleStrength, setStyleStrength] = useState(0.3);
+  const [maskExpansion, setMaskExpansion] = useState(3);
 
   const sourceImageUrl = useMemo(() => sourceImageFile ? URL.createObjectURL(sourceImageFile) : null, [sourceImageFile]);
   const referenceImageUrl = useMemo(() => referenceImageFile ? URL.createObjectURL(referenceImageFile) : null, [referenceImageFile]);
@@ -246,6 +247,7 @@ const Inpainting = () => {
         user_id: session?.user.id,
         denoise: 1.0,
         style_strength: styleStrength,
+        mask_expansion_percent: maskExpansion,
       };
 
       if (referenceImageFile) {
@@ -389,6 +391,7 @@ const Inpainting = () => {
                           <AccordionContent className="pt-4">
                             <InpaintingSettings
                               styleStrength={styleStrength} setStyleStrength={setStyleStrength}
+                              maskExpansion={maskExpansion} setMaskExpansion={setMaskExpansion}
                               disabled={isLoading}
                             />
                           </AccordionContent>
@@ -436,10 +439,10 @@ const Inpainting = () => {
           <Card className="mt-4">
             <CardHeader><CardTitle><div className="flex items-center gap-2"><History className="h-4 w-4" />{t('recentProJobs')}</div></CardTitle></CardHeader>
             <CardContent>
-              {isLoadingRecentJobs ? <Skeleton className="h-24 w-full" /> : recentJobs && recentJobs.length > 0 ? (
+              {isLoadingRecentJobs ? <Skeleton className="h-24 w-full" /> : proJobs.length > 0 ? (
                 <ScrollArea className="h-32">
                   <div className="flex gap-4 pb-2">
-                    {recentJobs.map(job => {
+                    {proJobs.map(job => {
                       const urlToPreview = job.final_result?.publicUrl || job.metadata?.source_image_url;
                       return (
                         <button key={job.id} onClick={() => handleSelectJob(job)} className={cn("border-2 rounded-lg p-0.5 flex-shrink-0 w-24 h-24", selectedJob?.id === job.id ? "border-primary" : "border-transparent")}>

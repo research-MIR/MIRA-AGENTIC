@@ -126,7 +126,7 @@ serve(async (req) => {
 
     if (maxX < minX || maxY < minY) throw new Error("The provided mask is empty or invalid after processing.");
 
-    const padding = Math.round(Math.max(maxX - minX, maxY - minY) * 0.05);
+    const padding = Math.round(Math.max(maxX - minX, maxY - minY) * 0.15);
     const bbox = {
       x: Math.max(0, minX - padding),
       y: Math.max(0, minY - padding),

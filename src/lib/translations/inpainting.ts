@@ -90,7 +90,7 @@ export const inpaintingTranslations = {
 L'inpainting è uno strumento potente per sostituire o modificare parti di un'immagine, ma richiede un approccio specifico per ottenere i migliori risultati.
 
 #### 1. Il Prompt Preciso: Lascia Fare all'IA
-- **Usa l'Auto-Prompt (Consigliato):** Se fornisci un'immagine di riferimento, ti consigliamo di lasciare attiva l'opzione "Auto-Genera". L'IA analizzerà la tua immagine sorgente e quella di riferimento per creare un prompt tecnicamente perfetto che descrive come il nuovo oggetto/texture dovrebbe apparire nel contesto della scena originale (illuminazione, prospettiva, ecc.).
+- **Usa l'Auto-Prompt (Consigliato):** Se fornisci un'immagine di riferimento, ti consigliamo vivamente di lasciare attiva l'opzione "Auto-Genera". L'IA analizzerà la tua immagine sorgente e quella di riferimento per creare un prompt tecnicamente perfetto che descrive come il nuovo oggetto/texture dovrebbe apparire nel contesto della scena originale (illuminazione, prospettiva, ecc.).
 - **Se Scrivi Manualmente:** Se preferisci il controllo manuale, ricorda che stai sostituendo il lavoro dell'IA. Il tuo prompt deve descrivere in dettaglio l'oggetto da inserire *come se fosse nella scena*.
   - **Descrivi solo la sostituzione:** Il tuo prompt dovrebbe descrivere solo ciò che vuoi che appaia *all'interno* dell'area mascherata. Non descrivere l'intera immagine.
   - **Sii dettagliato:** Includi dettagli su materiale, texture, stile e illuminazione per aiutare l'IA a integrare l'oggetto in modo realistico.
@@ -236,11 +236,11 @@ Inpainting is a powerful tool for replacing or modifying parts of an image, but 
   - **Low Denoise (e.g., 0.5-0.7):** Ideal for texture or color changes, or when the shape of the original object is similar to the desired one. Helps to blend the result better.
   - **High Denoise (e.g., 0.8-1.0):** Gives the AI more creative freedom. Use this if you want to significantly change an object's shape or if the lower setting isn't strong enough.
 
-#### 5. PRO Settings Explained
-- **Number of Images:** Generate multiple variations of the same inpainting request. Useful for getting different interpretations from the AI.
-- **High Resolution:** Increases the output resolution. Takes longer but produces higher quality results.
-- **Denoise Strength:** Controls the AI's creative freedom. A low value preserves the original structure, ideal for texture changes. A high value allows the AI to be more creative, useful for changing an object's shape.
-- **Mask Expansion:** Softens the edges of the mask, creating a more natural blend between the generated area and the original image. Increase this value if you notice hard edges in your results.
+#### 5. Impostazioni PRO Spiegate
+- **Numero di Tentativi:** Genera più variazioni della stessa richiesta di inpainting. Utile per ottenere diverse interpretazioni dall'IA.
+- **Alta Risoluzione:** Aumenta la risoluzione dell'output. Richiede più tempo ma produce risultati di qualità superiore.
+- **Intensità Denoise:** Controlla la libertà creativa dell'IA. Un valore basso preserva la struttura originale, ideale per cambi di texture. Un valore alto permette all'IA di essere più creativa, utile per cambiare la forma di un oggetto.
+- **Espansione Maschera:** Ammorbidisce i bordi della maschera, creando una fusione più naturale tra l'area generata e l'immagine originale. Aumenta questo valore se noti bordi netti nel risultato.
 `
   },
 };
