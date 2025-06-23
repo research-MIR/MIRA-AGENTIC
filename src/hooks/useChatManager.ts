@@ -9,7 +9,7 @@ import { useLanguage } from '@/context/LanguageContext';
 import { UploadedFile } from './useFileUpload';
 import { translateErrorMessage } from '@/lib/errors';
 
-const MAX_TURNS = 60;
+const MAX_TURNS = 120;
 
 export interface Model {
   id: string;
