@@ -42,6 +42,7 @@ serve(async (req) => {
     }
 
     // 3. Determine the initial state for the new branched job
+    const lastTurn = newHistory[newHistory.length - 1];
     let initialResult = null;
     // If the last turn was a function response, we can use that as the initial "message" in the new chat.
     if (lastTurn.role === 'function' && lastTurn.parts[0]?.functionResponse?.response) {

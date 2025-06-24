@@ -103,7 +103,7 @@ const Projects = () => {
     if (!newProjectName.trim() || !session?.user) return;
     setIsCreating(true);
     try {
-      const { error } = await supabase.from('mira-agent-projects').insert({ name: newProjectName, user_id: session.user.id });
+      const { error } = await supabase.from('projects').insert({ name: newProjectName, user_id: session.user.id });
       if (error) throw error;
       showSuccess(`Project "${newProjectName}" created.`);
       setNewProjectName('');
