@@ -34,6 +34,7 @@ const SegmentationTool = () => {
   const [sourcePreview, setSourcePreview] = useState<string | null>(null);
   const [referencePreview, setReferencePreview] = useState<string | null>(null);
   const [imageDimensions, setImageDimensions] = useState<{width: number, height: number} | null>(null);
+  const [referenceImageDimensions, setReferenceImageDimensions] = useState<{width: number, height: number} | null>(null);
   const [prompt, setPrompt] = useState('Give the segmentation masks for all clearly visible objects that match generally my reference image. Output a JSON list of segmentation masks where each entry contains the 2D bounding box in the key "box_2d", the segmentation mask in key "mask", and the text label in the key "label".');
   const [masks, setMasks] = useState<MaskItemData[] | null>(null);
   const [rawResponse, setRawResponse] = useState<string>('');
@@ -45,22 +46,23 @@ const SegmentationTool = () => {
   const handleFileSelect = useCallback((file: File | null, type: 'source' | 'reference') => {
     if (file && file.type.startsWith('image/')) {
       console.log(`[SegmentationTool] ${type} file selected: ${file.name}`);
-      if (type === 'source') {
-        setSourceFile(file);
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          const img = new Image();
-          img.onload = () => {
-              setImageDimensions({ width: img.width, height: img.height });
-              setSourcePreview(e.target?.result as string);
-          };
-          img.src = e.target?.result as string;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          if (type === 'source') {
+            setImageDimensions({ width: img.width, height: img.height });
+            setSourcePreview(e.target?.result as string);
+            setSourceFile(file);
+          } else {
+            setReferenceImageDimensions({ width: img.width, height: img.height });
+            setReferencePreview(e.target?.result as string);
+            setReferenceFile(file);
+          }
         };
-        reader.readAsDataURL(file);
-      } else {
-        setReferenceFile(file);
-        setReferencePreview(URL.createObjectURL(file));
-      }
+        img.src = e.target?.result as string;
+      };
+      reader.readAsDataURL(file);
     }
   }, []);
 
@@ -175,10 +177,10 @@ const SegmentationTool = () => {
                   {sourcePreview ? <img src={sourcePreview} alt="Original" className="rounded-md w-full" /> : <div className="aspect-square bg-muted rounded-md flex items-center justify-center text-muted-foreground">Upload an image</div>}
                 </div>
                 <div>
-                  <h3 className="font-semibold mb-2">Segmented Image</h3>
+                  <h3 className="font-semibold mb-2">Segmented Image (Projected on REFERENCE)</h3>
                   <div className="relative aspect-square bg-muted rounded-md">
-                    {sourcePreview && <img src={sourcePreview} alt="Original with overlay" className="rounded-md w-full h-full object-contain" />}
-                    {masks && imageDimensions && <SegmentationMask masks={masks} imageDimensions={imageDimensions} />}
+                    {referencePreview ? <img src={referencePreview} alt="Reference with overlay" className="rounded-md w-full h-full object-contain" /> : <div className="w-full h-full flex items-center justify-center text-muted-foreground">Upload a reference image</div>}
+                    {masks && referenceImageDimensions && <SegmentationMask masks={masks} imageDimensions={referenceImageDimensions} />}
                   </div>
                 </div>
               </div>
