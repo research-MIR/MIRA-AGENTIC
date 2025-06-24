@@ -77,14 +77,26 @@ serve(async (req) => {
     const contents: Content[] = [{ role: 'user', parts: userParts }];
 
     console.log(`[Orchestrator][${requestId}] Invoking ${NUM_WORKERS} segmentation workers in parallel...`);
-    const workerPromises = Array.from({ length: NUM_WORKERS }).map(() => 
-      ai.models.generateContent({
-          model: MODEL_NAME,
-          contents: contents,
-          generationConfig: { responseMimeType: "application/json" },
-          safetySettings,
-      }).then(result => extractJson(result.text)).catch(err => ({ error: err.message }))
-    );
+    
+    const workerPromises = Array.from({ length: NUM_WORKERS }).map((_, i) => {
+        console.log(`[Orchestrator][${requestId}] Starting worker ${i + 1}...`);
+        return ai.models.generateContent({
+            model: MODEL_NAME,
+            contents: contents,
+            generationConfig: { responseMimeType: "application/json" },
+            safetySettings,
+        }).then(result => {
+            console.log(`[Orchestrator][${requestId}] Worker ${i + 1} raw response text:`, result.text);
+            if (!result.text) {
+                console.error(`[Orchestrator][${requestId}] Worker ${i + 1} returned an empty response. Full response object:`, JSON.stringify(result, null, 2));
+                throw new Error("Model returned an empty response.");
+            }
+            return extractJson(result.text);
+        }).catch(err => {
+            console.error(`[Orchestrator][${requestId}] Worker ${i + 1} failed with error:`, err.message);
+            return { error: err.message };
+        });
+    });
 
     const settledResults = await Promise.allSettled(workerPromises);
     const allResults = settledResults.map(r => r.status === 'fulfilled' ? r.value : { error: r.reason.message });
