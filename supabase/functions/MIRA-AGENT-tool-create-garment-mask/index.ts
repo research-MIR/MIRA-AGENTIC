@@ -20,15 +20,18 @@ async function processMasks(
   maskRuns: MaskItemData[][], 
   imageDimensions: { width: number; height: number }
 ): Promise<string | null> {
+  console.log(`[processMasks] Starting to process ${maskRuns.length} mask runs.`);
   if (maskRuns.length === 0) return null;
 
   const firstMasksFromEachRun = maskRuns.map(run => run[0]).filter(Boolean);
   if (firstMasksFromEachRun.length === 0) return null;
+  console.log(`[processMasks] Extracted ${firstMasksFromEachRun.length} primary masks.`);
 
   const maskImages = await Promise.all(firstMasksFromEachRun.map(run => {
     const imageUrl = run.mask?.startsWith('data:image') ? run.mask : `data:image/png;base64,${run.mask}`;
     return loadImage(imageUrl);
   }));
+  console.log(`[processMasks] Loaded ${maskImages.length} mask images into canvas objects.`);
 
   const fullMaskCanvases = firstMasksFromEachRun.map((run, index) => {
     const maskImg = maskImages[index];
@@ -69,26 +72,33 @@ async function processMasks(
   }
   combinedCtx.putImageData(combinedImageData, 0, 0);
 
-  // Return the final black and white mask as a base64 string
   return combinedCanvas.toDataURL().split(',')[1];
 }
 
 
 serve(async (req) => {
+  console.log("[CreateGarmentMask] Function invoked.");
+
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
+    console.log("[CreateGarmentMask] Handling OPTIONS preflight request.");
+    return new Response(null, { headers: corsHeaders });
   }
 
   try {
+    console.log("[CreateGarmentMask] Parsing request body...");
     const { image_base64, mime_type, prompt, reference_image_base64, reference_mime_type } = await req.json();
     if (!image_base64 || !mime_type || !prompt) {
       throw new Error("image_base64, mime_type, and prompt are required.");
     }
+    console.log("[CreateGarmentMask] Request body parsed successfully.");
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
+    console.log("[CreateGarmentMask] Supabase client created.");
 
+    console.log("[CreateGarmentMask] Loading source image into canvas...");
     const sourceImage = await loadImage(`data:${mime_type};base64,${image_base64}`);
     const imageDimensions = { width: sourceImage.width(), height: sourceImage.height() };
+    console.log(`[CreateGarmentMask] Source image loaded. Dimensions: ${imageDimensions.width}x${imageDimensions.height}`);
 
     const createPayload = () => ({
       image_base64,
@@ -98,38 +108,43 @@ serve(async (req) => {
       reference_mime_type,
     });
 
-    // Run 9 segmentation jobs in parallel
-    const promises = Array(9).fill(null).map(() => 
-      supabase.functions.invoke('MIRA-AGENT-tool-segment-image', { body: createPayload() })
-    );
+    console.log("[CreateGarmentMask] Starting 9 parallel segmentation runs...");
+    const promises = Array(9).fill(null).map((_, i) => {
+      console.log(`[CreateGarmentMask] Invoking segment-image run #${i + 1}`);
+      return supabase.functions.invoke('MIRA-AGENT-tool-segment-image', { body: createPayload() });
+    });
 
     const results = await Promise.all(promises);
+    console.log("[CreateGarmentMask] All 9 segmentation runs have completed.");
 
     const allMasks: MaskItemData[][] = [];
     results.forEach((result, index) => {
       if (result.error) {
-        console.warn(`Run ${index + 1} failed: ${result.error.message}`);
-        // Don't throw, just skip this result
+        console.warn(`[CreateGarmentMask] Run ${index + 1} failed: ${result.error.message}`);
       } else {
         const maskData = result.data.masks || result.data;
         if (Array.isArray(maskData) && maskData.length > 0) {
           allMasks.push(maskData);
         } else {
-          console.warn(`Run ${index + 1} did not return a valid array of masks.`);
+          console.warn(`[CreateGarmentMask] Run ${index + 1} did not return a valid array of masks.`);
         }
       }
     });
+    console.log(`[CreateGarmentMask] Successfully processed ${allMasks.length} valid runs.`);
 
     if (allMasks.length < 6) {
         throw new Error(`Only ${allMasks.length} of 9 runs succeeded. Not enough data to create a reliable mask.`);
     }
 
+    console.log("[CreateGarmentMask] Processing and combining masks...");
     const finalMaskBase64 = await processMasks(allMasks, imageDimensions);
+    console.log("[CreateGarmentMask] Mask combination complete.");
 
     if (!finalMaskBase64) {
         throw new Error("Failed to process and combine masks.");
     }
 
+    console.log("[CreateGarmentMask] Returning final mask to client.");
     return new Response(JSON.stringify({ final_mask_base64: finalMaskBase64 }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
