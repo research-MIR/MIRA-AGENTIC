@@ -4,6 +4,8 @@ import { Button } from "@/components/ui/button";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { useState } from "react";
+import { useLanguage } from "@/context/LanguageContext";
+import { translateErrorMessage } from "@/lib/errors";
 
 interface ErrorCardProps {
   message: string;
@@ -13,6 +15,7 @@ interface ErrorCardProps {
 export const ErrorCard = ({ message, jobId }: ErrorCardProps) => {
   const { supabase } = useSession();
   const [isRetrying, setIsRetrying] = useState(false);
+  const { t } = useLanguage();
 
   const handleRetry = async () => {
     setIsRetrying(true);
@@ -76,6 +79,8 @@ export const ErrorCard = ({ message, jobId }: ErrorCardProps) => {
     }
   };
 
+  const friendlyMessage = translateErrorMessage(message, t);
+
   return (
     <Card className="max-w-lg bg-destructive/10 border-destructive">
       <CardContent className="p-3">
@@ -85,7 +90,7 @@ export const ErrorCard = ({ message, jobId }: ErrorCardProps) => {
           </div>
           <div className="flex-1">
             <p className="font-semibold text-destructive">An Error Occurred</p>
-            <p className="text-sm text-destructive/90">{message}</p>
+            <p className="text-sm text-destructive/90">{friendlyMessage}</p>
           </div>
           <Button variant="destructive" size="sm" onClick={handleRetry} disabled={isRetrying}>
             <RefreshCw className="h-4 w-4 mr-2" />

@@ -6,11 +6,12 @@ export const errorTranslations = {
     errorNoImageToRefine: "Non sono riuscito a trovare un'immagine da rifinare in questa conversazione. Per favore, caricane o generane una prima.",
     errorNetwork: "Si è verificato un problema di rete. Controlla la tua connessione e riprova.",
     errorUnknown: "Si è verificato un errore imprevisto. Per favore, riprova.",
-    noImageToRefine: "Mi dispiace, non ho trovato un'immagine nella nostra conversazione da rifinire. Per favore, caricane una o generane una prima.",
+    noImageToRefine: "Mi dispiace, non ho trovato un'immagine nella nostra conversazione da rifinare. Per favore, caricane una o generane una prima.",
     REFINEMENT_COMPLETE: "Ecco l'immagine rifinita. Cosa vuoi fare ora?",
     REFINEMENT_FURTHER: "Ecco l'immagine ulteriormente rifinita. Vuoi continuare?",
     ERROR_NO_IMAGE_TO_REFINE: "Mi dispiace, non ho trovato un'immagine nella nostra conversazione da rifinire. Per favore, caricane una o generane una prima.",
     errorMaxContext: "Questa conversazione ha raggiunto la sua memoria massima. Per continuare, per favore inizia una nuova chat.",
+    errorIncompleteOutput: "Il job di affinamento non è riuscito a produrre un risultato valido. Questo può accadere a causa di un problema temporaneo. Riprovare di solito risolve il problema.",
   },
   en: {
     errorQuotaExceeded: "You have reached your image generation limit for this period. Please check your plan details.",
@@ -24,5 +25,6 @@ export const errorTranslations = {
     REFINEMENT_FURTHER: "Here is the further refined image. Would you like to continue?",
     ERROR_NO_IMAGE_TO_REFINE: "I'm sorry, I couldn't find an image in our current conversation to refine. Please upload or generate one first.",
     errorMaxContext: "This conversation has reached its maximum context memory. To continue, please start a new chat.",
+    errorIncompleteOutput: "The refinement job failed to produce a valid output. This can happen due to a temporary issue. Retrying usually solves the problem.",
   },
 };

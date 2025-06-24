@@ -9,6 +9,7 @@ const errorKeywordMap: Record<string, string> = {
     "network request failed": "errorNetwork",
     "maximum context memory": "errorMaxContext",
     "history is too long": "errorMaxContext",
+    "incomplete or invalid output": "errorIncompleteOutput",
 };
 
 /**
