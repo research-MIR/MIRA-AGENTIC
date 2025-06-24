@@ -19,7 +19,7 @@ import { DebugStepsModal } from "@/components/VTO/DebugStepsModal";
 import { Switch } from "@/components/ui/switch";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { InpaintingSettings } from "@/components/Inpainting/InpaintingSettings";
-import { ScrollArea } from "../ui/scroll-area";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { useLanguage } from "@/context/LanguageContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import ReactMarkdown from "react-markdown";
