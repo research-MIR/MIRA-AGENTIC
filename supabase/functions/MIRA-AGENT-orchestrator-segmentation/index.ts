@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { GoogleGenAI, Content, Part, HarmCategory, HarmBlockThreshold } from 'https://esm.sh/@google/genai@0.15.0';
-import { createCanvas, loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
+import { createCanvas, loadImage, Canvas } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
@@ -41,10 +41,47 @@ async function uploadBufferToStorage(supabase: SupabaseClient, buffer: Uint8Arra
     return publicUrl;
 }
 
+/**
+ * Expands a mask on a given canvas by blurring and re-thresholding it.
+ * @param canvas The canvas containing the mask to expand.
+ * @param expansionPercent The percentage of the smaller image dimension to use for expansion.
+ */
+function expandMask(canvas: Canvas, expansionPercent: number) {
+    if (expansionPercent <= 0) return;
+
+    const ctx = canvas.getContext('2d');
+    const expansionAmount = Math.round(Math.min(canvas.width, canvas.height) * expansionPercent);
+
+    if (expansionAmount > 0) {
+        ctx.filter = `blur(${expansionAmount}px)`;
+        // Draw the canvas onto itself to apply the blur
+        ctx.drawImage(canvas, 0, 0);
+        ctx.filter = 'none';
+
+        // Re-threshold to make the blurred edges solid again
+        const smoothedImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const smoothedData = smoothedImageData.data;
+        for (let i = 0; i < smoothedData.length; i += 4) {
+            if (smoothedData[i] > 128) { // Check red channel, since blur makes it gray
+                smoothedData[i] = 255;
+                smoothedData[i + 1] = 255;
+                smoothedData[i + 2] = 255;
+            }
+        }
+        ctx.putImageData(smoothedImageData, 0, 0);
+    }
+}
+
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
+
+  // --- Configurable Expansion Percentages ---
+  const PRE_VOTE_EXPANSION_PERCENT = 0.02; // 2% expansion on individual masks
+  const POST_VOTE_EXPANSION_PERCENT = 0.02; // 2% expansion on the final combined mask
+  // -----------------------------------------
 
   const { image_base64, mime_type, prompt, reference_image_base64, reference_mime_type, user_id, image_dimensions } = await req.json();
   const requestId = `segment-orchestrator-${Date.now()}`;
@@ -124,6 +161,13 @@ serve(async (req) => {
         return fullCanvas;
     });
 
+    // --- STAGE 1 EXPANSION (PRE-VOTE) ---
+    console.log(`[Orchestrator][${requestId}] Applying pre-vote expansion of ${PRE_VOTE_EXPANSION_PERCENT * 100}% to each individual mask.`);
+    fullMaskCanvases.forEach(canvas => {
+        expandMask(canvas, PRE_VOTE_EXPANSION_PERCENT);
+    });
+    console.log(`[Orchestrator][${requestId}] Pre-vote expansion complete.`);
+
     const combinedCanvas = createCanvas(image_dimensions.width, image_dimensions.height);
     const combinedCtx = combinedCanvas.getContext('2d');
     const maskImageDatas = fullMaskCanvases.map(c => c.getContext('2d').getImageData(0, 0, image_dimensions.width, image_dimensions.height).data);
@@ -139,17 +183,12 @@ serve(async (req) => {
         }
     }
     combinedCtx.putImageData(combinedImageData, 0, 0);
+    console.log(`[Orchestrator][${requestId}] Majority voting complete.`);
 
-    const expansionAmount = Math.round(Math.min(image_dimensions.width, image_dimensions.height) * 0.01);
-    if (expansionAmount > 0) {
-        combinedCtx.filter = `blur(${expansionAmount}px)`;
-        combinedCtx.drawImage(combinedCanvas, 0, 0);
-        combinedCtx.filter = 'none';
-        const smoothedImageData = combinedCtx.getImageData(0, 0, image_dimensions.width, image_dimensions.height);
-        const smoothedData = smoothedImageData.data;
-        for (let i = 0; i < smoothedData.length; i += 4) { if (smoothedData[i] > 128) { smoothedData[i] = 255; smoothedData[i+1] = 255; smoothedData[i+2] = 255; } }
-        combinedCtx.putImageData(smoothedImageData, 0, 0);
-    }
+    // --- STAGE 2 EXPANSION (POST-VOTE) ---
+    console.log(`[Orchestrator][${requestId}] Applying post-vote expansion of ${POST_VOTE_EXPANSION_PERCENT * 100}% to the combined mask.`);
+    expandMask(combinedCanvas, POST_VOTE_EXPANSION_PERCENT);
+    console.log(`[Orchestrator][${requestId}] Post-vote expansion complete.`);
 
     const finalImageData = combinedCtx.getImageData(0, 0, image_dimensions.width, image_dimensions.height);
     const finalData = finalImageData.data;
