@@ -89,9 +89,10 @@ serve(async (req) => {
                 safetySettings,
             });
             
+            console.log(`[SegmentWorker][${requestId}] Raw response from Gemini on attempt ${attempt}:`, result.text);
+
             const responseJson = extractJson(result.text);
 
-            // **STRICT VALIDATION ADDED HERE**
             if (!responseJson || !Array.isArray(responseJson.masks) || responseJson.masks.length === 0) {
                 throw new Error("Model returned a valid JSON but it did not contain a 'masks' array.");
             }
@@ -114,12 +115,10 @@ serve(async (req) => {
         }
     }
 
-    // If all retries fail
     throw lastError || new Error("Worker failed after all retries without a specific error.");
 
   } catch (error) {
     console.error(`[SegmentWorker][${requestId}] Unhandled Error:`, error);
-    // Log the failure to the parent job so it's not completely silent
     await appendResultToJob(supabase, aggregation_job_id, { error: `Worker failed: ${error.message}` });
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

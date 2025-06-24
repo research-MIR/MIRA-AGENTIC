@@ -156,14 +156,21 @@ serve(async (req) => {
 
         console.log(`[Orchestrator][${requestId}] Job is 'aggregating'. Total results: ${resultsCount}, Valid results: ${validResultsCount}, Age: ${jobAgeSeconds.toFixed(0)}s.`);
 
-        if (validResultsCount >= MINIMUM_REQUIRED_RESULTS && jobAgeSeconds > JOB_TIMEOUT_SECONDS) {
-          console.log(`[Orchestrator][${requestId}] Job has timed out but has enough results (${validResultsCount}). Forcing composition.`);
-          await supabase.from('mira-agent-mask-aggregation-jobs').update({ status: 'compositing' }).eq('id', job_id);
-          await runComposition(supabase, job, requestId);
-        } else if (resultsCount >= 6) {
+        if (resultsCount >= 6) {
           console.log(`[Orchestrator][${requestId}] All 6 workers have reported. Transitioning to 'compositing'.`);
           await supabase.from('mira-agent-mask-aggregation-jobs').update({ status: 'compositing' }).eq('id', job_id);
           await runComposition(supabase, job, requestId);
+        } else if (jobAgeSeconds > JOB_TIMEOUT_SECONDS) {
+            if (validResultsCount >= MINIMUM_REQUIRED_RESULTS) {
+                console.log(`[Orchestrator][${requestId}] Job has timed out but has enough results (${validResultsCount}). Forcing composition.`);
+                await supabase.from('mira-agent-mask-aggregation-jobs').update({ status: 'compositing' }).eq('id', job_id);
+                await runComposition(supabase, job, requestId);
+            } else {
+                console.error(`[Orchestrator][${requestId}] Job timed out with insufficient valid results (${validResultsCount}). Marking as failed.`);
+                await supabase.from('mira-agent-mask-aggregation-jobs')
+                  .update({ status: 'failed', error_message: `Job timed out after ${JOB_TIMEOUT_SECONDS} seconds with only ${validResultsCount} valid results.` })
+                  .eq('id', job_id);
+            }
         } else {
           console.log(`[Orchestrator][${requestId}] Not enough results yet. Waiting for more.`);
         }

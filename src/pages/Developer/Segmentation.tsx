@@ -132,6 +132,7 @@ const SegmentationTool = () => {
           channelRef.current?.unsubscribe();
         } else if (job.status === 'failed') {
           setError(job.error_message || 'Job failed without a specific error.');
+          setRawResponse(JSON.stringify(job.results, null, 2));
           setIsLoading(false);
           showError("Segmentation failed.");
           channelRef.current?.unsubscribe();
