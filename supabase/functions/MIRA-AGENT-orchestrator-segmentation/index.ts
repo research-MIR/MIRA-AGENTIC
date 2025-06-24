@@ -186,9 +186,9 @@ serve(async (req) => {
         if (finalData[i] > 128) { finalData[i] = 255; finalData[i + 1] = 0; finalData[i + 2] = 0; finalData[i + 3] = 150; } 
         else { finalData[i + 3] = 0; }
     }
-    finalCtx.putImageData(finalImageData, 0, 0);
+    combinedCtx.putImageData(finalImageData, 0, 0);
 
-    const finalDataUrl = finalCanvas.toDataURL('image/png');
+    const finalDataUrl = combinedCanvas.toDataURL('image/png');
     if (!finalDataUrl || !finalDataUrl.includes(',')) {
         throw new Error("Failed to generate data URL from final canvas.");
     }
