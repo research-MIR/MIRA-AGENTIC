@@ -9,7 +9,7 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const MODEL_NAME = "gemini-2.5-flash-preview-05-20";
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
-const NUM_WORKERS = 5; // Number of parallel API calls
+const NUM_WORKERS = 10; // Number of parallel API calls
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -73,8 +73,8 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  const PRE_VOTE_EXPANSION_PERCENT = 0.02;
-  const POST_VOTE_EXPANSION_PERCENT = 0.02;
+  const PRE_VOTE_EXPANSION_PERCENT = 0.03;
+  const POST_VOTE_EXPANSION_PERCENT = 0.03;
 
   const { image_base64, mime_type, prompt, reference_image_base64, reference_mime_type, user_id, image_dimensions } = await req.json();
   const requestId = `segment-orchestrator-${Date.now()}`;
@@ -165,7 +165,7 @@ serve(async (req) => {
     const combinedImageData = combinedCtx.createImageData(image_dimensions.width, image_dimensions.height);
     const combinedData = combinedImageData.data;
 
-    const majorityThreshold = Math.floor(maskImageDatas.length / 2) + 1;
+    const majorityThreshold = 7;
     for (let i = 0; i < combinedData.length; i += 4) {
         let voteCount = 0;
         for (const data of maskImageDatas) { if (data[i] > 128) voteCount++; }
@@ -174,7 +174,7 @@ serve(async (req) => {
         }
     }
     combinedCtx.putImageData(combinedImageData, 0, 0);
-    console.log(`[Orchestrator][${requestId}] Majority voting complete.`);
+    console.log(`[Orchestrator][${requestId}] Majority voting complete with threshold ${majorityThreshold}.`);
 
     console.log(`[Orchestrator][${requestId}] Applying post-vote expansion of ${POST_VOTE_EXPANSION_PERCENT * 100}% to the combined mask.`);
     expandMask(combinedCanvas, POST_VOTE_EXPANSION_PERCENT);
@@ -186,9 +186,9 @@ serve(async (req) => {
         if (finalData[i] > 128) { finalData[i] = 255; finalData[i + 1] = 0; finalData[i + 2] = 0; finalData[i + 3] = 150; } 
         else { finalData[i + 3] = 0; }
     }
-    combinedCtx.putImageData(finalImageData, 0, 0);
+    finalCtx.putImageData(finalImageData, 0, 0);
 
-    const finalDataUrl = combinedCanvas.toDataURL('image/png');
+    const finalDataUrl = finalCanvas.toDataURL('image/png');
     if (!finalDataUrl || !finalDataUrl.includes(',')) {
         throw new Error("Failed to generate data URL from final canvas.");
     }
