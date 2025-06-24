@@ -48,8 +48,40 @@ const MaskItem = ({ maskItem, imageDimensions }: { maskItem: MaskItemData, image
       resizedMaskCanvas.height = bboxHeight;
       const resizedCtx = resizedMaskCanvas.getContext('2d');
       if (!resizedCtx) return;
+      
+      // Draw the initial mask
       resizedCtx.drawImage(maskImg, 0, 0, bboxWidth, bboxHeight);
-      console.log(`[MaskItem] Resized mask for "${maskItem.label}" to fit bounding box.`);
+      
+      // --- NEW: Expand and Smooth the mask ---
+      // 1. Calculate expansion amount (5% of the smaller dimension of the bounding box)
+      const expansionAmount = Math.round(Math.min(bboxWidth, bboxHeight) * 0.05);
+      console.log(`[MaskItem] Applying ${expansionAmount}px expansion/smoothing to mask for "${maskItem.label}".`);
+
+      // 2. Apply a blur filter to expand the mask
+      resizedCtx.filter = `blur(${expansionAmount}px)`;
+      // We need to draw the image again for the filter to apply. We draw the canvas onto itself.
+      resizedCtx.drawImage(resizedMaskCanvas, 0, 0);
+      
+      // 3. Reset the filter
+      resizedCtx.filter = 'none';
+
+      // 4. Threshold the blurred mask to make it sharp again (dilation effect)
+      const imageData = resizedCtx.getImageData(0, 0, bboxWidth, bboxHeight);
+      const data = imageData.data;
+      for (let i = 0; i < data.length; i += 4) {
+        // If the pixel is more than 50% white after blurring, make it fully white. Otherwise, black.
+        if (data[i] > 128) {
+          data[i] = 255;
+          data[i+1] = 255;
+          data[i+2] = 255;
+        } else {
+          data[i] = 0;
+          data[i+1] = 0;
+          data[i+2] = 0;
+        }
+      }
+      resizedCtx.putImageData(imageData, 0, 0);
+      // --- END of new logic ---
 
       const fullCanvas = document.createElement('canvas');
       fullCanvas.width = imageDimensions.width;
@@ -58,23 +90,23 @@ const MaskItem = ({ maskItem, imageDimensions }: { maskItem: MaskItemData, image
       if (!fullCtx) return;
       
       fullCtx.drawImage(resizedMaskCanvas, absX0, absY0);
-      console.log(`[MaskItem] Positioned resized mask for "${maskItem.label}" on full-size canvas.`);
+      console.log(`[MaskItem] Positioned processed mask for "${maskItem.label}" on full-size canvas.`);
 
-      const imageData = fullCtx.getImageData(0, 0, fullCanvas.width, fullCanvas.height);
-      const data = imageData.data;
+      const finalImageData = fullCtx.getImageData(0, 0, fullCanvas.width, fullCanvas.height);
+      const finalData = finalImageData.data;
 
-      for (let i = 0; i < data.length; i += 4) {
-        const probability = data[i];
+      for (let i = 0; i < finalData.length; i += 4) {
+        const probability = finalData[i];
         if (probability > 127) {
-          data[i] = 255;
-          data[i + 1] = 0;
-          data[i + 2] = 0;
-          data[i + 3] = 150;
+          finalData[i] = 255;
+          finalData[i + 1] = 0;
+          finalData[i + 2] = 0;
+          finalData[i + 3] = 150;
         } else {
-          data[i + 3] = 0;
+          finalData[i + 3] = 0;
         }
       }
-      fullCtx.putImageData(imageData, 0, 0);
+      fullCtx.putImageData(finalImageData, 0, 0);
       console.log(`[MaskItem] Colorized and applied alpha to mask for "${maskItem.label}".`);
 
       setProcessedMaskUrl(fullCanvas.toDataURL());
