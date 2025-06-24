@@ -1,8 +1,8 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { useSession } from '@/components/Auth/SessionContextProvider';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Loader2, UploadCloud, AlertTriangle, Image as ImageIcon } from 'lucide-react';
 import { showError, showLoading, dismissToast, showSuccess } from '@/utils/toast';
 import { useDropzone } from '@/hooks/useDropzone';
@@ -10,7 +10,6 @@ import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Label } from '@/components/ui/label';
-import { RealtimeChannel } from '@supabase/supabase-js';
 
 const fileToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -33,10 +32,8 @@ const SegmentationTool = () => {
   const [rawResponse, setRawResponse] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [aggregationJobId, setAggregationJobId] = useState<string | null>(null);
   const sourceFileInputRef = useRef<HTMLInputElement>(null);
   const referenceFileInputRef = useRef<HTMLInputElement>(null);
-  const channelRef = useRef<RealtimeChannel | null>(null);
 
   const handleFileSelect = useCallback((file: File | null, type: 'source' | 'reference') => {
     if (file && file.type.startsWith('image/')) {
@@ -75,9 +72,8 @@ const SegmentationTool = () => {
     setIsLoading(true);
     setError(null);
     setFinalMaskUrl(null);
-    setAggregationJobId(null);
     setRawResponse('');
-    const toastId = showLoading("Starting segmentation process...");
+    const toastId = showLoading("Starting segmentation process... This may take a moment.");
 
     try {
       const sourceBase64 = await fileToBase64(sourceFile);
@@ -97,57 +93,20 @@ const SegmentationTool = () => {
 
       if (error) throw error;
       
-      const newJobId = data.aggregation_job_id;
-      setAggregationJobId(newJobId);
+      setFinalMaskUrl(data.finalMaskUrl);
+      setRawResponse(JSON.stringify(data.rawResponse, null, 2));
       dismissToast(toastId);
-      showSuccess("Segmentation job started. Waiting for results...");
+      showSuccess("Segmentation complete!");
 
     } catch (err: any) {
       console.error("[SegmentationTool] Error during segmentation:", err);
       dismissToast(toastId);
       setError(err.message);
       showError(`Segmentation failed: ${err.message}`);
+    } finally {
       setIsLoading(false);
     }
   };
-
-  useEffect(() => {
-    if (!aggregationJobId) return;
-
-    const channel = supabase
-      .channel(`segmentation-job-${aggregationJobId}`)
-      .on('postgres_changes', {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'mira-agent-mask-aggregation-jobs',
-        filter: `id=eq.${aggregationJobId}`
-      }, (payload) => {
-        const job = payload.new as any;
-        console.log('[SegmentationPage] Realtime update received:', job);
-        if (job.status === 'complete') {
-          setFinalMaskUrl(job.final_mask_base64);
-          setRawResponse(JSON.stringify(job.results, null, 2));
-          setIsLoading(false);
-          showSuccess("Segmentation complete!");
-          channelRef.current?.unsubscribe();
-        } else if (job.status === 'failed') {
-          setError(job.error_message || 'Job failed without a specific error.');
-          setRawResponse(JSON.stringify(job.results, null, 2));
-          setIsLoading(false);
-          showError("Segmentation failed.");
-          channelRef.current?.unsubscribe();
-        }
-      })
-      .subscribe();
-
-    channelRef.current = channel;
-
-    return () => {
-      if (channelRef.current) {
-        supabase.removeChannel(channelRef.current);
-      }
-    };
-  }, [aggregationJobId, supabase]);
 
   return (
     <div className="p-4 md:p-8 h-full overflow-y-auto">
