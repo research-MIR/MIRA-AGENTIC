@@ -49,23 +49,35 @@ function expandMask(canvas: Canvas, expansionPercent: number) {
     const expansionAmount = Math.round(Math.min(canvas.width, canvas.height) * expansionPercent);
     if (expansionAmount <= 0) return;
 
-    console.log(`[expandMask] Applying blur filter with amount: ${expansionAmount}px`);
+    console.log(`[expandMask] Applying multi-draw expansion with amount: ${expansionAmount}px`);
     
-    ctx.filter = `blur(${expansionAmount}px)`;
-    ctx.drawImage(canvas, 0, 0);
-    ctx.filter = 'none';
+    const tempCanvas = createCanvas(canvas.width, canvas.height);
+    const tempCtx = tempCanvas.getContext('2d');
+    tempCtx.drawImage(canvas, 0, 0);
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const offsets = [
+        [0, 0], [-expansionAmount, 0], [expansionAmount, 0], [0, -expansionAmount], [0, expansionAmount],
+        [-expansionAmount, -expansionAmount], [expansionAmount, -expansionAmount],
+        [-expansionAmount, expansionAmount], [expansionAmount, expansionAmount],
+    ];
+
+    ctx.globalAlpha = 0.5;
+    for (const [dx, dy] of offsets) {
+        ctx.drawImage(tempCanvas, dx, dy);
+    }
+    ctx.globalAlpha = 1.0;
 
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const data = imageData.data;
     for (let i = 0; i < data.length; i += 4) {
-        if (data[i] > 128) {
+        if (data[i + 3] > 0) {
             data[i] = 255; data[i + 1] = 255; data[i + 2] = 255; data[i + 3] = 255;
-        } else {
-            data[i] = 0; data[i + 1] = 0; data[i + 2] = 0; data[i + 3] = 255;
         }
     }
     ctx.putImageData(imageData, 0, 0);
-    console.log(`[expandMask] Thresholding complete.`);
+    console.log(`[expandMask] Multi-draw expansion and thresholding complete.`);
 }
 
 serve(async (req) => {
