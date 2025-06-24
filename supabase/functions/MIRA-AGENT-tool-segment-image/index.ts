@@ -1,10 +1,11 @@
-// v1.1.0
+// v1.2.0
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { GoogleGenAI, Content, Part, HarmCategory, HarmBlockThreshold } from 'https://esm.sh/@google/genai@0.15.0';
 import { createCanvas, loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const MODEL_NAME = "gemini-2.5-flash-preview-05-20";
+const INFERENCE_COUNT = 3; // Run inference 3 times for consensus
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -27,64 +28,47 @@ function extractJson(text: string): any {
     }
 }
 
-async function cleanMask(base64Data: string): Promise<string> {
-    const maskImg = await loadImage(`data:image/png;base64,${base64Data}`);
-    const { width, height } = maskImg;
-    const canvas = createCanvas(width, height);
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(maskImg, 0, 0);
+async function getConsensusMask(base64Masks: string[]): Promise<string> {
+    if (base64Masks.length === 0) throw new Error("No masks provided for consensus.");
+    if (base64Masks.length === 1) return base64Masks[0];
 
-    const imageData = ctx.getImageData(0, 0, width, height);
-    const data = imageData.data;
-    const visited = new Uint8Array(width * height).fill(0);
-    const components = [];
+    const firstMaskImage = await loadImage(`data:image/png;base64,${base64Masks[0]}`);
+    const { width, height } = firstMaskImage;
 
-    for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-            const index = y * width + x;
-            if (data[index * 4] > 128 && !visited[index]) {
-                const component = [];
-                const queue = [{x, y}];
-                visited[index] = 1;
-                while (queue.length > 0) {
-                    const {x: cx, y: cy} = queue.shift()!;
-                    component.push({x: cx, y: cy});
-                    const neighbors = [[0, 1], [0, -1], [1, 0], [-1, 0]];
-                    for (const [dx, dy] of neighbors) {
-                        const nx = cx + dx;
-                        const ny = cy + dy;
-                        const nIndex = ny * width + nx;
-                        if (nx >= 0 && nx < width && ny >= 0 && ny < height && !visited[nIndex] && data[nIndex * 4] > 128) {
-                            visited[nIndex] = 1;
-                            queue.push({x: nx, y: ny});
-                        }
-                    }
-                }
-                components.push(component);
+    const voteMap = new Uint8Array(width * height).fill(0);
+
+    for (const base64 of base64Masks) {
+        const maskImg = await loadImage(`data:image/png;base64,${base64}`);
+        const canvas = createCanvas(width, height);
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(maskImg, 0, 0);
+        const imageData = ctx.getImageData(0, 0, width, height).data;
+        for (let i = 0; i < imageData.length; i += 4) {
+            if (imageData[i] > 128) { // If pixel is white
+                voteMap[i / 4]++;
             }
         }
     }
 
-    if (components.length <= 1) return base64Data;
+    const consensusCanvas = createCanvas(width, height);
+    const consensusCtx = consensusCanvas.getContext('2d');
+    const consensusImageData = consensusCtx.createImageData(width, height);
+    const consensusData = consensusImageData.data;
+    const threshold = Math.ceil(base64Masks.length / 2);
 
-    components.sort((a, b) => b.length - a.length);
-    const largestComponent = components[0];
-
-    const cleanCanvas = createCanvas(width, height);
-    const cleanCtx = cleanCanvas.getContext('2d');
-    const cleanImageData = cleanCtx.createImageData(width, height);
-    
-    for (const {x, y} of largestComponent) {
-        const index = (y * width + x) * 4;
-        cleanImageData.data[index] = 255;
-        cleanImageData.data[index + 1] = 255;
-        cleanImageData.data[index + 2] = 255;
-        cleanImageData.data[index + 3] = 255;
+    for (let i = 0; i < voteMap.length; i++) {
+        if (voteMap[i] >= threshold) {
+            consensusData[i * 4] = 255;
+            consensusData[i * 4 + 1] = 255;
+            consensusData[i * 4 + 2] = 255;
+            consensusData[i * 4 + 3] = 255;
+        }
     }
-    cleanCtx.putImageData(cleanImageData, 0, 0);
-    
-    return cleanCanvas.toDataURL().split(',')[1];
+    consensusCtx.putImageData(consensusImageData, 0, 0);
+
+    return consensusCanvas.toDataURL().split(',')[1];
 }
+
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -110,30 +94,42 @@ serve(async (req) => {
     }
     userParts.push({ text: prompt });
 
-    const result = await ai.models.generateContent({
-        model: MODEL_NAME,
-        contents: [{ role: 'user', parts: userParts }],
-        generationConfig: { responseMimeType: "application/json" },
-        safetySettings,
-    });
-
-    const responseJson = extractJson(result.text);
-    const maskData = responseJson.masks || responseJson;
-    if (!Array.isArray(maskData)) {
-      throw new Error("API did not return a valid array of masks.");
-    }
-
-    console.log(`[SegmentImageTool] Received ${maskData.length} raw masks. Starting cleaning process...`);
-    const cleanedMasks = await Promise.all(
-        maskData.map(async (maskItem) => {
-            if (!maskItem.mask) return maskItem;
-            const cleanedMaskData = await cleanMask(maskItem.mask);
-            return { ...maskItem, mask: cleanedMaskData };
+    const inferencePromises = Array(INFERENCE_COUNT).fill(0).map(() => 
+        ai.models.generateContent({
+            model: MODEL_NAME,
+            contents: [{ role: 'user', parts: userParts }],
+            generationConfig: { responseMimeType: "application/json" },
+            safetySettings,
         })
     );
-    console.log(`[SegmentImageTool] Cleaning complete. Returning ${cleanedMasks.length} cleaned masks.`);
 
-    return new Response(JSON.stringify({ masks: cleanedMasks }), {
+    const results = await Promise.allSettled(inferencePromises);
+    
+    const successfulResponses = results
+        .filter(r => r.status === 'fulfilled' && r.value.text)
+        .map(r => extractJson((r as PromiseFulfilledResult<any>).value.text));
+
+    if (successfulResponses.length === 0) {
+        throw new Error("All segmentation inferences failed or returned empty responses.");
+    }
+
+    const allMasks = successfulResponses.flatMap(res => (res.masks || [res])).filter(m => m.mask);
+    if (allMasks.length === 0) {
+        throw new Error("No valid masks were found in any of the successful responses.");
+    }
+
+    console.log(`[SegmentImageTool] Received ${allMasks.length} raw masks from ${successfulResponses.length} successful inferences. Starting consensus process...`);
+    
+    const consensusMaskData = await getConsensusMask(allMasks.map(m => m.mask));
+    
+    const finalResult = {
+        ...allMasks[0], // Use the box and label from the first successful result
+        mask: consensusMaskData,
+    };
+
+    console.log(`[SegmentImageTool] Consensus complete. Returning final mask.`);
+
+    return new Response(JSON.stringify({ masks: [finalResult] }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });
