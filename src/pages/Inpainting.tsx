@@ -13,12 +13,13 @@ import { useSession } from "@/components/Auth/SessionContextProvider";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { useImagePreview } from "@/context/ImagePreviewContext";
 import { useSecureImage } from "@/hooks/useSecureImage";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Skeleton } from "../ui/skeleton";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DebugStepsModal } from "@/components/VTO/DebugStepsModal";
+import { Switch } from "../ui/switch";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { InpaintingSettings } from "@/components/Inpainting/InpaintingSettings";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { ScrollArea } from "../ui/scroll-area";
 import { useLanguage } from "@/context/LanguageContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import ReactMarkdown from "react-markdown";
@@ -26,7 +27,6 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { optimizeImage } from "@/lib/utils";
 import { useImageTransferStore } from "@/store/imageTransferStore";
 import { RealtimeChannel } from "@supabase/supabase-js";
-import { Switch } from "@/components/ui/switch";
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -414,23 +414,25 @@ const Inpainting = () => {
               </div>
             </div>
 
-            <div className="lg:col-span-2 bg-muted rounded-lg flex items-center justify-center relative min-h-[60vh] lg:min-h-0">
+            <div className="lg:col-span-2 bg-muted rounded-lg flex flex-col items-stretch justify-center relative min-h-[60vh] lg:min-h-0">
               {sourceImageUrl && !selectedJob ? (
-                <div className="w-full h-full max-h-[80vh] aspect-square relative">
-                  <MaskCanvas 
-                    imageUrl={sourceImageUrl} 
-                    onMaskChange={setMaskImage}
-                    brushSize={brushSize}
-                    resetTrigger={resetTrigger}
-                  />
-                  <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10">
+                <>
+                  <div className="w-full flex-1 flex items-center justify-center relative p-2 overflow-hidden">
+                    <MaskCanvas 
+                      imageUrl={sourceImageUrl} 
+                      onMaskChange={setMaskImage}
+                      brushSize={brushSize}
+                      resetTrigger={resetTrigger}
+                    />
+                  </div>
+                  <div className="p-2 shrink-0">
                     <MaskControls 
                       brushSize={brushSize} 
                       onBrushSizeChange={setBrushSize} 
                       onReset={handleResetMask} 
                     />
                   </div>
-                </div>
+                </>
               ) : selectedJob ? (
                 renderJobResult(selectedJob)
               ) : (

@@ -169,7 +169,7 @@ const MaskCanvasComponent = ({ imageUrl, onMaskChange, brushSize, resetTrigger }
     generateFinalMask();
   }, [isDrawing, generateFinalMask]);
 
-  const handleMouseMove = (e: React.MouseEvent) => {
+  const handleContainerMouseMove = (e: React.MouseEvent) => {
     if (isDrawing) {
       draw(e);
     } else {
@@ -179,21 +179,24 @@ const MaskCanvasComponent = ({ imageUrl, onMaskChange, brushSize, resetTrigger }
   };
 
   return (
-    <div ref={containerRef} className="relative w-full h-full flex items-center justify-center">
+    <div 
+      ref={containerRef} 
+      className="relative w-full h-full flex items-center justify-center cursor-crosshair"
+      onMouseDown={startDrawing}
+      onMouseMove={handleContainerMouseMove}
+      onMouseUp={stopDrawing}
+      onMouseLeave={() => { stopDrawing(); clearPreviewCanvas(); }}
+      onTouchStart={startDrawing}
+      onTouchMove={draw}
+      onTouchEnd={stopDrawing}
+    >
       <canvas 
         ref={imageCanvasRef} 
         className="absolute max-w-full max-h-full object-contain" 
       />
       <canvas
         ref={drawingCanvasRef}
-        className="absolute max-w-full max-h-full object-contain cursor-crosshair"
-        onMouseDown={startDrawing}
-        onMouseMove={handleMouseMove}
-        onMouseUp={stopDrawing}
-        onMouseLeave={() => { stopDrawing(); clearPreviewCanvas(); }}
-        onTouchStart={startDrawing}
-        onTouchMove={draw}
-        onTouchEnd={stopDrawing}
+        className="absolute max-w-full max-h-full object-contain"
       />
       <canvas
         ref={previewCanvasRef}
