@@ -42,7 +42,8 @@ async function uploadBufferToStorage(supabase: SupabaseClient, buffer: Uint8Arra
 }
 
 /**
- * Expands a mask on a given canvas by using a shadow/glow effect.
+ * Expands a mask on a given canvas using manual pixel dilation.
+ * This is more memory-efficient than using canvas filters like blur or shadow.
  * @param canvas The canvas containing the mask to expand.
  * @param expansionPercent The percentage of the smaller image dimension to use for expansion.
  */
@@ -51,29 +52,45 @@ function expandMask(canvas: Canvas, expansionPercent: number) {
 
     const ctx = canvas.getContext('2d');
     const expansionAmount = Math.round(Math.min(canvas.width, canvas.height) * expansionPercent);
+    if (expansionAmount <= 0) return;
 
-    if (expansionAmount > 0) {
-        // Create a temporary canvas to hold the original mask
-        const tempCanvas = createCanvas(canvas.width, canvas.height);
-        const tempCtx = tempCanvas.getContext('2d');
-        tempCtx.drawImage(canvas, 0, 0);
+    const originalImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const originalData = new Uint8ClampedArray(originalImageData.data); // Create a copy to read from
+    const newData = originalImageData.data; // This is a live reference we will write to
 
-        // Clear the original canvas
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        
-        // Set up the "glow" effect which will act as our expansion
-        ctx.shadowColor = 'white';
-        ctx.shadowBlur = expansionAmount;
-        
-        // Drawing the mask multiple times makes the shadow more solid, creating a better fill.
-        // This is a common technique for creating a solid outer glow from a shape.
-        for (let i = 0; i < 10; i++) {
-            ctx.drawImage(tempCanvas, 0, 0);
+    for (let y = 0; y < canvas.height; y++) {
+        for (let x = 0; x < canvas.width; x++) {
+            const i = (y * canvas.width + x) * 4;
+            // If the current pixel is already white, skip it
+            if (newData[i] > 128) continue;
+
+            // Check neighbors for a white pixel
+            let foundNeighbor = false;
+            for (let dy = -expansionAmount; dy <= expansionAmount; dy++) {
+                for (let dx = -expansionAmount; dx <= expansionAmount; dx++) {
+                    if (dx === 0 && dy === 0) continue;
+
+                    const nx = x + dx;
+                    const ny = y + dy;
+
+                    if (nx >= 0 && nx < canvas.width && ny >= 0 && ny < canvas.height) {
+                        const ni = (ny * canvas.width + nx) * 4;
+                        // Check the original data copy
+                        if (originalData[ni] > 128) {
+                            newData[i] = 255;
+                            newData[i + 1] = 255;
+                            newData[i + 2] = 255;
+                            newData[i + 3] = 255;
+                            foundNeighbor = true;
+                            break;
+                        }
+                    }
+                }
+                if (foundNeighbor) break;
+            }
         }
-        
-        // Reset shadow properties for any subsequent drawing on this context
-        ctx.shadowBlur = 0;
     }
+    ctx.putImageData(originalImageData, 0, 0);
 }
 
 
