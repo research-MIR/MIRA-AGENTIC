@@ -85,7 +85,6 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  const PRE_VOTE_EXPANSION_PERCENT = 0.03;
   const POST_VOTE_EXPANSION_PERCENT = 0.03;
 
   const { image_base64, mime_type, prompt, reference_image_base64, reference_mime_type, user_id, image_dimensions } = await req.json();
@@ -161,8 +160,6 @@ serve(async (req) => {
             const tempCtx = tempCanvas.getContext('2d');
             tempCtx.drawImage(maskImg, absX0, absY0, bboxWidth, bboxHeight);
             
-            expandMask(tempCanvas, PRE_VOTE_EXPANSION_PERCENT);
-
             const imageData = tempCtx.getImageData(0, 0, image_dimensions.width, image_dimensions.height).data;
             for (let i = 0; i < imageData.length; i += 4) {
                 if (imageData[i] > 128) {
