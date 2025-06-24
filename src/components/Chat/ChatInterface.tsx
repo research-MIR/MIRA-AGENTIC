@@ -43,17 +43,13 @@ export const ChatInterface = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const handleSendMessage = () => {
-    const textToSend = input;
-    const filesToSend = [...uploadedFiles];
+  const handleSendMessage = (textOverride?: string) => {
+    const textToSend = textOverride || input;
+    const filesToSend = textOverride ? [] : [...uploadedFiles];
     const isSilent = textToSend.startsWith("I choose image number");
 
     if ((!textToSend.trim() && filesToSend.length === 0) || isJobRunning || isSending) {
       return;
-    }
-
-    if (!isSilent) {
-      // Optimistic UI update is now handled inside the hook, but we can keep it here if we want
     }
     
     setInput("");
