@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { useSession } from '@/components/Auth/SessionContextProvider';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Label } from '@/components/ui/label';
+import { useQuery } from '@tanstack/react-query';
 
 const fileToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -53,7 +54,7 @@ const newDefaultPrompt = `You are an expert image analyst specializing in fashio
 Output a JSON list of segmentation masks where each entry contains the 2D bounding box in the key "box_2d", the segmentation mask in key "mask", and the text label in the key "label".`;
 
 const SegmentationTool = () => {
-  const { supabase } = useSession();
+  const { supabase, session } = useSession();
   const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [referenceFile, setReferenceFile] = useState<File | null>(null);
   const [sourcePreview, setSourcePreview] = useState<string | null>(null);
@@ -62,8 +63,48 @@ const SegmentationTool = () => {
   const [finalMaskUrl, setFinalMaskUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [aggregationJobId, setAggregationJobId] = useState<string | null>(null);
   const sourceFileInputRef = useRef<HTMLInputElement>(null);
   const referenceFileInputRef = useRef<HTMLInputElement>(null);
+  const toastIdRef = useRef<string | number | null>(null);
+
+  const { data: jobStatus } = useQuery({
+    queryKey: ['maskAggregationJob', aggregationJobId],
+    queryFn: async () => {
+      if (!aggregationJobId) return null;
+      const { data, error } = await supabase
+        .from('mira-agent-mask-aggregation-jobs')
+        .select('status, final_mask_base64, error_message')
+        .eq('id', aggregationJobId)
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!aggregationJobId,
+    refetchInterval: (query) => {
+      const data = query.state.data as any;
+      return (data?.status === 'processing' || data?.status === 'pending') ? 2000 : false;
+    },
+  });
+
+  useEffect(() => {
+    if (jobStatus) {
+      if (jobStatus.status === 'complete') {
+        setIsLoading(false);
+        setFinalMaskUrl(`data:image/png;base64,${jobStatus.final_mask_base64}`);
+        if (toastIdRef.current) dismissToast(toastIdRef.current);
+        showSuccess("Mask generated successfully.");
+        setAggregationJobId(null);
+      } else if (jobStatus.status === 'failed') {
+        setIsLoading(false);
+        const errorMessage = jobStatus.error_message || 'An unknown error occurred during aggregation.';
+        setError(errorMessage);
+        if (toastIdRef.current) dismissToast(toastIdRef.current);
+        showError(`Segmentation failed: ${errorMessage}`);
+        setAggregationJobId(null);
+      }
+    }
+  }, [jobStatus]);
 
   const handleFileSelect = useCallback((file: File | null, type: 'source' | 'reference') => {
     if (file && file.type.startsWith('image/')) {
@@ -90,10 +131,15 @@ const SegmentationTool = () => {
       showError("Please upload a source image first.");
       return;
     }
+    if (!session?.user?.id) {
+      showError("You must be logged in to perform this action.");
+      return;
+    }
+
     setIsLoading(true);
     setError(null);
     setFinalMaskUrl(null);
-    const toastId = showLoading("Generating mask (this may take a moment)...");
+    toastIdRef.current = showLoading("Dispatching segmentation jobs...");
 
     try {
       const sourceBase64 = await fileToBase64(sourceFile);
@@ -105,22 +151,22 @@ const SegmentationTool = () => {
         prompt,
         reference_image_base64: referenceBase64,
         reference_mime_type: referenceFile?.type,
+        user_id: session.user.id,
       };
 
       const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-create-garment-mask', { body: payload });
 
       if (error) throw error;
-      if (!data.final_mask_base64) throw new Error("The function did not return a final mask.");
-
-      setFinalMaskUrl(`data:image/png;base64,${data.final_mask_base64}`);
-      dismissToast(toastId);
-      showSuccess("Mask generated successfully.");
+      if (!data.aggregation_job_id) throw new Error("The function did not return a job ID.");
+      
+      setAggregationJobId(data.aggregation_job_id);
+      if (toastIdRef.current) dismissToast(toastIdRef.current);
+      toastIdRef.current = showLoading("Processing... You can leave this page, the result will appear when ready.");
 
     } catch (err: any) {
-      dismissToast(toastId);
+      if (toastIdRef.current) dismissToast(toastIdRef.current);
       setError(err.message);
       showError(`Segmentation failed: ${err.message}`);
-    } finally {
       setIsLoading(false);
     }
   };
