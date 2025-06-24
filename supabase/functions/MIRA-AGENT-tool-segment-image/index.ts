@@ -6,6 +6,8 @@ const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const MODEL_NAME = "gemini-2.5-flash-preview-05-20";
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+const MAX_RETRIES = 2;
+const RETRY_DELAY_MS = 500;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -32,6 +34,18 @@ function extractJson(text: string): any {
     }
 }
 
+async function appendResultToJob(supabase: any, jobId: string, result: any) {
+    const { error } = await supabase.rpc('append_to_jsonb_array', {
+        table_name: 'mira-agent-mask-aggregation-jobs',
+        row_id: jobId,
+        column_name: 'results',
+        new_element: result
+    });
+    if (error) {
+        console.error(`[SegmentWorker] Failed to append result to aggregation job ${jobId}:`, error);
+    }
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -40,6 +54,7 @@ serve(async (req) => {
   const { image_base64, mime_type, prompt, reference_image_base64, reference_mime_type, aggregation_job_id } = await req.json();
   const requestId = `segment-worker-${aggregation_job_id}-${Math.random().toString(36).substring(2, 8)}`;
   console.log(`[SegmentWorker][${requestId}] Invoked for aggregation job ${aggregation_job_id}.`);
+  const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
 
   try {
     if (!image_base64 || !mime_type || !prompt || !aggregation_job_id) {
@@ -54,7 +69,6 @@ serve(async (req) => {
     ];
 
     if (reference_image_base64 && reference_mime_type) {
-        console.log(`[SegmentWorker][${requestId}] Reference image provided. Adding to payload.`);
         userParts.push(
             { text: "REFERENCE IMAGE:" },
             { inlineData: { mimeType: reference_mime_type, data: reference_image_base64 } }
@@ -64,40 +78,43 @@ serve(async (req) => {
     userParts.push({ text: prompt });
     const contents: Content[] = [{ role: 'user', parts: userParts }];
 
-    console.log(`[SegmentWorker][${requestId}] Calling Gemini API...`);
-    const result = await ai.models.generateContent({
-        model: MODEL_NAME,
-        contents: contents,
-        generationConfig: { responseMimeType: "application/json" },
-        safetySettings,
-    });
-    console.log(`[SegmentWorker][${requestId}] Received response from Gemini.`);
-
-    const responseJson = extractJson(result.text);
-    console.log(`[SegmentWorker][${requestId}] Successfully parsed JSON. Found ${responseJson.masks?.length || 'unknown'} masks.`);
-
-    const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-    console.log(`[SegmentWorker][${requestId}] Appending result to aggregation job in DB...`);
-    const { error: rpcError } = await supabase.rpc('append_to_jsonb_array', {
-        table_name: 'mira-agent-mask-aggregation-jobs',
-        row_id: aggregation_job_id,
-        column_name: 'results',
-        new_element: responseJson
-    });
-
-    if (rpcError) {
-        console.error(`[SegmentWorker][${requestId}] Failed to append result to aggregation job ${aggregation_job_id}:`, rpcError);
-    } else {
-        console.log(`[SegmentWorker][${requestId}] Successfully appended result to aggregation job ${aggregation_job_id}.`);
+    let lastError: Error | null = null;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+            console.log(`[SegmentWorker][${requestId}] Calling Gemini API, attempt ${attempt}...`);
+            const result = await ai.models.generateContent({
+                model: MODEL_NAME,
+                contents: contents,
+                generationConfig: { responseMimeType: "application/json" },
+                safetySettings,
+            });
+            
+            const responseJson = extractJson(result.text);
+            console.log(`[SegmentWorker][${requestId}] Successfully parsed JSON. Found ${responseJson.masks?.length || 'unknown'} masks.`);
+            
+            await appendResultToJob(supabase, aggregation_job_id, responseJson);
+            console.log(`[SegmentWorker][${requestId}] Successfully appended result to aggregation job.`);
+            
+            return new Response(JSON.stringify(responseJson), {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+              status: 200,
+            });
+        } catch (error) {
+            lastError = error;
+            console.warn(`[SegmentWorker][${requestId}] Attempt ${attempt} failed:`, error.message);
+            if (attempt < MAX_RETRIES) {
+                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS * attempt));
+            }
+        }
     }
 
-    return new Response(JSON.stringify(responseJson), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 200,
-    });
+    // If all retries fail
+    throw lastError || new Error("Worker failed after all retries without a specific error.");
 
   } catch (error) {
     console.error(`[SegmentWorker][${requestId}] Unhandled Error:`, error);
+    // Log the failure to the parent job so it's not completely silent
+    await appendResultToJob(supabase, aggregation_job_id, { error: `Worker failed: ${error.message}` });
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,

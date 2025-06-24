@@ -5,20 +5,20 @@ import { createCanvas, loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.t
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
+const MINIMUM_REQUIRED_RESULTS = 3;
+const JOB_TIMEOUT_SECONDS = 90;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Helper function to log memory usage
 function logMemoryUsage(step: string, requestId: string) {
     const memory = Deno.memoryUsage();
     const heapUsedMb = (memory.heapUsed / 1024 / 1024).toFixed(2);
     console.log(`[Orchestrator][${requestId}] Memory after step "${step}": Heap usage is ${heapUsedMb} MB`);
 }
 
-// Helper function to upload the final mask
 async function uploadBufferToStorage(supabase: SupabaseClient, buffer: Uint8Array, userId: string, filename: string): Promise<string> {
     const filePath = `${userId}/segmentation-final/${Date.now()}-${filename}`;
     const { error } = await supabase.storage
@@ -31,7 +31,6 @@ async function uploadBufferToStorage(supabase: SupabaseClient, buffer: Uint8Arra
     return publicUrl;
 }
 
-// The new composition logic, moved from the old compositor function
 async function runComposition(supabase: SupabaseClient, job: any, requestId: string) {
     console.log(`[Orchestrator][${requestId}] Starting composition for job ${job.id}.`);
     console.time(`[Orchestrator][${requestId}] Full Composition Process`);
@@ -39,7 +38,7 @@ async function runComposition(supabase: SupabaseClient, job: any, requestId: str
     if (!job.source_image_dimensions) throw new Error("Job is missing source_image_dimensions.");
     if (!job.results || !Array.isArray(job.results)) throw new Error("Job results are missing or not an array.");
 
-    const validRuns = job.results.filter(run => run && Array.isArray(run.masks) && run.masks.length > 0);
+    const validRuns = job.results.filter(run => run && !run.error && Array.isArray(run.masks) && run.masks.length > 0);
     if (validRuns.length === 0) throw new Error("No valid mask data found in any of the segmentation runs.");
     
     console.log(`[Orchestrator][${requestId}] Found ${validRuns.length} valid runs with masks.`);
@@ -148,25 +147,28 @@ serve(async (req) => {
       if (fetchError) throw fetchError;
       if (!job) throw new Error(`Job ${job_id} not found.`);
 
-      // Update heartbeat
       await supabase.from('mira-agent-mask-aggregation-jobs').update({ updated_at: new Date().toISOString() }).eq('id', job_id);
 
       if (job.status === 'aggregating') {
         const resultsCount = job.results?.length || 0;
-        console.log(`[Orchestrator][${requestId}] Job is 'aggregating'. Current results: ${resultsCount}.`);
-        if (resultsCount >= 6) {
-          console.log(`[Orchestrator][${requestId}] Sufficient results collected. Transitioning to 'compositing'.`);
+        const validResultsCount = job.results?.filter((r: any) => r && !r.error).length || 0;
+        const jobAgeSeconds = (Date.now() - new Date(job.created_at).getTime()) / 1000;
+
+        console.log(`[Orchestrator][${requestId}] Job is 'aggregating'. Total results: ${resultsCount}, Valid results: ${validResultsCount}, Age: ${jobAgeSeconds.toFixed(0)}s.`);
+
+        if (validResultsCount >= MINIMUM_REQUIRED_RESULTS && jobAgeSeconds > JOB_TIMEOUT_SECONDS) {
+          console.log(`[Orchestrator][${requestId}] Job has timed out but has enough results (${validResultsCount}). Forcing composition.`);
           await supabase.from('mira-agent-mask-aggregation-jobs').update({ status: 'compositing' }).eq('id', job_id);
-          // Re-invoke immediately to start composition without waiting for next watchdog cycle
-          supabase.functions.invoke('MIRA-AGENT-orchestrator-segmentation', { body: { job_id } }).catch(console.error);
+          await runComposition(supabase, job, requestId);
+        } else if (resultsCount >= 6) {
+          console.log(`[Orchestrator][${requestId}] All 6 workers have reported. Transitioning to 'compositing'.`);
+          await supabase.from('mira-agent-mask-aggregation-jobs').update({ status: 'compositing' }).eq('id', job_id);
+          await runComposition(supabase, job, requestId);
         } else {
           console.log(`[Orchestrator][${requestId}] Not enough results yet. Waiting for more.`);
         }
-      } else if (job.status === 'compositing') {
-        console.log(`[Orchestrator][${requestId}] Job is 'compositing'. Starting composition logic.`);
-        await runComposition(supabase, job, requestId);
       } else {
-        console.log(`[Orchestrator][${requestId}] Job is in status '${job.status}'. No action taken.`);
+        console.log(`[Orchestrator][${requestId}] Job is in status '${job.status}'. No action taken by watchdog.`);
       }
       
       return new Response(JSON.stringify({ success: true, message: "Checked job status." }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -185,7 +187,7 @@ serve(async (req) => {
       .from('mira-agent-mask-aggregation-jobs')
       .insert({
         user_id: user_id,
-        status: 'aggregating', // Start in aggregating state
+        status: 'aggregating',
         source_image_dimensions: image_dimensions,
         results: [],
       })
