@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Loader2, UploadCloud, AlertTriangle, Image as ImageIcon } from 'lucide-react';
-import { showError, showLoading, dismissToast } from '@/utils/toast';
+import { showError, showLoading, dismissToast, showSuccess } from '@/utils/toast';
 import { useDropzone } from '@/hooks/useDropzone';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
@@ -67,7 +67,7 @@ const SegmentationTool = () => {
   const [referencePreview, setReferencePreview] = useState<string | null>(null);
   const [imageDimensions, setImageDimensions] = useState<{width: number, height: number} | null>(null);
   const [prompt, setPrompt] = useState(newDefaultPrompt);
-  const [masks, setMasks] = useState<MaskItemData[] | null>(null);
+  const [masks, setMasks] = useState<MaskItemData[][] | null>(null);
   const [rawResponse, setRawResponse] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -114,38 +114,49 @@ const SegmentationTool = () => {
     setError(null);
     setMasks(null);
     setRawResponse('');
-    const toastId = showLoading("Segmenting image...");
+    const toastId = showLoading("Segmenting image (3 runs)...");
 
     try {
-      const payload: any = {
-        image_base64: await fileToBase64(sourceFile),
+      const sourceBase64 = await fileToBase64(sourceFile);
+      const referenceBase64 = referenceFile ? await fileToBase64(referenceFile) : null;
+
+      const createPayload = () => ({
+        image_base64: sourceBase64,
         mime_type: sourceFile.type,
         prompt,
-      };
-
-      if (referenceFile) {
-        payload.reference_image_base64 = await fileToBase64(referenceFile);
-        payload.reference_mime_type = referenceFile.type;
-      }
-
-      console.log("[SegmentationTool] Invoking Edge Function with payload:", { ...payload, image_base64: '...', reference_image_base64: '...' });
-
-      const { data, error: invokeError } = await supabase.functions.invoke('MIRA-AGENT-tool-segment-image', {
-        body: payload
+        reference_image_base64: referenceBase64,
+        reference_mime_type: referenceFile?.type,
       });
 
-      if (invokeError) throw invokeError;
-      
-      console.log("[SegmentationTool] Received response from Edge Function:", data);
-      const maskData = data.masks || data;
-      if (!Array.isArray(maskData)) {
-        throw new Error("API did not return a valid array of masks.");
-      }
+      // Create three parallel promises
+      const promises = [
+        supabase.functions.invoke('MIRA-AGENT-tool-segment-image', { body: createPayload() }),
+        supabase.functions.invoke('MIRA-AGENT-tool-segment-image', { body: createPayload() }),
+        supabase.functions.invoke('MIRA-AGENT-tool-segment-image', { body: createPayload() }),
+      ];
 
-      console.log(`[SegmentationTool] Successfully parsed ${maskData.length} masks.`);
-      setMasks(maskData);
-      setRawResponse(JSON.stringify(data, null, 2));
+      const results = await Promise.all(promises);
+
+      const allMasks: MaskItemData[][] = [];
+      let combinedRawResponse: Record<string, any> = {};
+      
+      results.forEach((result, index) => {
+        if (result.error) {
+          throw new Error(`Run ${index + 1} failed: ${result.error.message}`);
+        }
+        const maskData = result.data.masks || result.data;
+        if (!Array.isArray(maskData)) {
+          throw new Error(`Run ${index + 1} did not return a valid array of masks.`);
+        }
+        allMasks.push(maskData);
+        combinedRawResponse[`run_${index + 1}`] = result.data;
+      });
+
+      setMasks(allMasks);
+      setRawResponse(JSON.stringify(combinedRawResponse, null, 2));
       dismissToast(toastId);
+      showSuccess(`Segmentation complete. Found masks across ${allMasks.length} runs.`);
+
     } catch (err: any) {
       console.error("[SegmentationTool] Error during segmentation:", err);
       dismissToast(toastId);
