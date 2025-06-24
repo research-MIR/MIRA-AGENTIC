@@ -151,7 +151,7 @@ serve(async (req) => {
 
       if (job.status === 'aggregating') {
         const resultsCount = job.results?.length || 0;
-        const validResultsCount = job.results?.filter((r: any) => r && !r.error).length || 0;
+        const validResultsCount = job.results?.filter((r: any) => r && !r.error && Array.isArray(r.masks) && r.masks.length > 0).length || 0;
         const jobAgeSeconds = (Date.now() - new Date(job.created_at).getTime()) / 1000;
 
         console.log(`[Orchestrator][${requestId}] Job is 'aggregating'. Total results: ${resultsCount}, Valid results: ${validResultsCount}, Age: ${jobAgeSeconds.toFixed(0)}s.`);
@@ -167,6 +167,9 @@ serve(async (req) => {
         } else {
           console.log(`[Orchestrator][${requestId}] Not enough results yet. Waiting for more.`);
         }
+      } else if (job.status === 'compositing') {
+        console.log(`[Orchestrator][${requestId}] Job is 'compositing'. Starting composition logic.`);
+        await runComposition(supabase, job, requestId);
       } else {
         console.log(`[Orchestrator][${requestId}] Job is in status '${job.status}'. No action taken by watchdog.`);
       }

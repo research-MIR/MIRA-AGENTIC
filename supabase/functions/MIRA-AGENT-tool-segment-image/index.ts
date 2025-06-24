@@ -90,7 +90,13 @@ serve(async (req) => {
             });
             
             const responseJson = extractJson(result.text);
-            console.log(`[SegmentWorker][${requestId}] Successfully parsed JSON. Found ${responseJson.masks?.length || 'unknown'} masks.`);
+
+            // **STRICT VALIDATION ADDED HERE**
+            if (!responseJson || !Array.isArray(responseJson.masks) || responseJson.masks.length === 0) {
+                throw new Error("Model returned a valid JSON but it did not contain a 'masks' array.");
+            }
+
+            console.log(`[SegmentWorker][${requestId}] Successfully parsed JSON. Found ${responseJson.masks.length} masks.`);
             
             await appendResultToJob(supabase, aggregation_job_id, responseJson);
             console.log(`[SegmentWorker][${requestId}] Successfully appended result to aggregation job.`);
