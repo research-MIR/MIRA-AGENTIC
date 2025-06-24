@@ -91,18 +91,26 @@ serve(async (req) => {
             
             console.log(`[SegmentWorker][${requestId}] Raw response from Gemini on attempt ${attempt}:`, result.text);
 
-            const responseJson = extractJson(result.text);
-
-            if (!responseJson || !Array.isArray(responseJson.masks) || responseJson.masks.length === 0) {
-                throw new Error("Model returned a valid JSON but it did not contain a 'masks' array.");
+            let responseToStore;
+            try {
+                const responseJson = extractJson(result.text);
+                if (!responseJson || !Array.isArray(responseJson.masks) || responseJson.masks.length === 0) {
+                    throw new Error("Model returned a valid JSON but it did not contain a 'masks' array.");
+                }
+                responseToStore = responseJson;
+                console.log(`[SegmentWorker][${requestId}] Successfully parsed JSON. Found ${responseJson.masks.length} masks.`);
+            } catch (parsingError) {
+                console.warn(`[SegmentWorker][${requestId}] JSON parsing failed. Storing raw text. Error: ${parsingError.message}`);
+                responseToStore = {
+                    error: `JSON parsing failed: ${parsingError.message}`,
+                    raw_text: result.text
+                };
             }
-
-            console.log(`[SegmentWorker][${requestId}] Successfully parsed JSON. Found ${responseJson.masks.length} masks.`);
             
-            await appendResultToJob(supabase, aggregation_job_id, responseJson);
+            await appendResultToJob(supabase, aggregation_job_id, responseToStore);
             console.log(`[SegmentWorker][${requestId}] Successfully appended result to aggregation job.`);
             
-            return new Response(JSON.stringify(responseJson), {
+            return new Response(JSON.stringify(responseToStore), {
               headers: { ...corsHeaders, 'Content-Type': 'application/json' },
               status: 200,
             });
