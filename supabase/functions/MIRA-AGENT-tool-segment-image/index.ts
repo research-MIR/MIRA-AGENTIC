@@ -1,11 +1,9 @@
-// v1.0.3
+// v1.0.2
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { GoogleGenAI, Content, Part, HarmCategory, HarmBlockThreshold } from 'https://esm.sh/@google/genai@0.15.0';
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-const MODEL_NAME = "gemini-2.5-flash-preview-05-20";
-const MAX_RETRIES = 3;
-const RETRY_DELAY_MS = 500;
+const MODEL_NAME = "gemini-2.5-flash-preview-05-20"; // Using Flash for cost-effectiveness
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -37,14 +35,17 @@ function extractJson(text: string): any {
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
+    console.log("[SegmentImageTool] Handling OPTIONS preflight request.");
     return new Response('ok', { headers: corsHeaders });
   }
 
   try {
+    console.log("[SegmentImageTool] Function invoked.");
     const { image_base64, mime_type, prompt, reference_image_base64, reference_mime_type } = await req.json();
     if (!image_base64 || !mime_type || !prompt) {
       throw new Error("image_base64, mime_type, and prompt are required.");
     }
+    console.log(`[SegmentImageTool] Received prompt: "${prompt.substring(0, 50)}..."`);
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
@@ -54,45 +55,30 @@ serve(async (req) => {
     ];
 
     if (reference_image_base64 && reference_mime_type) {
+        console.log("[SegmentImageTool] Reference image provided. Adding to payload.");
         userParts.push(
             { text: "REFERENCE IMAGE:" },
             { inlineData: { mimeType: reference_mime_type, data: reference_image_base64 } }
         );
     }
+
     userParts.push({ text: prompt });
+
     const contents: Content[] = [{ role: 'user', parts: userParts }];
 
-    let result;
-    let responseJson;
-    let lastError: Error | null = null;
+    console.log("[SegmentImageTool] Calling Gemini API...");
+    const result = await ai.models.generateContent({
+        model: MODEL_NAME,
+        contents: contents,
+        generationConfig: {
+            responseMimeType: "application/json",
+        },
+        safetySettings,
+    });
 
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-        try {
-            console.log(`[SegmentImageTool] Calling Gemini API, attempt ${attempt}/${MAX_RETRIES}...`);
-            result = await ai.models.generateContent({
-                model: MODEL_NAME,
-                contents: contents,
-                generationConfig: { responseMimeType: "application/json" },
-                safetySettings,
-            });
-
-            console.log(`[SegmentImageTool] Received response from Gemini on attempt ${attempt}.`);
-            responseJson = extractJson(result.text);
-            console.log(`[SegmentImageTool] Successfully parsed JSON on attempt ${attempt}. Found ${responseJson.masks?.length || 'unknown'} masks.`);
-            lastError = null; // Clear error on success
-            break; // Exit loop on success
-        } catch (error) {
-            console.warn(`[SegmentImageTool] Attempt ${attempt} failed: ${error.message}`);
-            lastError = error;
-            if (attempt < MAX_RETRIES) {
-                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
-            }
-        }
-    }
-
-    if (lastError) {
-        throw lastError; // If all retries failed, throw the last error
-    }
+    console.log("[SegmentImageTool] Received response from Gemini.");
+    const responseJson = extractJson(result.text);
+    console.log(`[SegmentImageTool] Successfully parsed JSON. Found ${responseJson.masks?.length || 'unknown'} masks.`);
 
     return new Response(JSON.stringify(responseJson), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
