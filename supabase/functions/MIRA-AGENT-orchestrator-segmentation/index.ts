@@ -207,7 +207,13 @@ serve(async (req) => {
     }
     combinedCtx.putImageData(finalImageData, 0, 0);
 
-    const finalImageBuffer = combinedCanvas.toBuffer('image/png');
+    const finalDataUrl = combinedCanvas.toDataURL('image/png');
+    if (!finalDataUrl || !finalDataUrl.includes(',')) {
+        throw new Error("Failed to generate data URL from final canvas.");
+    }
+    const finalBase64 = finalDataUrl.split(',')[1];
+    const finalImageBuffer = decodeBase64(finalBase64);
+
     if (!finalImageBuffer) {
         throw new Error("Failed to convert final canvas to buffer. The canvas might be empty or invalid.");
     }
