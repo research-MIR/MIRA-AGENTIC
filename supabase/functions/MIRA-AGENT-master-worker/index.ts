@@ -8,8 +8,8 @@ const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const MODEL_NAME = "gemini-2.5-pro-preview-06-05";
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1000;
-const HISTORY_SLICE_FOR_TOOLS = 20; // The number of recent turns to send to sub-agents
-const MAX_TOKEN_THRESHOLD = 130000; // A safety threshold to detect context limit errors
+const HISTORY_SLICE_FOR_TOOLS = 20;
+const MAX_TOKEN_THRESHOLD = 130000;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -46,13 +46,37 @@ You have several powerful capabilities, each corresponding to a tool or a sequen
 2.  **Language:** The final user-facing summary for the \`finish_task\` tool MUST be in **${language}**. All other internal reasoning and tool calls should remain in English.
 3.  **Image Descriptions:** After generating images, the history will be updated with a text description for each one. You MUST use these descriptions to understand which image the user is referring to in subsequent requests (e.g., "refine the one with the red dress").
 4.  **The "finish_task" Imperative:** After a successful tool execution (like \`dispatch_to_artisan_engine\`, \`generate_image\`, or \`dispatch_to_refinement_agent\`), if the plan is complete and there is no new, unaddressed user feedback following it in the history, you MUST call \`finish_task\` to present the final result. Do not call another tool unless the user has provided new instructions.
-5.  **Upscaling Logic:** The \`dispatch_to_refinement_agent\` tool is for **upscaling** an image's resolution and clarity. It does NOT change the content. You must only call this tool when the user explicitly asks to 'upscale', 'improve quality', or 'make higher resolution'. If there are multiple images in the conversation history, you MUST first call \`present_image_choice\` to have the user confirm which image to upscale.
+---
+`;
+
+    const improvementLogic = `
+### **Primary Directive: Interpreting "Improvement" Requests**
+Your most critical task after presenting images is to correctly interpret the user's follow-up request to "improve" them. You must differentiate between two distinct categories of improvement.
+
+#### **Category 1: General Feedback (Leading to Re-generation)**
+This is when the user's feedback applies to the entire set of images and implies they want a new, different set of images based on conceptual changes.
+*   **User Trigger Phrases:** "Make them more cinematic," "I don't like these, try again with a different background," "Good start, but can we make the mood more somber?"
+*   **Your Thought Process:** The user's feedback is conceptual. They are not asking to modify an existing image, but to generate *new* ones. The root of the change is the prompt itself.
+*   **Correct Tool Call:** \`dispatch_to_artisan_engine\`.
+
+#### **Category 2: Quality Enhancement (Leading to Upscaling)**
+This is when the user is happy with the content of a specific image and wants to improve its *technical quality* (resolution, clarity, detail) without changing the content.
+*   **User Trigger Phrases:** "I love it, make it better," "upscale this one," "improve the resolution," "make it sharper," "migliorala."
+*   **Your Thought Process:** The user's request is about quality, not content.
+*   **Correct Tool Call:** \`dispatch_to_refinement_agent\`.
+
+### **Decision Tree for Handling User Feedback Post-Generation**
+1.  **Analyze the user's prompt.** Is it general/conceptual feedback (Category 1) or a quality/enhancement request (Category 2)?
+2.  **Check for Ambiguity.** Did the previous turn present more than one image?
+    *   **YES:** If the request is ambiguous (e.g., uses pronouns like 'it', 'that one', or a general command like 'upscale'), you MUST call \`present_image_choice\` to ask the user to select the specific image they want to enhance.
+    *   **NO (only one image was shown):** The request is unambiguous. You can proceed directly with the appropriate tool call (\`dispatch_to_artisan_engine\` for Category 1, or \`dispatch_to_refinement_agent\` for Category 2).
 ---
 `;
 
     if (jobContext?.isDesignerMode) {
         return `
 ${baseRules}
+${improvementLogic}
 ### HIGHEST PRIORITY: DESIGNER MODE (THE ART DIRECTOR)
 You are currently in **Designer Mode**. Your persona is that of a world-class, proactive Art Director. You are expected to take the lead, propose a creative vision, and hold your own work to uncompromising standards.
 
@@ -85,6 +109,7 @@ You must respect any of the following preferences set by the user for this job:$
     } else {
         return `
 ${baseRules}
+${improvementLogic}
 ### HIGHEST PRIORITY: ASSISTANT MODE (THE COLLABORATOR)
 You are currently in **Assistant Mode**. Your primary goal is to be a helpful, conversational, and collaborative partner. You are a faithful executor. Your default is to listen and clarify, not to be proactive.
 
@@ -110,7 +135,6 @@ You must respect any of the following preferences set by the user for this job:$
 `;
     }
 };
-
 
 async function getDynamicMasterTools(jobContext: any, supabase: SupabaseClient): Promise<FunctionDeclaration[]> {
     const baseTools: FunctionDeclaration[] = [
@@ -292,21 +316,16 @@ function assembleCreativeProcessResult(history: Content[]): any {
 
 function getValidHistorySliceForTool(fullHistory: Content[], maxLength: number): Content[] {
     const slicedHistory: Content[] = [];
-    // Iterate backwards from the end of the history
     for (let i = fullHistory.length - 1; i >= 0; i--) {
         const currentTurn = fullHistory[i];
         
-        // If the current turn is a function response, we MUST also include the preceding model's function call.
         if (currentTurn.role === 'function') {
             const modelTurn = fullHistory[i - 1];
             if (i > 0 && modelTurn.role === 'model' && modelTurn.parts[0]?.functionCall) {
-                // Add both as a pair
                 slicedHistory.unshift(modelTurn, currentTurn);
-                i--; // Decrement i again because we've processed two turns
+                i--;
             }
-            // If there's no preceding model/functionCall, this is an invalid turn, so we skip it.
         } else {
-            // For user or model turns without function calls, just add them.
             slicedHistory.unshift(currentTurn);
         }
 
@@ -315,12 +334,10 @@ function getValidHistorySliceForTool(fullHistory: Content[], maxLength: number):
         }
     }
 
-    // Final cleanup: ensure the very first turn is a 'user' turn.
     const firstUserIndex = slicedHistory.findIndex(turn => turn.role === 'user');
     if (firstUserIndex > 0) {
         return slicedHistory.slice(firstUserIndex);
     } else if (firstUserIndex === -1) {
-        // This case should be rare, but if no user turn is in the slice, the context is likely invalid.
         return []; 
     }
 
@@ -331,7 +348,7 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
   
   const { job_id } = await req.json();
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
   const currentJobId = job_id;
 
   try {
@@ -364,7 +381,7 @@ serve(async (req) => {
         return new Response(JSON.stringify({ success: true, message: `Job status is ${job.status}, worker halted.` }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+    const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
     let currentContext = { ...job.context };
     let history: Content[] = currentContext.history || [];
     let iterationNumber = currentContext.iteration_number || 1;
@@ -397,21 +414,20 @@ serve(async (req) => {
             });
         } catch (apiError) {
             console.warn(`[MasterWorker][${currentJobId}] Planner API call attempt ${attempt} failed:`, apiError.message);
-            if (attempt === MAX_RETRIES) throw apiError; // Rethrow the last API error
+            if (attempt === MAX_RETRIES) throw apiError;
             await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
-            continue; // Go to next iteration of the loop
+            continue;
         }
 
         functionCalls = result?.functionCalls;
 
         if (functionCalls && functionCalls.length > 0) {
             console.log(`[MasterWorker][${currentJobId}] Successfully received tool call on attempt ${attempt}.`);
-            break; // Valid tool call received, exit the loop.
+            break;
         } else {
             console.warn(`[MasterWorker][${currentJobId}] Planner did not return a tool call on attempt ${attempt}. Response was:`, result?.text || "No text response.");
             
             if (attempt < MAX_RETRIES) {
-                // Add a system message to nudge the model back on track.
                 history.push({
                     role: 'model',
                     parts: [{ text: result?.text || "I apologize, I seem to have responded incorrectly." }]
@@ -574,7 +590,6 @@ serve(async (req) => {
             images: images
         };
 
-        // Add the choice proposal to the history, which will be rendered by the UI
         history.push({
             role: 'function',
             parts: [{
@@ -589,7 +604,7 @@ serve(async (req) => {
         await supabase.from('mira-agent-jobs').update({
             status: 'awaiting_feedback',
             context: currentContext,
-            final_result: null // Clear final_result, history is the source of truth
+            final_result: null
         }).eq('id', currentJobId);
 
         console.log(`[MasterWorker][${currentJobId}] Job status set to 'awaiting_feedback' with an image choice proposal in history.`);
@@ -620,7 +635,6 @@ serve(async (req) => {
             finalStatus = 'awaiting_feedback';
         }
 
-        // The final response is now part of the history, making it the single source of truth.
         history.push({
             role: 'function',
             parts: [{
@@ -633,7 +647,6 @@ serve(async (req) => {
 
         currentContext.history = history;
         currentContext.iteration_number = iterationNumber;
-        // We no longer need to store the result separately.
         await supabase.from('mira-agent-jobs').update({ status: finalStatus, final_result: null, context: currentContext }).eq('id', currentJobId);
         console.log(`[MasterWorker][${currentJobId}] Job status set to '${finalStatus}'. Job is complete.`);
         return new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
