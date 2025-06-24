@@ -141,17 +141,29 @@ serve(async (req) => {
     const firstMasksFromEachRun = validRuns.map(run => run[0]).filter(mask => mask && mask.box_2d && mask.mask);
     if (firstMasksFromEachRun.length === 0) throw new Error("Could not extract any valid masks from the successful runs.");
 
-    const maskImages = await Promise.all(firstMasksFromEachRun.map(run => {
-        let base64Data = run.mask;
-        if (run.mask.includes(',')) {
-            base64Data = run.mask.split(',')[1];
+    const maskImagePromises = firstMasksFromEachRun.map(async (run) => {
+        try {
+            let base64Data = run.mask;
+            console.log(`[Orchestrator][${requestId}] Raw mask data from run:`, run.mask);
+            if (run.mask.includes(',')) {
+                base64Data = run.mask.split(',')[1];
+            }
+            const imageBuffer = decodeBase64(base64Data);
+            return await loadImage(imageBuffer);
+        } catch (e) {
+            console.error(`[Orchestrator][${requestId}] Failed to decode or load a mask. Error: ${e.message}. Skipping this mask.`);
+            return null;
         }
-        const imageBuffer = decodeBase64(base64Data);
-        return loadImage(imageBuffer);
-    }));
+    });
+
+    const maskImages = (await Promise.all(maskImagePromises)).filter(img => img !== null);
+    if (maskImages.length === 0) {
+        throw new Error("All masks failed to decode. Cannot proceed.");
+    }
     
     const fullMaskCanvases = firstMasksFromEachRun.map((run, index) => {
         const maskImg = maskImages[index];
+        if (!maskImg) return null;
         const [y0, x0, y1, x1] = run.box_2d;
         const absX0 = Math.floor((x0 / 1000) * image_dimensions.width);
         const absY0 = Math.floor((y0 / 1000) * image_dimensions.height);
@@ -160,7 +172,7 @@ serve(async (req) => {
         const fullCanvas = createCanvas(image_dimensions.width, image_dimensions.height);
         fullCanvas.getContext('2d').drawImage(maskImg, absX0, absY0, bboxWidth, bboxHeight);
         return fullCanvas;
-    });
+    }).filter(canvas => canvas !== null) as Canvas[];
 
     console.log(`[Orchestrator][${requestId}] Applying pre-vote expansion of ${PRE_VOTE_EXPANSION_PERCENT * 100}% to each individual mask.`);
     fullMaskCanvases.forEach(canvas => expandMask(canvas, PRE_VOTE_EXPANSION_PERCENT));
