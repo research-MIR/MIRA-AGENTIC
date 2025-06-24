@@ -9,7 +9,8 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const STALLED_THRESHOLD_MINUTES = 5;
+// A job is considered stalled if it hasn't been updated in 1 minute
+const STALLED_THRESHOLD_MINUTES = 1;
 
 serve(async (req) => {
   console.log("[MaskWatchdog] Function invoked by schedule.");
@@ -38,18 +39,18 @@ serve(async (req) => {
       });
     }
 
-    console.log(`[MaskWatchdog] Found ${stalledJobs.length} stalled job(s). Marking as failed...`);
+    console.log(`[MaskWatchdog] Found ${stalledJobs.length} stalled job(s). Re-triggering orchestrator...`);
 
-    const updates = stalledJobs.map(job => 
-      supabase
-        .from('mira-agent-mask-aggregation-jobs')
-        .update({ status: 'failed', error_message: `Job timed out in '${job.status}' state.` })
-        .eq('id', job.id)
-    );
+    const triggerPromises = stalledJobs.map(job => {
+        console.log(`[MaskWatchdog] Re-triggering orchestrator for stalled job ID: ${job.id}`);
+        return supabase.functions.invoke('MIRA-AGENT-orchestrator-segmentation', {
+            body: { job_id: job.id }
+        });
+    });
 
-    await Promise.all(updates);
+    await Promise.allSettled(triggerPromises);
 
-    const successMessage = `[MaskWatchdog] Successfully marked ${stalledJobs.length} stalled job(s) as failed.`;
+    const successMessage = `[MaskWatchdog] Successfully re-triggered ${stalledJobs.length} stalled job(s).`;
     console.log(successMessage);
     return new Response(JSON.stringify({ message: successMessage }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
