@@ -104,13 +104,13 @@ serve(async (req) => {
     await supabase.from('mira-agent-mask-aggregation-jobs').update({ results: allResults }).eq('id', aggregationJobId);
     console.log(`[Orchestrator][${requestId}] All workers finished. Results saved to DB.`);
 
-    const validRuns = allResults.filter(run => run && !run.error && Array.isArray(run.masks) && run.masks.length > 0);
+    const validRuns = allResults.filter(run => run && !run.error && Array.isArray(run) && run.length > 0);
     if (validRuns.length === 0) throw new Error("No valid mask data found in any of the segmentation runs.");
     
-    const firstMasksFromEachRun = validRuns.map(run => run.masks[0]).filter(Boolean);
+    const firstMasksFromEachRun = validRuns.map(run => run[0]).filter(mask => mask && mask.box_2d && mask.mask);
     if (firstMasksFromEachRun.length === 0) throw new Error("Could not extract any valid masks from the successful runs.");
 
-    const maskImages = await Promise.all(firstMasksFromEachRun.map(run => loadImage(`data:image/png;base64,${run.mask}`)));
+    const maskImages = await Promise.all(firstMasksFromEachRun.map(run => loadImage(run.mask)));
     
     const fullMaskCanvases = firstMasksFromEachRun.map((run, index) => {
         const maskImg = maskImages[index];
