@@ -439,10 +439,10 @@ const Inpainting = () => {
           <Card className="mt-4">
             <CardHeader><CardTitle><div className="flex items-center gap-2"><History className="h-4 w-4" />{t('recentProJobs')}</div></CardTitle></CardHeader>
             <CardContent>
-              {isLoadingRecentJobs ? <Skeleton className="h-24 w-full" /> : proJobs.length > 0 ? (
+              {isLoadingRecentJobs ? <Skeleton className="h-24 w-full" /> : recentJobs && recentJobs.length > 0 ? (
                 <ScrollArea className="h-32">
                   <div className="flex gap-4 pb-2">
-                    {proJobs.map(job => {
+                    {recentJobs.map(job => {
                       const urlToPreview = job.final_result?.publicUrl || job.metadata?.source_image_url;
                       return (
                         <button key={job.id} onClick={() => handleSelectJob(job)} className={cn("border-2 rounded-lg p-0.5 flex-shrink-0 w-24 h-24", selectedJob?.id === job.id ? "border-primary" : "border-transparent")}>
