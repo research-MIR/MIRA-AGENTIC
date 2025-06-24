@@ -60,7 +60,7 @@ const newDefaultPrompt = `You are an expert image analyst specializing in fashio
 Output a JSON list of segmentation masks where each entry contains the 2D bounding box in the key "box_2d", the segmentation mask in key "mask", and the text label in the key "label".`;
 
 const SegmentationTool = () => {
-  const { supabase } = useSession();
+  const { supabase, session } = useSession();
   const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [referenceFile, setReferenceFile] = useState<File | null>(null);
   const [sourcePreview, setSourcePreview] = useState<string | null>(null);
@@ -120,12 +120,26 @@ const SegmentationTool = () => {
       const sourceBase64 = await fileToBase64(sourceFile);
       const referenceBase64 = referenceFile ? await fileToBase64(referenceFile) : null;
 
+      const { data: aggJob, error: aggError } = await supabase
+        .from('mira-agent-mask-aggregation-jobs')
+        .insert({
+          user_id: session?.user.id,
+          status: 'processing',
+          source_image_dimensions: imageDimensions,
+        })
+        .select('id')
+        .single();
+
+      if (aggError) throw aggError;
+      const aggregation_job_id = aggJob.id;
+
       const createPayload = () => ({
         image_base64: sourceBase64,
         mime_type: sourceFile.type,
         prompt,
         reference_image_base64: referenceBase64,
         reference_mime_type: referenceFile?.type,
+        aggregation_job_id,
       });
 
       const promises = Array.from({ length: 6 }).map(() => 
@@ -151,6 +165,12 @@ const SegmentationTool = () => {
 
       setMasks(allMasks);
       setRawResponse(JSON.stringify(combinedRawResponse, null, 2));
+      
+      await supabase
+        .from('mira-agent-mask-aggregation-jobs')
+        .update({ status: 'complete' })
+        .eq('id', aggregation_job_id);
+
       dismissToast(toastId);
       showSuccess(`Segmentation complete. Found masks across ${allMasks.length} runs.`);
 

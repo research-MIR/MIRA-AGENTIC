@@ -1,9 +1,12 @@
-// v1.0.2
+// v1.0.3
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { GoogleGenAI, Content, Part, HarmCategory, HarmBlockThreshold } from 'https://esm.sh/@google/genai@0.15.0';
+import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-const MODEL_NAME = "gemini-2.5-flash-preview-05-20"; // Using Flash for cost-effectiveness
+const MODEL_NAME = "gemini-2.5-flash-preview-05-20";
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -41,11 +44,11 @@ serve(async (req) => {
 
   try {
     console.log("[SegmentImageTool] Function invoked.");
-    const { image_base64, mime_type, prompt, reference_image_base64, reference_mime_type } = await req.json();
-    if (!image_base64 || !mime_type || !prompt) {
-      throw new Error("image_base64, mime_type, and prompt are required.");
+    const { image_base64, mime_type, prompt, reference_image_base64, reference_mime_type, aggregation_job_id } = await req.json();
+    if (!image_base64 || !mime_type || !prompt || !aggregation_job_id) {
+      throw new Error("image_base64, mime_type, prompt, and aggregation_job_id are required.");
     }
-    console.log(`[SegmentImageTool] Received prompt: "${prompt.substring(0, 50)}..."`);
+    console.log(`[SegmentImageTool] Received prompt for aggregation job ${aggregation_job_id}`);
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
@@ -79,6 +82,20 @@ serve(async (req) => {
     console.log("[SegmentImageTool] Received response from Gemini.");
     const responseJson = extractJson(result.text);
     console.log(`[SegmentImageTool] Successfully parsed JSON. Found ${responseJson.masks?.length || 'unknown'} masks.`);
+
+    const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
+    const { error: rpcError } = await supabase.rpc('append_to_jsonb_array', {
+        table_name: 'mira-agent-mask-aggregation-jobs',
+        row_id: aggregation_job_id,
+        column_name: 'results',
+        new_element: responseJson
+    });
+
+    if (rpcError) {
+        console.error(`[SegmentImageTool] Failed to append result to aggregation job ${aggregation_job_id}:`, rpcError);
+    } else {
+        console.log(`[SegmentImageTool] Successfully appended result to aggregation job ${aggregation_job_id}.`);
+    }
 
     return new Response(JSON.stringify(responseJson), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
