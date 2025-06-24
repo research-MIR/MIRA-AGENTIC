@@ -27,18 +27,20 @@ interface MaskItemData {
     mask: string;
 }
 
-const newDefaultPrompt = `You are an expert image analyst. Your task is to find an object in a SOURCE image that is visually similar to an object in a REFERENCE image and create a segmentation mask for it.
+const newDefaultPrompt = `You are an expert image analyst specializing in fashion segmentation. Your task is to find an object in a SOURCE image that is visually similar to an object in a REFERENCE image and create a highly precise segmentation mask for it.
 
 ### Core Rules:
-1.  **Identify the Reference:** Look at the REFERENCE image to understand the target object's category and appearance (e.g., "a t-shirt", "a pair of jeans").
+1.  **Identify the Reference:** Look at the REFERENCE image to understand the target object's category and appearance (e.g., "a t-shirt", "a pair of jeans", "a blazer").
 2.  **Find in Source:** Locate the corresponding object in the SOURCE image.
-3.  **Segment Accurately:** Create a precise segmentation mask for the object you found in the SOURCE image. The mask should only cover that specific object.
+3.  **Precision is Paramount:** Create a precise segmentation mask for the object you found in the SOURCE image.
+4.  **No Overlap Rule:** The mask MUST NOT cover other garments or parts of the body that are not part of the target object. For example, if segmenting a jacket, do not let the mask bleed onto the skin of the chest or a shirt underneath.
+5.  **Under-covering is Preferable:** It is better for the mask to be slightly smaller and miss a few pixels of the target object than for it to be too large and cover adjacent areas. Prioritize clean edges.
 
 ### Example:
-*   **SOURCE IMAGE:** A photo of a woman wearing a red t-shirt and blue jeans.
-*   **REFERENCE IMAGE:** A photo of a blue t-shirt on a white background.
-*   **Your Logic:** The reference image shows a t-shirt. The woman in the source image is wearing a red t-shirt. I will segment the red t-shirt she is wearing.
-*   **Output:** A single segmentation mask for the red t-shirt in the source image.
+*   **SOURCE IMAGE:** A photo of a man wearing a brown blazer over his bare chest.
+*   **REFERENCE IMAGE:** A photo of a brown blazer.
+*   **Your Logic:** The reference is a blazer. The man in the source image is wearing a similar blazer. I will create a mask that follows the exact outline of the blazer, carefully avoiding the skin on his chest and neck.
+*   **Output:** A single, precise segmentation mask for "the brown jacket/blazer".
 
 ### Output Format:
 Output a JSON list of segmentation masks where each entry contains the 2D bounding box in the key "box_2d", the segmentation mask in key "mask", and the text label in the key "label".`;
