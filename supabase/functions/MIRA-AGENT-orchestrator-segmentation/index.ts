@@ -85,9 +85,7 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  const POST_VOTE_EXPANSION_PERCENT = 0.03;
-
-  const { image_base64, mime_type, prompt, reference_image_base64, reference_mime_type, user_id, image_dimensions } = await req.json();
+  const { image_base64, mime_type, prompt, reference_image_base64, reference_mime_type, user_id, image_dimensions, expansion_percent } = await req.json();
   const requestId = `segment-orchestrator-${Date.now()}`;
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
   let aggregationJobId: string | null = null;
@@ -190,8 +188,9 @@ serve(async (req) => {
     combinedCtx.putImageData(combinedImageData, 0, 0);
     console.log(`[Orchestrator][${requestId}] Majority voting complete with threshold ${majorityThreshold}.`);
 
-    console.log(`[Orchestrator][${requestId}] Applying post-vote expansion of ${POST_VOTE_EXPANSION_PERCENT * 100}% to the combined mask.`);
-    expandMask(combinedCanvas, POST_VOTE_EXPANSION_PERCENT);
+    const postVoteExpansion = expansion_percent ?? 0.03;
+    console.log(`[Orchestrator][${requestId}] Applying post-vote expansion of ${postVoteExpansion * 100}% to the combined mask.`);
+    expandMask(combinedCanvas, postVoteExpansion);
     console.log(`[Orchestrator][${requestId}] Post-vote expansion complete.`);
 
     const finalImageData = combinedCtx.getImageData(0, 0, image_dimensions.width, image_dimensions.height);

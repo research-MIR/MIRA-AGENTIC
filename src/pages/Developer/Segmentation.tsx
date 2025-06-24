@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Label } from '@/components/ui/label';
+import { Slider } from '@/components/ui/slider';
 
 const fileToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -28,6 +29,7 @@ const SegmentationTool = () => {
   const [referencePreview, setReferencePreview] = useState<string | null>(null);
   const [imageDimensions, setImageDimensions] = useState<{width: number, height: number} | null>(null);
   const [prompt, setPrompt] = useState(newDefaultPrompt);
+  const [expansionAmount, setExpansionAmount] = useState(3);
   const [finalMaskUrl, setFinalMaskUrl] = useState<string | null>(null);
   const [rawResponse, setRawResponse] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
@@ -88,6 +90,7 @@ const SegmentationTool = () => {
           reference_image_base64: referenceBase64,
           reference_mime_type: referenceFile?.type,
           image_dimensions: imageDimensions,
+          expansion_percent: expansionAmount / 100,
         }
       });
 
@@ -139,6 +142,20 @@ const SegmentationTool = () => {
             <CardHeader><CardTitle>2. Set Prompt</CardTitle></CardHeader>
             <CardContent>
               <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={6} />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader><CardTitle>3. Configure Settings</CardTitle></CardHeader>
+            <CardContent>
+              <Label>Mask Expansion: {expansionAmount}%</Label>
+              <Slider 
+                value={[expansionAmount]} 
+                onValueChange={(v) => setExpansionAmount(v[0])} 
+                min={0} 
+                max={10} 
+                step={0.5} 
+              />
+              <p className="text-xs text-muted-foreground mt-1">Controls how much the final mask spills over the edges. Higher values ensure full coverage but may bleed.</p>
             </CardContent>
           </Card>
           <Button onClick={handleSegment} disabled={isLoading || !sourceFile}>
