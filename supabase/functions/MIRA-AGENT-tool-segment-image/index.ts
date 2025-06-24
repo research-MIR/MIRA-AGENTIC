@@ -1,7 +1,6 @@
-// v1.0.3
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { GoogleGenAI, Content, Part, HarmCategory, HarmBlockThreshold } from 'https://esm.sh/@google/genai@0.15.0';
-import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const MODEL_NAME = "gemini-2.5-flash-preview-05-20";
@@ -21,34 +20,31 @@ const safetySettings = [
 ];
 
 function extractJson(text: string): any {
-    console.log("[SegmentImageTool] Attempting to extract JSON from model response.");
     const match = text.match(/```json\s*([\s\S]*?)\s*```/);
     if (match && match[1]) {
-        console.log("[SegmentImageTool] Extracted JSON from markdown block.");
         return JSON.parse(match[1]);
     }
     try {
-        console.log("[SegmentImageTool] Attempting to parse raw text as JSON.");
         return JSON.parse(text);
     } catch (e) {
-        console.error("[SegmentImageTool] Failed to parse JSON from model response:", text);
+        console.error("[SegmentWorker] Failed to parse JSON from model response:", text);
         throw new Error("The model returned a response that could not be parsed as JSON.");
     }
 }
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
-    console.log("[SegmentImageTool] Handling OPTIONS preflight request.");
     return new Response('ok', { headers: corsHeaders });
   }
 
+  const { image_base64, mime_type, prompt, reference_image_base64, reference_mime_type, aggregation_job_id } = await req.json();
+  const requestId = `segment-worker-${aggregation_job_id}-${Math.random().toString(36).substring(2, 8)}`;
+  console.log(`[SegmentWorker][${requestId}] Invoked for aggregation job ${aggregation_job_id}.`);
+
   try {
-    console.log("[SegmentImageTool] Function invoked.");
-    const { image_base64, mime_type, prompt, reference_image_base64, reference_mime_type, aggregation_job_id } = await req.json();
     if (!image_base64 || !mime_type || !prompt || !aggregation_job_id) {
       throw new Error("image_base64, mime_type, prompt, and aggregation_job_id are required.");
     }
-    console.log(`[SegmentImageTool] Received prompt for aggregation job ${aggregation_job_id}`);
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
@@ -58,7 +54,7 @@ serve(async (req) => {
     ];
 
     if (reference_image_base64 && reference_mime_type) {
-        console.log("[SegmentImageTool] Reference image provided. Adding to payload.");
+        console.log(`[SegmentWorker][${requestId}] Reference image provided. Adding to payload.`);
         userParts.push(
             { text: "REFERENCE IMAGE:" },
             { inlineData: { mimeType: reference_mime_type, data: reference_image_base64 } }
@@ -66,24 +62,22 @@ serve(async (req) => {
     }
 
     userParts.push({ text: prompt });
-
     const contents: Content[] = [{ role: 'user', parts: userParts }];
 
-    console.log("[SegmentImageTool] Calling Gemini API...");
+    console.log(`[SegmentWorker][${requestId}] Calling Gemini API...`);
     const result = await ai.models.generateContent({
         model: MODEL_NAME,
         contents: contents,
-        generationConfig: {
-            responseMimeType: "application/json",
-        },
+        generationConfig: { responseMimeType: "application/json" },
         safetySettings,
     });
+    console.log(`[SegmentWorker][${requestId}] Received response from Gemini.`);
 
-    console.log("[SegmentImageTool] Received response from Gemini.");
     const responseJson = extractJson(result.text);
-    console.log(`[SegmentImageTool] Successfully parsed JSON. Found ${responseJson.masks?.length || 'unknown'} masks.`);
+    console.log(`[SegmentWorker][${requestId}] Successfully parsed JSON. Found ${responseJson.masks?.length || 'unknown'} masks.`);
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
+    console.log(`[SegmentWorker][${requestId}] Appending result to aggregation job in DB...`);
     const { error: rpcError } = await supabase.rpc('append_to_jsonb_array', {
         table_name: 'mira-agent-mask-aggregation-jobs',
         row_id: aggregation_job_id,
@@ -92,9 +86,9 @@ serve(async (req) => {
     });
 
     if (rpcError) {
-        console.error(`[SegmentImageTool] Failed to append result to aggregation job ${aggregation_job_id}:`, rpcError);
+        console.error(`[SegmentWorker][${requestId}] Failed to append result to aggregation job ${aggregation_job_id}:`, rpcError);
     } else {
-        console.log(`[SegmentImageTool] Successfully appended result to aggregation job ${aggregation_job_id}.`);
+        console.log(`[SegmentWorker][${requestId}] Successfully appended result to aggregation job ${aggregation_job_id}.`);
     }
 
     return new Response(JSON.stringify(responseJson), {
@@ -103,7 +97,7 @@ serve(async (req) => {
     });
 
   } catch (error) {
-    console.error("[SegmentImageTool] Unhandled Error:", error);
+    console.error(`[SegmentWorker][${requestId}] Unhandled Error:`, error);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,
