@@ -15,6 +15,7 @@ const MaskItem = ({ maskItem, imageDimensions }: { maskItem: MaskItemData, image
   const [processedMaskUrl, setProcessedMaskUrl] = useState<string | null>(null);
 
   useEffect(() => {
+    console.log(`[MaskItem] Processing mask for label: "${maskItem.label}"`);
     const base64Data = maskItem.mask;
     if (!base64Data) {
       console.error('[MaskItem] ERROR: No mask data found in maskItem.mask.');
@@ -28,11 +29,14 @@ const MaskItem = ({ maskItem, imageDimensions }: { maskItem: MaskItemData, image
     const maskImg = new Image();
     maskImg.crossOrigin = "anonymous";
     maskImg.onload = () => {
+      console.log(`[MaskItem] Decoded base64 mask for "${maskItem.label}" successfully.`);
       const [y0, x0, y1, x1] = maskItem.box_2d;
       const absX0 = Math.floor((x0 / 1000) * imageDimensions.width);
       const absY0 = Math.floor((y0 / 1000) * imageDimensions.height);
       const bboxWidth = Math.ceil(((x1 - x0) / 1000) * imageDimensions.width);
       const bboxHeight = Math.ceil(((y1 - y0) / 1000) * imageDimensions.height);
+
+      console.log(`[MaskItem] Calculated absolute bbox for "${maskItem.label}":`, { x: absX0, y: absY0, width: bboxWidth, height: bboxHeight });
 
       if (bboxWidth < 1 || bboxHeight < 1) {
         console.error('[MaskItem] ERROR: Bounding box has zero or negative dimensions. Aborting.');
@@ -45,6 +49,7 @@ const MaskItem = ({ maskItem, imageDimensions }: { maskItem: MaskItemData, image
       const resizedCtx = resizedMaskCanvas.getContext('2d');
       if (!resizedCtx) return;
       resizedCtx.drawImage(maskImg, 0, 0, bboxWidth, bboxHeight);
+      console.log(`[MaskItem] Resized mask for "${maskItem.label}" to fit bounding box.`);
 
       const fullCanvas = document.createElement('canvas');
       fullCanvas.width = imageDimensions.width;
@@ -53,6 +58,7 @@ const MaskItem = ({ maskItem, imageDimensions }: { maskItem: MaskItemData, image
       if (!fullCtx) return;
       
       fullCtx.drawImage(resizedMaskCanvas, absX0, absY0);
+      console.log(`[MaskItem] Positioned resized mask for "${maskItem.label}" on full-size canvas.`);
 
       const imageData = fullCtx.getImageData(0, 0, fullCanvas.width, fullCanvas.height);
       const data = imageData.data;
@@ -69,11 +75,12 @@ const MaskItem = ({ maskItem, imageDimensions }: { maskItem: MaskItemData, image
         }
       }
       fullCtx.putImageData(imageData, 0, 0);
+      console.log(`[MaskItem] Colorized and applied alpha to mask for "${maskItem.label}".`);
 
       setProcessedMaskUrl(fullCanvas.toDataURL());
     };
     maskImg.onerror = (err) => {
-      console.error('[MaskItem] ERROR: maskImg.onerror - Failed to load mask image.', err);
+      console.error(`[MaskItem] ERROR: maskImg.onerror - Failed to load mask image for label "${maskItem.label}".`, err);
     };
     maskImg.src = imageUrl;
 
@@ -96,6 +103,8 @@ export const SegmentationMask = ({ masks, imageDimensions }: SegmentationMaskPro
   if (!masks || masks.length === 0 || !imageDimensions) {
     return null;
   }
+
+  console.log(`[SegmentationMask] Rendering ${masks.length} masks.`);
 
   return (
     <div className="absolute top-0 left-0 w-full h-full pointer-events-none">

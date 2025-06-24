@@ -17,26 +17,35 @@ const safetySettings = [
 ];
 
 function extractJson(text: string): any {
+    console.log("[SegmentImageTool] Attempting to extract JSON from model response.");
     const match = text.match(/```json\s*([\s\S]*?)\s*```/);
     if (match && match[1]) {
+        console.log("[SegmentImageTool] Extracted JSON from markdown block.");
         return JSON.parse(match[1]);
     }
     try {
+        console.log("[SegmentImageTool] Attempting to parse raw text as JSON.");
         return JSON.parse(text);
     } catch (e) {
-        console.error("Failed to parse JSON from model response:", text);
+        console.error("[SegmentImageTool] Failed to parse JSON from model response:", text);
         throw new Error("The model returned a response that could not be parsed as JSON.");
     }
 }
 
 serve(async (req) => {
-  if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
+  // Handle CORS preflight requests
+  if (req.method === 'OPTIONS') {
+    console.log("[SegmentImageTool] Handling OPTIONS preflight request.");
+    return new Response('ok', { headers: corsHeaders });
+  }
 
   try {
+    console.log("[SegmentImageTool] Function invoked.");
     const { image_base64, mime_type, prompt } = await req.json();
     if (!image_base64 || !mime_type || !prompt) {
       throw new Error("image_base64, mime_type, and prompt are required.");
     }
+    console.log(`[SegmentImageTool] Received prompt: "${prompt.substring(0, 50)}..."`);
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
@@ -48,6 +57,7 @@ serve(async (req) => {
         ]
     }];
 
+    console.log("[SegmentImageTool] Calling Gemini API...");
     const result = await ai.models.generateContent({
         model: MODEL_NAME,
         contents: contents,
@@ -57,7 +67,9 @@ serve(async (req) => {
         safetySettings,
     });
 
+    console.log("[SegmentImageTool] Received response from Gemini.");
     const responseJson = extractJson(result.text);
+    console.log(`[SegmentImageTool] Successfully parsed JSON. Found ${responseJson.masks?.length || 'unknown'} masks.`);
 
     return new Response(JSON.stringify(responseJson), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -65,7 +77,7 @@ serve(async (req) => {
     });
 
   } catch (error) {
-    console.error("[SegmentImageTool] Error:", error);
+    console.error("[SegmentImageTool] Unhandled Error:", error);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,

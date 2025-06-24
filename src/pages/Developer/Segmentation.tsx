@@ -9,6 +9,7 @@ import { useDropzone } from '@/hooks/useDropzone';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { SegmentationMask } from '@/components/SegmentationMask';
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 const fileToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -39,6 +40,7 @@ const SegmentationTool = () => {
 
   const handleFileSelect = useCallback((file: File | null) => {
     if (file && file.type.startsWith('image/')) {
+      console.log(`[SegmentationTool] File selected: ${file.name}, size: ${file.size}`);
       setSourceFile(file);
       setMasks(null);
       setRawResponse('');
@@ -47,6 +49,7 @@ const SegmentationTool = () => {
       reader.onload = (e) => {
         const img = new Image();
         img.onload = () => {
+            console.log(`[SegmentationTool] Image loaded. Dimensions: ${img.width}x${img.height}`);
             setImageDimensions({ width: img.width, height: img.height });
             setSourcePreview(e.target?.result as string);
         };
@@ -65,6 +68,7 @@ const SegmentationTool = () => {
       showError("Please upload an image first.");
       return;
     }
+    console.log("[SegmentationTool] Starting segmentation process...");
     setIsLoading(true);
     setError(null);
     setMasks(null);
@@ -73,26 +77,31 @@ const SegmentationTool = () => {
 
     try {
       const image_base64 = await fileToBase64(sourceFile);
+      const payload = {
+        image_base64,
+        mime_type: sourceFile.type,
+        prompt,
+      };
+      console.log("[SegmentationTool] Invoking Edge Function with payload:", { mime_type: payload.mime_type, prompt: payload.prompt, image_base64: '...' });
+
       const { data, error: invokeError } = await supabase.functions.invoke('MIRA-AGENT-tool-segment-image', {
-        body: {
-          image_base64,
-          mime_type: sourceFile.type,
-          prompt,
-        }
+        body: payload
       });
 
       if (invokeError) throw invokeError;
       
-      // The response might have a top-level 'masks' key
+      console.log("[SegmentationTool] Received response from Edge Function:", data);
       const maskData = data.masks || data;
       if (!Array.isArray(maskData)) {
         throw new Error("API did not return a valid array of masks.");
       }
 
+      console.log(`[SegmentationTool] Successfully parsed ${maskData.length} masks.`);
       setMasks(maskData);
       setRawResponse(JSON.stringify(data, null, 2));
       dismissToast(toastId);
     } catch (err: any) {
+      console.error("[SegmentationTool] Error during segmentation:", err);
       dismissToast(toastId);
       setError(err.message);
       showError(`Segmentation failed: ${err.message}`);
