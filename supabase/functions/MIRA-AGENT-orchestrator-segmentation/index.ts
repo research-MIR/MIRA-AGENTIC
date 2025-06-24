@@ -142,7 +142,10 @@ serve(async (req) => {
     if (firstMasksFromEachRun.length === 0) throw new Error("Could not extract any valid masks from the successful runs.");
 
     const maskImages = await Promise.all(firstMasksFromEachRun.map(run => {
-        const base64Data = run.mask.split(',')[1];
+        let base64Data = run.mask;
+        if (run.mask.includes(',')) {
+            base64Data = run.mask.split(',')[1];
+        }
         const imageBuffer = decodeBase64(base64Data);
         return loadImage(imageBuffer);
     }));
