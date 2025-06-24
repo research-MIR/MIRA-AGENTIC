@@ -199,25 +199,33 @@ serve(async (req) => {
     expandMask(combinedCanvas, POST_VOTE_EXPANSION_PERCENT);
     console.log(`[Orchestrator][${requestId}] Post-vote expansion complete.`);
 
+    console.log(`[Orchestrator][${requestId}] Getting final image data...`);
     const finalImageData = combinedCtx.getImageData(0, 0, image_dimensions.width, image_dimensions.height);
+    console.log(`[Orchestrator][${requestId}] Got final image data. Starting colorization loop...`);
     const finalData = finalImageData.data;
     for (let i = 0; i < finalData.length; i += 4) {
         if (finalData[i] > 128) { finalData[i] = 255; finalData[i + 1] = 0; finalData[i + 2] = 0; finalData[i + 3] = 150; } 
         else { finalData[i + 3] = 0; }
     }
+    console.log(`[Orchestrator][${requestId}] Colorization loop complete. Putting image data back...`);
     combinedCtx.putImageData(finalImageData, 0, 0);
+    console.log(`[Orchestrator][${requestId}] Put image data back. Generating data URL...`);
 
     const finalDataUrl = combinedCanvas.toDataURL('image/png');
+    console.log(`[Orchestrator][${requestId}] Generated data URL. Length: ${finalDataUrl.length}. Decoding...`);
     if (!finalDataUrl || !finalDataUrl.includes(',')) {
         throw new Error("Failed to generate data URL from final canvas.");
     }
     const finalBase64 = finalDataUrl.split(',')[1];
     const finalImageBuffer = decodeBase64(finalBase64);
+    console.log(`[Orchestrator][${requestId}] Decoded base64. Buffer length: ${finalImageBuffer.length}. Checking buffer...`);
 
     if (!finalImageBuffer) {
         throw new Error("Failed to convert final canvas to buffer. The canvas might be empty or invalid.");
     }
+    console.log(`[Orchestrator][${requestId}] Buffer is valid. Uploading to storage...`);
     const finalPublicUrl = await uploadBufferToStorage(supabase, finalImageBuffer, user_id, 'final_mask.png');
+    console.log(`[Orchestrator][${requestId}] Upload complete. Final URL: ${finalPublicUrl}`);
 
     await supabase.from('mira-agent-mask-aggregation-jobs')
       .update({ status: 'complete', final_mask_base64: finalPublicUrl })
