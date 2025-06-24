@@ -48,7 +48,7 @@ export const Sidebar = () => {
     queryKey: ['projects', session?.user?.id],
     queryFn: async () => {
       if (!session?.user) return [];
-      const { data, error } = await supabase.from('projects').select('id, name').eq('user_id', session.user.id).order('name', { ascending: true });
+      const { data, error } = await supabase.from('mira-agent-projects').select('id, name').eq('user_id', session.user.id).order('name', { ascending: true });
       if (error) throw error;
       return data;
     },

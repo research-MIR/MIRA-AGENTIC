@@ -66,7 +66,7 @@ export const AddToProjectDialog = ({ projects }: AddToProjectDialogProps) => {
     const toastId = showLoading("Creating project and moving chat...");
     try {
       const { data: newProject, error: createError } = await supabase
-        .from('projects')
+        .from('mira-agent-projects')
         .insert({ name: newProjectName.trim(), user_id: session.user.id })
         .select('id')
         .single();

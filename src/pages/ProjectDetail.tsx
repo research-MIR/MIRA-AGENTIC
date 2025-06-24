@@ -125,7 +125,7 @@ const ProjectDetail = () => {
     if (!newProjectName.trim() || !projectId) return;
     setIsUpdating(true);
     try {
-      const { error } = await supabase.from('projects').update({ name: newProjectName }).eq('id', projectId);
+      const { error } = await supabase.from('mira-agent-projects').update({ name: newProjectName }).eq('id', projectId);
       if (error) throw error;
       showSuccess("Project renamed.");
       await queryClient.invalidateQueries({ queryKey: ['projectDetails', projectId] });
@@ -414,7 +414,7 @@ const ProjectDetail = () => {
             <Button onClick={() => setIsManageChatsModalOpen(false)}>{t('done')}</Button>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
+      </AlertDialog>
 
       <AlertDialog open={!!jobToDelete} onOpenChange={(open) => !open && setJobToDelete(null)}>
         <AlertDialogContent>

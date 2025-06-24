@@ -39,7 +39,7 @@ export const ShareProjectModal = ({ project, isOpen, onClose }: ShareProjectModa
     queryKey: ['projectCollaborators', project?.project_id],
     queryFn: async () => {
       if (!project) return [];
-      const { data, error } = await supabase.from('project_collaborators').select('user_id').eq('project_id', project.project_id);
+      const { data, error } = await supabase.from('mira-agent-project-collaborators').select('user_id').eq('project_id', project.project_id);
       if (error) throw error;
       const userIds = data.map(c => c.user_id);
       if (userIds.length === 0) return [];
@@ -60,7 +60,7 @@ export const ShareProjectModal = ({ project, isOpen, onClose }: ShareProjectModa
     if (!project) return;
     const toastId = showLoading("Updating sharing settings...");
     try {
-      const { error } = await supabase.from('projects').update({ sharing_mode: value }).eq('id', project.project_id);
+      const { error } = await supabase.from('mira-agent-projects').update({ sharing_mode: value }).eq('id', project.project_id);
       if (error) throw error;
       setActiveTab(value);
       queryClient.invalidateQueries({ queryKey: ['projectPreviews'] });
@@ -96,7 +96,7 @@ export const ShareProjectModal = ({ project, isOpen, onClose }: ShareProjectModa
     if (!project) return;
     setIsLoading(true);
     try {
-      const { error } = await supabase.from('project_collaborators').insert({ project_id: project.project_id, user_id: user.id });
+      const { error } = await supabase.from('mira-agent-project-collaborators').insert({ project_id: project.project_id, user_id: user.id });
       if (error) throw error;
       queryClient.invalidateQueries({ queryKey: ['projectCollaborators', project.project_id] });
       setEmail('');
@@ -112,7 +112,7 @@ export const ShareProjectModal = ({ project, isOpen, onClose }: ShareProjectModa
     if (!project) return;
     setIsLoading(true);
     try {
-      const { error } = await supabase.from('project_collaborators').delete().eq('project_id', project.project_id).eq('user_id', userId);
+      const { error } = await supabase.from('mira-agent-project-collaborators').delete().eq('project_id', project.project_id).eq('user_id', userId);
       if (error) throw error;
       queryClient.invalidateQueries({ queryKey: ['projectCollaborators', project.project_id] });
     } catch (err: any) {
