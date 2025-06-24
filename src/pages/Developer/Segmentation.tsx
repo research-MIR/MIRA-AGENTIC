@@ -27,35 +27,18 @@ interface MaskItemData {
     mask: string;
 }
 
-const newDefaultPrompt = `You are an expert fashion AI and virtual stylist. Your primary task is to analyze a PERSON image and a GARMENT image and generate a precise segmentation mask on the PERSON image. This mask represents the area where the garment should be placed, a process we call 'projection masking'.
+const newDefaultPrompt = `You are an expert image analyst. Your task is to find an object in a SOURCE image that is visually similar to an object in a REFERENCE image and create a segmentation mask for it.
 
 ### Core Rules:
-1.  **Analyze the Garment:** First, identify the type of clothing in the GARMENT image (e.g., t-shirt, dress, jacket, pants).
-2.  **Project onto Person:** Identify the corresponding body region on the PERSON image where this garment would be worn.
-3.  **The Cover-Up Imperative:** This is the most important rule. The generated mask must cover the **entire area** the new garment would occupy. **Crucially, if the person is already wearing clothing in that area, the mask must cover the existing clothing as well.** The goal is to create a clean slate for the new garment. You are masking the *destination area*, not the existing clothes.
-4.  **Be Generous:** Slightly expand the mask beyond the garment's natural boundaries to ensure a clean replacement and better blending.
+1.  **Identify the Reference:** Look at the REFERENCE image to understand the target object's category and appearance (e.g., "a t-shirt", "a pair of jeans").
+2.  **Find in Source:** Locate the corresponding object in the SOURCE image.
+3.  **Segment Accurately:** Create a precise segmentation mask for the object you found in the SOURCE image. The mask should only cover that specific object.
 
-### Few-Shot Examples:
-
-**Example 1: Jacket over Lingerie (Your specific problem case)**
-*   **Input:** A person wearing a bra and a reference image of a jacket.
-*   **Logic:** The reference is a jacket. A jacket covers the entire upper body (torso and arms). The person is wearing a bra. I must ignore the shape of the bra and create a mask for the full area a jacket would cover.
-*   **Output:** A single mask covering the person's torso and arms, with the label "Upper Body Area for Jacket Placement".
-
-**Example 2: T-Shirt over a Long-Sleeve Shirt**
-*   **Input:** A person wearing a long-sleeve sweater and a reference image of a t-shirt.
-*   **Logic:** The reference is a t-shirt. It covers the torso. The person is wearing a sweater that also covers the arms. To place the t-shirt, I must cover the entire existing sweater, including the sleeves, to ensure it is completely replaced.
-*   **Output:** A single mask covering the person's entire torso and arms, with the label "Upper Body Area for T-Shirt Placement".
-
-**Example 3: Dress over Pants and Top**
-*   **Input:** A person wearing jeans and a blouse, and a reference image of a knee-length dress.
-*   **Logic:** The reference is a dress. It covers the torso and legs down to the knee. I must create a mask that covers this entire area, obscuring the original blouse and jeans.
-*   **Output:** A single mask covering the person's torso and legs down to the knees, with the label "Full Dress Area for Placement".
-
-**Example 4: Cropped Top over a T-Shirt**
-*   **Input:** A person wearing a standard-length t-shirt and a reference image of a short, cropped top.
-*   **Logic:** The reference is a cropped top, which is smaller than the existing t-shirt. To ensure the original t-shirt is completely replaced, I must generate a mask that covers the *entire area of the original t-shirt*.
-*   **Output:** A single mask that covers the full area of the original t-shirt, with the label "Torso Area for Cropped Top Placement".
+### Example:
+*   **SOURCE IMAGE:** A photo of a woman wearing a red t-shirt and blue jeans.
+*   **REFERENCE IMAGE:** A photo of a blue t-shirt on a white background.
+*   **Your Logic:** The reference image shows a t-shirt. The woman in the source image is wearing a red t-shirt. I will segment the red t-shirt she is wearing.
+*   **Output:** A single segmentation mask for the red t-shirt in the source image.
 
 ### Output Format:
 Output a JSON list of segmentation masks where each entry contains the 2D bounding box in the key "box_2d", the segmentation mask in key "mask", and the text label in the key "label".`;
