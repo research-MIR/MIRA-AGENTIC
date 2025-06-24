@@ -42,7 +42,7 @@ async function uploadBufferToStorage(supabase: SupabaseClient, buffer: Uint8Arra
 }
 
 /**
- * Expands a mask on a given canvas by blurring and re-thresholding it.
+ * Expands a mask on a given canvas by using a shadow/glow effect.
  * @param canvas The canvas containing the mask to expand.
  * @param expansionPercent The percentage of the smaller image dimension to use for expansion.
  */
@@ -53,22 +53,26 @@ function expandMask(canvas: Canvas, expansionPercent: number) {
     const expansionAmount = Math.round(Math.min(canvas.width, canvas.height) * expansionPercent);
 
     if (expansionAmount > 0) {
-        ctx.filter = `blur(${expansionAmount}px)`;
-        // Draw the canvas onto itself to apply the blur
-        ctx.drawImage(canvas, 0, 0);
-        ctx.filter = 'none';
+        // Create a temporary canvas to hold the original mask
+        const tempCanvas = createCanvas(canvas.width, canvas.height);
+        const tempCtx = tempCanvas.getContext('2d');
+        tempCtx.drawImage(canvas, 0, 0);
 
-        // Re-threshold to make the blurred edges solid again
-        const smoothedImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const smoothedData = smoothedImageData.data;
-        for (let i = 0; i < smoothedData.length; i += 4) {
-            if (smoothedData[i] > 128) { // Check red channel, since blur makes it gray
-                smoothedData[i] = 255;
-                smoothedData[i + 1] = 255;
-                smoothedData[i + 2] = 255;
-            }
+        // Clear the original canvas
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // Set up the "glow" effect which will act as our expansion
+        ctx.shadowColor = 'white';
+        ctx.shadowBlur = expansionAmount;
+        
+        // Drawing the mask multiple times makes the shadow more solid, creating a better fill.
+        // This is a common technique for creating a solid outer glow from a shape.
+        for (let i = 0; i < 10; i++) {
+            ctx.drawImage(tempCanvas, 0, 0);
         }
-        ctx.putImageData(smoothedImageData, 0, 0);
+        
+        // Reset shadow properties for any subsequent drawing on this context
+        ctx.shadowBlur = 0;
     }
 }
 
