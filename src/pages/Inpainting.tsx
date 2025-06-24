@@ -137,6 +137,13 @@ const Inpainting = () => {
     setSelectedJobId(job.id);
   };
 
+  const handleReferenceFileSelect = (file: File | null) => {
+    setReferenceImageFile(file);
+    if (file) {
+      setIsAutoPromptEnabled(true);
+    }
+  };
+
   useEffect(() => {
     if (!referenceImageFile) {
       setIsAutoPromptEnabled(false);
@@ -363,7 +370,7 @@ const Inpainting = () => {
                           <AccordionContent className="pt-4 space-y-4">
                             <div className="grid grid-cols-2 gap-4">
                               <ImageUploader onFileSelect={handleFileSelect} title={t('sourceImage')} imageUrl={sourceImageUrl} onClear={resetForm} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
-                              <ImageUploader onFileSelect={setReferenceImageFile} title={t('referenceImage')} imageUrl={referenceImageUrl} onClear={() => setReferenceImageFile(null)} icon={<Palette className="h-8 w-8 text-muted-foreground" />} />
+                              <ImageUploader onFileSelect={handleReferenceFileSelect} title={t('referenceImage')} imageUrl={referenceImageUrl} onClear={() => setReferenceImageFile(null)} icon={<Palette className="h-8 w-8 text-muted-foreground" />} />
                             </div>
                           </AccordionContent>
                         </AccordionItem>
