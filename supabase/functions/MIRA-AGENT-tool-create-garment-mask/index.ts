@@ -62,7 +62,6 @@ async function processMasks(
               voteCount++;
           }
       }
-      // Keep the pixel if it's present in at least 6 of the 9 runs
       if (voteCount >= 6) {
           combinedData[i] = 255;
           combinedData[i+1] = 255;
@@ -80,7 +79,6 @@ serve(async (req) => {
   console.log("[CreateGarmentMask] Function invoked.");
 
   if (req.method === 'OPTIONS') {
-    console.log("[CreateGarmentMask] Handling OPTIONS preflight request.");
     return new Response(null, { headers: corsHeaders });
   }
 
@@ -114,20 +112,25 @@ serve(async (req) => {
       return supabase.functions.invoke('MIRA-AGENT-tool-segment-image', { body: createPayload() });
     });
 
-    const results = await Promise.all(promises);
+    const results = await Promise.allSettled(promises);
     console.log("[CreateGarmentMask] All 9 segmentation runs have completed.");
 
     const allMasks: MaskItemData[][] = [];
     results.forEach((result, index) => {
-      if (result.error) {
-        console.warn(`[CreateGarmentMask] Run ${index + 1} failed: ${result.error.message}`);
-      } else {
-        const maskData = result.data.masks || result.data;
-        if (Array.isArray(maskData) && maskData.length > 0) {
-          allMasks.push(maskData);
+      if (result.status === 'fulfilled') {
+        const { data, error } = result.value;
+        if (error) {
+          console.warn(`[CreateGarmentMask] Run ${index + 1} failed with function error: ${error.message}`);
         } else {
-          console.warn(`[CreateGarmentMask] Run ${index + 1} did not return a valid array of masks.`);
+          const maskData = data.masks || data;
+          if (Array.isArray(maskData) && maskData.length > 0) {
+            allMasks.push(maskData);
+          } else {
+            console.warn(`[CreateGarmentMask] Run ${index + 1} did not return a valid array of masks.`);
+          }
         }
+      } else {
+        console.error(`[CreateGarmentMask] Run ${index + 1} was rejected: ${result.reason}`);
       }
     });
     console.log(`[CreateGarmentMask] Successfully processed ${allMasks.length} valid runs.`);
