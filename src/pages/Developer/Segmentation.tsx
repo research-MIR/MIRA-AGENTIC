@@ -114,7 +114,7 @@ const SegmentationTool = () => {
     setError(null);
     setMasks(null);
     setRawResponse('');
-    const toastId = showLoading("Segmenting image (3 runs)...");
+    const toastId = showLoading("Segmenting image (6 runs)...");
 
     try {
       const sourceBase64 = await fileToBase64(sourceFile);
@@ -128,12 +128,9 @@ const SegmentationTool = () => {
         reference_mime_type: referenceFile?.type,
       });
 
-      // Create three parallel promises
-      const promises = [
-        supabase.functions.invoke('MIRA-AGENT-tool-segment-image', { body: createPayload() }),
-        supabase.functions.invoke('MIRA-AGENT-tool-segment-image', { body: createPayload() }),
-        supabase.functions.invoke('MIRA-AGENT-tool-segment-image', { body: createPayload() }),
-      ];
+      const promises = Array.from({ length: 6 }).map(() => 
+        supabase.functions.invoke('MIRA-AGENT-tool-segment-image', { body: createPayload() })
+      );
 
       const results = await Promise.all(promises);
 
@@ -239,7 +236,7 @@ const SegmentationTool = () => {
             <Card>
                 <CardHeader>
                     <CardTitle>Individual Runs</CardTitle>
-                    <CardDescription>See the output from each of the 3 segmentation runs.</CardDescription>
+                    <CardDescription>See the output from each of the {masks.length} segmentation runs.</CardDescription>
                 </CardHeader>
                 <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     {masks.map((run, index) => (

@@ -82,8 +82,9 @@ const processMasks = async (
                   voteCount++;
               }
           }
-          // Keep the pixel if it's present in at least 2 of the 3 runs
-          if (voteCount >= 2) {
+          // Keep the pixel if it's present in a majority of the runs (e.g., >= 4 out of 6)
+          const majorityThreshold = Math.floor(maskImageDatas.length / 2) + 1;
+          if (voteCount >= majorityThreshold) {
               combinedData[i] = 255;
               combinedData[i+1] = 255;
               combinedData[i+2] = 255;
