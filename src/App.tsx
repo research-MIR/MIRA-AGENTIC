@@ -19,6 +19,7 @@ import { useSession } from "./components/Auth/SessionContextProvider.tsx";
 import { useLanguage } from "./context/LanguageContext.tsx";
 import { useOnboardingTour } from "./context/OnboardingTourContext.tsx";
 import { TourProvider as ReactourProvider, StepType } from '@reactour/tour';
+import SegmentationTool from "./pages/Developer/Segmentation.tsx";
 
 const App = () => {
   const { isTourOpen, closeTour, isTourPending, openTour, startTour } = useOnboardingTour();
@@ -96,6 +97,7 @@ const App = () => {
             <Route path="/settings" element={<Settings />} />
             <Route path="/virtual-try-on" element={<VirtualTryOn />} />
             <Route path="/developer" element={<Developer />} />
+            <Route path="/developer/segmentation" element={<SegmentationTool />} />
           </Route>
         </Route>
         <Route path="*" element={<NotFound />} />
