@@ -27,14 +27,14 @@ interface MaskItemData {
     mask: string;
 }
 
-const newDefaultPrompt = `You are an expert image analyst specializing in fashion segmentation. Your task is to find an object in a SOURCE image that is visually similar to an object in a REFERENCE image and create a highly precise segmentation mask for it.
+const newDefaultPrompt = `You are an expert image analyst specializing in fashion segmentation. Your task is to find a garment in a SOURCE image that is visually similar to a garment in a REFERENCE image and create a highly precise segmentation mask for **only that specific garment**.
 
 ### Core Rules:
-1.  **Identify the Reference:** Look at the REFERENCE image to understand the target object's category and appearance (e.g., "a t-shirt", "a pair of jeans", "a blazer").
-2.  **Find in Source:** Locate the corresponding object in the SOURCE image.
-3.  **Precision is Paramount:** Create a precise segmentation mask for the object you found in the SOURCE image.
-4.  **No Overlap Rule:** The mask MUST NOT cover other garments or parts of the body that are not part of the target object. For example, if segmenting a jacket, do not let the mask bleed onto the skin of the chest or a shirt underneath.
-5.  **Under-covering is Preferable:** It is better for the mask to be slightly smaller and miss a few pixels of the target object than for it to be too large and cover adjacent areas. Prioritize clean edges.
+1.  **Identify the Reference:** Look at the REFERENCE image to understand the target garment's category and appearance (e.g., "a t-shirt", "a pair of jeans", "a blazer").
+2.  **Find in Source:** Locate the corresponding garment in the SOURCE image.
+3.  **Precision is Paramount:** Create a precise segmentation mask for the garment you found in the SOURCE image.
+4.  **Strict No Overlap Rule:** The mask MUST ONLY cover the target garment. It MUST NOT bleed onto other clothing items, skin, or background elements. For example, if the reference is a jacket and the person is also wearing a t-shirt, the mask must *only* cover the jacket.
+5.  **Under-covering is Preferable:** It is better for the mask to be slightly smaller and miss a few pixels of the target garment than for it to be too large and cover adjacent areas. Prioritize clean edges.
 
 ### Few-Shot Examples:
 
@@ -47,13 +47,13 @@ const newDefaultPrompt = `You are an expert image analyst specializing in fashio
 **Example 2: Pants**
 *   **SOURCE IMAGE:** A photo of a person wearing a white shirt and blue jeans.
 *   **REFERENCE IMAGE:** A photo of blue jeans.
-*   **Your Logic:** The reference is blue jeans. The person in the source image is wearing blue jeans. I will create a mask that covers only the jeans, stopping precisely at the waistline and not overlapping with the white shirt.
+*   **Your Logic:** The reference is blue jeans. The person in the source image is wearing blue jeans. I will create a mask that covers only the jeans, stopping precisely at the waistline and **explicitly not overlapping with the white shirt**.
 *   **Output:** A single, precise segmentation mask for "the blue jeans".
 
-**Example 3: T-shirt**
-*   **SOURCE IMAGE:** A photo of a person wearing a red t-shirt.
+**Example 3: T-shirt under a jacket**
+*   **SOURCE IMAGE:** A photo of a person wearing a red t-shirt underneath an open black jacket.
 *   **REFERENCE IMAGE:** A photo of a red t-shirt.
-*   **Your Logic:** The reference is a t-shirt. The person in the source image is wearing a matching t-shirt. I will create a mask for the t-shirt, carefully following the neckline and sleeves to avoid masking the skin.
+*   **Your Logic:** The reference is a t-shirt. The person in the source image is wearing a matching t-shirt. I will create a mask for the t-shirt, carefully following its outline and **ensuring the mask does not extend onto the black jacket**.
 *   **Output:** A single, precise segmentation mask for "the red t-shirt".
 
 ### Output Format:
@@ -218,7 +218,7 @@ const SegmentationTool = () => {
                   {sourcePreview ? <img src={sourcePreview} alt="Original" className="rounded-md w-full" /> : <div className="aspect-square bg-muted rounded-md flex items-center justify-center text-muted-foreground">Upload an image</div>}
                 </div>
                 <div>
-                  <h3 className="font-semibold mb-2">Combined Mask (2/3 Votes)</h3>
+                  <h3 className="font-semibold mb-2">Segmented Image</h3>
                   <div className="relative aspect-square bg-muted rounded-md">
                     {sourcePreview && <img src={sourcePreview} alt="Original with overlay" className="rounded-md w-full h-full object-contain" />}
                     {masks && imageDimensions && <SegmentationMask masks={masks} imageDimensions={imageDimensions} />}
