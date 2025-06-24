@@ -31,6 +31,12 @@ const parseHistoryToMessages = (jobData: any, t: (key: string) => string): Messa
         if (turn.role === 'user') {
             const message: Message = { from: 'user', imageUrls: [] };
             const textPart = turn.parts.find((p: any) => p.text);
+
+            // Check if it's a system note and skip it
+            if (textPart && textPart.text.startsWith("System note:")) {
+                continue;
+            }
+
             const imageParts = turn.parts.filter((p: any) => p.inlineData);
 
             if (textPart) message.text = textPart.text;
