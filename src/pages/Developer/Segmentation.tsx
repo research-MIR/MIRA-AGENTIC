@@ -2,13 +2,12 @@ import { useState, useRef, useCallback } from 'react';
 import { useSession } from '@/components/Auth/SessionContextProvider';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Loader2, UploadCloud, AlertTriangle, Image as ImageIcon } from 'lucide-react';
 import { showError, showLoading, dismissToast, showSuccess } from '@/utils/toast';
 import { useDropzone } from '@/hooks/useDropzone';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
-import { SegmentationMask } from '@/components/SegmentationMask';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Label } from '@/components/ui/label';
 
@@ -20,12 +19,6 @@ const fileToBase64 = (file: File): Promise<string> => {
       reader.onerror = (error) => reject(error);
     });
 };
-
-interface MaskItemData {
-    box_2d: [number, number, number, number];
-    label: string;
-    mask: string;
-}
 
 const newDefaultPrompt = `You are an expert image analyst specializing in fashion segmentation. Your task is to find a garment in a SOURCE image that is visually similar to a garment in a REFERENCE image and create a highly precise segmentation mask for **only that specific garment**.
 
@@ -65,10 +58,8 @@ const SegmentationTool = () => {
   const [referenceFile, setReferenceFile] = useState<File | null>(null);
   const [sourcePreview, setSourcePreview] = useState<string | null>(null);
   const [referencePreview, setReferencePreview] = useState<string | null>(null);
-  const [imageDimensions, setImageDimensions] = useState<{width: number, height: number} | null>(null);
   const [prompt, setPrompt] = useState(newDefaultPrompt);
-  const [masks, setMasks] = useState<MaskItemData[][] | null>(null);
-  const [rawResponse, setRawResponse] = useState<string>('');
+  const [finalMaskUrl, setFinalMaskUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const sourceFileInputRef = useRef<HTMLInputElement>(null);
@@ -76,19 +67,9 @@ const SegmentationTool = () => {
 
   const handleFileSelect = useCallback((file: File | null, type: 'source' | 'reference') => {
     if (file && file.type.startsWith('image/')) {
-      console.log(`[SegmentationTool] ${type} file selected: ${file.name}`);
       if (type === 'source') {
         setSourceFile(file);
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          const img = new Image();
-          img.onload = () => {
-              setImageDimensions({ width: img.width, height: img.height });
-              setSourcePreview(e.target?.result as string);
-          };
-          img.src = e.target?.result as string;
-        };
-        reader.readAsDataURL(file);
+        setSourcePreview(URL.createObjectURL(file));
       } else {
         setReferenceFile(file);
         setReferencePreview(URL.createObjectURL(file));
@@ -109,56 +90,33 @@ const SegmentationTool = () => {
       showError("Please upload a source image first.");
       return;
     }
-    console.log("[SegmentationTool] Starting segmentation process...");
     setIsLoading(true);
     setError(null);
-    setMasks(null);
-    setRawResponse('');
-    const toastId = showLoading("Segmenting image (3 runs)...");
+    setFinalMaskUrl(null);
+    const toastId = showLoading("Generating mask (this may take a moment)...");
 
     try {
       const sourceBase64 = await fileToBase64(sourceFile);
       const referenceBase64 = referenceFile ? await fileToBase64(referenceFile) : null;
 
-      const createPayload = () => ({
+      const payload = {
         image_base64: sourceBase64,
         mime_type: sourceFile.type,
         prompt,
         reference_image_base64: referenceBase64,
         reference_mime_type: referenceFile?.type,
-      });
+      };
 
-      // Create three parallel promises
-      const promises = [
-        supabase.functions.invoke('MIRA-AGENT-tool-segment-image', { body: createPayload() }),
-        supabase.functions.invoke('MIRA-AGENT-tool-segment-image', { body: createPayload() }),
-        supabase.functions.invoke('MIRA-AGENT-tool-segment-image', { body: createPayload() }),
-      ];
+      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-create-garment-mask', { body: payload });
 
-      const results = await Promise.all(promises);
+      if (error) throw error;
+      if (!data.final_mask_base64) throw new Error("The function did not return a final mask.");
 
-      const allMasks: MaskItemData[][] = [];
-      let combinedRawResponse: Record<string, any> = {};
-      
-      results.forEach((result, index) => {
-        if (result.error) {
-          throw new Error(`Run ${index + 1} failed: ${result.error.message}`);
-        }
-        const maskData = result.data.masks || result.data;
-        if (!Array.isArray(maskData)) {
-          throw new Error(`Run ${index + 1} did not return a valid array of masks.`);
-        }
-        allMasks.push(maskData);
-        combinedRawResponse[`run_${index + 1}`] = result.data;
-      });
-
-      setMasks(allMasks);
-      setRawResponse(JSON.stringify(combinedRawResponse, null, 2));
+      setFinalMaskUrl(`data:image/png;base64,${data.final_mask_base64}`);
       dismissToast(toastId);
-      showSuccess(`Segmentation complete. Found masks across ${allMasks.length} runs.`);
+      showSuccess("Mask generated successfully.");
 
     } catch (err: any) {
-      console.error("[SegmentationTool] Error during segmentation:", err);
       dismissToast(toastId);
       setError(err.message);
       showError(`Segmentation failed: ${err.message}`);
@@ -170,8 +128,8 @@ const SegmentationTool = () => {
   return (
     <div className="p-4 md:p-8 h-full overflow-y-auto">
       <header className="pb-4 mb-8 border-b">
-        <h1 className="text-3xl font-bold">Gemini 2.5 Segmentation Tool</h1>
-        <p className="text-muted-foreground">A developer tool to test image segmentation capabilities.</p>
+        <h1 className="text-3xl font-bold">Garment Mask Generation Tool</h1>
+        <p className="text-muted-foreground">A developer tool to test the server-side mask generation function.</p>
       </header>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-1 space-y-6">
@@ -202,7 +160,7 @@ const SegmentationTool = () => {
           </Card>
           <Button onClick={handleSegment} disabled={isLoading || !sourceFile}>
             {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ImageIcon className="mr-2 h-4 w-4" />}
-            Segment Image
+            Generate Mask
           </Button>
         </div>
         <div className="lg:col-span-2 space-y-6">
@@ -218,44 +176,22 @@ const SegmentationTool = () => {
                   {sourcePreview ? <img src={sourcePreview} alt="Original" className="rounded-md w-full" /> : <div className="aspect-square bg-muted rounded-md flex items-center justify-center text-muted-foreground">Upload an image</div>}
                 </div>
                 <div>
-                  <h3 className="font-semibold mb-2">Segmented Image</h3>
+                  <h3 className="font-semibold mb-2">Generated Mask</h3>
                   <div className="relative aspect-square bg-muted rounded-md">
-                    {sourcePreview && <img src={sourcePreview} alt="Original with overlay" className="rounded-md w-full h-full object-contain" />}
-                    {masks && imageDimensions && <SegmentationMask masks={masks} imageDimensions={imageDimensions} />}
+                    {sourcePreview && <img src={sourcePreview} alt="Original with overlay" className="rounded-md w-full h-full object-contain opacity-20" />}
+                    {finalMaskUrl && (
+                        <img 
+                            src={finalMaskUrl} 
+                            alt="Generated Mask" 
+                            className="absolute top-0 left-0 w-full h-full object-contain"
+                            style={{ imageRendering: 'pixelated' }}
+                        />
+                    )}
                   </div>
                 </div>
               </div>
-
-              {rawResponse && (
-                <div className="mt-6">
-                  <h3 className="font-semibold mb-2">Raw JSON Response</h3>
-                  <pre className="bg-muted p-4 rounded-md text-xs overflow-x-auto max-h-96">{rawResponse}</pre>
-                </div>
-              )}
             </CardContent>
           </Card>
-
-          {masks && (
-            <Card>
-                <CardHeader>
-                    <CardTitle>Individual Runs</CardTitle>
-                    <CardDescription>See the output from each of the 3 segmentation runs.</CardDescription>
-                </CardHeader>
-                <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    {masks.map((run, index) => (
-                        <div key={index}>
-                            <h3 className="font-semibold mb-2 text-center">Run {index + 1}</h3>
-                            <div className="relative aspect-square bg-muted rounded-md">
-                                {sourcePreview && <img src={sourcePreview} alt="Original" className="rounded-md w-full h-full object-contain" />}
-                                {imageDimensions && (
-                                    <SegmentationMask masks={[run]} imageDimensions={imageDimensions} />
-                                )}
-                            </div>
-                        </div>
-                    ))}
-                </CardContent>
-            </Card>
-          )}
         </div>
       </div>
     </div>
