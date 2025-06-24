@@ -141,7 +141,9 @@ serve(async (req) => {
     const firstMasksFromEachRun = validRuns.map(run => run[0]).filter(mask => mask && mask.box_2d && mask.mask);
     if (firstMasksFromEachRun.length === 0) throw new Error("Could not extract any valid masks from the successful runs.");
 
-    const fullMaskCanvases: Canvas[] = [];
+    const accumulator = new Uint8Array(image_dimensions.width * image_dimensions.height);
+    console.log(`[Orchestrator][${requestId}] Created accumulator array for votes.`);
+
     for (const run of firstMasksFromEachRun) {
         try {
             let base64Data = run.mask;
@@ -155,34 +157,37 @@ serve(async (req) => {
             const bboxWidth = Math.ceil(((x1 - x0) / 1000) * image_dimensions.width);
             const bboxHeight = Math.ceil(((y1 - y0) / 1000) * image_dimensions.height);
             
-            const fullCanvas = createCanvas(image_dimensions.width, image_dimensions.height);
-            fullCanvas.getContext('2d').drawImage(maskImg, absX0, absY0, bboxWidth, bboxHeight);
+            const tempCanvas = createCanvas(image_dimensions.width, image_dimensions.height);
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCtx.drawImage(maskImg, absX0, absY0, bboxWidth, bboxHeight);
             
-            fullMaskCanvases.push(fullCanvas);
+            expandMask(tempCanvas, PRE_VOTE_EXPANSION_PERCENT);
+
+            const imageData = tempCtx.getImageData(0, 0, image_dimensions.width, image_dimensions.height).data;
+            for (let i = 0; i < imageData.length; i += 4) {
+                if (imageData[i] > 128) {
+                    accumulator[i / 4]++;
+                }
+            }
         } catch (e) {
             console.error(`[Orchestrator][${requestId}] Failed to process a mask. Error: ${e.message}. Skipping.`);
         }
     }
-
-    if (fullMaskCanvases.length === 0) throw new Error("All masks failed to process into canvases.");
-    console.log(`[Orchestrator][${requestId}] Processed ${fullMaskCanvases.length} masks into canvases.`);
-
-    console.log(`[Orchestrator][${requestId}] Applying pre-vote expansion of ${PRE_VOTE_EXPANSION_PERCENT * 100}% to each mask.`);
-    fullMaskCanvases.forEach(canvas => expandMask(canvas, PRE_VOTE_EXPANSION_PERCENT));
-    console.log(`[Orchestrator][${requestId}] Pre-vote expansion complete.`);
+    console.log(`[Orchestrator][${requestId}] Finished processing all masks and accumulating votes.`);
 
     const combinedCanvas = createCanvas(image_dimensions.width, image_dimensions.height);
     const combinedCtx = combinedCanvas.getContext('2d');
-    const maskImageDatas = fullMaskCanvases.map(c => c.getContext('2d').getImageData(0, 0, image_dimensions.width, image_dimensions.height).data);
     const combinedImageData = combinedCtx.createImageData(image_dimensions.width, image_dimensions.height);
     const combinedData = combinedImageData.data;
-
+    
     const majorityThreshold = 7;
-    for (let i = 0; i < combinedData.length; i += 4) {
-        let voteCount = 0;
-        for (const data of maskImageDatas) { if (data[i] > 128) voteCount++; }
-        if (voteCount >= majorityThreshold) {
-            combinedData[i] = 255; combinedData[i+1] = 255; combinedData[i+2] = 255; combinedData[i+3] = 255;
+    for (let i = 0; i < accumulator.length; i++) {
+        if (accumulator[i] >= majorityThreshold) {
+            const idx = i * 4;
+            combinedData[idx] = 255;
+            combinedData[idx + 1] = 255;
+            combinedData[idx + 2] = 255;
+            combinedData[idx + 3] = 255;
         }
     }
     combinedCtx.putImageData(combinedImageData, 0, 0);
