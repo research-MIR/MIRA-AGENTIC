@@ -63,19 +63,33 @@ const processMasks = async (
   const combinedImageData = combinedCtx.createImageData(imageDimensions.width, imageDimensions.height);
   const combinedData = combinedImageData.data;
 
-  for (let i = 0; i < combinedData.length; i += 4) {
-    let voteCount = 0;
-    for (const data of maskImageDatas) {
-      if (data && data[i] > 128) { // Check red channel
-        voteCount++;
+  // If there's only one run, we don't need to vote. Just copy it over.
+  if (maskImageDatas.length === 1 && maskImageDatas[0]) {
+      const singleMaskData = maskImageDatas[0];
+      for (let i = 0; i < combinedData.length; i += 4) {
+          if (singleMaskData[i] > 128) { // Check red channel
+              combinedData[i] = 255;
+              combinedData[i+1] = 255;
+              combinedData[i+2] = 255;
+              combinedData[i+3] = 255;
+          }
       }
-    }
-    if (voteCount >= 2) {
-      combinedData[i] = 255;
-      combinedData[i+1] = 255;
-      combinedData[i+2] = 255;
-      combinedData[i+3] = 255;
-    }
+  } else { // Existing voting logic for multiple runs
+      for (let i = 0; i < combinedData.length; i += 4) {
+          let voteCount = 0;
+          for (const data of maskImageDatas) {
+              if (data && data[i] > 128) { // Check red channel
+                  voteCount++;
+              }
+          }
+          // Keep the pixel if it's present in at least 2 of the 3 runs
+          if (voteCount >= 2) {
+              combinedData[i] = 255;
+              combinedData[i+1] = 255;
+              combinedData[i+2] = 255;
+              combinedData[i+3] = 255;
+          }
+      }
   }
   combinedCtx.putImageData(combinedImageData, 0, 0);
 

@@ -218,7 +218,7 @@ const SegmentationTool = () => {
                   {sourcePreview ? <img src={sourcePreview} alt="Original" className="rounded-md w-full" /> : <div className="aspect-square bg-muted rounded-md flex items-center justify-center text-muted-foreground">Upload an image</div>}
                 </div>
                 <div>
-                  <h3 className="font-semibold mb-2">Segmented Image</h3>
+                  <h3 className="font-semibold mb-2">Combined Mask (2/3 Votes)</h3>
                   <div className="relative aspect-square bg-muted rounded-md">
                     {sourcePreview && <img src={sourcePreview} alt="Original with overlay" className="rounded-md w-full h-full object-contain" />}
                     {masks && imageDimensions && <SegmentationMask masks={masks} imageDimensions={imageDimensions} />}
@@ -234,6 +234,28 @@ const SegmentationTool = () => {
               )}
             </CardContent>
           </Card>
+
+          {masks && (
+            <Card>
+                <CardHeader>
+                    <CardTitle>Individual Runs</CardTitle>
+                    <CardDescription>See the output from each of the 3 segmentation runs.</CardDescription>
+                </CardHeader>
+                <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {masks.map((run, index) => (
+                        <div key={index}>
+                            <h3 className="font-semibold mb-2 text-center">Run {index + 1}</h3>
+                            <div className="relative aspect-square bg-muted rounded-md">
+                                {sourcePreview && <img src={sourcePreview} alt="Original" className="rounded-md w-full h-full object-contain" />}
+                                {imageDimensions && (
+                                    <SegmentationMask masks={[run]} imageDimensions={imageDimensions} />
+                                )}
+                            </div>
+                        </div>
+                    ))}
+                </CardContent>
+            </Card>
+          )}
         </div>
       </div>
     </div>
