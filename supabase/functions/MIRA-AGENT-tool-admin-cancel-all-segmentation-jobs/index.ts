@@ -19,13 +19,36 @@ serve(async (req) => {
     const activeStatuses = ['aggregating', 'compositing'];
     const cancellationReason = "Cancelled by admin dev tool.";
 
-    const { count, error } = await supabase
+    // Step 1: Select the jobs to be cancelled to get their IDs
+    const { data: jobsToCancel, error: selectError } = await supabase
       .from('mira-agent-mask-aggregation-jobs')
-      .update({ status: 'failed', error_message: cancellationReason })
+      .select('id')
       .in('status', activeStatuses);
 
-    if (error) {
-      throw new Error(`Failed to cancel jobs: ${error.message}`);
+    if (selectError) {
+      throw new Error(`Failed to select jobs to cancel: ${selectError.message}`);
+    }
+
+    if (!jobsToCancel || jobsToCancel.length === 0) {
+      const message = "No active segmentation jobs found to cancel.";
+      console.log(message);
+      return new Response(JSON.stringify({ success: true, message, count: 0 }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 200,
+      });
+    }
+
+    const jobIdsToCancel = jobsToCancel.map(j => j.id);
+    console.log(`Found ${jobIdsToCancel.length} jobs to cancel:`, jobIdsToCancel);
+
+    // Step 2: Update the selected jobs by their specific IDs
+    const { count, error: updateError } = await supabase
+      .from('mira-agent-mask-aggregation-jobs')
+      .update({ status: 'failed', error_message: cancellationReason })
+      .in('id', jobIdsToCancel);
+
+    if (updateError) {
+      throw new Error(`Failed to cancel jobs: ${updateError.message}`);
     }
     
     const message = `Successfully cancelled ${count || 0} active Segmentation job(s).`;
