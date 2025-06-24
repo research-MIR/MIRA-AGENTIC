@@ -126,7 +126,7 @@ serve(async (req) => {
 
     if (maxX < minX || maxY < minY) throw new Error("The provided mask is empty or invalid after processing.");
 
-    const padding = Math.round(Math.max(maxX - minX, maxY - minY) * 0.15);
+    const padding = Math.round(Math.max(maxX - minX, maxY - minY) * 0.20);
     const bbox = {
       x: Math.max(0, minX - padding),
       y: Math.max(0, minY - padding),
@@ -212,6 +212,7 @@ serve(async (req) => {
         reference_image_url: referenceImageUrl,
         full_source_image_base64: source_image_base64,
         bbox: bbox,
+        cropped_dilated_mask_base64: croppedDilatedMaskBase64,
       }
     }).select('id').single();
     if (insertError) throw insertError;

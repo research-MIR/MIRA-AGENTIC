@@ -33,8 +33,8 @@ serve(async (req) => {
     if (!job.final_result?.publicUrl) throw new Error("Job is missing the final_result URL (inpainted crop).");
 
     const metadata = job.metadata || {};
-    if (!metadata.full_source_image_base64 || !metadata.bbox) {
-      throw new Error("Job is missing essential metadata (full source image or bounding box) for compositing.");
+    if (!metadata.full_source_image_base64 || !metadata.bbox || !metadata.cropped_dilated_mask_base64) {
+      throw new Error("Job is missing essential metadata (source image, bbox, or mask) for compositing.");
     }
 
     const fullSourceImage = await loadImage(`data:image/png;base64,${metadata.full_source_image_base64}`);
@@ -42,12 +42,39 @@ serve(async (req) => {
     if (!inpaintedCropResponse.ok) throw new Error(`Failed to download inpainted crop from ComfyUI: ${inpaintedCropResponse.statusText}`);
     const inpaintedCropArrayBuffer = await inpaintedCropResponse.arrayBuffer();
     const inpaintedCropImage = await loadImage(new Uint8Array(inpaintedCropArrayBuffer));
+    const croppedMaskImage = await loadImage(`data:image/png;base64,${metadata.cropped_dilated_mask_base64}`);
 
+    // Main canvas for the final image
     const canvas = createCanvas(fullSourceImage.width(), fullSourceImage.height());
     const ctx = canvas.getContext('2d');
-    
+
+    // 1. Draw the original image as the base layer
     ctx.drawImage(fullSourceImage, 0, 0);
-    ctx.drawImage(inpaintedCropImage, metadata.bbox.x, metadata.bbox.y, metadata.bbox.width, metadata.bbox.height);
+
+    // 2. Create a temporary canvas for the feathered crop
+    const featheredCropCanvas = createCanvas(metadata.bbox.width, metadata.bbox.height);
+    const featheredCtx = featheredCropCanvas.getContext('2d');
+
+    // 3. Draw the inpainted crop onto the temp canvas
+    featheredCtx.drawImage(inpaintedCropImage, 0, 0, metadata.bbox.width, metadata.bbox.height);
+
+    // 4. Apply the mask with feathering
+    featheredCtx.globalCompositeOperation = 'destination-in';
+
+    // 5. Feather the mask by blurring it
+    const featherAmount = Math.max(5, Math.round(metadata.bbox.width * 0.05)); // Feather by 5% of width, with a minimum of 5px
+    featheredCtx.filter = `blur(${featherAmount}px)`;
+
+    // 6. Draw the mask onto the temp canvas. This will use the blur filter and the composite operation
+    // to create a feathered alpha channel on the inpainted crop.
+    featheredCtx.drawImage(croppedMaskImage, 0, 0, metadata.bbox.width, metadata.bbox.height);
+
+    // 7. Reset composite operation and filter for the main canvas
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.filter = 'none'; // Reset filter on the main context just in case
+
+    // 8. Draw the feathered crop onto the main canvas at the correct position
+    ctx.drawImage(featheredCropCanvas, metadata.bbox.x, metadata.bbox.y);
     
     const finalImageBuffer = canvas.toBuffer('image/png');
     const finalFilePath = `${job.user_id}/inpainting-final/${Date.now()}_final.png`;
@@ -63,7 +90,7 @@ serve(async (req) => {
       .update({ 
           status: 'complete',
           final_result: { publicUrl: finalPublicUrl, storagePath: finalFilePath },
-          metadata: { ...metadata, full_source_image_base64: null } // Clear large data
+          metadata: { ...metadata, full_source_image_base64: null, cropped_dilated_mask_base64: null } // Clear large data
       })
       .eq('id', job_id);
 
