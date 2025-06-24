@@ -16,7 +16,7 @@ import { useSecureImage } from "@/hooks/useSecureImage";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DebugStepsModal } from "@/components/VTO/DebugStepsModal";
-import { Switch } from "../ui/switch";
+import { Switch } from "@/components/ui/switch";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { InpaintingSettings } from "@/components/Inpainting/InpaintingSettings";
 import { ScrollArea } from "../ui/scroll-area";
