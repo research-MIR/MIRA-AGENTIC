@@ -16,11 +16,11 @@ serve(async (req) => {
 
   try {
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-    const activeStatuses = ['queued', 'processing'];
+    const activeStatuses = ['aggregating', 'compositing'];
     const cancellationReason = "Cancelled by admin dev tool.";
 
     const { count, error } = await supabase
-      .from('mira-agent-comfyui-jobs')
+      .from('mira-agent-mask-aggregation-jobs')
       .update({ status: 'failed', error_message: cancellationReason })
       .in('status', activeStatuses);
 
@@ -28,7 +28,7 @@ serve(async (req) => {
       throw new Error(`Failed to cancel jobs: ${error.message}`);
     }
     
-    const message = `Successfully cancelled ${count || 0} active ComfyUI job(s).`;
+    const message = `Successfully cancelled ${count || 0} active Segmentation job(s).`;
     console.log(message);
 
     return new Response(JSON.stringify({ success: true, message, count }), {
@@ -37,7 +37,7 @@ serve(async (req) => {
     });
 
   } catch (error) {
-    console.error("[AdminCancelJobs] Error:", error);
+    console.error("[AdminCancelSegmentationJobs] Error:", error);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,

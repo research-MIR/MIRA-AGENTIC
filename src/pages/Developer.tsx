@@ -100,11 +100,11 @@ const Developer = () => {
   const { t } = useLanguage();
   const [isCancelling, setIsCancelling] = useState(false);
 
-  const handleCancelAllJobs = async () => {
+  const handleCancelAllSegmentationJobs = async () => {
     setIsCancelling(true);
-    const toastId = showLoading("Cancelling all active jobs...");
+    const toastId = showLoading("Cancelling all active segmentation jobs...");
     try {
-        const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-admin-cancel-all-comfy-jobs');
+        const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-admin-cancel-all-segmentation-jobs');
         if (error) throw error;
         dismissToast(toastId);
         showSuccess(data.message);
@@ -133,20 +133,20 @@ const Developer = () => {
             <CardContent>
               <AlertDialog>
                 <AlertDialogTrigger asChild>
-                  <Button variant="destructive">Cancel All ComfyUI Jobs</Button>
+                  <Button variant="destructive">Cancel All Segmentation Jobs</Button>
                 </AlertDialogTrigger>
                 <AlertDialogContent>
                   <AlertDialogHeader>
                     <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
                     <AlertDialogDescription>
-                      This will cancel ALL active ('queued' or 'processing') ComfyUI jobs for EVERY user on the platform. This action cannot be undone.
+                      This will cancel ALL active ('aggregating' or 'compositing') Segmentation jobs for EVERY user on the platform. This action cannot be undone.
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
                     <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={handleCancelAllJobs} disabled={isCancelling}>
+                    <AlertDialogAction onClick={handleCancelAllSegmentationJobs} disabled={isCancelling}>
                       {isCancelling && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                      Yes, cancel all jobs
+                      Yes, cancel all segmentation jobs
                     </AlertDialogAction>
                   </AlertDialogFooter>
                 </AlertDialogContent>
