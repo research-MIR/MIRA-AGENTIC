@@ -151,7 +151,7 @@ const SegmentationTool = () => {
         prompt,
         reference_image_base64: referenceBase64,
         reference_mime_type: referenceFile?.type,
-        user_id: session.user.id,
+        invoker_user_id: session.user.id,
       };
 
       const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-create-garment-mask', { body: payload });

@@ -22,15 +22,15 @@ serve(async (req) => {
         typeof value === 'string' && value.length > 30 ? value.substring(0, 30) + '...' : value
     ));
 
-    const { image_base64, mime_type, prompt, reference_image_base64, reference_mime_type, user_id } = body;
+    const { image_base64, mime_type, prompt, reference_image_base64, reference_mime_type, invoker_user_id } = body;
     
-    if (!image_base64 || !mime_type || !prompt || !user_id) {
+    if (!image_base64 || !mime_type || !prompt || !invoker_user_id) {
       console.error("[CreateGarmentMask Dispatcher] Validation failed. One or more required fields are missing.");
       console.error(`  - has image_base64: ${!!image_base64}`);
       console.error(`  - has mime_type: ${!!mime_type}`);
       console.error(`  - has prompt: ${!!prompt}`);
-      console.error(`  - has user_id: ${!!user_id}`);
-      throw new Error("image_base64, mime_type, prompt, and user_id are required.");
+      console.error(`  - has invoker_user_id: ${!!invoker_user_id}`);
+      throw new Error("image_base64, mime_type, prompt, and invoker_user_id are required.");
     }
     console.log("[CreateGarmentMask Dispatcher] All required fields are present.");
 
@@ -42,7 +42,7 @@ serve(async (req) => {
     const { data: newJob, error: insertError } = await supabase
       .from('mira-agent-mask-aggregation-jobs')
       .insert({
-        user_id,
+        user_id: invoker_user_id,
         status: 'processing',
         source_image_dimensions: imageDimensions,
         source_image_base64: image_base64,
