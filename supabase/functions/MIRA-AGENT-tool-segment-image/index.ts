@@ -98,6 +98,7 @@ serve(async (req) => {
         contents: contents,
         generationConfig: {
             responseMimeType: "application/json",
+            temperature: 0.7,
         },
         safetySettings,
         config: {
