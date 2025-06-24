@@ -66,6 +66,7 @@ export const RefinementProposalSchema = z.object({
 
 // Schema for when the agent asks the user to choose an image
 export const ImageChoiceProposalSchema = z.object({
+    isImageChoiceProposal: z.literal(true),
     summary: z.string(),
     images: z.array(ImageResultSchema),
 }).passthrough();

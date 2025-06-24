@@ -574,7 +574,7 @@ serve(async (req) => {
             images: images
         };
 
-        // Add the choice proposal to the history so the UI can render it
+        // Add the choice proposal to the history, which will be rendered by the UI
         history.push({
             role: 'function',
             parts: [{

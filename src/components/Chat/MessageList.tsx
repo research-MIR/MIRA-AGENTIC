@@ -31,7 +31,7 @@ interface ArtisanResponseData { isArtisanResponse: boolean; version: number; ana
 interface ImageGenerationData { isImageGeneration: true; images: ImageResult[]; follow_up_message?: string; }
 interface CreativeProcessData { isCreativeProcess: true; iterations: any[]; final_generation_result: any; follow_up_message?: string; }
 interface RefinementProposalData { summary: string; options: { url: string; jobId: string; }[]; }
-interface ImageChoiceProposalData { summary: string; images: ImageResult[]; }
+interface ImageChoiceProposalData { isImageChoiceProposal: true; summary: string; images: ImageResult[]; }
 
 export interface Message { 
     from: "bot" | "user"; 
