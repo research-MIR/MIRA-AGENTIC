@@ -42,6 +42,12 @@ async function uploadBufferToStorage(supabase: SupabaseClient, buffer: Uint8Arra
     return publicUrl;
 }
 
+/**
+ * Expands a mask by applying a blur filter and then thresholding the result.
+ * This is much more performant than manual pixel iteration.
+ * @param canvas The canvas containing the mask to expand.
+ * @param expansionPercent The percentage of the smaller image dimension to use for the blur radius.
+ */
 function expandMask(canvas: Canvas, expansionPercent: number) {
     if (expansionPercent <= 0) return;
 
@@ -49,35 +55,35 @@ function expandMask(canvas: Canvas, expansionPercent: number) {
     const expansionAmount = Math.round(Math.min(canvas.width, canvas.height) * expansionPercent);
     if (expansionAmount <= 0) return;
 
-    const originalImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const originalData = new Uint8ClampedArray(originalImageData.data);
-    const newData = originalImageData.data;
+    console.log(`[expandMask] Applying blur filter with amount: ${expansionAmount}px`);
+    
+    // Apply the blur filter. This is a fast, native operation.
+    ctx.filter = `blur(${expansionAmount}px)`;
+    // Draw the image onto itself for the filter to apply.
+    ctx.drawImage(canvas, 0, 0);
+    // Reset the filter immediately after use.
+    ctx.filter = 'none';
 
-    for (let y = 0; y < canvas.height; y++) {
-        for (let x = 0; x < canvas.width; x++) {
-            const i = (y * canvas.width + x) * 4;
-            if (newData[i] > 128) continue;
-
-            let foundNeighbor = false;
-            for (let dy = -expansionAmount; dy <= expansionAmount; dy++) {
-                for (let dx = -expansionAmount; dx <= expansionAmount; dx++) {
-                    if (dx === 0 && dy === 0) continue;
-                    const nx = x + dx;
-                    const ny = y + dy;
-                    if (nx >= 0 && nx < canvas.width && ny >= 0 && ny < canvas.height) {
-                        const ni = (ny * canvas.width + nx) * 4;
-                        if (originalData[ni] > 128) {
-                            newData[i] = 255; newData[i + 1] = 255; newData[i + 2] = 255; newData[i + 3] = 255;
-                            foundNeighbor = true;
-                            break;
-                        }
-                    }
-                }
-                if (foundNeighbor) break;
-            }
+    // Now, threshold the blurred result to get a hard mask again.
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imageData.data;
+    for (let i = 0; i < data.length; i += 4) {
+        // If any color channel is more than half-intensity, make it fully white.
+        if (data[i] > 128) {
+            data[i] = 255;
+            data[i + 1] = 255;
+            data[i + 2] = 255;
+            data[i + 3] = 255;
+        } else {
+            // Otherwise, make it fully black.
+            data[i] = 0;
+            data[i + 1] = 0;
+            data[i + 2] = 0;
+            data[i + 3] = 255;
         }
     }
-    ctx.putImageData(originalImageData, 0, 0);
+    ctx.putImageData(imageData, 0, 0);
+    console.log(`[expandMask] Thresholding complete.`);
 }
 
 serve(async (req) => {
@@ -85,8 +91,7 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  const PRE_VOTE_EXPANSION_PERCENT = 0.02;
-  const POST_VOTE_EXPANSION_PERCENT = 0.02;
+  const EXPANSION_PERCENT = 0.03; // A single 3% expansion
 
   const { image_base64, mime_type, prompt, reference_image_base64, reference_mime_type, user_id, image_dimensions } = await req.json();
   const requestId = `segment-orchestrator-${Date.now()}`;
@@ -138,92 +143,51 @@ serve(async (req) => {
     const validRuns = allResults.filter(run => run && !run.error && Array.isArray(run) && run.length > 0);
     if (validRuns.length === 0) throw new Error("No valid mask data found in any of the segmentation runs.");
     
-    const firstMasksFromEachRun = validRuns.map(run => run[0]).filter(mask => mask && mask.box_2d && mask.mask);
-    if (firstMasksFromEachRun.length === 0) throw new Error("Could not extract any valid masks from the successful runs.");
-
-    const fullMaskCanvases: Canvas[] = [];
-    for (const run of firstMasksFromEachRun) {
-        try {
-            console.log(`[Orchestrator][${requestId}] Processing mask for label: ${run.label}`);
-            let base64Data = run.mask;
-            if (run.mask.includes(',')) {
-                base64Data = run.mask.split(',')[1];
-            }
-            const imageBuffer = decodeBase64(base64Data);
-            const maskImg = await loadImage(imageBuffer);
-
-            const [y0, x0, y1, x1] = run.box_2d;
-            const absX0 = Math.floor((x0 / 1000) * image_dimensions.width);
-            const absY0 = Math.floor((y0 / 1000) * image_dimensions.height);
-            const bboxWidth = Math.ceil(((x1 - x0) / 1000) * image_dimensions.width);
-            const bboxHeight = Math.ceil(((y1 - y0) / 1000) * image_dimensions.height);
-            
-            const fullCanvas = createCanvas(image_dimensions.width, image_dimensions.height);
-            fullCanvas.getContext('2d').drawImage(maskImg, absX0, absY0, bboxWidth, bboxHeight);
-            
-            fullMaskCanvases.push(fullCanvas);
-        } catch (e) {
-            console.error(`[Orchestrator][${requestId}] Failed to process a mask. Error: ${e.message}. Skipping this mask.`);
-        }
+    const firstValidMask = validRuns[0][0];
+    if (!firstValidMask || !firstValidMask.box_2d || !firstValidMask.mask) {
+        throw new Error("The first valid run did not contain a usable mask.");
     }
+    console.log(`[Orchestrator][${requestId}] Using first valid mask with label: ${firstValidMask.label}`);
 
-    if (fullMaskCanvases.length === 0) {
-        throw new Error("All masks failed to process into canvases. Cannot proceed.");
+    let base64Data = firstValidMask.mask;
+    if (firstValidMask.mask.includes(',')) {
+        base64Data = firstValidMask.mask.split(',')[1];
     }
-    console.log(`[Orchestrator][${requestId}] Successfully processed ${fullMaskCanvases.length} masks into canvases sequentially.`);
+    const imageBuffer = decodeBase64(base64Data);
+    const maskImg = await loadImage(imageBuffer);
 
-    console.log(`[Orchestrator][${requestId}] Applying pre-vote expansion of ${PRE_VOTE_EXPANSION_PERCENT * 100}% to each individual mask.`);
-    fullMaskCanvases.forEach(canvas => expandMask(canvas, PRE_VOTE_EXPANSION_PERCENT));
-    console.log(`[Orchestrator][${requestId}] Pre-vote expansion complete.`);
+    const [y0, x0, y1, x1] = firstValidMask.box_2d;
+    const absX0 = Math.floor((x0 / 1000) * image_dimensions.width);
+    const absY0 = Math.floor((y0 / 1000) * image_dimensions.height);
+    const bboxWidth = Math.ceil(((x1 - x0) / 1000) * image_dimensions.width);
+    const bboxHeight = Math.ceil(((y1 - y0) / 1000) * image_dimensions.height);
+    
+    const finalCanvas = createCanvas(image_dimensions.width, image_dimensions.height);
+    const finalCtx = finalCanvas.getContext('2d');
+    finalCtx.drawImage(maskImg, absX0, absY0, bboxWidth, bboxHeight);
 
-    const combinedCanvas = createCanvas(image_dimensions.width, image_dimensions.height);
-    const combinedCtx = combinedCanvas.getContext('2d');
-    const maskImageDatas = fullMaskCanvases.map(c => c.getContext('2d').getImageData(0, 0, image_dimensions.width, image_dimensions.height).data);
-    const combinedImageData = combinedCtx.createImageData(image_dimensions.width, image_dimensions.height);
-    const combinedData = combinedImageData.data;
+    console.log(`[Orchestrator][${requestId}] Applying a single expansion of ${EXPANSION_PERCENT * 100}% to the mask.`);
+    expandMask(finalCanvas, EXPANSION_PERCENT);
 
-    const majorityThreshold = Math.floor(maskImageDatas.length / 2) + 1;
-    for (let i = 0; i < combinedData.length; i += 4) {
-        let voteCount = 0;
-        for (const data of maskImageDatas) { if (data[i] > 128) voteCount++; }
-        if (voteCount >= majorityThreshold) {
-            combinedData[i] = 255; combinedData[i+1] = 255; combinedData[i+2] = 255; combinedData[i+3] = 255;
-        }
-    }
-    combinedCtx.putImageData(combinedImageData, 0, 0);
-    console.log(`[Orchestrator][${requestId}] Majority voting complete.`);
-
-    console.log(`[Orchestrator][${requestId}] Applying post-vote expansion of ${POST_VOTE_EXPANSION_PERCENT * 100}% to the combined mask.`);
-    expandMask(combinedCanvas, POST_VOTE_EXPANSION_PERCENT);
-    console.log(`[Orchestrator][${requestId}] Post-vote expansion complete.`);
-
-    console.log(`[Orchestrator][${requestId}] Getting final image data...`);
-    const finalImageData = combinedCtx.getImageData(0, 0, image_dimensions.width, image_dimensions.height);
-    console.log(`[Orchestrator][${requestId}] Got final image data. Starting colorization loop...`);
+    const finalImageData = finalCtx.getImageData(0, 0, image_dimensions.width, image_dimensions.height);
     const finalData = finalImageData.data;
     for (let i = 0; i < finalData.length; i += 4) {
         if (finalData[i] > 128) { finalData[i] = 255; finalData[i + 1] = 0; finalData[i + 2] = 0; finalData[i + 3] = 150; } 
         else { finalData[i + 3] = 0; }
     }
-    console.log(`[Orchestrator][${requestId}] Colorization loop complete. Putting image data back...`);
-    combinedCtx.putImageData(finalImageData, 0, 0);
-    console.log(`[Orchestrator][${requestId}] Put image data back. Generating data URL...`);
+    finalCtx.putImageData(finalImageData, 0, 0);
 
-    const finalDataUrl = combinedCanvas.toDataURL('image/png');
-    console.log(`[Orchestrator][${requestId}] Generated data URL. Length: ${finalDataUrl.length}. Decoding...`);
+    const finalDataUrl = finalCanvas.toDataURL('image/png');
     if (!finalDataUrl || !finalDataUrl.includes(',')) {
         throw new Error("Failed to generate data URL from final canvas.");
     }
     const finalBase64 = finalDataUrl.split(',')[1];
     const finalImageBuffer = decodeBase64(finalBase64);
-    console.log(`[Orchestrator][${requestId}] Decoded base64. Buffer length: ${finalImageBuffer.length}. Checking buffer...`);
 
     if (!finalImageBuffer) {
         throw new Error("Failed to convert final canvas to buffer. The canvas might be empty or invalid.");
     }
-    console.log(`[Orchestrator][${requestId}] Buffer is valid. Uploading to storage...`);
     const finalPublicUrl = await uploadBufferToStorage(supabase, finalImageBuffer, user_id, 'final_mask.png');
-    console.log(`[Orchestrator][${requestId}] Upload complete. Final URL: ${finalPublicUrl}`);
 
     await supabase.from('mira-agent-mask-aggregation-jobs')
       .update({ status: 'complete', final_mask_base64: finalPublicUrl })
