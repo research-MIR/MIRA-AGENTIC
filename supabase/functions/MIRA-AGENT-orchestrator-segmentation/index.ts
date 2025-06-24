@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { GoogleGenAI, Content, Part, HarmCategory, HarmBlockThreshold } from 'https://esm.sh/@google/genai@0.15.0';
 import { createCanvas, loadImage, Canvas } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
+import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
@@ -41,12 +42,6 @@ async function uploadBufferToStorage(supabase: SupabaseClient, buffer: Uint8Arra
     return publicUrl;
 }
 
-/**
- * Expands a mask on a given canvas using manual pixel dilation.
- * This is more memory-efficient than using canvas filters like blur or shadow.
- * @param canvas The canvas containing the mask to expand.
- * @param expansionPercent The percentage of the smaller image dimension to use for expansion.
- */
 function expandMask(canvas: Canvas, expansionPercent: number) {
     if (expansionPercent <= 0) return;
 
@@ -55,32 +50,24 @@ function expandMask(canvas: Canvas, expansionPercent: number) {
     if (expansionAmount <= 0) return;
 
     const originalImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const originalData = new Uint8ClampedArray(originalImageData.data); // Create a copy to read from
-    const newData = originalImageData.data; // This is a live reference we will write to
+    const originalData = new Uint8ClampedArray(originalImageData.data);
+    const newData = originalImageData.data;
 
     for (let y = 0; y < canvas.height; y++) {
         for (let x = 0; x < canvas.width; x++) {
             const i = (y * canvas.width + x) * 4;
-            // If the current pixel is already white, skip it
             if (newData[i] > 128) continue;
 
-            // Check neighbors for a white pixel
             let foundNeighbor = false;
             for (let dy = -expansionAmount; dy <= expansionAmount; dy++) {
                 for (let dx = -expansionAmount; dx <= expansionAmount; dx++) {
                     if (dx === 0 && dy === 0) continue;
-
                     const nx = x + dx;
                     const ny = y + dy;
-
                     if (nx >= 0 && nx < canvas.width && ny >= 0 && ny < canvas.height) {
                         const ni = (ny * canvas.width + nx) * 4;
-                        // Check the original data copy
                         if (originalData[ni] > 128) {
-                            newData[i] = 255;
-                            newData[i + 1] = 255;
-                            newData[i + 2] = 255;
-                            newData[i + 3] = 255;
+                            newData[i] = 255; newData[i + 1] = 255; newData[i + 2] = 255; newData[i + 3] = 255;
                             foundNeighbor = true;
                             break;
                         }
@@ -93,16 +80,13 @@ function expandMask(canvas: Canvas, expansionPercent: number) {
     ctx.putImageData(originalImageData, 0, 0);
 }
 
-
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
-  // --- Configurable Expansion Percentages ---
-  const PRE_VOTE_EXPANSION_PERCENT = 0.02; // 2% expansion on individual masks
-  const POST_VOTE_EXPANSION_PERCENT = 0.02; // 2% expansion on the final combined mask
-  // -----------------------------------------
+  const PRE_VOTE_EXPANSION_PERCENT = 0.02;
+  const POST_VOTE_EXPANSION_PERCENT = 0.02;
 
   const { image_base64, mime_type, prompt, reference_image_base64, reference_mime_type, user_id, image_dimensions } = await req.json();
   const requestId = `segment-orchestrator-${Date.now()}`;
@@ -114,7 +98,6 @@ serve(async (req) => {
       throw new Error("Missing required parameters for new job.");
     }
 
-    console.log(`[Orchestrator][${requestId}] Creating aggregation job record in DB...`);
     const { data: newJob, error: insertError } = await supabase
       .from('mira-agent-mask-aggregation-jobs')
       .insert({ user_id, status: 'aggregating', source_image_dimensions: image_dimensions, results: [] })
@@ -134,27 +117,17 @@ serve(async (req) => {
     userParts.push({ text: prompt });
     const contents: Content[] = [{ role: 'user', parts: userParts }];
 
-    console.log(`[Orchestrator][${requestId}] Invoking ${NUM_WORKERS} segmentation workers in parallel...`);
-    
-    const workerPromises = Array.from({ length: NUM_WORKERS }).map((_, i) => {
-        console.log(`[Orchestrator][${requestId}] Starting worker ${i + 1}...`);
-        return ai.models.generateContent({
+    const workerPromises = Array.from({ length: NUM_WORKERS }).map((_, i) => 
+        ai.models.generateContent({
             model: MODEL_NAME,
             contents: contents,
             generationConfig: { responseMimeType: "application/json" },
             safetySettings,
         }).then(result => {
-            console.log(`[Orchestrator][${requestId}] Worker ${i + 1} raw response text:`, result.text);
-            if (!result.text) {
-                console.error(`[Orchestrator][${requestId}] Worker ${i + 1} returned an empty response. Full response object:`, JSON.stringify(result, null, 2));
-                throw new Error("Model returned an empty response.");
-            }
+            if (!result.text) throw new Error("Model returned an empty response.");
             return extractJson(result.text);
-        }).catch(err => {
-            console.error(`[Orchestrator][${requestId}] Worker ${i + 1} failed with error:`, err.message);
-            return { error: err.message };
-        });
-    });
+        }).catch(err => ({ error: err.message }))
+    );
 
     const settledResults = await Promise.allSettled(workerPromises);
     const allResults = settledResults.map(r => r.status === 'fulfilled' ? r.value : { error: r.reason.message });
@@ -168,7 +141,11 @@ serve(async (req) => {
     const firstMasksFromEachRun = validRuns.map(run => run[0]).filter(mask => mask && mask.box_2d && mask.mask);
     if (firstMasksFromEachRun.length === 0) throw new Error("Could not extract any valid masks from the successful runs.");
 
-    const maskImages = await Promise.all(firstMasksFromEachRun.map(run => loadImage(run.mask)));
+    const maskImages = await Promise.all(firstMasksFromEachRun.map(run => {
+        const base64Data = run.mask.split(',')[1];
+        const imageBuffer = decodeBase64(base64Data);
+        return loadImage(imageBuffer);
+    }));
     
     const fullMaskCanvases = firstMasksFromEachRun.map((run, index) => {
         const maskImg = maskImages[index];
@@ -182,11 +159,8 @@ serve(async (req) => {
         return fullCanvas;
     });
 
-    // --- STAGE 1 EXPANSION (PRE-VOTE) ---
     console.log(`[Orchestrator][${requestId}] Applying pre-vote expansion of ${PRE_VOTE_EXPANSION_PERCENT * 100}% to each individual mask.`);
-    fullMaskCanvases.forEach(canvas => {
-        expandMask(canvas, PRE_VOTE_EXPANSION_PERCENT);
-    });
+    fullMaskCanvases.forEach(canvas => expandMask(canvas, PRE_VOTE_EXPANSION_PERCENT));
     console.log(`[Orchestrator][${requestId}] Pre-vote expansion complete.`);
 
     const combinedCanvas = createCanvas(image_dimensions.width, image_dimensions.height);
@@ -206,7 +180,6 @@ serve(async (req) => {
     combinedCtx.putImageData(combinedImageData, 0, 0);
     console.log(`[Orchestrator][${requestId}] Majority voting complete.`);
 
-    // --- STAGE 2 EXPANSION (POST-VOTE) ---
     console.log(`[Orchestrator][${requestId}] Applying post-vote expansion of ${POST_VOTE_EXPANSION_PERCENT * 100}% to the combined mask.`);
     expandMask(combinedCanvas, POST_VOTE_EXPANSION_PERCENT);
     console.log(`[Orchestrator][${requestId}] Post-vote expansion complete.`);
@@ -220,6 +193,9 @@ serve(async (req) => {
     combinedCtx.putImageData(finalImageData, 0, 0);
 
     const finalImageBuffer = combinedCanvas.toBuffer('image/png');
+    if (!finalImageBuffer) {
+        throw new Error("Failed to convert final canvas to buffer. The canvas might be empty or invalid.");
+    }
     const finalPublicUrl = await uploadBufferToStorage(supabase, finalImageBuffer, user_id, 'final_mask.png');
 
     await supabase.from('mira-agent-mask-aggregation-jobs')
