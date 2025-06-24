@@ -33,7 +33,6 @@ function extractJson(text: string): any {
 }
 
 serve(async (req) => {
-  // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     console.log("[SegmentImageTool] Handling OPTIONS preflight request.");
     return new Response('ok', { headers: corsHeaders });
@@ -41,7 +40,7 @@ serve(async (req) => {
 
   try {
     console.log("[SegmentImageTool] Function invoked.");
-    const { image_base64, mime_type, prompt } = await req.json();
+    const { image_base64, mime_type, prompt, reference_image_base64, reference_mime_type } = await req.json();
     if (!image_base64 || !mime_type || !prompt) {
       throw new Error("image_base64, mime_type, and prompt are required.");
     }
@@ -49,13 +48,22 @@ serve(async (req) => {
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
-    const contents: Content[] = [{
-        role: 'user',
-        parts: [
-            { inlineData: { mimeType: mime_type, data: image_base64 } },
-            { text: prompt }
-        ]
-    }];
+    const userParts: Part[] = [
+        { text: "SOURCE IMAGE:" },
+        { inlineData: { mimeType: mime_type, data: image_base64 } },
+    ];
+
+    if (reference_image_base64 && reference_mime_type) {
+        console.log("[SegmentImageTool] Reference image provided. Adding to payload.");
+        userParts.push(
+            { text: "REFERENCE IMAGE:" },
+            { inlineData: { mimeType: reference_mime_type, data: reference_image_base64 } }
+        );
+    }
+
+    userParts.push({ text: prompt });
+
+    const contents: Content[] = [{ role: 'user', parts: userParts }];
 
     console.log("[SegmentImageTool] Calling Gemini API...");
     const result = await ai.models.generateContent({

@@ -29,43 +29,51 @@ interface MaskItemData {
 const SegmentationTool = () => {
   const { supabase } = useSession();
   const [sourceFile, setSourceFile] = useState<File | null>(null);
+  const [referenceFile, setReferenceFile] = useState<File | null>(null);
   const [sourcePreview, setSourcePreview] = useState<string | null>(null);
+  const [referencePreview, setReferencePreview] = useState<string | null>(null);
   const [imageDimensions, setImageDimensions] = useState<{width: number, height: number} | null>(null);
-  const [prompt, setPrompt] = useState('Give the segmentation masks for all clearly visible objects. Output a JSON list of segmentation masks where each entry contains the 2D bounding box in the key "box_2d", the segmentation mask in key "mask", and the text label in the key "label".');
+  const [prompt, setPrompt] = useState('Give the segmentation masks for all clearly visible objects that match generally my reference image. Output a JSON list of segmentation masks where each entry contains the 2D bounding box in the key "box_2d", the segmentation mask in key "mask", and the text label in the key "label".');
   const [masks, setMasks] = useState<MaskItemData[] | null>(null);
   const [rawResponse, setRawResponse] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const sourceFileInputRef = useRef<HTMLInputElement>(null);
+  const referenceFileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleFileSelect = useCallback((file: File | null) => {
+  const handleFileSelect = useCallback((file: File | null, type: 'source' | 'reference') => {
     if (file && file.type.startsWith('image/')) {
-      console.log(`[SegmentationTool] File selected: ${file.name}, size: ${file.size}`);
-      setSourceFile(file);
-      setMasks(null);
-      setRawResponse('');
-      setError(null);
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const img = new Image();
-        img.onload = () => {
-            console.log(`[SegmentationTool] Image loaded. Dimensions: ${img.width}x${img.height}`);
-            setImageDimensions({ width: img.width, height: img.height });
-            setSourcePreview(e.target?.result as string);
+      console.log(`[SegmentationTool] ${type} file selected: ${file.name}`);
+      if (type === 'source') {
+        setSourceFile(file);
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const img = new Image();
+          img.onload = () => {
+              setImageDimensions({ width: img.width, height: img.height });
+              setSourcePreview(e.target?.result as string);
+          };
+          img.src = e.target?.result as string;
         };
-        img.src = e.target?.result as string;
-      };
-      reader.readAsDataURL(file);
+        reader.readAsDataURL(file);
+      } else {
+        setReferenceFile(file);
+        setReferencePreview(URL.createObjectURL(file));
+      }
     }
   }, []);
 
-  const { dropzoneProps, isDraggingOver } = useDropzone({
-    onDrop: (e) => handleFileSelect(e.dataTransfer.files?.[0]),
+  const { dropzoneProps: sourceDropzoneProps, isDraggingOver: isDraggingOverSource } = useDropzone({
+    onDrop: (e) => handleFileSelect(e.dataTransfer.files?.[0], 'source'),
+  });
+
+  const { dropzoneProps: referenceDropzoneProps, isDraggingOver: isDraggingOverReference } = useDropzone({
+    onDrop: (e) => handleFileSelect(e.dataTransfer.files?.[0], 'reference'),
   });
 
   const handleSegment = async () => {
     if (!sourceFile) {
-      showError("Please upload an image first.");
+      showError("Please upload a source image first.");
       return;
     }
     console.log("[SegmentationTool] Starting segmentation process...");
@@ -76,13 +84,18 @@ const SegmentationTool = () => {
     const toastId = showLoading("Segmenting image...");
 
     try {
-      const image_base64 = await fileToBase64(sourceFile);
-      const payload = {
-        image_base64,
+      const payload: any = {
+        image_base64: await fileToBase64(sourceFile),
         mime_type: sourceFile.type,
         prompt,
       };
-      console.log("[SegmentationTool] Invoking Edge Function with payload:", { mime_type: payload.mime_type, prompt: payload.prompt, image_base64: '...' });
+
+      if (referenceFile) {
+        payload.reference_image_base64 = await fileToBase64(referenceFile);
+        payload.reference_mime_type = referenceFile.type;
+      }
+
+      console.log("[SegmentationTool] Invoking Edge Function with payload:", { ...payload, image_base64: '...', reference_image_base64: '...' });
 
       const { data, error: invokeError } = await supabase.functions.invoke('MIRA-AGENT-tool-segment-image', {
         body: payload
@@ -119,18 +132,21 @@ const SegmentationTool = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-1 space-y-6">
           <Card>
-            <CardHeader><CardTitle>1. Upload Image</CardTitle></CardHeader>
-            <CardContent>
-              <div {...dropzoneProps} onClick={() => fileInputRef.current?.click()} className={cn("p-4 border-2 border-dashed rounded-lg text-center cursor-pointer hover:border-primary transition-colors", isDraggingOver && "border-primary bg-primary/10")}>
-                {sourcePreview ? (
-                  <img src={sourcePreview} alt="Source preview" className="max-h-48 mx-auto rounded-md" />
-                ) : (
-                  <>
-                    <UploadCloud className="mx-auto h-12 w-12 text-muted-foreground" />
-                    <p className="mt-2 text-sm font-medium">Click or drag file to upload</p>
-                  </>
-                )}
-                <Input ref={fileInputRef} type="file" className="hidden" accept="image/*" onChange={(e) => handleFileSelect(e.target.files?.[0] || null)} />
+            <CardHeader><CardTitle>1. Upload Images</CardTitle></CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <Label>Source Image</Label>
+                <div {...sourceDropzoneProps} onClick={() => sourceFileInputRef.current?.click()} className={cn("mt-1 p-4 border-2 border-dashed rounded-lg text-center cursor-pointer hover:border-primary transition-colors", isDraggingOverSource && "border-primary bg-primary/10")}>
+                  {sourcePreview ? <img src={sourcePreview} alt="Source preview" className="max-h-32 mx-auto rounded-md" /> : <><UploadCloud className="mx-auto h-8 w-8 text-muted-foreground" /><p className="mt-2 text-xs font-medium">Click or drag source image</p></>}
+                  <Input ref={sourceFileInputRef} type="file" className="hidden" accept="image/*" onChange={(e) => handleFileSelect(e.target.files?.[0] || null, 'source')} />
+                </div>
+              </div>
+              <div>
+                <Label>Reference Image (Optional)</Label>
+                <div {...referenceDropzoneProps} onClick={() => referenceFileInputRef.current?.click()} className={cn("mt-1 p-4 border-2 border-dashed rounded-lg text-center cursor-pointer hover:border-primary transition-colors", isDraggingOverReference && "border-primary bg-primary/10")}>
+                  {referencePreview ? <img src={referencePreview} alt="Reference preview" className="max-h-32 mx-auto rounded-md" /> : <><UploadCloud className="mx-auto h-8 w-8 text-muted-foreground" /><p className="mt-2 text-xs font-medium">Click or drag reference image</p></>}
+                  <Input ref={referenceFileInputRef} type="file" className="hidden" accept="image/*" onChange={(e) => handleFileSelect(e.target.files?.[0] || null, 'reference')} />
+                </div>
               </div>
             </CardContent>
           </Card>
