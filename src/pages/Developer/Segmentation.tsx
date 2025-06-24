@@ -27,33 +27,33 @@ interface MaskItemData {
     mask: string;
 }
 
-const newDefaultPrompt = `You are an expert image analyst specializing in fashion segmentation. Your task is to find an object in a SOURCE image that is visually similar to an object in a REFERENCE image and create a highly precise segmentation mask for it.
+const newDefaultPrompt = `You are an expert image analyst specializing in fashion segmentation. Your primary task is to find the specific garment in the SOURCE image that matches the garment category shown in the REFERENCE image. You must create a highly precise segmentation mask for ONLY this single garment, ignoring all other clothing items.
 
 ### Core Rules:
-1.  **Identify the Reference:** Look at the REFERENCE image to understand the target object's category and appearance (e.g., "a t-shirt", "a pair of jeans", "a blazer").
-2.  **Find in Source:** Locate the corresponding object in the SOURCE image.
-3.  **Precision is Paramount:** Create a precise segmentation mask for the object you found in the SOURCE image.
-4.  **No Overlap Rule:** The mask MUST NOT cover other garments or parts of the body that are not part of the target object. For example, if segmenting a jacket, do not let the mask bleed onto the skin of the chest or a shirt underneath.
-5.  **Under-covering is Preferable:** It is better for the mask to be slightly smaller and miss a few pixels of the target object than for it to be too large and cover adjacent areas. Prioritize clean edges.
+1.  **Identify the Target Garment:** Look at the REFERENCE image to understand the target garment's category (e.g., "a t-shirt", "a pair of jeans", "a blazer").
+2.  **Isolate in Source:** Locate the corresponding garment in the SOURCE image.
+3.  **Strict Exclusion Principle:** This is the most important rule. If the person in the SOURCE image is wearing multiple items, you MUST only segment the single garment that matches the reference. For example, if the reference is a jacket and the source shows a person in a jacket and a shirt, your mask must ONLY cover the jacket. It must NOT include the shirt, any accessories (like necklaces or belts), or skin.
+4.  **Precision is Paramount:** The mask must follow the exact outline of the target garment.
+5.  **Under-covering is Preferable:** It is better for the mask to be slightly smaller and miss a few pixels of the target garment than for it to be too large and cover adjacent areas (like skin or other clothes). Prioritize clean, sharp edges.
 
 ### Few-Shot Examples:
 
 **Example 1: Blazer over bare chest**
 *   **SOURCE IMAGE:** A photo of a man wearing a brown blazer over his bare chest.
 *   **REFERENCE IMAGE:** A photo of a brown blazer.
-*   **Your Logic:** The reference is a blazer. The man in the source image is wearing a similar blazer. I will create a mask that follows the exact outline of the blazer, carefully avoiding the skin on his chest and neck.
+*   **Your Logic:** The reference is a blazer. The man in the source image is wearing a similar blazer. I will create a mask that follows the exact outline of the blazer, carefully stopping at the lapels and avoiding the skin on his chest and neck.
 *   **Output:** A single, precise segmentation mask for "the brown jacket/blazer".
 
 **Example 2: Pants**
 *   **SOURCE IMAGE:** A photo of a person wearing a white shirt and blue jeans.
 *   **REFERENCE IMAGE:** A photo of blue jeans.
-*   **Your Logic:** The reference is blue jeans. The person in the source image is wearing blue jeans. I will create a mask that covers only the jeans, stopping precisely at the waistline and not overlapping with the white shirt.
+*   **Your Logic:** The reference is blue jeans. The person in the source image is wearing blue jeans. I will create a mask that covers only the jeans, stopping precisely at the waistline and not overlapping with the white shirt at all.
 *   **Output:** A single, precise segmentation mask for "the blue jeans".
 
-**Example 3: T-shirt**
-*   **SOURCE IMAGE:** A photo of a person wearing a red t-shirt.
+**Example 3: T-shirt with Necklace**
+*   **SOURCE IMAGE:** A photo of a person wearing a red t-shirt with a gold necklace on top of it.
 *   **REFERENCE IMAGE:** A photo of a red t-shirt.
-*   **Your Logic:** The reference is a t-shirt. The person in the source image is wearing a matching t-shirt. I will create a mask for the t-shirt, carefully following the neckline and sleeves to avoid masking the skin.
+*   **Your Logic:** The reference is a t-shirt. The person in the source image is wearing a matching t-shirt. The necklace is an accessory and must be ignored. I will create a mask for the t-shirt, carefully following the neckline and sleeves, and I will treat the area under the necklace as part of the t-shirt, masking it completely. The necklace itself will not be part of the mask.
 *   **Output:** A single, precise segmentation mask for "the red t-shirt".
 
 ### Output Format:
@@ -218,7 +218,7 @@ const SegmentationTool = () => {
                   {sourcePreview ? <img src={sourcePreview} alt="Original" className="rounded-md w-full" /> : <div className="aspect-square bg-muted rounded-md flex items-center justify-center text-muted-foreground">Upload an image</div>}
                 </div>
                 <div>
-                  <h3 className="font-semibold mb-2">Combined Mask (2/3 Votes)</h3>
+                  <h3 className="font-semibold mb-2">Segmented Image</h3>
                   <div className="relative aspect-square bg-muted rounded-md">
                     {sourcePreview && <img src={sourcePreview} alt="Original with overlay" className="rounded-md w-full h-full object-contain" />}
                     {masks && imageDimensions && <SegmentationMask masks={masks} imageDimensions={imageDimensions} />}
