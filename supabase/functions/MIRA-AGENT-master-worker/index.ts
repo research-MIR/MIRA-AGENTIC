@@ -384,27 +384,52 @@ serve(async (req) => {
     console.log(`[MasterWorker][${currentJobId}] USING SYSTEM PROMPT:\n---\n${systemPrompt}\n---`);
 
     let result: GenerationResult | null = null;
+    let functionCalls: any = null;
+
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-      try {
         console.log(`[MasterWorker][${currentJobId}] Calling Gemini planner, attempt ${attempt}...`);
-        result = await ai.models.generateContent({
-          model: MODEL_NAME,
-          contents: history,
-          config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] }, tools: [{ functionDeclarations: dynamicTools }] }
-        });
-        break;
-      } catch (error) {
-        console.warn(`[MasterWorker][${currentJobId}] Planner attempt ${attempt} failed:`, error.message);
-        if (attempt === MAX_RETRIES) throw error;
-        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
-      }
+        
+        try {
+            result = await ai.models.generateContent({
+                model: MODEL_NAME,
+                contents: history,
+                config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] }, tools: [{ functionDeclarations: dynamicTools }] }
+            });
+        } catch (apiError) {
+            console.warn(`[MasterWorker][${currentJobId}] Planner API call attempt ${attempt} failed:`, apiError.message);
+            if (attempt === MAX_RETRIES) throw apiError; // Rethrow the last API error
+            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+            continue; // Go to next iteration of the loop
+        }
+
+        functionCalls = result?.functionCalls;
+
+        if (functionCalls && functionCalls.length > 0) {
+            console.log(`[MasterWorker][${currentJobId}] Successfully received tool call on attempt ${attempt}.`);
+            break; // Valid tool call received, exit the loop.
+        } else {
+            console.warn(`[MasterWorker][${currentJobId}] Planner did not return a tool call on attempt ${attempt}. Response was:`, result?.text || "No text response.");
+            
+            if (attempt < MAX_RETRIES) {
+                // Add a system message to nudge the model back on track.
+                history.push({
+                    role: 'model',
+                    parts: [{ text: result?.text || "I apologize, I seem to have responded incorrectly." }]
+                });
+                history.push({
+                    role: 'user',
+                    parts: [{ text: "System note: That was an invalid response. You must respond with a tool call. Please re-evaluate the user's request and call the appropriate tool to continue the plan." }]
+                });
+                console.log(`[MasterWorker][${currentJobId}] Appended system note to history. Retrying...`);
+                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+            }
+        }
     }
 
     if (!result) throw new Error("AI planner failed to respond after all retries.");
 
     console.log(`[MasterWorker][${currentJobId}] Raw response from Gemini planner:`, JSON.stringify(result, null, 2));
 
-    const functionCalls = result.functionCalls;
     if (!functionCalls || functionCalls.length === 0) {
         const usage = result?.usageMetadata;
         if (usage && usage.promptTokenCount > MAX_TOKEN_THRESHOLD) {
@@ -414,7 +439,7 @@ serve(async (req) => {
             return new Response(JSON.stringify({ error: errorMessage }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
         }
 
-        console.error(`[MasterWorker][${currentJobId}] Orchestrator did not return a tool call. Finishing task with an error message.`);
+        console.error(`[MasterWorker][${currentJobId}] Orchestrator did not return a tool call after all retries. Finishing task with an error message.`);
         await supabase.from('mira-agent-jobs').update({ status: 'failed', error_message: "The agent could not decide on a next step." }).eq('id', currentJobId);
         return new Response(JSON.stringify({ error: "Agent failed to decide on a next step." }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
     }
