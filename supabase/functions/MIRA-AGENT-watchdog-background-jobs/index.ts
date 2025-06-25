@@ -10,6 +10,7 @@ const corsHeaders = {
 };
 
 const STALLED_POLLER_THRESHOLD_SECONDS = 30;
+const STALLED_AGGREGATION_THRESHOLD_SECONDS = 60; // 1 minute
 
 serve(async (req) => {
   const requestId = `watchdog-bg-${Date.now()}`;
@@ -71,6 +72,29 @@ serve(async (req) => {
       actionsTaken.push(`Started ${jobIdsToProcess.length} new batch inpaint workers.`);
     } else {
         console.log(`[Watchdog-BG][${requestId}] No new pending batch jobs found.`);
+    }
+
+    // --- Task 3: Handle Stalled Segmentation Aggregation Jobs ---
+    const segmentationThreshold = new Date(Date.now() - STALLED_AGGREGATION_THRESHOLD_SECONDS * 1000).toISOString();
+    const { data: stalledAggregationJobs, error: aggregationError } = await supabase
+      .from('mira-agent-mask-aggregation-jobs')
+      .select('id, results')
+      .eq('status', 'aggregating')
+      .lt('updated_at', segmentationThreshold);
+
+    if (aggregationError) {
+        console.error(`[Watchdog-BG][${requestId}] Error querying for stalled aggregation jobs:`, aggregationError.message);
+    } else if (stalledAggregationJobs && stalledAggregationJobs.length > 0) {
+        console.log(`[Watchdog-BG][${requestId}] Found ${stalledAggregationJobs.length} stalled aggregation job(s). Forcing composition...`);
+        const compositorPromises = stalledAggregationJobs.map(async (job) => {
+            console.log(`[Watchdog-BG][${requestId}] Forcing compositor for job ${job.id}. It has ${job.results?.length || 0} results.`);
+            await supabase.from('mira-agent-mask-aggregation-jobs').update({ status: 'compositing' }).eq('id', job.id);
+            return supabase.functions.invoke('MIRA-AGENT-compositor-segmentation', { body: { job_id: job.id } });
+        });
+        await Promise.allSettled(compositorPromises);
+        actionsTaken.push(`Forced composition for ${stalledAggregationJobs.length} stalled aggregation jobs.`);
+    } else {
+      console.log(`[Watchdog-BG][${requestId}] No stalled aggregation jobs found.`);
     }
 
     const finalMessage = actionsTaken.length > 0 ? actionsTaken.join(' ') : "No actions required. All jobs are running normally.";
