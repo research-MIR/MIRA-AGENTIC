@@ -9,7 +9,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const STALLED_THRESHOLD_MINUTES = 1;
+const STALLED_THRESHOLD_SECONDS = 30; // Reduced from 1 minute
 
 serve(async (req) => {
   console.log("ComfyUI Watchdog: Function invoked.");
@@ -20,7 +20,7 @@ serve(async (req) => {
 
   try {
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-    const threshold = new Date(Date.now() - STALLED_THRESHOLD_MINUTES * 60 * 1000).toISOString();
+    const threshold = new Date(Date.now() - STALLED_THRESHOLD_SECONDS * 1000).toISOString();
     console.log(`ComfyUI Watchdog: Checking for jobs stalled since ${threshold}`);
 
     // Fetch stalled jobs from both tables
