@@ -97,6 +97,8 @@ serve(async (req) => {
         num_attempts = 1, denoise = 1.0, resolution = 'standard', mask_expansion_percent = 2 
       } = body;
       
+      console.log(`[BitStudioProxy][${requestId}] Inpaint mode received with prompt: "${prompt ? prompt.substring(0, 30) + '...' : 'N/A'}", Denoise: ${denoise}, Has Reference: ${!!reference_image_base64}`);
+
       if (!full_source_image_base64 || (!mask_image_base64 && !mask_image_url)) {
         throw new Error("Missing required parameters for inpaint mode: full_source_image_base64 and one of mask_image_base64 or mask_image_url are required.");
       }
@@ -226,6 +228,12 @@ serve(async (req) => {
         const sourceBlob = new Blob([decodeBase64(sourceToSendBase64)], { type: 'image/png' });
         const finalMaskBlob = new Blob([decodeBase64(maskToSendBase64)], { type: 'image/png' });
 
+        console.log(`[BitStudioProxy][${requestId}] Attempt ${i + 1}: Uploading source image to BitStudio...`);
+        console.log(`[BitStudioProxy][${requestId}] Attempt ${i + 1}: Uploading mask image to BitStudio...`);
+        if (reference_image_base64) {
+          console.log(`[BitStudioProxy][${requestId}] Attempt ${i + 1}: Uploading reference image to BitStudio...`);
+        }
+
         const uploadPromises: Promise<string | null>[] = [
           uploadToBitStudio(sourceBlob, 'inpaint-base', `source_${i}.png`),
           uploadToBitStudio(finalMaskBlob, 'inpaint-mask', `mask_${i}.png`)
@@ -237,7 +245,7 @@ serve(async (req) => {
           uploadPromises.push(Promise.resolve(null));
         }
         const [sourceImageId, maskImageId, referenceImageId] = await Promise.all(uploadPromises);
-        console.log(`[BitStudioProxy][${requestId}] Attempt ${i + 1}: Images uploaded to BitStudio.`);
+        console.log(`[BitStudioProxy][${requestId}] Attempt ${i + 1}: BitStudio Image IDs -> Source: ${sourceImageId}, Mask: ${maskImageId}, Reference: ${referenceImageId || 'N/A'}`);
 
         const inpaintUrl = `${BITSTUDIO_API_BASE}/images/${sourceImageId}/inpaint`;
         const inpaintPayload: any = { 
@@ -249,6 +257,9 @@ serve(async (req) => {
         };
         if (referenceImageId) inpaintPayload.reference_image_id = referenceImageId;
         
+        console.log(`[BitStudioProxy][${requestId}] Attempt ${i + 1}: Sending final payload to BitStudio inpainting endpoint: ${inpaintUrl}`);
+        console.log(JSON.stringify(inpaintPayload, null, 2));
+
         const inpaintResponse = await fetch(inpaintUrl, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}`, 'Content-Type': 'application/json' },
