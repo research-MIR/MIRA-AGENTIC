@@ -11,7 +11,7 @@ const corsHeaders = {
 const workflowTemplate = `{
   "3": {
     "inputs": {
-      "seed": 1062983749859779,
+      "seed": 1083577032522281,
       "steps": 20,
       "cfg": 1,
       "sampler_name": "euler",
@@ -83,7 +83,7 @@ const workflowTemplate = `{
   },
   "17": {
     "inputs": {
-      "image": "source_image.png"
+      "image": "ComfyUI_Inpaint_00034_.png"
     },
     "class_type": "LoadImage",
     "_meta": {
@@ -92,7 +92,7 @@ const workflowTemplate = `{
   },
   "23": {
     "inputs": {
-      "text": "Wearing pink Maxi Dress",
+      "text": "shoes",
       "clip": [
         "34",
         0
@@ -151,7 +151,7 @@ const workflowTemplate = `{
     "inputs": {
       "noise_mask": false,
       "positive": [
-        "51",
+        "26",
         0
       ],
       "negative": [
@@ -190,7 +190,7 @@ const workflowTemplate = `{
   },
   "45": {
     "inputs": {
-      "image": "mask_image.png"
+      "image": "ComfyUI_temp_czavg_00001_.png"
     },
     "class_type": "LoadImage",
     "_meta": {
@@ -219,70 +219,13 @@ const workflowTemplate = `{
       "title": "Load Style Model"
     }
   },
-  "49": {
-    "inputs": {
-      "clip_name": "sigclip_vision_patch14_384.safetensors"
-    },
-    "class_type": "CLIPVisionLoader",
-    "_meta": {
-      "title": "Load CLIP Vision"
-    }
-  },
-  "50": {
-    "inputs": {
-      "crop": "none",
-      "clip_vision": [
-        "49",
-        0
-      ],
-      "image": [
-        "52",
-        0
-      ]
-    },
-    "class_type": "CLIPVisionEncode",
-    "_meta": {
-      "title": "CLIP Vision Encode"
-    }
-  },
-  "51": {
-    "inputs": {
-      "strength": 0.30000000000000004,
-      "strength_type": "attn_bias",
-      "conditioning": [
-        "26",
-        0
-      ],
-      "style_model": [
-        "48",
-        0
-      ],
-      "clip_vision_output": [
-        "50",
-        0
-      ]
-    },
-    "class_type": "StyleModelApply",
-    "_meta": {
-      "title": "Apply Style Model"
-    }
-  },
-  "52": {
-    "inputs": {
-      "image": "reference_image.png"
-    },
-    "class_type": "LoadImage",
-    "_meta": {
-      "title": "Input Reference"
-    }
-  },
   "53": {
     "inputs": {
-      "expand": 1,
+      "expand": 3,
       "incremental_expandrate": 0,
       "tapered_corners": true,
       "flip_input": false,
-      "blur_radius": 1,
+      "blur_radius": 1.5,
       "lerp_alpha": 1,
       "decay_factor": 1,
       "fill_holes": false,
@@ -337,6 +280,15 @@ const workflowTemplate = `{
     "_meta": {
       "title": "MASKDEBUG"
     }
+  },
+  "57": {
+    "inputs": {
+      "image": "ComfyUI_Inpaint_00034_.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Input Image"
+    }
   }
 }`;
 
@@ -376,7 +328,6 @@ serve(async (req) => {
       prompt,
       is_garment_mode,
       denoise,
-      style_strength,
       mask_expansion_percent = 2,
     } = await req.json();
 
@@ -462,6 +413,10 @@ serve(async (req) => {
     
     const sourceImageUrl = await uploadToSupabaseStorage(supabase, sourceBlob, user_id, 'source.png');
     let referenceImageUrl: string | null = null;
+    if (reference_image_base64) {
+        const referenceBlob = new Blob([decodeBase64(reference_image_base64)], { type: 'image/png' });
+        referenceImageUrl = await uploadToSupabaseStorage(supabase, referenceBlob, user_id, 'reference.png');
+    }
     
     const [sourceFilename, maskFilename] = await Promise.all([
       uploadImageToComfyUI(sanitizedAddress, sourceBlob, 'source.png'),
@@ -473,18 +428,6 @@ serve(async (req) => {
     finalWorkflow['45'].inputs.image = maskFilename;
     finalWorkflow['23'].inputs.text = finalPrompt;
     if (denoise) finalWorkflow['3'].inputs.denoise = denoise;
-
-    if (reference_image_base64) {
-        console.log(`[InpaintingProxy] Reference image provided. Using full style model workflow.`);
-        const referenceBlob = new Blob([decodeBase64(reference_image_base64)], { type: 'image/png' });
-        referenceImageUrl = await uploadToSupabaseStorage(supabase, referenceBlob, user_id, 'reference.png');
-        const referenceFilename = await uploadImageToComfyUI(sanitizedAddress, referenceBlob, 'reference.png');
-        finalWorkflow['52'].inputs.image = referenceFilename;
-        if (style_strength) finalWorkflow['51'].inputs.strength = style_strength;
-    } else {
-        console.log(`[InpaintingProxy] No reference image. Bypassing style model nodes.`);
-        finalWorkflow['38'].inputs.positive = ["26", 0];
-    }
 
     const queueUrl = `${sanitizedAddress}/prompt`;
     const response = await fetch(queueUrl, {
@@ -505,7 +448,6 @@ serve(async (req) => {
       metadata: { 
         prompt: finalPrompt, 
         denoise, 
-        style_strength,
         source_image_url: sourceImageUrl,
         reference_image_url: referenceImageUrl,
         full_source_image_base64: source_image_base64,
