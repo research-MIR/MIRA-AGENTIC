@@ -40,18 +40,6 @@ function extractJson(text: string): any {
     }
 }
 
-async function appendResultToJob(supabase: any, jobId: string, result: any) {
-    const { error } = await supabase.rpc('append_to_jsonb_array', {
-        table_name: 'mira-agent-mask-aggregation-jobs',
-        row_id: jobId,
-        column_name: 'results',
-        new_element: result
-    });
-    if (error) {
-        console.error(`[SegmentWorker] Failed to append result to aggregation job ${jobId}:`, error);
-    }
-}
-
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -67,7 +55,6 @@ serve(async (req) => {
       throw new Error("aggregation_job_id is required.");
     }
 
-    // Fetch the source image base64 from the main job record
     const { data: jobData, error: fetchError } = await supabase
         .from('mira-agent-mask-aggregation-jobs')
         .select('source_image_base64')
@@ -122,26 +109,26 @@ serve(async (req) => {
         };
     }
     
-    await appendResultToJob(supabase, aggregation_job_id, responseToStore);
-    console.log(`[SegmentWorker][${requestId}] Successfully appended result to aggregation job.`);
+    const { data: newCount, error: appendError } = await supabase.rpc('append_result_and_get_count', {
+        p_job_id: aggregation_job_id,
+        p_new_element: responseToStore
+    });
 
-    // Check if this is the last worker
-    const { data: updatedJob, error: checkError } = await supabase
-        .from('mira-agent-mask-aggregation-jobs')
-        .select('results')
-        .eq('id', aggregation_job_id)
-        .single();
-    
-    if (checkError) throw checkError;
+    if (appendError) {
+        console.error(`[SegmentWorker][${requestId}] Failed to append result to aggregation job:`, appendError);
+        throw appendError;
+    }
 
-    if (updatedJob && updatedJob.results && updatedJob.results.length >= NUM_WORKERS) {
+    console.log(`[SegmentWorker][${requestId}] Successfully appended result. New count: ${newCount}.`);
+
+    if (newCount >= NUM_WORKERS) {
         console.log(`[SegmentWorker][${requestId}] This is the final worker. Triggering compositor...`);
         await supabase.from('mira-agent-mask-aggregation-jobs').update({ status: 'compositing' }).eq('id', aggregation_job_id);
         supabase.functions.invoke('MIRA-AGENT-compositor-segmentation', {
             body: { job_id: aggregation_job_id }
         }).catch(console.error);
     } else {
-        console.log(`[SegmentWorker][${requestId}] Not the final worker. Current count: ${updatedJob?.results?.length || 0}/${NUM_WORKERS}.`);
+        console.log(`[SegmentWorker][${requestId}] Not the final worker. Current count: ${newCount}/${NUM_WORKERS}.`);
     }
     
     return new Response(JSON.stringify(responseToStore), {
@@ -151,7 +138,8 @@ serve(async (req) => {
 
   } catch (error) {
     console.error(`[SegmentWorker][${requestId}] Unhandled Error:`, error);
-    await appendResultToJob(supabase, aggregation_job_id, { error: `Worker failed: ${error.message}` });
+    // We don't need to append an error here, as the RPC call would have failed.
+    // The orchestrator will eventually time out and mark the main job as failed if necessary.
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,
