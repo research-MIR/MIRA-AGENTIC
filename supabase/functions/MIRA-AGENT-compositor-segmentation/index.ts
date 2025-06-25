@@ -75,8 +75,7 @@ serve(async (req) => {
         Array.isArray(run) && 
         run.length > 0 &&
         run[0].mask &&
-        typeof run[0].mask === 'string' &&
-        run[0].mask.startsWith('data:image/png;base64,')
+        typeof run[0].mask === 'string'
     );
     console.log(`[Compositor][${job.id}] Found ${validRuns.length} valid runs after filtering.`);
 
@@ -88,11 +87,20 @@ serve(async (req) => {
 
     for (const run of firstMasksFromEachRun) {
       try {
-        const base64Data = run.mask.split(',')[1];
+        let base64Data = run.mask;
+        if (!base64Data.startsWith('data:image/png;base64,')) {
+            base64Data = `data:image/png;base64,${base64Data}`;
+        }
+        base64Data = base64Data.split(',')[1];
         const imageBuffer = decodeBase64(base64Data);
         const maskImg = await loadImage(imageBuffer);
 
-        const [y0, x0, y1, x1] = run.box_2d;
+        let box = run.box_2d;
+        if (Array.isArray(box[0])) { // Check for nested array
+            box = [box[0][0], box[0][1], box[1][0], box[1][1]];
+        }
+        const [y0, x0, y1, x1] = box;
+
         const absX0 = Math.floor((x0 / 1000) * job.source_image_dimensions.width);
         const absY0 = Math.floor((y0 / 1000) * job.source_image_dimensions.height);
         const bboxWidth = Math.ceil(((x1 - x0) / 1000) * job.source_image_dimensions.width);

@@ -118,18 +118,24 @@ serve(async (req) => {
             let responseToStore;
             try {
                 const responseJson = extractJson(result.text);
-                if (
-                    !responseJson || 
-                    !Array.isArray(responseJson) || 
-                    responseJson.length === 0 ||
-                    !responseJson[0].mask ||
-                    typeof responseJson[0].mask !== 'string' ||
-                    !responseJson[0].mask.startsWith('data:image/png;base64,')
-                ) {
-                    throw new Error("Model returned a JSON with an invalid or missing mask structure.");
+                if (!responseJson || !Array.isArray(responseJson) || responseJson.length === 0 || !responseJson[0].mask || typeof responseJson[0].mask !== 'string' || !responseJson[0].box_2d) {
+                    throw new Error("Model returned a JSON with an invalid or missing mask/box_2d structure.");
                 }
-                responseToStore = responseJson;
-                console.log(`[SegmentWorker][${requestId}] Successfully parsed JSON. Found ${responseJson.length} masks.`);
+
+                const normalizedResponse = responseJson.map(item => {
+                    if (item.mask && typeof item.mask === 'string' && !item.mask.startsWith('data:image/png;base64,')) {
+                        console.log(`[SegmentWorker][${requestId}] Normalizing raw base64 mask.`);
+                        item.mask = `data:image/png;base64,${item.mask}`;
+                    }
+                    if (item.box_2d && Array.isArray(item.box_2d[0])) {
+                        console.log(`[SegmentWorker][${requestId}] Normalizing nested box_2d array.`);
+                        item.box_2d = [item.box_2d[0][0], item.box_2d[0][1], item.box_2d[1][0], item.box_2d[1][1]];
+                    }
+                    return item;
+                });
+
+                responseToStore = normalizedResponse;
+                console.log(`[SegmentWorker][${requestId}] Successfully parsed and normalized JSON. Found ${responseToStore.length} masks.`);
             } catch (parsingError) {
                 console.warn(`[SegmentWorker][${requestId}] JSON parsing failed. Storing raw text. Error: ${parsingError.message}`);
                 responseToStore = {
