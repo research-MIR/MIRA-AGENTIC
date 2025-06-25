@@ -67,7 +67,11 @@ serve(async (req) => {
     }
 
     const results = job.results || [];
+    console.log(`[Compositor][${job.id}] Raw results from database:`, JSON.stringify(results, null, 2));
+
     const validRuns = results.filter((run: any) => run && !run.error && Array.isArray(run) && run.length > 0);
+    console.log(`[Compositor][${job.id}] Found ${validRuns.length} valid runs after filtering.`);
+
     if (validRuns.length === 0) throw new Error("No valid mask data found in any of the segmentation runs.");
     
     const firstMasksFromEachRun = validRuns.map((run: any) => run[0]).filter((mask: any) => mask && mask.box_2d && mask.mask);
@@ -102,7 +106,7 @@ serve(async (req) => {
     const combinedImageData = combinedCtx.createImageData(job.source_image_dimensions.width, job.source_image_dimensions.height);
     const combinedData = combinedImageData.data;
     
-    const majorityThreshold = Math.floor(NUM_WORKERS / 2.5); // Adjusted threshold for fewer workers
+    const majorityThreshold = Math.floor(NUM_WORKERS / 2.5);
     for (let i = 0; i < accumulator.length; i++) {
       if (accumulator[i] >= majorityThreshold) {
         const idx = i * 4;
@@ -117,15 +121,14 @@ serve(async (req) => {
     const finalPublicUrl = await uploadBufferToStorage(supabase, finalImageBuffer, job.user_id, 'final_mask.png');
 
     await supabase.from('mira-agent-mask-aggregation-jobs')
-      .update({ status: 'complete', final_mask_base64: finalPublicUrl, source_image_base64: null }) // Clear the large base64 data
+      .update({ status: 'complete', final_mask_base64: finalPublicUrl, source_image_base64: null })
       .eq('id', job.id);
     console.log(`[Compositor][${job.id}] Composition successful. Job complete.`);
 
-    // NEW LOGIC: Check if this aggregation job was part of a batch inpainting flow
     const { data: parentPairJob, error: parentFetchError } = await supabase
         .from('mira-agent-batch-inpaint-pair-jobs')
         .select('id')
-        .eq('metadata->>aggregation_job_id', job.id) // Check if any pair job references this aggregation job
+        .eq('metadata->>aggregation_job_id', job.id)
         .maybeSingle();
 
     if (parentFetchError) {
