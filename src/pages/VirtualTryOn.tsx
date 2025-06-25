@@ -61,6 +61,8 @@ const VirtualTryOn = () => {
   const [sourceImageFile, setSourceImageFile] = useState<File | null>(null);
   const [referenceImageFile, setReferenceImageFile] = useState<File | null>(null);
   const [maskImage, setMaskImage] = useState<string | null>(null);
+  const [autoMaskUrl, setAutoMaskUrl] = useState<string | null>(null);
+  const [isAutoMasking, setIsAutoMasking] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [brushSize, setBrushSize] = useState(30);
   const [resetTrigger, setResetTrigger] = useState(0);
@@ -105,6 +107,7 @@ const VirtualTryOn = () => {
     setSourceImageFile(null);
     setReferenceImageFile(null);
     setMaskImage(null);
+    setAutoMaskUrl(null);
     setPrompt("");
     setResetTrigger(c => c + 1);
     consumeImageUrl();
@@ -199,6 +202,8 @@ const VirtualTryOn = () => {
               sourceImageFile={sourceImageFile} setSourceImageFile={setSourceImageFile}
               referenceImageFile={referenceImageFile} setReferenceImageFile={setReferenceImageFile}
               maskImage={maskImage} setMaskImage={setMaskImage}
+              autoMaskUrl={autoMaskUrl} setAutoMaskUrl={setAutoMaskUrl}
+              isAutoMasking={isAutoMasking} setIsAutoMasking={setIsAutoMasking}
               prompt={prompt} setPrompt={setPrompt}
               brushSize={brushSize} setBrushSize={setBrushSize}
               resetTrigger={resetTrigger} setResetTrigger={setResetTrigger}
