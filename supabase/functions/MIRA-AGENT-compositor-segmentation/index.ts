@@ -121,6 +121,31 @@ serve(async (req) => {
       .eq('id', job.id);
     console.log(`[Compositor][${job.id}] Composition successful. Job complete.`);
 
+    // NEW LOGIC: Check if this aggregation job was part of a batch inpainting flow
+    const { data: parentPairJob, error: parentFetchError } = await supabase
+        .from('mira-agent-batch-inpaint-pair-jobs')
+        .select('id')
+        .eq('metadata->>aggregation_job_id', job.id) // Check if any pair job references this aggregation job
+        .maybeSingle();
+
+    if (parentFetchError) {
+        console.error(`[Compositor][${job.id}] Error checking for parent batch job:`, parentFetchError.message);
+    }
+
+    if (parentPairJob) {
+        console.log(`[Compositor][${job.id}] Found parent batch job ${parentPairJob.id}. Triggering step 2 worker.`);
+        await supabase.from('mira-agent-batch-inpaint-pair-jobs')
+            .update({ status: 'segmented' })
+            .eq('id', parentPairJob.id);
+        
+        supabase.functions.invoke('MIRA-AGENT-worker-batch-inpaint-step2', {
+            body: {
+                pair_job_id: parentPairJob.id,
+                final_mask_url: finalPublicUrl
+            }
+        }).catch(console.error);
+    }
+
     return new Response(JSON.stringify({ success: true, finalMaskUrl: finalPublicUrl }), { headers: corsHeaders });
 
   } catch (error) {
