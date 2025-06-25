@@ -47,31 +47,29 @@ function expandMask(canvas: Canvas, expansionPercent: number) {
     if (expansionPercent <= 0) return;
 
     const ctx = canvas.getContext('2d');
+    if (!ctx) return;
     const expansionAmount = Math.round(Math.min(canvas.width, canvas.height) * expansionPercent);
     if (expansionAmount <= 0) return;
 
     console.log(`[expandMask] Applying shadowBlur expansion with amount: ${expansionAmount}px`);
 
-    // Create a temporary canvas to hold the original mask shape
     const tempCanvas = createCanvas(canvas.width, canvas.height);
     const tempCtx = tempCanvas.getContext('2d');
+    if (!tempCtx) return;
     tempCtx.drawImage(canvas, 0, 0);
 
-    // Clear the main canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    // Use the shadow as a fast, native dilation/grow effect
     ctx.shadowColor = 'white';
     ctx.shadowBlur = expansionAmount;
-    
-    // Draw the shape once to create the "glow"
     ctx.drawImage(tempCanvas, 0, 0);
     
-    // Draw it again without the shadow to fill the center and make it solid
     ctx.shadowBlur = 0;
-    ctx.drawImage(tempCanvas, 0, 0);
+    ctx.globalCompositeOperation = 'source-in';
+    ctx.fillStyle = 'white';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.globalCompositeOperation = 'source-over';
     
-    console.log(`[expandMask] shadowBlur expansion complete.`);
+    console.log(`[expandMask] shadowBlur expansion and solidification complete.`);
 }
 
 serve(async (req) => {
