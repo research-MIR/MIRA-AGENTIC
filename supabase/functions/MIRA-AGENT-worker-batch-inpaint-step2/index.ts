@@ -29,17 +29,21 @@ async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string)
 }
 
 serve(async (req) => {
+  console.log(`[BatchInpaintWorker-Step2] Function invoked.`);
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   const { pair_job_id, final_mask_url } = await req.json();
+  console.log(`[BatchInpaintWorker-Step2][${pair_job_id}] Received payload. pair_job_id: ${pair_job_id}, final_mask_url: ${final_mask_url}`);
+
   if (!pair_job_id || !final_mask_url) {
+    console.error(`[BatchInpaintWorker-Step2] Missing required parameters. pair_job_id: ${!!pair_job_id}, final_mask_url: ${!!final_mask_url}`);
     return new Response(JSON.stringify({ error: "pair_job_id and final_mask_url are required." }), { status: 400, headers: corsHeaders });
   }
 
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-  console.log(`[BatchInpaintWorker-Step2][${pair_job_id}] Starting inpainting.`);
+  console.log(`[BatchInpaintWorker-Step2][${pair_job_id}] Starting inpainting process.`);
 
   try {
     const { data: pairJob, error: fetchError } = await supabase
