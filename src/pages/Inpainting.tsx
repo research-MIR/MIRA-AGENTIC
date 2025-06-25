@@ -106,7 +106,9 @@ const Inpainting = () => {
   const [isAutoPromptEnabled, setIsAutoPromptEnabled] = useState(true);
   const [isSizeWarningOpen, setIsSizeWarningOpen] = useState(false);
 
-  const [styleStrength, setStyleStrength] = useState(0.3);
+  const [numAttempts, setNumAttempts] = useState(1);
+  const [denoise, setDenoise] = useState(0.99);
+  const [isHighQuality, setIsHighQuality] = useState(false);
   const [maskExpansion, setMaskExpansion] = useState(3);
 
   const sourceImageUrl = useMemo(() => sourceImageFile ? URL.createObjectURL(sourceImageFile) : null, [sourceImageFile]);
@@ -246,8 +248,9 @@ const Inpainting = () => {
         prompt: finalPrompt,
         is_garment_mode: false,
         user_id: session?.user.id,
-        denoise: 1.0,
-        style_strength: styleStrength,
+        num_attempts: numAttempts,
+        denoise: denoise,
+        is_high_quality: isHighQuality,
         mask_expansion_percent: maskExpansion,
       };
 
@@ -261,7 +264,7 @@ const Inpainting = () => {
       if (error) throw error;
 
       dismissToast(toastId);
-      showSuccess("Inpainting job started! You can track progress in the sidebar.");
+      showSuccess(`${numAttempts} inpainting job(s) started! You can track progress in the sidebar.`);
       queryClient.invalidateQueries({ queryKey: ['activeJobs'] });
       queryClient.invalidateQueries({ queryKey: ['inpaintingJobs', session.user.id] });
       resetForm();
@@ -435,7 +438,9 @@ const Inpainting = () => {
                           </TooltipProvider>
                           <AccordionContent className="pt-4">
                             <InpaintingSettings
-                              styleStrength={styleStrength} setStyleStrength={setStyleStrength}
+                              numAttempts={numAttempts} setNumAttempts={setNumAttempts}
+                              isHighQuality={isHighQuality} setIsHighQuality={setIsHighQuality}
+                              denoise={denoise} setDenoise={setDenoise}
                               maskExpansion={maskExpansion} setMaskExpansion={setMaskExpansion}
                               disabled={isLoading}
                             />
@@ -486,10 +491,10 @@ const Inpainting = () => {
           <Card className="mt-4">
             <CardHeader><CardTitle><div className="flex items-center gap-2"><History className="h-4 w-4" />{t('recentProJobs')}</div></CardTitle></CardHeader>
             <CardContent>
-              {isLoadingRecentJobs ? <Skeleton className="h-24 w-full" /> : recentJobs && recentJobs.length > 0 ? (
+              {isLoadingRecentJobs ? <Skeleton className="h-24 w-full" /> : proJobs.length > 0 ? (
                 <ScrollArea className="h-32">
                   <div className="flex gap-4 pb-2">
-                    {recentJobs.map(job => {
+                    {proJobs.map(job => {
                       const urlToPreview = job.final_result?.publicUrl || job.metadata?.source_image_url;
                       return (
                         <button key={job.id} onClick={() => handleSelectJob(job)} className={cn("border-2 rounded-lg p-0.5 flex-shrink-0 w-24 h-24", selectedJob?.id === job.id ? "border-primary" : "border-transparent")}>

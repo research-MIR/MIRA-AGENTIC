@@ -278,7 +278,7 @@ const workflowTemplate = `{
     },
     "class_type": "DifferentialDiffusionAdvanced",
     "_meta": {
-      "title": "Differential Diffusion Advanced"
+      "title": "Apply Flux PAG Attention"
     }
   },
   "59": {
@@ -353,6 +353,7 @@ serve(async (req) => {
       denoise,
       style_strength,
       mask_expansion_percent = 2,
+      num_attempts = 1,
     } = await req.json();
 
     if (!user_id || !source_image_base64 || !mask_image_base64) {
@@ -447,44 +448,51 @@ serve(async (req) => {
       uploadImageToComfyUI(sanitizedAddress, maskBlob, 'mask.png')
     ]);
 
-    const finalWorkflow = JSON.parse(workflowTemplate);
-    finalWorkflow['17'].inputs.image = sourceFilename;
-    finalWorkflow['45'].inputs.image = maskFilename;
-    finalWorkflow['23'].inputs.text = finalPrompt;
-    if (denoise) finalWorkflow['3'].inputs.denoise = denoise;
+    const jobIds: string[] = [];
+    for (let i = 0; i < num_attempts; i++) {
+      const finalWorkflow = JSON.parse(workflowTemplate);
+      finalWorkflow['17'].inputs.image = sourceFilename;
+      finalWorkflow['45'].inputs.image = maskFilename;
+      finalWorkflow['23'].inputs.text = finalPrompt;
+      finalWorkflow['3'].inputs.seed = Math.floor(Math.random() * 1000000000000000);
+      if (denoise) finalWorkflow['3'].inputs.denoise = denoise;
 
-    const queueUrl = `${sanitizedAddress}/prompt`;
-    const response = await fetch(queueUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: finalWorkflow })
+      const queueUrl = `${sanitizedAddress}/prompt`;
+      const response = await fetch(queueUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: finalWorkflow })
+      });
+      if (!response.ok) throw new Error(`ComfyUI server error: ${await response.text()}`);
+      
+      const comfyUIResponse = await response.json();
+      if (!comfyUIResponse.prompt_id) throw new Error("ComfyUI did not return a prompt_id.");
+
+      const { data: newJob, error: insertError } = await supabase.from('mira-agent-inpainting-jobs').insert({
+        user_id,
+        comfyui_address: sanitizedAddress,
+        comfyui_prompt_id: comfyUIResponse.prompt_id,
+        status: 'queued',
+        metadata: { 
+          prompt: finalPrompt, 
+          denoise, 
+          style_strength,
+          source_image_url: sourceImageUrl,
+          reference_image_url: referenceImageUrl,
+          full_source_image_base64: source_image_base64,
+          bbox: bbox,
+          cropped_dilated_mask_base64: croppedDilatedMaskBase64,
+        }
+      }).select('id').single();
+      if (insertError) throw insertError;
+      jobIds.push(newJob.id);
+    }
+
+    jobIds.forEach(jobId => {
+      supabase.functions.invoke('MIRA-AGENT-poller-inpainting', { body: { job_id: jobId } }).catch(console.error);
     });
-    if (!response.ok) throw new Error(`ComfyUI server error: ${await response.text()}`);
-    
-    const comfyUIResponse = await response.json();
-    if (!comfyUIResponse.prompt_id) throw new Error("ComfyUI did not return a prompt_id.");
 
-    const { data: newJob, error: insertError } = await supabase.from('mira-agent-inpainting-jobs').insert({
-      user_id,
-      comfyui_address: sanitizedAddress,
-      comfyui_prompt_id: comfyUIResponse.prompt_id,
-      status: 'queued',
-      metadata: { 
-        prompt: finalPrompt, 
-        denoise, 
-        style_strength,
-        source_image_url: sourceImageUrl,
-        reference_image_url: referenceImageUrl,
-        full_source_image_base64: source_image_base64,
-        bbox: bbox,
-        cropped_dilated_mask_base64: croppedDilatedMaskBase64,
-      }
-    }).select('id').single();
-    if (insertError) throw insertError;
-
-    supabase.functions.invoke('MIRA-AGENT-poller-inpainting', { body: { job_id: newJob.id } }).catch(console.error);
-
-    return new Response(JSON.stringify({ success: true, jobId: newJob.id }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ success: true, jobIds }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (error) {
     console.error("[InpaintingProxy] Error:", error);
     return new Response(JSON.stringify({ error: error.message }), {
