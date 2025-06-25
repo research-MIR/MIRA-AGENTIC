@@ -125,6 +125,7 @@ const Inpainting = () => {
     enabled: !!session?.user,
   });
 
+  const proJobs = useMemo(() => recentJobs || [], [recentJobs]);
   const selectedJob = useMemo(() => recentJobs?.find(job => job.id === selectedJobId), [recentJobs, selectedJobId]);
 
   const resetForm = useCallback(() => {
