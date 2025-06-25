@@ -107,8 +107,6 @@ const Inpainting = () => {
   const [isSizeWarningOpen, setIsSizeWarningOpen] = useState(false);
 
   const [numAttempts, setNumAttempts] = useState(1);
-  const [denoise, setDenoise] = useState(0.99);
-  const [isHighQuality, setIsHighQuality] = useState(false);
   const [maskExpansion, setMaskExpansion] = useState(3);
 
   const sourceImageUrl = useMemo(() => sourceImageFile ? URL.createObjectURL(sourceImageFile) : null, [sourceImageFile]);
@@ -250,8 +248,6 @@ const Inpainting = () => {
         is_garment_mode: false,
         user_id: session?.user.id,
         num_attempts: numAttempts,
-        denoise: denoise,
-        is_high_quality: isHighQuality,
         mask_expansion_percent: maskExpansion,
       };
 
@@ -440,8 +436,6 @@ const Inpainting = () => {
                           <AccordionContent className="pt-4">
                             <InpaintingSettings
                               numAttempts={numAttempts} setNumAttempts={setNumAttempts}
-                              isHighQuality={isHighQuality} setIsHighQuality={setIsHighQuality}
-                              denoise={denoise} setDenoise={setDenoise}
                               maskExpansion={maskExpansion} setMaskExpansion={setMaskExpansion}
                               disabled={isLoading}
                             />
