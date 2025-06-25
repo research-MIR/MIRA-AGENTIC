@@ -117,7 +117,7 @@ serve(async (req) => {
     const finalPublicUrl = await uploadBufferToStorage(supabase, finalImageBuffer, job.user_id, 'final_mask.png');
 
     await supabase.from('mira-agent-mask-aggregation-jobs')
-      .update({ status: 'complete', final_mask_base64: finalPublicUrl })
+      .update({ status: 'complete', final_mask_base64: finalPublicUrl, source_image_base64: null }) // Clear the large base64 data
       .eq('id', job.id);
     console.log(`[Compositor][${job.id}] Composition successful. Job complete.`);
 
@@ -125,7 +125,10 @@ serve(async (req) => {
 
   } catch (error) {
     console.error(`[Compositor][${job_id}] Error:`, error);
-    await supabase.from('mira-agent-mask-aggregation-jobs').update({ status: 'failed', error_message: error.message }).eq('id', job_id);
-    return new Response(JSON.stringify({ error: error.message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
+    await supabase.from('mira-agent-mask-aggregation-jobs').update({ status: 'failed', error_message: error.message }).eq('id', job.id);
+    return new Response(JSON.stringify({ error: error.message }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      status: 500,
+    });
   }
 });
