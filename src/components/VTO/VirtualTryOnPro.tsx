@@ -13,13 +13,13 @@ import { useSession } from "@/components/Auth/SessionContextProvider";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { useImagePreview } from "@/context/ImagePreviewContext";
 import { useSecureImage } from "@/hooks/useSecureImage";
-import { Skeleton } from "../ui/skeleton";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useQueryClient } from "@tanstack/react-query";
 import { DebugStepsModal } from "./DebugStepsModal";
-import { Switch } from "../ui/switch";
+import { Switch } from "@/components/ui/switch";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { ProModeSettings } from "./ProModeSettings";
-import { ScrollArea } from "../ui/scroll-area";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { useLanguage } from "@/context/LanguageContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import ReactMarkdown from "react-markdown";
@@ -210,7 +210,7 @@ export const VirtualTryOnPro = ({
       showError("Please provide a source image and draw a mask.");
       return;
     }
-    if (!isAutoPromptEnabled && !prompt.trim()) {
+    if (!isAutoPromptEnabled && !prompt.trim() && !referenceImageFile) {
       showError("Please provide a prompt or enable auto-prompt.");
       return;
     }
@@ -224,7 +224,7 @@ export const VirtualTryOnPro = ({
         mode: 'inpaint',
         full_source_image_base64: await fileToBase64(optimizedSource),
         mask_image_base64: maskImage.split(',')[1],
-        prompt: isAutoPromptEnabled ? "" : prompt,
+        prompt: prompt,
         auto_prompt_enabled: isAutoPromptEnabled,
         is_garment_mode: true, // VTO Pro Mode is always garment-focused
         user_id: session?.user.id,
@@ -292,173 +292,151 @@ export const VirtualTryOnPro = ({
   };
 
   const isGenerateDisabled = isLoading || !!selectedJob || !sourceImageFile || !maskImage || (!isAutoPromptEnabled && !prompt.trim() && !referenceImageFile);
-  const placeholderText = isAutoPromptEnabled ? t('promptPlaceholderInpaintingOptional') : t('promptPlaceholderInpaintingRequired');
+  const placeholderText = isAutoPromptEnabled ? t('promptPlaceholderVTO') : t('promptPlaceholderVTO');
 
   return (
     <>
-      <div className="flex flex-col gap-4">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-1 flex flex-col gap-4">
-            <div className="space-y-4">
-              <Card>
-                <CardHeader>
-                  <div className="flex justify-between items-center">
-                    <CardTitle>{selectedJob ? t('selectedJob') : t('setup')}</CardTitle>
-                    <div className="flex items-center gap-2">
-                        <Button variant="ghost" size="icon" onClick={() => setIsGuideOpen(true)}>
-                            <HelpCircle className="h-5 w-5" />
-                        </Button>
-                        {(selectedJob || sourceImageFile) && <Button variant="outline" size="sm" onClick={resetForm}><PlusCircle className="h-4 w-4 mr-2" />{t('new')}</Button>}
-                    </div>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="lg:col-span-1 flex flex-col gap-4">
+          <div className="space-y-4">
+            <Card>
+              <CardHeader>
+                <div className="flex justify-between items-center">
+                  <CardTitle>{selectedJob ? t('selectedJob') : t('setup')}</CardTitle>
+                  <div className="flex items-center gap-2">
+                      <Button variant="ghost" size="icon" onClick={() => setIsGuideOpen(true)}>
+                          <HelpCircle className="h-5 w-5" />
+                      </Button>
+                      {(selectedJob || sourceImageFile) && <Button variant="outline" size="sm" onClick={resetForm}><PlusCircle className="h-4 w-4 mr-2" />{t('new')}</Button>}
                   </div>
-                </CardHeader>
-                <CardContent>
-                  {selectedJob ? (
-                    <div className="space-y-4">
-                      <p className="text-sm text-muted-foreground">{t('viewingJob')}</p>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <Label>{t('sourceImage')}</Label>
-                          <div className="mt-1 aspect-square w-full bg-muted rounded-md overflow-hidden">
-                            <SecureImageDisplay imageUrl={selectedJob.source_person_image_url} alt="Source Person" />
-                          </div>
-                        </div>
-                        <div>
-                          <Label>{t('garmentReference')}</Label>
-                          <div className="mt-1 aspect-square w-full bg-muted rounded-md overflow-hidden">
-                            <SecureImageDisplay imageUrl={selectedJob.source_garment_image_url} alt="Source Garment" />
-                          </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {selectedJob ? (
+                  <div className="space-y-4">
+                    <p className="text-sm text-muted-foreground">{t('viewingJob')}</p>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label>{t('sourceImage')}</Label>
+                        <div className="mt-1 aspect-square w-full bg-muted rounded-md overflow-hidden">
+                          <SecureImageDisplay imageUrl={selectedJob.source_person_image_url} alt="Source Person" />
                         </div>
                       </div>
                       <div>
-                        <Label>{t('prompt')}</Label>
-                        <p className="text-sm p-2 bg-muted rounded-md mt-1">{selectedJob.metadata?.prompt_used || "N/A"}</p>
+                        <Label>{t('garmentReference')}</Label>
+                        <div className="mt-1 aspect-square w-full bg-muted rounded-md overflow-hidden">
+                          <SecureImageDisplay imageUrl={selectedJob.source_garment_image_url} alt="Source Garment" />
+                        </div>
                       </div>
                     </div>
-                  ) : (
-                    <Accordion type="multiple" defaultValue={['item-1']} className="w-full">
-                      <AccordionItem value="item-1">
-                        <AccordionTrigger>{t('inputs')}</AccordionTrigger>
-                        <AccordionContent className="pt-4 space-y-4">
-                          <div className="grid grid-cols-2 gap-4">
-                            <ImageUploader onFileSelect={setSourceImageFile} title={t('sourceImage')} imageUrl={sourceImageUrl} onClear={resetForm} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
-                            <ImageUploader onFileSelect={setReferenceImageFile} title={t('garmentReference')} imageUrl={referenceImageUrl} onClear={() => setReferenceImageFile(null)} icon={<Shirt className="h-8 w-8 text-muted-foreground" />} />
-                          </div>
-                        </AccordionContent>
-                      </AccordionItem>
-                      <AccordionItem value="item-2">
-                        <AccordionTrigger>{t('promptOptional')}</AccordionTrigger>
-                        <AccordionContent className="pt-4 space-y-2">
-                          <div className="flex items-center space-x-2">
-                            <Switch id="auto-prompt-pro" checked={isAutoPromptEnabled} onCheckedChange={setIsAutoPromptEnabled} disabled={!referenceImageFile} />
-                            <Label htmlFor="auto-prompt-pro">{t('autoGenerate')}</Label>
-                          </div>
-                          <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={placeholderText} rows={4} disabled={isAutoPromptEnabled} />
-                        </AccordionContent>
-                      </AccordionItem>
-                      <AccordionItem value="item-3">
-                        <TooltipProvider>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <AccordionTrigger className="text-primary animate-pulse">{t('proSettings')}</AccordionTrigger>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              <p>{t('proSettingsTooltip')}</p>
-                            </TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-                        <AccordionContent className="pt-4">
-                          <ProModeSettings
-                            numAttempts={numAttempts} setNumAttempts={setNumAttempts}
-                            denoise={denoise} setDenoise={setDenoise}
-                            isHighQuality={isHighQuality} setIsHighQuality={setIsHighQuality}
-                            maskExpansion={maskExpansion} setMaskExpansion={setMaskExpansion}
-                            disabled={isLoading}
-                          />
-                        </AccordionContent>
-                      </AccordionItem>
-                    </Accordion>
-                  )}
-                </CardContent>
-              </Card>
-              <Button size="lg" className="w-full" onClick={handleGenerate} disabled={isGenerateDisabled}>
-                {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-                {t('generate')}
-              </Button>
-            </div>
+                    <div>
+                      <Label>{t('prompt')}</Label>
+                      <p className="text-sm p-2 bg-muted rounded-md mt-1">{selectedJob.metadata?.prompt_used || "N/A"}</p>
+                    </div>
+                  </div>
+                ) : (
+                  <Accordion type="multiple" defaultValue={['item-1']} className="w-full">
+                    <AccordionItem value="item-1">
+                      <AccordionTrigger>{t('inputs')}</AccordionTrigger>
+                      <AccordionContent className="pt-4 space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                          <ImageUploader onFileSelect={setSourceImageFile} title={t('sourceImage')} imageUrl={sourceImageUrl} onClear={resetForm} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
+                          <ImageUploader onFileSelect={setReferenceImageFile} title={t('garmentReference')} imageUrl={referenceImageUrl} onClear={() => setReferenceImageFile(null)} icon={<Shirt className="h-8 w-8 text-muted-foreground" />} />
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
+                    <AccordionItem value="item-2">
+                      <AccordionTrigger>{t('promptSectionTitle')}</AccordionTrigger>
+                      <AccordionContent className="pt-4 space-y-2">
+                        <div className="flex items-center space-x-2">
+                          <Switch id="auto-prompt-pro" checked={isAutoPromptEnabled} onCheckedChange={setIsAutoPromptEnabled} disabled={!referenceImageFile} />
+                          <Label htmlFor="auto-prompt-pro">{t('autoGenerate')}</Label>
+                        </div>
+                        <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={placeholderText} rows={4} disabled={isAutoPromptEnabled} />
+                      </AccordionContent>
+                    </AccordionItem>
+                    <AccordionItem value="item-3">
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <AccordionTrigger className="text-primary animate-pulse">{t('proSettings')}</AccordionTrigger>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>{t('proSettingsTooltip')}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                      <AccordionContent className="pt-4">
+                        <ProModeSettings
+                          numAttempts={numAttempts} setNumAttempts={setNumAttempts}
+                          denoise={denoise} setDenoise={setDenoise}
+                          isHighQuality={isHighQuality} setIsHighQuality={setIsHighQuality}
+                          maskExpansion={maskExpansion} setMaskExpansion={setMaskExpansion}
+                          disabled={isLoading}
+                        />
+                      </AccordionContent>
+                    </AccordionItem>
+                  </Accordion>
+                )}
+              </CardContent>
+            </Card>
+            <Button size="lg" className="w-full" onClick={handleGenerate} disabled={isGenerateDisabled}>
+              {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+              {t('generate')}
+            </Button>
           </div>
+        </div>
 
-          <div className="lg:col-span-2 bg-muted rounded-lg flex items-center justify-center relative min-h-[60vh] lg:min-h-0">
-            {sourceImageUrl && !selectedJob ? (
-              <div className="w-full h-full max-h-[80vh] aspect-square relative">
+        <div className="lg:col-span-2 bg-muted rounded-lg flex flex-col items-stretch justify-center relative min-h-[60vh] lg:min-h-0">
+          {sourceImageUrl && !selectedJob ? (
+            <>
+              <div className="w-full flex-1 flex items-center justify-center relative p-2 overflow-hidden">
                 <MaskCanvas 
                   imageUrl={sourceImageUrl} 
                   onMaskChange={setMaskImage}
                   brushSize={brushSize}
                   resetTrigger={resetTrigger}
                 />
-                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10">
-                  <MaskControls 
-                    brushSize={brushSize} 
-                    onBrushSizeChange={setBrushSize} 
-                    onReset={handleResetMask} 
-                  />
-                </div>
               </div>
-            ) : selectedJob ? (
-              renderJobResult(selectedJob)
-            ) : (
-              <div {...dropzoneProps} className={cn("w-full h-full flex flex-col items-center justify-center cursor-pointer border-2 border-dashed rounded-lg", isDraggingOver && "border-primary")}>
-                <UploadCloud className="h-12 w-12 text-muted-foreground" />
-                <p className="mt-4 font-semibold">{t('uploadToBegin')}</p>
-                <p className="text-sm text-muted-foreground">{t('orSelectRecent')}</p>
+              <div className="p-2 shrink-0">
+                <MaskControls 
+                  brushSize={brushSize} 
+                  onBrushSizeChange={setBrushSize} 
+                  onReset={handleResetMask} 
+                />
               </div>
-            )}
-          </div>
+            </>
+          ) : selectedJob ? (
+            renderJobResult(selectedJob)
+          ) : (
+            <div {...dropzoneProps} className={cn("w-full h-full flex flex-col items-center justify-center cursor-pointer border-2 border-dashed rounded-lg", isDraggingOver && "border-primary")}>
+              <UploadCloud className="h-12 w-12 text-muted-foreground" />
+              <p className="mt-4 font-semibold">{t('uploadToBegin')}</p>
+              <p className="text-sm text-muted-foreground">{t('orSelectRecent')}</p>
+            </div>
+          )}
         </div>
-        
-        <Card className="mt-4">
-          <CardHeader><CardTitle><div className="flex items-center gap-2"><History className="h-4 w-4" />{t('recentProJobs')}</div></CardTitle></CardHeader>
-          <CardContent>
-            {isLoadingRecentJobs ? <Skeleton className="h-24 w-full" /> : proJobs.length > 0 ? (
-              <ScrollArea className="h-32">
-                <div className="flex gap-4 pb-2">
-                  {proJobs.map(job => {
-                    const urlToPreview = job.final_image_url || job.source_person_image_url;
-                    return (
-                      <button key={job.id} onClick={() => handleSelectJob(job)} className={cn("border-2 rounded-lg p-0.5 flex-shrink-0 w-24 h-24", selectedJob?.id === job.id ? "border-primary" : "border-transparent")}>
-                        <SecureImageDisplay imageUrl={urlToPreview} alt="Recent job" className="w-full h-full object-cover" />
-                      </button>
-                    )
-                  })}
-                </div>
-              </ScrollArea>
-            ) : <p className="text-muted-foreground text-sm">{t('noRecentProJobs')}</p>}
-          </CardContent>
-        </Card>
       </div>
       
-      <DebugStepsModal 
-        isOpen={isDebugModalOpen}
-        onClose={() => setIsDebugModalOpen(false)}
-        assets={selectedJob?.metadata?.debug_assets || null}
-      />
-
-      <Dialog open={isGuideOpen} onOpenChange={setIsGuideOpen}>
-        <DialogContent className="max-w-2xl">
-            <DialogHeader>
-                <DialogTitle>{t('inpaintingGuideTitle')}</DialogTitle>
-            </DialogHeader>
-            <ScrollArea className="max-h-[70vh] pr-4">
-                <div className="space-y-4 markdown-content">
-                    <ReactMarkdown>{t('inpaintingGuideContent')}</ReactMarkdown>
-                </div>
+      <Card className="mt-4">
+        <CardHeader><CardTitle><div className="flex items-center gap-2"><History className="h-4 w-4" />{t('recentProJobs')}</div></CardTitle></CardHeader>
+        <CardContent>
+          {isLoadingRecentJobs ? <Skeleton className="h-24 w-full" /> : proJobs.length > 0 ? (
+            <ScrollArea className="h-32">
+              <div className="flex gap-4 pb-2">
+                {proJobs.map(job => {
+                  const urlToPreview = job.final_image_url || job.source_person_image_url;
+                  return (
+                    <button key={job.id} onClick={() => handleSelectJob(job)} className={cn("border-2 rounded-lg p-0.5 flex-shrink-0 w-24 h-24", selectedJob?.id === job.id ? "border-primary" : "border-transparent")}>
+                      <SecureImageDisplay imageUrl={urlToPreview || null} alt="Recent job" className="w-full h-full object-cover" />
+                    </button>
+                  )
+                })}
+              </div>
             </ScrollArea>
-            <DialogFooter>
-                <Button onClick={() => setIsGuideOpen(false)}>{t('done')}</Button>
-            </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          ) : <p className="text-muted-foreground text-sm">{t('noRecentProJobs')}</p>}
+        </CardContent>
+      </Card>
     </>
   );
 };
