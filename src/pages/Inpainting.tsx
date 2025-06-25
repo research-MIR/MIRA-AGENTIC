@@ -53,15 +53,21 @@ interface InpaintingJob {
   }
 }
 
-const SecureImageDisplay = ({ imageUrl, alt, onClick, className }: { imageUrl: string | null, alt: string, onClick?: (e: React.MouseEvent<HTMLImageElement>) => void, className?: string }) => {
+const SecureImageDisplay = ({ imageUrl, alt, onClick, className, style }: { 
+    imageUrl: string | null, 
+    alt: string, 
+    onClick?: (e: React.MouseEvent<HTMLImageElement>) => void, 
+    className?: string,
+    style?: React.CSSProperties 
+}) => {
     const { displayUrl, isLoading, error } = useSecureImage(imageUrl);
     const hasClickHandler = !!onClick;
   
-    if (!imageUrl) return <div className={cn("w-full h-full bg-muted rounded-md flex items-center justify-center", className)}><ImageIcon className="h-6 w-6 text-muted-foreground" /></div>;
-    if (isLoading) return <div className={cn("w-full h-full bg-muted rounded-md flex items-center justify-center", className)}><Loader2 className="h-6 w-6 animate-spin" /></div>;
-    if (error) return <div className={cn("w-full h-full bg-muted rounded-md flex items-center justify-center", className)}><AlertTriangle className="h-6 w-6 text-destructive" /></div>;
+    if (!imageUrl) return <div className={cn("w-full h-full bg-muted rounded-md flex items-center justify-center", className)} style={style}><ImageIcon className="h-6 w-6 text-muted-foreground" /></div>;
+    if (isLoading) return <div className={cn("w-full h-full bg-muted rounded-md flex items-center justify-center", className)} style={style}><Loader2 className="h-6 w-6 animate-spin" /></div>;
+    if (error) return <div className={cn("w-full h-full bg-muted rounded-md flex items-center justify-center", className)} style={style}><AlertTriangle className="h-6 w-6 text-destructive" /></div>;
     
-    return <img src={displayUrl} alt={alt} className={cn("max-w-full max-h-full object-contain rounded-md", hasClickHandler && "cursor-pointer", className)} onClick={onClick} />;
+    return <img src={displayUrl} alt={alt} className={cn("max-w-full max-h-full object-contain rounded-md", hasClickHandler && "cursor-pointer", className)} onClick={onClick} style={style} />;
 };
 
 const ImageUploader = ({ onFileSelect, title, imageUrl, onClear, icon }: { onFileSelect: (file: File) => void, title: string, imageUrl: string | null, onClear: () => void, icon: React.ReactNode }) => {
@@ -104,6 +110,7 @@ const Inpainting = () => {
   const [isGuideOpen, setIsGuideOpen] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [isAutoPromptEnabled, setIsAutoPromptEnabled] = useState(true);
+  const [isAutoMaskEnabled, setIsAutoMaskEnabled] = useState(false);
   const [isSizeWarningOpen, setIsSizeWarningOpen] = useState(false);
 
   const [numAttempts, setNumAttempts] = useState(1);
@@ -144,14 +151,11 @@ const Inpainting = () => {
     setReferenceImageFile(file);
     if (file) {
       setIsAutoPromptEnabled(true);
+      setIsAutoMaskEnabled(true);
+    } else {
+      setIsAutoMaskEnabled(false);
     }
   };
-
-  useEffect(() => {
-    if (!referenceImageFile) {
-      setIsAutoPromptEnabled(false);
-    }
-  }, [referenceImageFile]);
 
   useEffect(() => {
     const { url } = consumeImageUrl();
@@ -218,22 +222,29 @@ const Inpainting = () => {
     setResetTrigger(c => c + 1);
   };
 
-  const proceedWithGeneration = async () => {
-    if (!sourceImageFile || !maskImage) return;
+  const proceedWithGeneration = async (maskToUse: string) => {
+    if (!sourceImageFile) return;
     setIsLoading(true);
     let toastId = showLoading(t('sendingJob'));
 
     try {
       let finalPrompt = prompt;
 
-      if (!isAutoPromptEnabled && prompt.trim()) {
+      if (isAutoPromptEnabled && (prompt.trim() || referenceImageFile)) {
         dismissToast(toastId);
         toastId = showLoading(t('enhancingPrompt'));
-        const { data: enhancedData, error: enhancerError } = await supabase.functions.invoke('MIRA-AGENT-tool-text-prompt-enhancer', {
-          body: { user_prompt: prompt }
+        const { data: enhancedData, error: enhancerError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-prompt-helper', {
+          body: { 
+            person_image_base64: await fileToBase64(sourceImageFile),
+            person_image_mime_type: sourceImageFile.type,
+            garment_image_base64: referenceImageFile ? await fileToBase64(referenceImageFile) : null,
+            garment_image_mime_type: referenceImageFile?.type,
+            prompt_appendix: prompt,
+            is_garment_mode: false,
+          }
         });
         if (enhancerError) throw enhancerError;
-        finalPrompt = enhancedData.enhanced_prompt;
+        finalPrompt = enhancedData.final_prompt;
         setPrompt(finalPrompt);
         dismissToast(toastId);
         toastId = showLoading(t('sendingJob'));
@@ -243,18 +254,13 @@ const Inpainting = () => {
 
       const payload: any = {
         source_image_base64: await fileToBase64(optimizedSource),
-        mask_image_base64: maskImage.split(',')[1],
+        mask_image_base64: maskToUse.split(',')[1],
         prompt: finalPrompt,
         is_garment_mode: false,
         user_id: session?.user.id,
         num_attempts: numAttempts,
         mask_expansion_percent: maskExpansion,
       };
-
-      if (referenceImageFile) {
-        const optimizedReference = await optimizeImage(referenceImageFile);
-        payload.reference_image_base64 = await fileToBase64(optimizedReference);
-      }
 
       const { error } = await supabase.functions.invoke('MIRA-AGENT-proxy-inpainting', { body: payload });
 
@@ -275,47 +281,73 @@ const Inpainting = () => {
   };
 
   const handleGenerate = async () => {
-    if (!sourceImageFile || !maskImage) {
-      showError("Please provide a source image and draw a mask.");
-      return;
-    }
-    if (!isAutoPromptEnabled && !prompt.trim() && !referenceImageFile) {
-      showError("Please provide a prompt or enable auto-prompt.");
-      return;
-    }
+    if (!sourceImageFile) return showError("Please provide a source image.");
+    if (!isAutoMaskEnabled && !maskImage) return showError("Please draw a mask or enable auto-masking.");
+    if (!isAutoPromptEnabled && !prompt.trim() && !referenceImageFile) return showError("Please provide a prompt or enable auto-prompt.");
 
-    const maskImg = new Image();
-    maskImg.src = maskImage;
-    maskImg.onload = () => {
-      const tempCanvas = document.createElement('canvas');
-      tempCanvas.width = maskImg.width;
-      tempCanvas.height = maskImg.height;
-      const ctx = tempCanvas.getContext('2d');
-      if (!ctx) return;
-      ctx.drawImage(maskImg, 0, 0);
-      const imageData = ctx.getImageData(0, 0, tempCanvas.width, tempCanvas.height).data;
-      
-      let minX = tempCanvas.width, minY = tempCanvas.height, maxX = 0, maxY = 0;
-      for (let i = 0; i < imageData.length; i += 4) {
-        if (imageData[i + 3] > 0) { // Check alpha channel
-          const x = (i / 4) % tempCanvas.width;
-          const y = Math.floor((i / 4) / tempCanvas.width);
-          if (x < minX) minX = x;
-          if (x > maxX) maxX = x;
-          if (y < minY) minY = y;
-          if (y > maxY) maxY = y;
+    if (isAutoMaskEnabled) {
+      if (!referenceImageFile) return showError("Auto-mask requires a reference image.");
+      setIsLoading(true);
+      const toastId = showLoading("Generating automatic mask...");
+      try {
+        const sourceBase64 = await fileToBase64(sourceImageFile);
+        const referenceBase64 = await fileToBase64(referenceImageFile);
+        const img = new Image();
+        img.onload = async () => {
+          const { data, error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-segmentation', {
+            body: {
+              user_id: session?.user.id,
+              image_base64: sourceBase64,
+              mime_type: sourceImageFile.type,
+              reference_image_base64: referenceBase64,
+              reference_mime_type: referenceImageFile.type,
+              image_dimensions: { width: img.width, height: img.height },
+            }
+          });
+          if (error) throw error;
+          dismissToast(toastId);
+          proceedWithGeneration(data.finalMaskUrl);
+        };
+        img.src = URL.createObjectURL(sourceImageFile);
+      } catch (err: any) {
+        dismissToast(toastId);
+        showError(`Auto-masking failed: ${err.message}`);
+        setIsLoading(false);
+      }
+    } else {
+      const maskImg = new Image();
+      maskImg.src = maskImage!;
+      maskImg.onload = () => {
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = maskImg.width;
+        tempCanvas.height = maskImg.height;
+        const ctx = tempCanvas.getContext('2d');
+        if (!ctx) return;
+        ctx.drawImage(maskImg, 0, 0);
+        const imageData = ctx.getImageData(0, 0, tempCanvas.width, tempCanvas.height).data;
+        
+        let minX = tempCanvas.width, minY = tempCanvas.height, maxX = 0, maxY = 0;
+        for (let i = 0; i < imageData.length; i += 4) {
+          if (imageData[i + 3] > 0) {
+            const x = (i / 4) % tempCanvas.width;
+            const y = Math.floor((i / 4) / tempCanvas.width);
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+          }
         }
-      }
 
-      const bboxWidth = maxX - minX;
-      const bboxHeight = maxY - minY;
+        const bboxWidth = maxX - minX;
+        const bboxHeight = maxY - minY;
 
-      if (bboxWidth < 512 || bboxHeight < 512) {
-        setIsSizeWarningOpen(true);
-      } else {
-        proceedWithGeneration();
-      }
-    };
+        if (bboxWidth < 512 || bboxHeight < 512) {
+          setIsSizeWarningOpen(true);
+        } else {
+          proceedWithGeneration(maskImage!);
+        }
+      };
+    }
   };
 
   const { dropzoneProps, isDraggingOver } = useDropzone({
@@ -352,7 +384,7 @@ const Inpainting = () => {
     );
   };
 
-  const isGenerateDisabled = isLoading || !!selectedJob || !sourceImageFile || !maskImage || (!isAutoPromptEnabled && !prompt.trim() && !referenceImageFile);
+  const isGenerateDisabled = isLoading || !!selectedJob || !sourceImageFile || (!isAutoMaskEnabled && !maskImage) || (!isAutoPromptEnabled && !prompt.trim() && !referenceImageFile);
   const placeholderText = isAutoPromptEnabled ? t('promptPlaceholderInpaintingOptional') : t('promptPlaceholderInpaintingRequired');
 
   return (
@@ -416,7 +448,7 @@ const Inpainting = () => {
                           <AccordionTrigger>{t('promptOptional')}</AccordionTrigger>
                           <AccordionContent className="pt-4 space-y-2">
                             <div className="flex items-center space-x-2">
-                              <Switch id="auto-prompt-pro" checked={isAutoPromptEnabled} onCheckedChange={setIsAutoPromptEnabled} disabled={!referenceImageFile} />
+                              <Switch id="auto-prompt-pro" checked={isAutoPromptEnabled} onCheckedChange={setIsAutoPromptEnabled} />
                               <Label htmlFor="auto-prompt-pro">{t('autoGenerate')}</Label>
                             </div>
                             <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={placeholderText} rows={4} disabled={isAutoPromptEnabled} />
@@ -456,20 +488,36 @@ const Inpainting = () => {
               {sourceImageUrl && !selectedJob ? (
                 <>
                   <div className="w-full flex-1 flex items-center justify-center relative p-2 overflow-hidden">
-                    <MaskCanvas 
-                      imageUrl={sourceImageUrl} 
-                      onMaskChange={setMaskImage}
-                      brushSize={brushSize}
-                      resetTrigger={resetTrigger}
-                    />
+                    <div className="absolute top-2 left-2 z-20 bg-background/80 p-2 rounded-lg shadow-md">
+                      <div className="flex items-center space-x-2">
+                        <Switch id="auto-mask" checked={isAutoMaskEnabled} onCheckedChange={setIsAutoMaskEnabled} disabled={!referenceImageFile} />
+                        <Label htmlFor="auto-mask">{t('autoMask')}</Label>
+                      </div>
+                    </div>
+                    {isAutoMaskEnabled ? (
+                      <div className="text-center text-muted-foreground">
+                        <Sparkles className="h-12 w-12 mx-auto" />
+                        <p className="mt-4 font-semibold">Auto-Mask Enabled</p>
+                        <p className="text-sm">A mask will be generated from your reference image.</p>
+                      </div>
+                    ) : (
+                      <MaskCanvas 
+                        imageUrl={sourceImageUrl} 
+                        onMaskChange={setMaskImage}
+                        brushSize={brushSize}
+                        resetTrigger={resetTrigger}
+                      />
+                    )}
                   </div>
-                  <div className="p-2 shrink-0">
-                    <MaskControls 
-                      brushSize={brushSize} 
-                      onBrushSizeChange={setBrushSize} 
-                      onReset={handleResetMask} 
-                    />
-                  </div>
+                  {!isAutoMaskEnabled && (
+                    <div className="p-2 shrink-0">
+                      <MaskControls 
+                        brushSize={brushSize} 
+                        onBrushSizeChange={setBrushSize} 
+                        onReset={handleResetMask} 
+                      />
+                    </div>
+                  )}
                 </>
               ) : selectedJob ? (
                 renderJobResult(selectedJob)
@@ -537,7 +585,7 @@ const Inpainting = () => {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={proceedWithGeneration}>Continue Anyway</AlertDialogAction>
+            <AlertDialogAction onClick={() => proceedWithGeneration(maskImage!)}>Continue Anyway</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
