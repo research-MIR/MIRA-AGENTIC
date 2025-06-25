@@ -10,6 +10,8 @@ const corsHeaders = {
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
+const MAX_DOWNLOAD_RETRIES = 3;
+const RETRY_DOWNLOAD_DELAY_MS = 2000;
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -31,50 +33,36 @@ serve(async (req) => {
 
     if (fetchError) throw fetchError;
     if (!job.final_result?.publicUrl) throw new Error("Job is missing the final_result URL (inpainted crop).");
-
-    const metadata = job.metadata || {};
-    if (!metadata.full_source_image_base64 || !metadata.bbox || !metadata.cropped_dilated_mask_base64) {
-      throw new Error("Job is missing essential metadata (source image, bbox, or mask) for compositing.");
+    if (!job.metadata?.full_source_image_base64 || !job.metadata?.bbox) {
+      throw new Error("Job is missing essential metadata (source image or bbox) for compositing.");
     }
 
-    const fullSourceImage = await loadImage(`data:image/png;base64,${metadata.full_source_image_base64}`);
-    const inpaintedCropResponse = await fetch(job.final_result.publicUrl);
-    if (!inpaintedCropResponse.ok) throw new Error(`Failed to download inpainted crop from ComfyUI: ${inpaintedCropResponse.statusText}`);
+    const fullSourceImage = await loadImage(`data:image/png;base64,${job.metadata.full_source_image_base64}`);
+    
+    let inpaintedCropResponse: Response | null = null;
+    for (let attempt = 1; attempt <= MAX_DOWNLOAD_RETRIES; attempt++) {
+        const response = await fetch(job.final_result.publicUrl);
+        if (response.ok && response.headers.get('content-type')?.startsWith('image/')) {
+            inpaintedCropResponse = response;
+            console.log(`[Compositor-Inpainting][${job_id}] Successfully downloaded inpainted crop on attempt ${attempt}.`);
+            break;
+        }
+        console.warn(`[Compositor-Inpainting][${job_id}] Failed to download inpainted crop on attempt ${attempt}. Status: ${response.status}. Retrying in ${RETRY_DOWNLOAD_DELAY_MS}ms...`);
+        await new Promise(resolve => setTimeout(resolve, RETRY_DOWNLOAD_DELAY_MS));
+    }
+
+    if (!inpaintedCropResponse) {
+        throw new Error(`Failed to download inpainted crop from ComfyUI after ${MAX_DOWNLOAD_RETRIES} attempts.`);
+    }
+
     const inpaintedCropArrayBuffer = await inpaintedCropResponse.arrayBuffer();
     const inpaintedCropImage = await loadImage(new Uint8Array(inpaintedCropArrayBuffer));
-    const croppedMaskImage = await loadImage(`data:image/png;base64,${metadata.cropped_dilated_mask_base64}`);
 
-    // Main canvas for the final image
     const canvas = createCanvas(fullSourceImage.width(), fullSourceImage.height());
     const ctx = canvas.getContext('2d');
-
-    // 1. Draw the original image as the base layer
+    
     ctx.drawImage(fullSourceImage, 0, 0);
-
-    // 2. Create a temporary canvas for the feathered crop
-    const featheredCropCanvas = createCanvas(metadata.bbox.width, metadata.bbox.height);
-    const featheredCtx = featheredCropCanvas.getContext('2d');
-
-    // 3. Draw the inpainted crop onto the temp canvas
-    featheredCtx.drawImage(inpaintedCropImage, 0, 0, metadata.bbox.width, metadata.bbox.height);
-
-    // 4. Apply the mask with feathering
-    featheredCtx.globalCompositeOperation = 'destination-in';
-
-    // 5. Feather the mask by blurring it
-    const featherAmount = Math.max(5, Math.round(metadata.bbox.width * 0.05)); // Feather by 5% of width, with a minimum of 5px
-    featheredCtx.filter = `blur(${featherAmount}px)`;
-
-    // 6. Draw the mask onto the temp canvas. This will use the blur filter and the composite operation
-    // to create a feathered alpha channel on the inpainted crop.
-    featheredCtx.drawImage(croppedMaskImage, 0, 0, metadata.bbox.width, metadata.bbox.height);
-
-    // 7. Reset composite operation and filter for the main canvas
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.filter = 'none'; // Reset filter on the main context just in case
-
-    // 8. Draw the feathered crop onto the main canvas at the correct position
-    ctx.drawImage(featheredCropCanvas, metadata.bbox.x, metadata.bbox.y);
+    ctx.drawImage(inpaintedCropImage, job.metadata.bbox.x, job.metadata.bbox.y, job.metadata.bbox.width, job.metadata.bbox.height);
     
     const finalImageBuffer = canvas.toBuffer('image/png');
     const finalFilePath = `${job.user_id}/inpainting-final/${Date.now()}_final.png`;
@@ -90,7 +78,7 @@ serve(async (req) => {
       .update({ 
           status: 'complete',
           final_result: { publicUrl: finalPublicUrl, storagePath: finalFilePath },
-          metadata: { ...metadata, full_source_image_base64: null, cropped_dilated_mask_base64: null } // Clear large data
+          metadata: { ...job.metadata, full_source_image_base64: null } // Clear large data
       })
       .eq('id', job_id);
 

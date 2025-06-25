@@ -9,7 +9,7 @@ const corsHeaders = {
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
-const POLLING_INTERVAL_MS = 2500; // Reduced from 5000ms
+const POLLING_INTERVAL_MS = 2500;
 const FINAL_OUTPUT_NODE_ID = "9";
 
 serve(async (req) => {
