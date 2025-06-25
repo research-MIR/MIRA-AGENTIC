@@ -19,22 +19,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { ScrollArea } from "@/components/ui/scroll-area";
 import ReactMarkdown from "react-markdown";
 import { useImageTransferStore } from "@/store/imageTransferStore";
-
-interface BitStudioJob {
-  id: string;
-  status: 'queued' | 'processing' | 'complete' | 'failed';
-  source_person_image_url: string;
-  source_garment_image_url: string;
-  final_image_url?: string;
-  error_message?: string;
-  mode: 'base' | 'inpaint';
-  metadata?: {
-    debug_assets?: any;
-    prompt_used?: string;
-    source_image_url?: string;
-    reference_image_url?: string;
-  }
-}
+import { BitStudioJob } from "@/types/vto";
 
 const SecureImageDisplay = ({ imageUrl, alt, onClick, className, style }: { 
     imageUrl: string | null, 
@@ -182,7 +167,7 @@ const VirtualTryOn = () => {
                         const urlToPreview = job.final_image_url || job.source_person_image_url;
                         return (
                           <button key={job.id} onClick={() => handleSelectJob(job)} className={cn("border-2 rounded-lg p-1 flex-shrink-0 w-24 h-24", selectedJobId === job.id ? "border-primary" : "border-transparent")}>
-                            <SecureImageDisplay imageUrl={urlToPreview} alt="Recent job" />
+                            <SecureImageDisplay imageUrl={urlToPreview || null} alt="Recent job" />
                           </button>
                         )
                       })}

@@ -27,6 +27,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { optimizeImage } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { BatchInpaintPro } from "./BatchInpaintPro";
+import { BitStudioJob } from "@/types/vto";
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -36,21 +37,6 @@ const fileToBase64 = (file: File): Promise<string> => {
     reader.onerror = (error) => reject(error);
   });
 };
-
-interface InpaintingJob {
-  id: string;
-  status: 'queued' | 'processing' | 'complete' | 'failed';
-  final_result?: {
-    publicUrl: string;
-  };
-  error_message?: string;
-  metadata?: {
-    debug_assets?: any;
-    prompt_used?: string;
-    source_image_url?: string;
-    reference_image_url?: string;
-  }
-}
 
 const SecureImageDisplay = ({ imageUrl, alt, onClick, className, style }: { 
     imageUrl: string | null, 
@@ -91,10 +77,10 @@ const ImageUploader = ({ onFileSelect, title, imageUrl, onClear, icon }: { onFil
 };
 
 interface VirtualTryOnProProps {
-  recentJobs: InpaintingJob[] | undefined;
+  recentJobs: BitStudioJob[] | undefined;
   isLoadingRecentJobs: boolean;
-  selectedJob: InpaintingJob | undefined;
-  handleSelectJob: (job: InpaintingJob) => void;
+  selectedJob: BitStudioJob | undefined;
+  handleSelectJob: (job: BitStudioJob) => void;
   resetForm: () => void;
   transferredImageUrl?: string | null;
   onTransferConsumed: () => void;
@@ -302,12 +288,12 @@ export const VirtualTryOnPro = ({
     onDrop: (e) => handleFileSelect(e.target.files?.[0]),
   });
 
-  const renderJobResult = (job: InpaintingJob) => {
+  const renderJobResult = (job: BitStudioJob) => {
     if (job.status === 'failed') return <p className="text-destructive text-sm p-2">{t('jobFailed', { errorMessage: job.error_message })}</p>;
-    if (job.status === 'complete' && job.final_result?.publicUrl) {
+    if (job.status === 'complete' && job.final_image_url) {
       return (
         <div className="relative group w-full h-full">
-          <SecureImageDisplay imageUrl={job.final_result.publicUrl} alt="Final Result" onClick={() => showImage({ images: [{ url: job.final_result!.publicUrl }], currentIndex: 0 })} />
+          <SecureImageDisplay imageUrl={job.final_image_url} alt="Final Result" onClick={() => showImage({ images: [{ url: job.final_image_url! }], currentIndex: 0 })} />
           {job.metadata?.debug_assets && (
             <Button 
               variant="secondary" 
@@ -490,7 +476,7 @@ export const VirtualTryOnPro = ({
             <ScrollArea className="h-32">
               <div className="flex gap-4 pb-2">
                 {proJobs.map(job => {
-                  const urlToPreview = job.final_result?.publicUrl || job.metadata?.source_image_url;
+                  const urlToPreview = job.final_image_url || job.metadata?.source_image_url;
                   return (
                     <button key={job.id} onClick={() => handleSelectJob(job)} className={cn("border-2 rounded-lg p-0.5 flex-shrink-0 w-24 h-24", selectedJob?.id === job.id ? "border-primary" : "border-transparent")}>
                       <SecureImageDisplay imageUrl={urlToPreview || null} alt="Recent job" className="w-full h-full object-cover" />
