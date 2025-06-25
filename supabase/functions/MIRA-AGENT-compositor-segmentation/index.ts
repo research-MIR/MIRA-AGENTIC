@@ -159,19 +159,33 @@ serve(async (req) => {
             .update({ status: 'segmented' })
             .eq('id', parentPairJob.id);
         
-        supabase.functions.invoke('MIRA-AGENT-worker-batch-inpaint-step2', {
-            body: {
-                pair_job_id: parentPairJob.id,
-                final_mask_url: finalPublicUrl
+        try {
+            console.log(`[Compositor][${job.id}] Awaiting invocation of MIRA-AGENT-worker-batch-inpaint-step2...`);
+            const { data: workerData, error: invokeError } = await supabase.functions.invoke('MIRA-AGENT-worker-batch-inpaint-step2', {
+                body: {
+                    pair_job_id: parentPairJob.id,
+                    final_mask_url: finalPublicUrl
+                }
+            });
+
+            if (invokeError) {
+                throw invokeError;
             }
-        }).catch(console.error);
+            console.log(`[Compositor][${job.id}] Worker invocation successful. Response:`, workerData);
+
+        } catch (e) {
+            console.error(`[Compositor][${job.id}] CRITICAL: Invocation of worker failed. Error:`, e.message);
+            await supabase.from('mira-agent-batch-inpaint-pair-jobs')
+                .update({ status: 'failed', error_message: `Failed to invoke step 2 worker: ${e.message}` })
+                .eq('id', parentPairJob.id);
+        }
     }
 
     return new Response(JSON.stringify({ success: true, finalMaskUrl: finalPublicUrl }), { headers: corsHeaders });
 
   } catch (error) {
-    console.error(`[Compositor][${job_id}] Error:`, error);
-    await supabase.from('mira-agent-mask-aggregation-jobs').update({ status: 'failed', error_message: error.message }).eq('id', job_id);
+    console.error(`[Compositor][${job.id}] Error:`, error);
+    await supabase.from('mira-agent-mask-aggregation-jobs').update({ status: 'failed', error_message: error.message }).eq('id', job.id);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,
