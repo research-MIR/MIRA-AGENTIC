@@ -176,7 +176,7 @@ serve(async (req) => {
     const combinedImageData = combinedCtx.createImageData(image_dimensions.width, image_dimensions.height);
     const combinedData = combinedImageData.data;
     
-    const majorityThreshold = 7;
+    const majorityThreshold = 4;
     for (let i = 0; i < accumulator.length; i++) {
         if (accumulator[i] >= majorityThreshold) {
             const idx = i * 4;
