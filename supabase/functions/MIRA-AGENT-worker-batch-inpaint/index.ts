@@ -18,7 +18,6 @@ const blobToBase64 = async (blob: Blob): Promise<string> => {
 
 async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
     const url = new URL(publicUrl);
-    // Example path: /storage/v1/object/public/mira-agent-user-uploads/user-id/vto-batch-source/file.png
     const pathStartIndex = url.pathname.indexOf(UPLOAD_BUCKET);
     if (pathStartIndex === -1) {
         throw new Error(`Could not find bucket name '${UPLOAD_BUCKET}' in URL path: ${publicUrl}`);
@@ -29,7 +28,6 @@ async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string)
         throw new Error(`Could not parse file path from URL: ${publicUrl}`);
     }
 
-    console.log(`[BatchInpaintWorker] Downloading from storage path: ${filePath}`);
     const { data, error } = await supabase.storage.from(UPLOAD_BUCKET).download(filePath);
 
     if (error) {
@@ -38,38 +36,52 @@ async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string)
     return data;
 }
 
-async function processPair(supabase: SupabaseClient, pair: any, userId: string, pairIndex: number) {
-    const pairId = `pair-${pairIndex}-${Date.now()}`;
-    console.log(`[BatchInpaintWorker][${pairId}] Starting processing.`);
-    const { person_url, garment_url, appendix } = pair;
-    console.log(`[BatchInpaintWorker][${pairId}] Person URL: ${person_url}, Garment URL: ${garment_url}`);
+serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { headers: corsHeaders });
+  }
 
-    // 1. Download images and convert to base64
-    console.log(`[BatchInpaintWorker][${pairId}] Step 1: Downloading images...`);
+  const { pair_job_id } = await req.json();
+  if (!pair_job_id) {
+    return new Response(JSON.stringify({ error: "pair_job_id is required." }), { status: 400, headers: corsHeaders });
+  }
+
+  const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
+  console.log(`[BatchInpaintWorker][${pair_job_id}] Starting processing.`);
+
+  try {
+    const { data: pairJob, error: fetchError } = await supabase
+      .from('mira-agent-batch-inpaint-pair-jobs')
+      .select('*')
+      .eq('id', pair_job_id)
+      .single();
+
+    if (fetchError) throw new Error(`Failed to fetch pair job: ${fetchError.message}`);
+    if (!pairJob) throw new Error(`Pair job with ID ${pair_job_id} not found.`);
+
+    const { user_id, source_person_image_url, source_garment_image_url, prompt_appendix } = pairJob;
+
+    console.log(`[BatchInpaintWorker][${pair_job_id}] Downloading images...`);
     const [personBlob, garmentBlob] = await Promise.all([
-        downloadFromSupabase(supabase, person_url),
-        downloadFromSupabase(supabase, garment_url)
+        downloadFromSupabase(supabase, source_person_image_url),
+        downloadFromSupabase(supabase, source_garment_image_url)
     ]);
     
     const [personBase64, garmentBase64] = await Promise.all([
         blobToBase64(personBlob),
         blobToBase64(garmentBlob)
     ]);
-    console.log(`[BatchInpaintWorker][${pairId}] Images downloaded and encoded successfully.`);
+    console.log(`[BatchInpaintWorker][${pair_job_id}] Images downloaded and encoded.`);
 
-    // 2. Get image dimensions
-    console.log(`[BatchInpaintWorker][${pairId}] Step 2: Getting image dimensions...`);
     const { loadImage } = await import('https://deno.land/x/canvas@v1.4.1/mod.ts');
     const personImageBuffer = await personBlob.arrayBuffer();
     const personImage = await loadImage(new Uint8Array(personImageBuffer));
     const image_dimensions = { width: personImage.width(), height: personImage.height() };
-    console.log(`[BatchInpaintWorker][${pairId}] Source image dimensions: ${image_dimensions.width}x${image_dimensions.height}`);
 
-    // 3. Auto-mask
-    console.log(`[BatchInpaintWorker][${pairId}] Step 3: Invoking segmentation orchestrator...`);
+    console.log(`[BatchInpaintWorker][${pair_job_id}] Invoking segmentation orchestrator...`);
     const { data: segmentationData, error: segmentationError } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-segmentation', {
         body: {
-            user_id: userId,
+            user_id: user_id,
             image_base64: personBase64,
             mime_type: personBlob.type,
             reference_image_base64: garmentBase64,
@@ -79,30 +91,28 @@ async function processPair(supabase: SupabaseClient, pair: any, userId: string, 
     });
     if (segmentationError) throw new Error(`Segmentation failed: ${segmentationError.message}`);
     const mask_image_url = segmentationData.finalMaskUrl;
-    console.log(`[BatchInpaintWorker][${pairId}] Segmentation complete. Mask URL: ${mask_image_url}`);
+    console.log(`[BatchInpaintWorker][${pair_job_id}] Segmentation complete. Mask URL: ${mask_image_url}`);
 
-    // 4. Auto-prompt
-    console.log(`[BatchInpaintWorker][${pairId}] Step 4: Generating prompt...`);
+    console.log(`[BatchInpaintWorker][${pair_job_id}] Generating prompt...`);
     const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-prompt-helper', {
         body: {
             person_image_base64: personBase64,
             person_image_mime_type: personBlob.type,
             garment_image_base64: garmentBase64,
             garment_image_mime_type: garmentBlob.type,
-            prompt_appendix: appendix,
+            prompt_appendix: prompt_appendix,
             is_garment_mode: true,
         }
     });
     if (promptError) throw new Error(`Prompt generation failed: ${promptError.message}`);
     const finalPrompt = promptData.final_prompt;
-    console.log(`[BatchInpaintWorker][${pairId}] Prompt generated: "${finalPrompt.substring(0, 60)}..."`);
+    console.log(`[BatchInpaintWorker][${pair_job_id}] Prompt generated: "${finalPrompt.substring(0, 60)}..."`);
 
-    // 5. Queue inpainting job
-    console.log(`[BatchInpaintWorker][${pairId}] Step 5: Queuing final inpainting job...`);
-    const { error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
+    console.log(`[BatchInpaintWorker][${pair_job_id}] Queuing final inpainting job...`);
+    const { data: proxyData, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
         body: {
             mode: 'inpaint',
-            user_id: userId,
+            user_id: user_id,
             full_source_image_base64: personBase64,
             mask_image_url: mask_image_url,
             prompt: finalPrompt,
@@ -111,49 +121,28 @@ async function processPair(supabase: SupabaseClient, pair: any, userId: string, 
             resolution: 'standard',
             mask_expansion_percent: 3,
             num_attempts: 1,
+            batch_pair_job_id: pair_job_id
         }
     });
     if (proxyError) throw new Error(`Job queuing failed: ${proxyError.message}`);
-    console.log(`[BatchInpaintWorker][${pairId}] Pair processed and job queued successfully.`);
-}
+    
+    const inpaintingJobId = proxyData.jobIds[0];
+    console.log(`[BatchInpaintWorker][${pair_job_id}] Pair processed and job queued successfully. Inpainting Job ID: ${inpaintingJobId}`);
+    
+    await supabase.from('mira-agent-batch-inpaint-pair-jobs')
+        .update({ status: 'delegated', inpainting_job_id: inpaintingJobId })
+        .eq('id', pair_job_id);
 
-serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
-  }
-
-  try {
-    const { pairs, user_id } = await req.json();
-    if (!pairs || !Array.isArray(pairs) || pairs.length === 0 || !user_id) {
-      throw new Error("`pairs` array and `user_id` are required.");
-    }
-
-    const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-    console.log(`[BatchInpaintOrchestrator] Received batch request with ${pairs.length} pairs for user ${user_id}.`);
-
-    // Don't await this. Let it run in the background.
-    Promise.allSettled(pairs.map((pair, index) => processPair(supabase, pair, user_id, index)))
-        .then(results => {
-            let successCount = 0;
-            results.forEach((result, index) => {
-                if (result.status === 'fulfilled') {
-                    successCount++;
-                    console.log(`[BatchInpaintOrchestrator] Worker for pair ${index} completed successfully.`);
-                } else {
-                    console.error(`[BatchInpaintOrchestrator] Worker for pair ${index} FAILED. Reason:`, result.reason);
-                }
-            });
-            console.log(`[BatchInpaintOrchestrator] Batch complete. ${successCount}/${pairs.length} jobs queued successfully.`);
-            // In a real app, you might send a notification to the user here.
-        });
-
-    return new Response(JSON.stringify({ success: true, message: `${pairs.length} jobs are being processed in the background.` }), {
+    return new Response(JSON.stringify({ success: true }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });
 
   } catch (error) {
-    console.error("[BatchInpaintOrchestrator] Error:", error);
+    console.error(`[BatchInpaintWorker][${pair_job_id}] Error:`, error);
+    await supabase.from('mira-agent-batch-inpaint-pair-jobs')
+      .update({ status: 'failed', error_message: error.message })
+      .eq('id', pair_job_id);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,

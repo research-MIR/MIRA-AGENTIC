@@ -9,11 +9,11 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// A job is now considered stalled if it hasn't been polled in the last 5 seconds.
-const STALLED_THRESHOLD_SECONDS = 5;
+const STALLED_POLLER_THRESHOLD_SECONDS = 30;
 
 serve(async (req) => {
-  console.log("BitStudio Watchdog: Function invoked.");
+  const requestId = `watchdog-bg-${Date.now()}`;
+  console.log(`[Watchdog-BG][${requestId}] Function invoked.`);
 
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -21,47 +21,67 @@ serve(async (req) => {
 
   try {
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-    
-    const threshold = new Date(Date.now() - STALLED_THRESHOLD_SECONDS * 1000).toISOString();
-    console.log(`BitStudio Watchdog: Checking for jobs stalled since ${threshold}`);
+    let actionsTaken = [];
 
-    const { data: stalledJobs, error: queryError } = await supabase
+    // --- Task 1: Handle Stalled BitStudio Pollers ---
+    const pollerThreshold = new Date(Date.now() - STALLED_POLLER_THRESHOLD_SECONDS * 1000).toISOString();
+    const { data: stalledJobs, error: stalledError } = await supabase
       .from('mira-agent-bitstudio-jobs')
       .select('id')
       .in('status', ['queued', 'processing'])
-      .lt('last_polled_at', threshold);
+      .lt('last_polled_at', pollerThreshold);
 
-    if (queryError) {
-      throw new Error(`Failed to query for stalled jobs: ${queryError.message}`);
+    if (stalledError) {
+        console.error(`[Watchdog-BG][${requestId}] Error querying for stalled jobs:`, stalledError.message);
+    } else if (stalledJobs && stalledJobs.length > 0) {
+      console.log(`[Watchdog-BG][${requestId}] Found ${stalledJobs.length} stalled BitStudio job(s). Re-triggering pollers...`);
+      const pollerPromises = stalledJobs.map(job => 
+        supabase.functions.invoke('MIRA-AGENT-poller-bitstudio', { body: { job_id: job.id } })
+      );
+      await Promise.allSettled(pollerPromises);
+      actionsTaken.push(`Re-triggered ${stalledJobs.length} stalled BitStudio pollers.`);
+    } else {
+      console.log(`[Watchdog-BG][${requestId}] No stalled BitStudio jobs found.`);
     }
 
-    if (!stalledJobs || stalledJobs.length === 0) {
-      const message = "BitStudio Watchdog: No stalled jobs found. Check complete.";
-      console.log(message);
-      return new Response(JSON.stringify({ message }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 200,
-      });
+    // --- Task 2: Handle New Pending Batch Inpainting Jobs ---
+    const { data: pendingPairs, error: pendingError } = await supabase
+      .from('mira-agent-batch-inpaint-pair-jobs')
+      .select('id')
+      .eq('status', 'pending')
+      .limit(5); // Process up to 5 new jobs per run to avoid overwhelming the system
+
+    if (pendingError) {
+        console.error(`[Watchdog-BG][${requestId}] Error querying for pending batch jobs:`, pendingError.message);
+    } else if (pendingPairs && pendingPairs.length > 0) {
+      console.log(`[Watchdog-BG][${requestId}] Found ${pendingPairs.length} new pending batch job(s). Triggering workers...`);
+      
+      const jobIdsToProcess = pendingPairs.map(p => p.id);
+      
+      // Lock the jobs to prevent them from being picked up again
+      await supabase
+        .from('mira-agent-batch-inpaint-pair-jobs')
+        .update({ status: 'processing' })
+        .in('id', jobIdsToProcess);
+
+      const workerPromises = jobIdsToProcess.map(id => 
+        supabase.functions.invoke('MIRA-AGENT-worker-batch-inpaint', { body: { pair_job_id: id } })
+      );
+      await Promise.allSettled(workerPromises);
+      actionsTaken.push(`Started ${jobIdsToProcess.length} new batch inpaint workers.`);
+    } else {
+        console.log(`[Watchdog-BG][${requestId}] No new pending batch jobs found.`);
     }
 
-    console.log(`BitStudio Watchdog: Found ${stalledJobs.length} stalled job(s). Re-triggering pollers now...`);
-
-    const triggerPromises = stalledJobs.map(job => {
-      console.log(`BitStudio Watchdog: Re-triggering poller for stalled job ID: ${job.id}`);
-      return supabase.functions.invoke('MIRA-AGENT-poller-bitstudio', { body: { job_id: job.id } });
-    });
-
-    await Promise.allSettled(triggerPromises);
-
-    const successMessage = `BitStudio Watchdog: Successfully re-triggered ${stalledJobs.length} stalled job(s).`;
-    console.log(successMessage);
-    return new Response(JSON.stringify({ message: successMessage }), {
+    const finalMessage = actionsTaken.length > 0 ? actionsTaken.join(' ') : "No actions required. All jobs are running normally.";
+    console.log(`[Watchdog-BG][${requestId}] Check complete. ${finalMessage}`);
+    return new Response(JSON.stringify({ message: finalMessage }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });
 
   } catch (error) {
-    console.error("BitStudio Watchdog: Unhandled error:", error);
+    console.error(`[Watchdog-BG][${requestId}] Unhandled error:`, error);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,
