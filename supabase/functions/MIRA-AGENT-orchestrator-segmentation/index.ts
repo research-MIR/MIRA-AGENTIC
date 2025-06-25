@@ -46,7 +46,6 @@ serve(async (req) => {
         const promise = supabase.functions.invoke('MIRA-AGENT-worker-segmentation', {
             body: {
                 aggregation_job_id: aggregationJobId,
-                // Pass all necessary data to the worker
                 mime_type,
                 reference_image_base64,
                 reference_mime_type,
@@ -55,8 +54,6 @@ serve(async (req) => {
         workerPromises.push(promise);
     }
 
-    // We don't await the promises here. This is "fire and forget".
-    // We can log if any of the invocations failed, but we don't block.
     Promise.allSettled(workerPromises).then(results => {
         const failedInvocations = results.filter(r => r.status === 'rejected');
         if (failedInvocations.length > 0) {
