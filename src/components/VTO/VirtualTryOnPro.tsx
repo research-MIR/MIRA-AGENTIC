@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Wand2, Brush, Palette, UploadCloud, Sparkles, Loader2, Image as ImageIcon, X, PlusCircle, AlertTriangle, Eye, Settings, History, HelpCircle, Shirt } from "lucide-react";
+import { Wand2, Brush, Palette, UploadCloud, Sparkles, Loader2, Image as ImageIcon, X, PlusCircle, AlertTriangle, Eye, Settings, History, HelpCircle, Shirt, Users, Link2 } from "lucide-react";
 import { MaskCanvas } from "@/components/Editor/MaskCanvas";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -25,6 +25,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import ReactMarkdown from "react-markdown";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { optimizeImage } from "@/lib/utils";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -46,6 +47,7 @@ interface BitStudioJob {
   metadata?: {
     debug_assets?: any;
     prompt_used?: string;
+    source_image_url?: string;
   }
 }
 
@@ -404,6 +406,25 @@ export const VirtualTryOnPro = ({
           )}
         </div>
       </div>
+      <Card className="mt-4">
+        <CardHeader><CardTitle><div className="flex items-center gap-2"><History className="h-4 w-4" />{t('recentProJobs')}</div></CardTitle></CardHeader>
+        <CardContent>
+          {isLoadingRecentJobs ? <Skeleton className="h-24 w-full" /> : proJobs.length > 0 ? (
+            <ScrollArea className="h-32">
+              <div className="flex gap-4 pb-2">
+                {proJobs.map(job => {
+                  const urlToPreview = job.final_image_url || job.metadata?.source_image_url;
+                  return (
+                    <button key={job.id} onClick={() => handleSelectJob(job)} className={cn("border-2 rounded-lg p-0.5 flex-shrink-0 w-24 h-24", selectedJob?.id === job.id ? "border-primary" : "border-transparent")}>
+                      <SecureImageDisplay imageUrl={urlToPreview || null} alt="Recent job" className="w-full h-full object-cover" />
+                    </button>
+                  )
+                })}
+              </div>
+            </ScrollArea>
+          ) : <p className="text-muted-foreground text-sm">{t('noRecentProJobs')}</p>}
+        </CardContent>
+      </Card>
       <DebugStepsModal 
         isOpen={isDebugModalOpen}
         onClose={() => setIsDebugModalOpen(false)}
