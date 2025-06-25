@@ -185,11 +185,8 @@ export const VirtualTryOnPro = ({
     setResetTrigger(c => c + 1);
   };
 
-  const handleGenerate = async () => {
-    if (!sourceImageFile) return showError("Please provide a source image.");
-    if (!isAutoMaskEnabled && !maskImage) return showError("Please draw a mask or enable auto-masking.");
-    if (!isAutoPromptEnabled && !prompt.trim() && !referenceImageFile) return showError("Please provide a prompt or enable auto-prompt.");
-
+  const proceedWithGeneration = async (maskToUse: string) => {
+    if (!sourceImageFile) return;
     setIsLoading(true);
     let toastId = showLoading(t('sendingJob'));
 
@@ -221,6 +218,7 @@ export const VirtualTryOnPro = ({
       const payload: any = {
         mode: 'inpaint',
         full_source_image_base64: await fileToBase64(optimizedSource),
+        mask_image_base64: maskToUse.split(',')[1],
         prompt: finalPrompt,
         is_garment_mode: true,
         user_id: session?.user.id,
@@ -228,52 +226,16 @@ export const VirtualTryOnPro = ({
         mask_expansion_percent: maskExpansion,
       };
 
-      if (isAutoMaskEnabled) {
-        if (!referenceImageFile) throw new Error("Auto-mask requires a reference image.");
-        dismissToast(toastId);
-        const maskToastId = showLoading("Generating automatic mask...");
-        const img = new Image();
-        img.onload = async () => {
-          try {
-            const { data, error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-segmentation', {
-              body: {
-                user_id: session?.user.id,
-                image_base64: payload.full_source_image_base64,
-                mime_type: optimizedSource.type,
-                reference_image_base64: await fileToBase64(referenceImageFile),
-                reference_mime_type: referenceImageFile.type,
-                image_dimensions: { width: img.width, height: img.height },
-              }
-            });
-            if (error) throw error;
-            payload.mask_image_url = data.finalMaskUrl;
-            dismissToast(maskToastId);
-            const finalToastId = showLoading(t('sendingJob'));
-            const { error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', { body: payload });
-            if (proxyError) throw proxyError;
-            dismissToast(finalToastId);
-            showSuccess(`${numAttempts} inpainting job(s) started!`);
-            queryClient.invalidateQueries({ queryKey: ['activeJobs'] });
-            queryClient.invalidateQueries({ queryKey: ['bitstudioJobs', session.user.id] });
-            resetForm();
-          } catch (err: any) {
-            dismissToast(maskToastId);
-            showError(`Auto-masking failed: ${err.message}`);
-          } finally {
-            setIsLoading(false);
-          }
-        };
-        img.src = URL.createObjectURL(optimizedSource);
-        return;
-      } else {
-        payload.mask_image_base64 = maskImage!.split(',')[1];
+      if (referenceImageFile) {
+        payload.reference_image_base64 = await fileToBase64(referenceImageFile);
       }
 
       const { error } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', { body: payload });
+
       if (error) throw error;
 
       dismissToast(toastId);
-      showSuccess(`${numAttempts} inpainting job(s) started!`);
+      showSuccess(`${numAttempts} inpainting job(s) started! You can track progress in the sidebar.`);
       queryClient.invalidateQueries({ queryKey: ['activeJobs'] });
       queryClient.invalidateQueries({ queryKey: ['bitstudioJobs', session.user.id] });
       resetForm();
@@ -286,16 +248,61 @@ export const VirtualTryOnPro = ({
     }
   };
 
+  const handleGenerate = async () => {
+    if (!sourceImageFile) return showError("Please provide a source image.");
+    if (!isAutoMaskEnabled && !maskImage) return showError("Please draw a mask or enable auto-masking.");
+    if (!isAutoPromptEnabled && !prompt.trim() && !referenceImageFile) return showError("Please provide a prompt or enable auto-prompt.");
+
+    if (isAutoMaskEnabled) {
+      if (!referenceImageFile) return showError("Auto-mask requires a reference image.");
+      setIsLoading(true);
+      const toastId = showLoading("Generating automatic mask...");
+      try {
+        const sourceBase64 = await fileToBase64(sourceImageFile);
+        const referenceBase64 = await fileToBase64(referenceImageFile);
+        const img = new Image();
+        img.onload = async () => {
+          try {
+            const { data, error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-segmentation', {
+              body: {
+                user_id: session?.user.id,
+                image_base64: sourceBase64,
+                mime_type: sourceImageFile.type,
+                reference_image_base64: referenceBase64,
+                reference_mime_type: referenceImageFile.type,
+                image_dimensions: { width: img.width, height: img.height },
+              }
+            });
+            if (error) throw error;
+            dismissToast(toastId);
+            proceedWithGeneration(data.finalMaskUrl);
+          } catch (err: any) {
+            dismissToast(toastId);
+            showError(`Auto-masking failed: ${err.message}`);
+            setIsLoading(false);
+          }
+        };
+        img.src = URL.createObjectURL(sourceImageFile);
+      } catch (err: any) {
+        dismissToast(toastId);
+        showError(`Failed to process image for auto-masking: ${err.message}`);
+        setIsLoading(false);
+      }
+    } else {
+      proceedWithGeneration(maskImage!);
+    }
+  };
+
   const { dropzoneProps, isDraggingOver } = useDropzone({
     onDrop: (e) => handleFileSelect(e.target.files?.[0]),
   });
 
   const renderJobResult = (job: InpaintingJob) => {
     if (job.status === 'failed') return <p className="text-destructive text-sm p-2">{t('jobFailed', { errorMessage: job.error_message })}</p>;
-    if (job.status === 'complete' && job.final_image_url) {
+    if (job.status === 'complete' && job.final_result?.publicUrl) {
       return (
         <div className="relative group w-full h-full">
-          <SecureImageDisplay imageUrl={job.final_image_url} alt="Final Result" onClick={() => showImage({ images: [{ url: job.final_image_url! }], currentIndex: 0 })} />
+          <SecureImageDisplay imageUrl={job.final_result.publicUrl} alt="Final Result" onClick={() => showImage({ images: [{ url: job.final_result!.publicUrl }], currentIndex: 0 })} />
           {job.metadata?.debug_assets && (
             <Button 
               variant="secondary" 
@@ -478,7 +485,7 @@ export const VirtualTryOnPro = ({
             <ScrollArea className="h-32">
               <div className="flex gap-4 pb-2">
                 {proJobs.map(job => {
-                  const urlToPreview = job.final_image_url || job.metadata?.source_image_url;
+                  const urlToPreview = job.final_result?.publicUrl || job.metadata?.source_image_url;
                   return (
                     <button key={job.id} onClick={() => handleSelectJob(job)} className={cn("border-2 rounded-lg p-0.5 flex-shrink-0 w-24 h-24", selectedJob?.id === job.id ? "border-primary" : "border-transparent")}>
                       <SecureImageDisplay imageUrl={urlToPreview || null} alt="Recent job" className="w-full h-full object-cover" />
