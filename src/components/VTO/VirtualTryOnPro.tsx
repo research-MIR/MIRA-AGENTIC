@@ -118,6 +118,11 @@ interface VirtualTryOnProProps {
   setIsHighQuality: (hq: boolean) => void;
   maskExpansion: number;
   setMaskExpansion: (me: number) => void;
+  // New props for auto-masking
+  isAutoMasking: boolean;
+  autoMaskUrl: string | null;
+  handleAutoMask: () => void;
+  clearAutoMask: () => void;
 }
 
 export const VirtualTryOnPro = ({
@@ -125,7 +130,8 @@ export const VirtualTryOnPro = ({
   sourceImageFile, setSourceImageFile, referenceImageFile, setReferenceImageFile, maskImage, setMaskImage,
   prompt, setPrompt, brushSize, setBrushSize, resetTrigger, setResetTrigger, isLoading, setIsLoading,
   isDebugModalOpen, setIsDebugModalOpen, isAutoPromptEnabled, setIsAutoPromptEnabled, isGuideOpen, setIsGuideOpen,
-  numAttempts, setNumAttempts, denoise, setDenoise, isHighQuality, setIsHighQuality, maskExpansion, setMaskExpansion
+  numAttempts, setNumAttempts, denoise, setDenoise, isHighQuality, setIsHighQuality, maskExpansion, setMaskExpansion,
+  isAutoMasking, autoMaskUrl, handleAutoMask, clearAutoMask
 }: VirtualTryOnProProps) => {
   const { supabase, session } = useSession();
   const { t } = useLanguage();
@@ -134,43 +140,6 @@ export const VirtualTryOnPro = ({
 
   const sourceImageUrl = useMemo(() => sourceImageFile ? URL.createObjectURL(sourceImageFile) : null, [sourceImageFile]);
   const referenceImageUrl = useMemo(() => referenceImageFile ? URL.createObjectURL(referenceImageFile) : null, [referenceImageFile]);
-
-  useEffect(() => {
-    if (transferredImageUrl) {
-      const fetchImageAsFile = async (imageUrl: string) => {
-        console.log(`[VirtualTryOnPro] Attempting to fetch transferred image: ${imageUrl}`);
-        try {
-          const url = new URL(imageUrl);
-          const pathSegments = url.pathname.split('/');
-          const objectIndex = pathSegments.indexOf('object');
-          if (objectIndex === -1 || objectIndex + 2 > pathSegments.length) {
-            throw new Error("Invalid Supabase URL format.");
-          }
-          const bucketName = pathSegments[objectIndex + 2];
-          const pathStartIndex = url.pathname.indexOf(bucketName) + bucketName.length + 1;
-          const storagePath = decodeURIComponent(url.pathname.substring(pathStartIndex));
-
-          const { data: blob, error } = await supabase.storage
-            .from(bucketName)
-            .download(storagePath);
-
-          if (error) throw error;
-          if (!blob) throw new Error("Downloaded blob is null.");
-          console.log('[VirtualTryOnPro] Image blob downloaded successfully from Supabase.');
-
-          const filename = imageUrl.split('/').pop() || 'image.png';
-          const file = new File([blob], filename, { type: blob.type });
-          setSourceImageFile(file);
-          console.log('[VirtualTryOnPro] State updated with new source image file. Consuming transfer.');
-          onTransferConsumed();
-        } catch (e) {
-          console.error("Failed to fetch transferred image for VTO Pro:", e);
-          showError("Could not load the transferred image.");
-        }
-      };
-      fetchImageAsFile(transferredImageUrl);
-    }
-  }, [transferredImageUrl, supabase, onTransferConsumed, setSourceImageFile]);
 
   useEffect(() => {
     return () => {
@@ -206,10 +175,8 @@ export const VirtualTryOnPro = ({
   };
 
   const handleGenerate = async () => {
-    if (!sourceImageFile || !maskImage) {
-      showError("Please provide a source image and draw a mask.");
-      return;
-    }
+    if (!sourceImageFile) return showError("Please upload a source image.");
+    if (!maskImage && !autoMaskUrl) return showError("Please draw a mask or use the auto-mask feature.");
     if (!isAutoPromptEnabled && !prompt.trim() && !referenceImageFile) {
       showError("Please provide a prompt or enable auto-prompt.");
       return;
@@ -223,16 +190,21 @@ export const VirtualTryOnPro = ({
       const payload: any = {
         mode: 'inpaint',
         full_source_image_base64: await fileToBase64(optimizedSource),
-        mask_image_base64: maskImage.split(',')[1],
         prompt: prompt,
         auto_prompt_enabled: isAutoPromptEnabled,
-        is_garment_mode: true, // VTO Pro Mode is always garment-focused
+        is_garment_mode: true,
         user_id: session?.user.id,
         num_attempts: numAttempts,
         denoise: denoise,
         resolution: isHighQuality ? 'high' : 'standard',
         mask_expansion_percent: maskExpansion,
       };
+
+      if (autoMaskUrl) {
+        payload.mask_image_url = autoMaskUrl;
+      } else if (maskImage) {
+        payload.mask_image_base64 = maskImage.split(',')[1];
+      }
 
       if (referenceImageFile) {
         const optimizedReference = await optimizeImage(referenceImageFile);
@@ -246,7 +218,7 @@ export const VirtualTryOnPro = ({
       dismissToast(toastId);
       showSuccess(`${numAttempts} inpainting job(s) started! You can track progress in the sidebar.`);
       queryClient.invalidateQueries({ queryKey: ['activeJobs'] });
-      queryClient.invalidateQueries({ queryKey: ['bitstudioJobs', session?.user?.id] });
+      queryClient.invalidateQueries({ queryKey: ['bitstudioJobs', session?.user.id] });
       resetForm();
 
     } catch (err: any) {
@@ -291,7 +263,7 @@ export const VirtualTryOnPro = ({
     );
   };
 
-  const isGenerateDisabled = isLoading || !!selectedJob || !sourceImageFile || !maskImage || (!isAutoPromptEnabled && !prompt.trim() && !referenceImageFile);
+  const isGenerateDisabled = isLoading || !!selectedJob || !sourceImageFile || (!maskImage && !autoMaskUrl) || (!isAutoPromptEnabled && !prompt.trim() && !referenceImageFile);
   const placeholderText = isAutoPromptEnabled ? t('promptPlaceholderVTO') : t('promptPlaceholderVTO');
 
   return (
@@ -343,6 +315,10 @@ export const VirtualTryOnPro = ({
                           <ImageUploader onFileSelect={setSourceImageFile} title={t('sourceImage')} imageUrl={sourceImageUrl} onClear={resetForm} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
                           <ImageUploader onFileSelect={setReferenceImageFile} title={t('garmentReference')} imageUrl={referenceImageUrl} onClear={() => setReferenceImageFile(null)} icon={<Shirt className="h-8 w-8 text-muted-foreground" />} />
                         </div>
+                        <Button className="w-full" onClick={handleAutoMask} disabled={isAutoMasking || !sourceImageFile || !referenceImageFile}>
+                          {isAutoMasking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+                          {t('autoMask')}
+                        </Button>
                       </AccordionContent>
                     </AccordionItem>
                     <AccordionItem value="item-2">
@@ -391,20 +367,30 @@ export const VirtualTryOnPro = ({
           {sourceImageUrl && !selectedJob ? (
             <>
               <div className="w-full flex-1 flex items-center justify-center relative p-2 overflow-hidden">
-                <MaskCanvas 
-                  imageUrl={sourceImageUrl} 
-                  onMaskChange={setMaskImage}
-                  brushSize={brushSize}
-                  resetTrigger={resetTrigger}
-                />
+                {autoMaskUrl ? (
+                  <div className="relative w-full h-full">
+                    <img src={sourceImageUrl} alt="Source" className="max-w-full max-h-full object-contain" />
+                    <img src={autoMaskUrl} alt="Auto-generated Mask" className="absolute top-0 left-0 w-full h-full object-contain opacity-50 mix-blend-screen pointer-events-none" style={{ filter: 'brightness(0) invert(1) sepia(1) saturate(10000%) hue-rotate(330deg)' }} />
+                    <Button variant="destructive" size="sm" className="absolute top-2 right-2" onClick={clearAutoMask}><X className="h-4 w-4 mr-2" />Clear Mask</Button>
+                  </div>
+                ) : (
+                  <MaskCanvas 
+                    imageUrl={sourceImageUrl} 
+                    onMaskChange={setMaskImage}
+                    brushSize={brushSize}
+                    resetTrigger={resetTrigger}
+                  />
+                )}
               </div>
-              <div className="p-2 shrink-0">
-                <MaskControls 
-                  brushSize={brushSize} 
-                  onBrushSizeChange={setBrushSize} 
-                  onReset={handleResetMask} 
-                />
-              </div>
+              {!autoMaskUrl && (
+                <div className="p-2 shrink-0">
+                  <MaskControls 
+                    brushSize={brushSize} 
+                    onBrushSizeChange={setBrushSize} 
+                    onReset={handleResetMask} 
+                  />
+                </div>
+              )}
             </>
           ) : selectedJob ? (
             renderJobResult(selectedJob)

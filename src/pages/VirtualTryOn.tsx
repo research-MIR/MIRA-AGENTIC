@@ -19,7 +19,16 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { ScrollArea } from "@/components/ui/scroll-area";
 import ReactMarkdown from "react-markdown";
 import { useImageTransferStore } from "@/store/imageTransferStore";
-import { showError } from "@/utils/toast";
+import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
+
+const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve((reader.result as string).split(',')[1]);
+      reader.onerror = (error) => reject(error);
+    });
+};
 
 interface BitStudioJob {
   id: string;
@@ -57,7 +66,7 @@ const VirtualTryOn = () => {
   
   const { consumeImageUrl, imageUrlToTransfer, vtoTarget } = useImageTransferStore();
 
-  // State lifted from VirtualTryOnPro
+  // State for Pro Mode, managed here
   const [sourceImageFile, setSourceImageFile] = useState<File | null>(null);
   const [referenceImageFile, setReferenceImageFile] = useState<File | null>(null);
   const [maskImage, setMaskImage] = useState<string | null>(null);
@@ -72,6 +81,8 @@ const VirtualTryOn = () => {
   const [denoise, setDenoise] = useState(0.99);
   const [isHighQuality, setIsHighQuality] = useState(false);
   const [maskExpansion, setMaskExpansion] = useState(3);
+  const [isAutoMasking, setIsAutoMasking] = useState(false);
+  const [autoMaskUrl, setAutoMaskUrl] = useState<string | null>(null);
 
   useEffect(() => {
     console.log('[VTO Page] Image transfer effect triggered.');
@@ -107,6 +118,7 @@ const VirtualTryOn = () => {
     setMaskImage(null);
     setPrompt("");
     setResetTrigger(c => c + 1);
+    setAutoMaskUrl(null);
     consumeImageUrl();
   }, [consumeImageUrl]);
 
@@ -165,6 +177,43 @@ const VirtualTryOn = () => {
     setSelectedJobId(job.id);
   };
 
+  const handleAutoMask = async () => {
+    if (!sourceImageFile || !referenceImageFile) {
+      showError("Please upload both a source and a reference image.");
+      return;
+    }
+    setIsAutoMasking(true);
+    const toastId = showLoading("Generating mask...");
+    try {
+      const sourceBase64 = await fileToBase64(sourceImageFile);
+      const referenceBase64 = await fileToBase64(referenceImageFile);
+      const img = new Image();
+      img.src = URL.createObjectURL(sourceImageFile);
+      await new Promise(resolve => img.onload = resolve);
+
+      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-segmentation', {
+        body: {
+          user_id: session?.user.id,
+          image_base64: sourceBase64,
+          mime_type: sourceImageFile.type,
+          reference_image_base64: referenceBase64,
+          reference_mime_type: referenceImageFile.type,
+          image_dimensions: { width: img.naturalWidth, height: img.naturalHeight },
+        }
+      });
+
+      if (error) throw error;
+      setAutoMaskUrl(data.finalMaskUrl);
+      dismissToast(toastId);
+      showSuccess("Auto-mask generated!");
+    } catch (err: any) {
+      dismissToast(toastId);
+      showError(`Auto-mask failed: ${err.message}`);
+    } finally {
+      setIsAutoMasking(false);
+    }
+  };
+
   return (
     <>
       <div className="p-4 md:p-8 h-screen flex flex-col">
@@ -195,7 +244,6 @@ const VirtualTryOn = () => {
               resetForm={resetForm}
               transferredImageUrl={vtoTarget === 'pro-source' ? imageUrlToTransfer : null}
               onTransferConsumed={consumeImageUrl}
-              // Pass state and setters down
               sourceImageFile={sourceImageFile} setSourceImageFile={setSourceImageFile}
               referenceImageFile={referenceImageFile} setReferenceImageFile={setReferenceImageFile}
               maskImage={maskImage} setMaskImage={setMaskImage}
@@ -210,6 +258,10 @@ const VirtualTryOn = () => {
               denoise={denoise} setDenoise={setDenoise}
               isHighQuality={isHighQuality} setIsHighQuality={setIsHighQuality}
               maskExpansion={maskExpansion} setMaskExpansion={setMaskExpansion}
+              isAutoMasking={isAutoMasking}
+              autoMaskUrl={autoMaskUrl}
+              handleAutoMask={handleAutoMask}
+              clearAutoMask={() => setAutoMaskUrl(null)}
             />
           ) : (
             <div className="h-full">

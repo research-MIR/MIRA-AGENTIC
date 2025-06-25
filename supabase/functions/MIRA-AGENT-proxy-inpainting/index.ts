@@ -260,7 +260,7 @@ const workflowTemplate = `{
     },
     "class_type": "DifferentialDiffusionAdvanced",
     "_meta": {
-      "title": "Differential Diffusion Advanced"
+      "title": "Apply Differential Diffusion"
     }
   },
   "59": {
@@ -392,6 +392,22 @@ async function uploadToSupabaseStorage(supabase: SupabaseClient, blob: Blob, use
     return publicUrl;
 }
 
+async function getMaskBlob(supabase: SupabaseClient, maskUrl: string): Promise<Blob> {
+    const url = new URL(maskUrl);
+    const pathSegments = url.pathname.split('/');
+    const bucketName = pathSegments[pathSegments.indexOf('object') + 2];
+    const pathStartIndex = url.pathname.indexOf(bucketName) + bucketName.length + 1;
+    const storagePath = decodeURIComponent(url.pathname.substring(pathStartIndex));
+
+    if (!bucketName || !storagePath) {
+        throw new Error(`Could not parse bucket or path from mask URL: ${maskUrl}`);
+    }
+
+    const { data, error } = await supabase.storage.from(bucketName).download(storagePath);
+    if (error) throw new Error(`Failed to download mask from Supabase: ${error.message}`);
+    return data;
+}
+
 serve(async (req) => {
   const COMFYUI_ENDPOINT_URL = Deno.env.get('COMFYUI_ENDPOINT_URL');
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
@@ -405,6 +421,7 @@ serve(async (req) => {
       user_id,
       source_image_base64,
       mask_image_base64,
+      mask_image_url,
       reference_image_base64,
       prompt,
       is_garment_mode,
@@ -414,8 +431,8 @@ serve(async (req) => {
       num_attempts = 1,
     } = await req.json();
 
-    if (!user_id || !source_image_base64 || !mask_image_base64) {
-      throw new Error("Missing required parameters: user_id, source_image_base64, and mask_image_base64 are required.");
+    if (!user_id || !source_image_base64 || (!mask_image_base64 && !mask_image_url)) {
+      throw new Error("Missing required parameters: user_id, source_image_base64, and one of mask_image_base64 or mask_image_url are required.");
     }
 
     let finalPrompt = prompt;
@@ -441,7 +458,15 @@ serve(async (req) => {
     if (!finalPrompt) throw new Error("Prompt is required for inpainting.");
 
     const fullSourceImage = await loadImage(`data:image/png;base64,${source_image_base64}`);
-    const rawMaskImage = await loadImage(`data:image/png;base64,${mask_image_base64}`);
+    
+    let maskBlob: Blob;
+    if (mask_image_url) {
+        console.log(`[InpaintingProxy] Fetching mask from URL: ${mask_image_url}`);
+        maskBlob = await getMaskBlob(supabase, mask_image_url);
+    } else {
+        maskBlob = new Blob([decodeBase64(mask_image_base64)], { type: 'image/png' });
+    }
+    const rawMaskImage = await loadImage(await maskBlob.arrayBuffer());
 
     const dilatedCanvas = createCanvas(rawMaskImage.width(), rawMaskImage.height());
     const dilateCtx = dilatedCanvas.getContext('2d');
@@ -492,7 +517,7 @@ serve(async (req) => {
     const maskToSendBase64 = croppedDilatedMaskBase64;
 
     const sourceBlob = new Blob([decodeBase64(sourceToSendBase64)], { type: 'image/png' });
-    const maskBlob = new Blob([decodeBase64(maskToSendBase64)], { type: 'image/png' });
+    const finalMaskBlob = new Blob([decodeBase64(maskToSendBase64)], { type: 'image/png' });
     
     const sourceImageUrl = await uploadToSupabaseStorage(supabase, sourceBlob, user_id, 'source.png');
     let referenceImageUrl: string | null = null;
@@ -503,7 +528,7 @@ serve(async (req) => {
     
     const [sourceFilename, maskFilename] = await Promise.all([
       uploadImageToComfyUI(sanitizedAddress, sourceBlob, 'source.png'),
-      uploadImageToComfyUI(sanitizedAddress, maskBlob, 'mask.png')
+      uploadImageToComfyUI(sanitizedAddress, finalMaskBlob, 'mask.png')
     ]);
 
     const jobIds: string[] = [];
