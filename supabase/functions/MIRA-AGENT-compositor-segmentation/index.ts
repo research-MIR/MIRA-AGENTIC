@@ -69,35 +69,45 @@ serve(async (req) => {
     const results = job.results || [];
     console.log(`[Compositor][${job.id}] Raw results from database:`, JSON.stringify(results, null, 2));
 
-    const validRuns = results.filter((run: any) => run && !run.error && Array.isArray(run) && run.length > 0);
+    const validRuns = results.filter((run: any) => 
+        run && 
+        !run.error && 
+        Array.isArray(run) && 
+        run.length > 0 &&
+        run[0].mask &&
+        typeof run[0].mask === 'string' &&
+        run[0].mask.startsWith('data:image/png;base64,')
+    );
     console.log(`[Compositor][${job.id}] Found ${validRuns.length} valid runs after filtering.`);
 
     if (validRuns.length === 0) throw new Error("No valid mask data found in any of the segmentation runs.");
     
-    const firstMasksFromEachRun = validRuns.map((run: any) => run[0]).filter((mask: any) => mask && mask.box_2d && mask.mask);
-    if (firstMasksFromEachRun.length === 0) throw new Error("Could not extract any valid masks from the successful runs.");
+    const firstMasksFromEachRun = validRuns.map((run: any) => run[0]);
 
     const accumulator = new Uint8Array(job.source_image_dimensions.width * job.source_image_dimensions.height);
 
     for (const run of firstMasksFromEachRun) {
-      let base64Data = run.mask;
-      if (run.mask.includes(',')) base64Data = run.mask.split(',')[1];
-      const imageBuffer = decodeBase64(base64Data);
-      const maskImg = await loadImage(imageBuffer);
+      try {
+        const base64Data = run.mask.split(',')[1];
+        const imageBuffer = decodeBase64(base64Data);
+        const maskImg = await loadImage(imageBuffer);
 
-      const [y0, x0, y1, x1] = run.box_2d;
-      const absX0 = Math.floor((x0 / 1000) * job.source_image_dimensions.width);
-      const absY0 = Math.floor((y0 / 1000) * job.source_image_dimensions.height);
-      const bboxWidth = Math.ceil(((x1 - x0) / 1000) * job.source_image_dimensions.width);
-      const bboxHeight = Math.ceil(((y1 - y0) / 1000) * job.source_image_dimensions.height);
-      
-      const tempCanvas = createCanvas(job.source_image_dimensions.width, job.source_image_dimensions.height);
-      const tempCtx = tempCanvas.getContext('2d');
-      tempCtx.drawImage(maskImg, absX0, absY0, bboxWidth, bboxHeight);
-      
-      const imageData = tempCtx.getImageData(0, 0, job.source_image_dimensions.width, job.source_image_dimensions.height).data;
-      for (let i = 0; i < imageData.length; i += 4) {
-        if (imageData[i] > 128) accumulator[i / 4]++;
+        const [y0, x0, y1, x1] = run.box_2d;
+        const absX0 = Math.floor((x0 / 1000) * job.source_image_dimensions.width);
+        const absY0 = Math.floor((y0 / 1000) * job.source_image_dimensions.height);
+        const bboxWidth = Math.ceil(((x1 - x0) / 1000) * job.source_image_dimensions.width);
+        const bboxHeight = Math.ceil(((y1 - y0) / 1000) * job.source_image_dimensions.height);
+        
+        const tempCanvas = createCanvas(job.source_image_dimensions.width, job.source_image_dimensions.height);
+        const tempCtx = tempCanvas.getContext('2d');
+        tempCtx.drawImage(maskImg, absX0, absY0, bboxWidth, bboxHeight);
+        
+        const imageData = tempCtx.getImageData(0, 0, job.source_image_dimensions.width, job.source_image_dimensions.height).data;
+        for (let i = 0; i < imageData.length; i += 4) {
+          if (imageData[i] > 128) accumulator[i / 4]++;
+        }
+      } catch (e) {
+          console.warn(`[Compositor][${job.id}] Skipping one mask due to processing error:`, e.message);
       }
     }
 
