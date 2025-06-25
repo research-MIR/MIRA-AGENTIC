@@ -60,7 +60,8 @@ async function processPair(supabase: SupabaseClient, pair: any, userId: string, 
     // 2. Get image dimensions
     console.log(`[BatchInpaintWorker][${pairId}] Step 2: Getting image dimensions...`);
     const { loadImage } = await import('https://deno.land/x/canvas@v1.4.1/mod.ts');
-    const personImage = await loadImage(await personBlob.arrayBuffer());
+    const personImageBuffer = await personBlob.arrayBuffer();
+    const personImage = await loadImage(new Uint8Array(personImageBuffer));
     const image_dimensions = { width: personImage.width(), height: personImage.height() };
     console.log(`[BatchInpaintWorker][${pairId}] Source image dimensions: ${image_dimensions.width}x${image_dimensions.height}`);
 
