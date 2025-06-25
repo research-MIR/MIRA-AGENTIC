@@ -8,24 +8,20 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import ReactMarkdown from "react-markdown";
 import { Button } from "@/components/ui/button";
 import { useLanguage } from "@/context/LanguageContext";
-import { optimizeImage } from "@/lib/utils";
+import { optimizeImage, sanitizeFilename } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { BatchInpaintPro } from "./BatchInpaintPro";
 import { BitStudioJob } from "@/types/vto";
+import { useVTOJobs } from "@/hooks/useVTOJobs";
 import { RecentJobsList } from "./RecentJobsList";
 import { VTOProSetup } from "./VTOProSetup";
 import { VTOProWorkbench } from "./VTOProWorkbench";
+import { useImageTransferStore } from "@/store/imageTransferStore";
+import { HelpCircle } from "lucide-react";
 
-const fileToBase64 = (file: File): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = () => resolve((reader.result as string).split(',')[1]);
-    reader.onerror = (error) => reject(error);
-  });
-};
-
-interface VirtualTryOnProProps {
+const VirtualTryOnPro = ({
+  recentJobs, isLoadingRecentJobs, selectedJob, handleSelectJob, resetForm, transferredImageUrl, onTransferConsumed
+}: {
   recentJobs: BitStudioJob[] | undefined;
   isLoadingRecentJobs: boolean;
   selectedJob: BitStudioJob | undefined;
@@ -33,11 +29,7 @@ interface VirtualTryOnProProps {
   resetForm: () => void;
   transferredImageUrl?: string | null;
   onTransferConsumed: () => void;
-}
-
-export const VirtualTryOnPro = ({
-  recentJobs, isLoadingRecentJobs, selectedJob, handleSelectJob, resetForm, transferredImageUrl, onTransferConsumed
-}: VirtualTryOnProProps) => {
+}) => {
   const { supabase, session } = useSession();
   const { t } = useLanguage();
   const queryClient = useQueryClient();
@@ -97,59 +89,50 @@ export const VirtualTryOnPro = ({
     setResetTrigger(c => c + 1);
   };
 
-  const handleGenerate = async () => {
-    if (!sourceImageFile || !maskImage) return showError("Please provide a source image and draw a mask.");
-    if (!isAutoPromptEnabled && !prompt.trim() && !referenceImageFile) return showError("Please provide a prompt or enable auto-prompt.");
+  const uploadFile = async (file: File, type: 'person' | 'garment') => {
+    if (!session?.user) throw new Error("User session not found.");
+    const optimizedFile = await optimizeImage(file);
+    const sanitizedName = sanitizeFilename(optimizedFile.name);
+    const filePath = `${session.user.id}/vto-source/${type}-${Date.now()}-${sanitizedName}`;
+    
+    const { error } = await supabase.storage
+      .from('mira-agent-user-uploads')
+      .upload(filePath, optimizedFile);
+    
+    if (error) throw new Error(`Failed to upload ${type} image: ${error.message}`);
+    
+    const { data: { publicUrl } } = supabase.storage
+      .from('mira-agent-user-uploads')
+      .getPublicUrl(filePath);
+      
+    return publicUrl;
+  };
 
+  const handleGenerate = async () => {
+    if (!sourceImageFile || !referenceImageFile) return showError("Please provide both a source and a reference image.");
+    
     setIsLoading(true);
-    let toastId = showLoading(t('sendingJob'));
+    const toastId = showLoading(t('sendingJob'));
 
     try {
-      let finalPrompt = prompt;
+      const [person_url, garment_url] = await Promise.all([
+        uploadFile(sourceImageFile, 'person'),
+        uploadFile(referenceImageFile, 'garment')
+      ]);
 
-      if (isAutoPromptEnabled && (prompt.trim() || referenceImageFile)) {
-        dismissToast(toastId);
-        toastId = showLoading(t('enhancingPrompt'));
-        const { data: enhancedData, error: enhancerError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-prompt-helper', {
-          body: { 
-            person_image_base64: await fileToBase64(sourceImageFile),
-            person_image_mime_type: sourceImageFile.type,
-            garment_image_base64: referenceImageFile ? await fileToBase64(referenceImageFile) : null,
-            garment_image_mime_type: referenceImageFile?.type,
-            prompt_appendix: prompt,
-            is_garment_mode: true,
-          }
-        });
-        if (enhancerError) throw enhancerError;
-        finalPrompt = enhancedData.final_prompt;
-        setPrompt(finalPrompt);
-        dismissToast(toastId);
-        toastId = showLoading(t('sendingJob'));
-      }
+      const pairs = [{ person_url, garment_url, appendix: prompt }];
 
-      const optimizedSource = await optimizeImage(sourceImageFile, { forceOriginalDimensions: true });
-
-      const payload: any = {
-        mode: 'inpaint',
-        full_source_image_base64: await fileToBase64(optimizedSource),
-        mask_image_base64: maskImage.split(',')[1],
-        prompt: finalPrompt,
-        is_garment_mode: true,
-        user_id: session?.user.id,
-        num_attempts: numAttempts,
-        mask_expansion_percent: maskExpansion,
-      };
-
-      if (referenceImageFile) {
-        payload.reference_image_base64 = await fileToBase64(referenceImageFile);
-      }
-
-      const { error } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', { body: payload });
+      const { error } = await supabase.functions.invoke('MIRA-AGENT-proxy-batch-inpaint', {
+        body: {
+          pairs: pairs,
+          user_id: session?.user?.id
+        }
+      });
 
       if (error) throw error;
 
       dismissToast(toastId);
-      showSuccess(`${numAttempts} inpainting job(s) started! You can track progress in the sidebar.`);
+      showSuccess("Inpainting job started! You can track its progress in the sidebar.");
       queryClient.invalidateQueries({ queryKey: ['activeJobs'] });
       queryClient.invalidateQueries({ queryKey: ['bitstudioJobs', session.user.id] });
       resetForm();
@@ -162,7 +145,7 @@ export const VirtualTryOnPro = ({
     }
   };
 
-  const isGenerateDisabled = isLoading || !!selectedJob || !sourceImageFile || !maskImage || (!isAutoPromptEnabled && !prompt.trim() && !referenceImageFile);
+  const isGenerateDisabled = isLoading || !!selectedJob || !sourceImageFile || !referenceImageFile;
 
   return (
     <>
@@ -242,3 +225,5 @@ export const VirtualTryOnPro = ({
     </>
   );
 };
+
+export default VirtualTryOnPro;
