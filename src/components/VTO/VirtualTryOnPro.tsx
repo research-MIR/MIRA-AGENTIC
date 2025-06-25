@@ -218,13 +218,18 @@ export const VirtualTryOnPro = ({
       const payload: any = {
         mode: 'inpaint',
         full_source_image_base64: await fileToBase64(optimizedSource),
-        mask_image_base64: maskToUse.split(',')[1],
         prompt: finalPrompt,
         is_garment_mode: true,
         user_id: session?.user.id,
         num_attempts: numAttempts,
         mask_expansion_percent: maskExpansion,
       };
+
+      if (maskToUse.startsWith('data:')) {
+        payload.mask_image_base64 = maskToUse.split(',')[1];
+      } else {
+        payload.mask_image_url = maskToUse;
+      }
 
       if (referenceImageFile) {
         payload.reference_image_base64 = await fileToBase64(referenceImageFile);
