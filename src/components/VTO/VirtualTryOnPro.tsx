@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -144,6 +144,10 @@ export const VirtualTryOnPro = ({
       setResetTrigger(c => c + 1);
     }
   };
+
+  const { dropzoneProps, isDraggingOver } = useDropzone({
+    onDrop: (e) => handleFileSelect(e.dataTransfer.files?.[0] || null),
+  });
 
   const handleResetMask = () => {
     setResetTrigger(c => c + 1);
