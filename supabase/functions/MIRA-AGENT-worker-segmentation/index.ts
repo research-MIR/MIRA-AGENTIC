@@ -1,11 +1,13 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { GoogleGenAI, Content, Part, HarmCategory, HarmBlockThreshold } from 'https://esm.sh/@google/genai@0.15.0';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const MODEL_NAME = "gemini-2.5-flash-preview-05-20";
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+const MAX_RETRIES = 2;
+const RETRY_DELAY_MS = 500;
 const NUM_WORKERS = 5; // Must match the orchestrator
 
 const corsHeaders = {
@@ -33,11 +35,28 @@ Output a JSON list of segmentation masks where each entry contains the 2D boundi
 
 function extractJson(text: string): any {
     const match = text.match(/```json\s*([\s\S]*?)\s*```/);
-    if (match && match[1]) return JSON.parse(match[1]);
-    try { return JSON.parse(text); } catch (e) {
+    if (match && match[1]) {
+        return JSON.parse(match[1]);
+    }
+    try {
+        return JSON.parse(text);
+    } catch (e) {
         console.error("[SegmentWorker] Failed to parse JSON from model response:", text);
         throw new Error("The model returned a response that could not be parsed as JSON.");
     }
+}
+
+async function appendResultToJob(supabase: any, jobId: string, result: any) {
+    const { data: newCount, error: appendError } = await supabase.rpc('append_result_and_get_count', {
+        p_job_id: jobId,
+        p_new_element: result
+    });
+
+    if (appendError) {
+        console.error(`[SegmentWorker] Failed to append result to aggregation job ${jobId}:`, appendError);
+        throw appendError;
+    }
+    return newCount;
 }
 
 serve(async (req) => {
@@ -83,63 +102,73 @@ serve(async (req) => {
     userParts.push({ text: systemPrompt });
     const contents: Content[] = [{ role: 'user', parts: userParts }];
 
-    console.log(`[SegmentWorker][${requestId}] Calling Gemini API...`);
-    const result = await ai.models.generateContent({
-        model: MODEL_NAME,
-        contents: contents,
-        generationConfig: { responseMimeType: "application/json" },
-        safetySettings,
-    });
-    
-    console.log(`[SegmentWorker][${requestId}] Raw response from Gemini:`, result.text);
+    let lastError: Error | null = null;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+            console.log(`[SegmentWorker][${requestId}] Calling Gemini API, attempt ${attempt}...`);
+            const result = await ai.models.generateContent({
+                model: MODEL_NAME,
+                contents: contents,
+                generationConfig: { responseMimeType: "application/json" },
+                safetySettings,
+            });
+            
+            console.log(`[SegmentWorker][${requestId}] Raw response from Gemini on attempt ${attempt}:`, result.text);
 
-    let responseToStore;
-    try {
-        const responseJson = extractJson(result.text);
-        if (!responseJson || !Array.isArray(responseJson) || responseJson.length === 0) {
-            throw new Error("Model returned a valid JSON but it did not contain a mask array.");
+            let responseToStore;
+            try {
+                const responseJson = extractJson(result.text);
+                if (
+                    !responseJson || 
+                    !Array.isArray(responseJson) || 
+                    responseJson.length === 0 ||
+                    !responseJson[0].mask ||
+                    typeof responseJson[0].mask !== 'string' ||
+                    !responseJson[0].mask.startsWith('data:image/png;base64,')
+                ) {
+                    throw new Error("Model returned a JSON with an invalid or missing mask structure.");
+                }
+                responseToStore = responseJson;
+                console.log(`[SegmentWorker][${requestId}] Successfully parsed JSON. Found ${responseJson.length} masks.`);
+            } catch (parsingError) {
+                console.warn(`[SegmentWorker][${requestId}] JSON parsing failed. Storing raw text. Error: ${parsingError.message}`);
+                responseToStore = {
+                    error: `JSON parsing failed: ${parsingError.message}`,
+                    raw_text: result.text
+                };
+            }
+            
+            const newCount = await appendResultToJob(supabase, aggregation_job_id, responseToStore);
+            console.log(`[SegmentWorker][${requestId}] Successfully appended result. New count: ${newCount}.`);
+            
+            if (newCount >= NUM_WORKERS) {
+                console.log(`[SegmentWorker][${requestId}] This is the final worker. Triggering compositor...`);
+                await supabase.from('mira-agent-mask-aggregation-jobs').update({ status: 'compositing' }).eq('id', aggregation_job_id);
+                supabase.functions.invoke('MIRA-AGENT-compositor-segmentation', {
+                    body: { job_id: aggregation_job_id }
+                }).catch(console.error);
+            } else {
+                console.log(`[SegmentWorker][${requestId}] Not the final worker. Current count: ${newCount}/${NUM_WORKERS}.`);
+            }
+
+            return new Response(JSON.stringify(responseToStore), {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+              status: 200,
+            });
+        } catch (error) {
+            lastError = error;
+            console.warn(`[SegmentWorker][${requestId}] Attempt ${attempt} failed:`, error.message);
+            if (attempt < MAX_RETRIES) {
+                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS * attempt));
+            }
         }
-        responseToStore = responseJson;
-        console.log(`[SegmentWorker][${requestId}] Successfully parsed JSON. Found ${responseJson.length} masks.`);
-    } catch (parsingError) {
-        console.warn(`[SegmentWorker][${requestId}] JSON parsing failed. Storing raw text. Error: ${parsingError.message}`);
-        responseToStore = {
-            error: `JSON parsing failed: ${parsingError.message}`,
-            raw_text: result.text
-        };
-    }
-    
-    const { data: newCount, error: appendError } = await supabase.rpc('append_result_and_get_count', {
-        p_job_id: aggregation_job_id,
-        p_new_element: responseToStore
-    });
-
-    if (appendError) {
-        console.error(`[SegmentWorker][${requestId}] Failed to append result to aggregation job:`, appendError);
-        throw appendError;
     }
 
-    console.log(`[SegmentWorker][${requestId}] Successfully appended result. New count: ${newCount}.`);
-
-    if (newCount >= NUM_WORKERS) {
-        console.log(`[SegmentWorker][${requestId}] This is the final worker. Triggering compositor...`);
-        await supabase.from('mira-agent-mask-aggregation-jobs').update({ status: 'compositing' }).eq('id', aggregation_job_id);
-        supabase.functions.invoke('MIRA-AGENT-compositor-segmentation', {
-            body: { job_id: aggregation_job_id }
-        }).catch(console.error);
-    } else {
-        console.log(`[SegmentWorker][${requestId}] Not the final worker. Current count: ${newCount}/${NUM_WORKERS}.`);
-    }
-    
-    return new Response(JSON.stringify(responseToStore), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 200,
-    });
+    throw lastError || new Error("Worker failed after all retries without a specific error.");
 
   } catch (error) {
     console.error(`[SegmentWorker][${requestId}] Unhandled Error:`, error);
-    // We don't need to append an error here, as the RPC call would have failed.
-    // The orchestrator will eventually time out and mark the main job as failed if necessary.
+    await appendResultToJob(supabase, aggregation_job_id, { error: `Worker failed: ${error.message}` });
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,
