@@ -182,7 +182,7 @@ serve(async (req) => {
     combinedCtx.putImageData(combinedImageData, 0, 0);
     console.log(`[Orchestrator][${requestId}] Majority voting complete with threshold ${majorityThreshold}.`);
 
-    const postVoteExpansion = expansion_percent ?? 0.03;
+    const postVoteExpansion = expansion_percent ?? 0.10;
     console.log(`[Orchestrator][${requestId}] Applying post-vote expansion of ${postVoteExpansion * 100}% to the combined mask.`);
     expandMask(combinedCanvas, postVoteExpansion);
     console.log(`[Orchestrator][${requestId}] Post-vote expansion complete.`);
