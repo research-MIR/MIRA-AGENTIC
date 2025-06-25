@@ -363,14 +363,14 @@ serve(async (req) => {
     const maskCanvas = createCanvas(rawMaskImage.width(), rawMaskImage.height());
     const maskCtx = maskCanvas.getContext('2d');
     maskCtx.drawImage(rawMaskImage, 0, 0);
-    const maskImageData = maskCtx.getImageData(0, 0, maskCanvas.width(), maskCanvas.height());
+    const maskImageData = maskCtx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
     const maskData = maskImageData.data;
 
-    let minX = maskCanvas.width(), minY = maskCanvas.height(), maxX = 0, maxY = 0;
+    let minX = maskCanvas.width, minY = maskCanvas.height, maxX = 0, maxY = 0;
     for (let i = 0; i < maskData.length; i += 4) {
       if (maskData[i + 3] > 0) { // Check alpha channel
-        const x = (i / 4) % maskCanvas.width();
-        const y = Math.floor((i / 4) / maskCanvas.width());
+        const x = (i / 4) % maskCanvas.width;
+        const y = Math.floor((i / 4) / maskCanvas.width);
         if (x < minX) minX = x;
         if (x > maxX) maxX = x;
         if (y < minY) minY = y;
