@@ -1,4 +1,4 @@
-import React, { useMemo, useEffect, useCallback, useRef } from "react";
+import React, { useMemo, useEffect, useCallback, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -144,15 +144,26 @@ export const VirtualTryOnPro = ({
   const { showImage } = useImagePreview();
   const queryClient = useQueryClient();
 
-  const sourceImageUrl = useMemo(() => sourceImageFile ? URL.createObjectURL(sourceImageFile) : null, [sourceImageFile]);
-  const referenceImageUrl = useMemo(() => referenceImageFile ? URL.createObjectURL(referenceImageFile) : null, [referenceImageFile]);
+  const [sourcePreview, setSourcePreview] = useState<string | null>(null);
+  const [referencePreview, setReferencePreview] = useState<string | null>(null);
 
   useEffect(() => {
-    return () => {
-      if (sourceImageUrl) URL.revokeObjectURL(sourceImageUrl);
-      if (referenceImageUrl) URL.revokeObjectURL(referenceImageUrl);
-    };
-  }, [sourceImageUrl, referenceImageUrl]);
+    if (sourceImageFile) {
+      const url = URL.createObjectURL(sourceImageFile);
+      setSourcePreview(url);
+      return () => URL.revokeObjectURL(url);
+    }
+    setSourcePreview(null);
+  }, [sourceImageFile]);
+
+  useEffect(() => {
+    if (referenceImageFile) {
+      const url = URL.createObjectURL(referenceImageFile);
+      setReferencePreview(url);
+      return () => URL.revokeObjectURL(url);
+    }
+    setReferencePreview(null);
+  }, [referenceImageFile]);
 
   useEffect(() => {
     if (selectedJob) {
@@ -318,8 +329,8 @@ export const VirtualTryOnPro = ({
                       <AccordionTrigger>{t('inputs')}</AccordionTrigger>
                       <AccordionContent className="pt-4 space-y-4">
                         <div className="grid grid-cols-2 gap-4">
-                          <ImageUploader onFileSelect={setSourceImageFile} title={t('sourceImage')} imageUrl={sourceImageUrl} onClear={resetForm} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
-                          <ImageUploader onFileSelect={setReferenceImageFile} title={t('garmentReference')} imageUrl={referenceImageUrl} onClear={() => setReferenceImageFile(null)} icon={<Shirt className="h-8 w-8 text-muted-foreground" />} />
+                          <ImageUploader onFileSelect={setSourceImageFile} title={t('sourceImage')} imageUrl={sourcePreview} onClear={resetForm} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
+                          <ImageUploader onFileSelect={setReferenceImageFile} title={t('garmentReference')} imageUrl={referencePreview} onClear={() => setReferenceImageFile(null)} icon={<Shirt className="h-8 w-8 text-muted-foreground" />} />
                         </div>
                         <Button className="w-full" onClick={handleAutoMask} disabled={isAutoMasking || !sourceImageFile || !referenceImageFile}>
                           {isAutoMasking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
@@ -370,12 +381,12 @@ export const VirtualTryOnPro = ({
         </div>
 
         <div className="lg:col-span-2 bg-muted rounded-lg flex flex-col items-stretch justify-center relative min-h-[60vh] lg:min-h-0">
-          {sourceImageUrl && !selectedJob ? (
+          {sourcePreview && !selectedJob ? (
             <>
               <div className="w-full flex-1 flex items-center justify-center relative p-2 overflow-hidden">
                 {autoMaskUrl ? (
                   <div className="relative w-full h-full">
-                    <img src={sourceImageUrl} alt="Source" className="max-w-full max-h-full object-contain" />
+                    <img src={sourcePreview} alt="Source" className="max-w-full max-h-full object-contain" />
                     <SecureImageDisplay 
                         imageUrl={autoMaskUrl} 
                         alt="Auto-generated Mask" 
@@ -386,7 +397,7 @@ export const VirtualTryOnPro = ({
                   </div>
                 ) : (
                   <MaskCanvas 
-                    imageUrl={sourceImageUrl} 
+                    imageUrl={sourcePreview} 
                     onMaskChange={setMaskImage}
                     brushSize={brushSize}
                     resetTrigger={resetTrigger}
