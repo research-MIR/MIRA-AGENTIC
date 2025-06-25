@@ -109,7 +109,7 @@ serve(async (req) => {
           maskBlob = new Blob([decodeBase64(mask_image_base64)], { type: 'image/png' });
       }
       
-      const rawMaskImage = await loadImage(await maskBlob.arrayBuffer());
+      const rawMaskImage = await loadImage(new Uint8Array(await maskBlob.arrayBuffer()));
       console.log(`[BitStudioProxy][${requestId}] Mask image loaded into memory.`);
 
       const dilatedCanvas = createCanvas(rawMaskImage.width(), rawMaskImage.height());
