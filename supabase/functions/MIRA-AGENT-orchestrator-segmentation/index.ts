@@ -11,17 +11,23 @@ const corsHeaders = {
 };
 
 serve(async (req) => {
+  const requestId = `segment-orchestrator-${Date.now()}`;
+  console.log(`[Orchestrator][${requestId}] Function invoked.`);
+
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
-  const { image_base64, mime_type, reference_image_base64, reference_mime_type, user_id, image_dimensions } = await req.json();
-  const requestId = `segment-orchestrator-${Date.now()}`;
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
   let aggregationJobId: string | null = null;
 
   try {
+    const body = await req.json();
+    console.log(`[Orchestrator][${requestId}] Received body with keys:`, Object.keys(body));
+    const { image_base64, mime_type, reference_image_base64, reference_mime_type, user_id, image_dimensions } = body;
+
     if (!user_id || !image_base64 || !mime_type || !image_dimensions) {
+      console.error(`[Orchestrator][${requestId}] Validation failed. user_id: ${!!user_id}, image_base64: ${!!image_base64}, mime_type: ${!!mime_type}, image_dimensions: ${!!image_dimensions}`);
       throw new Error("Missing required parameters for new job.");
     }
 
