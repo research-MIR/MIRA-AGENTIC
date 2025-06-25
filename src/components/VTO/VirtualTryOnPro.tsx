@@ -1,33 +1,20 @@
-import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
-import { Button } from "@/components/ui/button";
-import { Wand2, Brush, Palette, UploadCloud, Sparkles, Loader2, Image as ImageIcon, X, PlusCircle, AlertTriangle, Eye, Settings, History, HelpCircle, Shirt, Users, Link2 } from "lucide-react";
-import { MaskCanvas } from "@/components/Editor/MaskCanvas";
-import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
-import { useDropzone } from "@/hooks/useDropzone";
-import { MaskControls } from "@/components/Editor/MaskControls";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
-import { useImagePreview } from "@/context/ImagePreviewContext";
-import { useSecureImage } from "@/hooks/useSecureImage";
 import { useQueryClient } from "@tanstack/react-query";
 import { DebugStepsModal } from "./DebugStepsModal";
-import { Switch } from "@/components/ui/switch";
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { InpaintingSettings } from "../Inpainting/InpaintingSettings";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { useLanguage } from "@/context/LanguageContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import ReactMarkdown from "react-markdown";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Button } from "@/components/ui/button";
+import { useLanguage } from "@/context/LanguageContext";
 import { optimizeImage } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { BatchInpaintPro } from "./BatchInpaintPro";
 import { BitStudioJob } from "@/types/vto";
 import { RecentJobsList } from "./RecentJobsList";
+import { VTOProSetup } from "./VTOProSetup";
+import { VTOProWorkbench } from "./VTOProWorkbench";
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -36,44 +23,6 @@ const fileToBase64 = (file: File): Promise<string> => {
     reader.onload = () => resolve((reader.result as string).split(',')[1]);
     reader.onerror = (error) => reject(error);
   });
-};
-
-const SecureImageDisplay = ({ imageUrl, alt, onClick, className, style }: { 
-    imageUrl: string | null, 
-    alt: string, 
-    onClick?: (e: React.MouseEvent<HTMLImageElement>) => void, 
-    className?: string,
-    style?: React.CSSProperties 
-}) => {
-    const { displayUrl, isLoading, error } = useSecureImage(imageUrl);
-    const hasClickHandler = !!onClick;
-  
-    if (!imageUrl) return <div className={cn("w-full h-full bg-muted rounded-md flex items-center justify-center", className)} style={style}><ImageIcon className="h-6 w-6 text-muted-foreground" /></div>;
-    if (isLoading) return <div className={cn("w-full h-full bg-muted rounded-md flex items-center justify-center", className)} style={style}><Loader2 className="h-6 w-6 animate-spin" /></div>;
-    if (error) return <div className={cn("w-full h-full bg-muted rounded-md flex items-center justify-center", className)} style={style}><AlertTriangle className="h-6 w-6 text-destructive" /></div>;
-    
-    return <img src={displayUrl} alt={alt} className={cn("max-w-full max-h-full object-contain rounded-md", hasClickHandler && "cursor-pointer", className)} onClick={onClick} style={style} />;
-};
-
-const ImageUploader = ({ onFileSelect, title, imageUrl, onClear, icon }: { onFileSelect: (file: File) => void, title: string, imageUrl: string | null, onClear: () => void, icon: React.ReactNode }) => {
-    const inputRef = useRef<HTMLInputElement>(null);
-    const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: (e) => e.dataTransfer.files && onFileSelect(e.dataTransfer.files[0]) });
-  
-    if (imageUrl) {
-      return (
-        <div className="relative h-32">
-          <img src={imageUrl} alt={title} className="w-full h-full object-cover rounded-md" />
-          <Button variant="destructive" size="icon" className="absolute top-2 right-2 h-6 w-6 z-10" onClick={onClear}><X className="h-4 w-4" /></Button>
-        </div>
-      );
-    }
-  
-    return (
-      <div {...dropzoneProps} className={cn("flex flex-col h-32 justify-center items-center rounded-lg border border-dashed p-4 text-center transition-colors cursor-pointer", isDraggingOver && "border-primary bg-primary/10")} onClick={() => inputRef.current?.click()}>
-        <div className="text-center pointer-events-none">{icon}<p className="mt-2 text-sm font-semibold">{title}</p></div>
-        <Input ref={inputRef} type="file" className="hidden" accept="image/*" onChange={(e) => e.target.files && onFileSelect(e.target.files[0])} />
-      </div>
-    );
 };
 
 interface VirtualTryOnProProps {
@@ -91,7 +40,6 @@ export const VirtualTryOnPro = ({
 }: VirtualTryOnProProps) => {
   const { supabase, session } = useSession();
   const { t } = useLanguage();
-  const { showImage } = useImagePreview();
   const queryClient = useQueryClient();
 
   const [sourceImageFile, setSourceImageFile] = useState<File | null>(null);
@@ -103,24 +51,12 @@ export const VirtualTryOnPro = ({
   const [isLoading, setIsLoading] = useState(false);
   const [isDebugModalOpen, setIsDebugModalOpen] = useState(false);
   const [isAutoPromptEnabled, setIsAutoPromptEnabled] = useState(true);
-  const [isAutoMaskEnabled, setIsAutoMaskEnabled] = useState(false);
   const [isGuideOpen, setIsGuideOpen] = useState(false);
 
   const [numAttempts, setNumAttempts] = useState(1);
   const [maskExpansion, setMaskExpansion] = useState(3);
 
   const sourceImageUrl = useMemo(() => sourceImageFile ? URL.createObjectURL(sourceImageFile) : null, [sourceImageFile]);
-  const referenceImageUrl = useMemo(() => referenceImageFile ? URL.createObjectURL(referenceImageFile) : null, [referenceImageFile]);
-
-  const handleReferenceFileSelect = (file: File | null) => {
-    setReferenceImageFile(file);
-    if (file) {
-      setIsAutoPromptEnabled(true);
-      setIsAutoMaskEnabled(true);
-    } else {
-      setIsAutoMaskEnabled(false);
-    }
-  };
 
   useEffect(() => {
     if (transferredImageUrl) {
@@ -144,9 +80,8 @@ export const VirtualTryOnPro = ({
   useEffect(() => {
     return () => {
       if (sourceImageUrl) URL.revokeObjectURL(sourceImageUrl);
-      if (referenceImageUrl) URL.revokeObjectURL(referenceImageUrl);
     };
-  }, [sourceImageUrl, referenceImageUrl]);
+  }, [sourceImageUrl]);
 
   useEffect(() => {
     if (selectedJob) {
@@ -158,19 +93,14 @@ export const VirtualTryOnPro = ({
     }
   }, [selectedJob]);
 
-  const handleFileSelect = (file: File | null) => {
-    if (file && file.type.startsWith("image/")) {
-      resetForm();
-      setSourceImageFile(file);
-    }
-  };
-
   const handleResetMask = () => {
     setResetTrigger(c => c + 1);
   };
 
-  const proceedWithGeneration = async (maskToUse: string) => {
-    if (!sourceImageFile) return;
+  const handleGenerate = async () => {
+    if (!sourceImageFile || !maskImage) return showError("Please provide a source image and draw a mask.");
+    if (!isAutoPromptEnabled && !prompt.trim() && !referenceImageFile) return showError("Please provide a prompt or enable auto-prompt.");
+
     setIsLoading(true);
     let toastId = showLoading(t('sendingJob'));
 
@@ -202,18 +132,13 @@ export const VirtualTryOnPro = ({
       const payload: any = {
         mode: 'inpaint',
         full_source_image_base64: await fileToBase64(optimizedSource),
+        mask_image_base64: maskImage.split(',')[1],
         prompt: finalPrompt,
         is_garment_mode: true,
         user_id: session?.user.id,
         num_attempts: numAttempts,
         mask_expansion_percent: maskExpansion,
       };
-
-      if (maskToUse.startsWith('data:')) {
-        payload.mask_image_base64 = maskToUse.split(',')[1];
-      } else {
-        payload.mask_image_url = maskToUse;
-      }
 
       if (referenceImageFile) {
         payload.reference_image_base64 = await fileToBase64(referenceImageFile);
@@ -237,87 +162,7 @@ export const VirtualTryOnPro = ({
     }
   };
 
-  const handleGenerate = async () => {
-    if (!sourceImageFile) return showError("Please provide a source image.");
-    if (!isAutoMaskEnabled && !maskImage) return showError("Please draw a mask or enable auto-masking.");
-    if (!isAutoPromptEnabled && !prompt.trim() && !referenceImageFile) return showError("Please provide a prompt or enable auto-prompt.");
-
-    if (isAutoMaskEnabled) {
-      if (!referenceImageFile) return showError("Auto-mask requires a reference image.");
-      setIsLoading(true);
-      const toastId = showLoading("Generating automatic mask...");
-      try {
-        const sourceBase64 = await fileToBase64(sourceImageFile);
-        const referenceBase64 = await fileToBase64(referenceImageFile);
-        const img = new Image();
-        img.onload = async () => {
-          try {
-            const { data, error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-segmentation', {
-              body: {
-                user_id: session?.user.id,
-                image_base64: sourceBase64,
-                mime_type: sourceImageFile.type,
-                reference_image_base64: referenceBase64,
-                reference_mime_type: referenceImageFile.type,
-                image_dimensions: { width: img.width, height: img.height },
-              }
-            });
-            if (error) throw error;
-            dismissToast(toastId);
-            proceedWithGeneration(data.finalMaskUrl);
-          } catch (err: any) {
-            dismissToast(toastId);
-            showError(`Auto-masking failed: ${err.message}`);
-            setIsLoading(false);
-          }
-        };
-        img.src = URL.createObjectURL(sourceImageFile);
-      } catch (err: any) {
-        dismissToast(toastId);
-        showError(`Failed to process image for auto-masking: ${err.message}`);
-        setIsLoading(false);
-      }
-    } else {
-      proceedWithGeneration(maskImage!);
-    }
-  };
-
-  const { dropzoneProps, isDraggingOver } = useDropzone({
-    onDrop: (e) => handleFileSelect(e.target.files?.[0]),
-  });
-
-  const renderJobResult = (job: BitStudioJob) => {
-    if (job.status === 'failed') return <p className="text-destructive text-sm p-2">{t('jobFailed', { errorMessage: job.error_message })}</p>;
-    if (job.status === 'complete' && job.final_image_url) {
-      return (
-        <div className="relative group w-full h-full">
-          <SecureImageDisplay imageUrl={job.final_image_url} alt="Final Result" onClick={() => showImage({ images: [{ url: job.final_image_url! }], currentIndex: 0 })} />
-          {job.metadata?.debug_assets && (
-            <Button 
-              variant="secondary" 
-              className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
-              onClick={(e) => {
-                e.stopPropagation();
-                setIsDebugModalOpen(true);
-              }}
-            >
-              <Eye className="mr-2 h-4 w-4" />
-              Show Steps
-            </Button>
-          )}
-        </div>
-      );
-    }
-    return (
-      <div className="text-center text-muted-foreground">
-        <Loader2 className="h-12 w-12 mx-auto animate-spin" />
-        <p className="mt-4">{t('jobStatus', { status: job.status })}</p>
-      </div>
-    );
-  };
-
-  const isGenerateDisabled = isLoading || !!selectedJob || !sourceImageFile || (!isAutoMaskEnabled && !maskImage) || (!isAutoPromptEnabled && !prompt.trim() && !referenceImageFile);
-  const placeholderText = isAutoPromptEnabled ? t('promptPlaceholderVTO') : t('promptPlaceholderVTO');
+  const isGenerateDisabled = isLoading || !!selectedJob || !sourceImageFile || !maskImage || (!isAutoPromptEnabled && !prompt.trim() && !referenceImageFile);
 
   return (
     <>
@@ -328,139 +173,37 @@ export const VirtualTryOnPro = ({
         </TabsList>
         <TabsContent value="single" className="pt-6">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <div className="lg:col-span-1 flex flex-col gap-4">
-              <div className="space-y-4">
-                <Card>
-                  <CardHeader>
-                    <div className="flex justify-between items-center">
-                      <CardTitle>{selectedJob ? t('selectedJob') : t('setup')}</CardTitle>
-                      <div className="flex items-center gap-2">
-                          <Button variant="ghost" size="icon" onClick={() => setIsGuideOpen(true)}>
-                              <HelpCircle className="h-5 w-5" />
-                          </Button>
-                          {(selectedJob || sourceImageFile) && <Button variant="outline" size="sm" onClick={resetForm}><PlusCircle className="h-4 w-4 mr-2" />{t('new')}</Button>}
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    {selectedJob ? (
-                      <div className="space-y-4">
-                        <p className="text-sm text-muted-foreground">{t('viewingJob')}</p>
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <Label>{t('sourceImage')}</Label>
-                            <div className="mt-1 aspect-square w-full bg-muted rounded-md overflow-hidden">
-                              <SecureImageDisplay imageUrl={selectedJob.metadata?.source_image_url || null} alt="Source Person" />
-                            </div>
-                          </div>
-                          <div>
-                            <Label>{t('referenceImage')}</Label>
-                            <div className="mt-1 aspect-square w-full bg-muted rounded-md overflow-hidden">
-                              <SecureImageDisplay imageUrl={selectedJob.metadata?.reference_image_url || null} alt="Source Garment" />
-                            </div>
-                          </div>
-                        </div>
-                        <div>
-                          <Label>{t('prompt')}</Label>
-                          <p className="text-sm p-2 bg-muted rounded-md mt-1">{selectedJob.metadata?.prompt_used || "N/A"}</p>
-                        </div>
-                      </div>
-                    ) : (
-                      <Accordion type="multiple" defaultValue={['item-1']} className="w-full">
-                        <AccordionItem value="item-1">
-                          <AccordionTrigger>{t('inputs')}</AccordionTrigger>
-                          <AccordionContent className="pt-4 space-y-4">
-                            <div className="grid grid-cols-2 gap-4">
-                              <ImageUploader onFileSelect={handleFileSelect} title={t('sourceImage')} imageUrl={sourceImageUrl} onClear={resetForm} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
-                              <ImageUploader onFileSelect={handleReferenceFileSelect} title={t('referenceImage')} imageUrl={referenceImageUrl} onClear={() => setReferenceImageFile(null)} icon={<Shirt className="h-8 w-8 text-muted-foreground" />} />
-                            </div>
-                          </AccordionContent>
-                        </AccordionItem>
-                        <AccordionItem value="item-2">
-                          <AccordionTrigger>{t('promptOptional')}</AccordionTrigger>
-                          <AccordionContent className="pt-4 space-y-2">
-                            <div className="flex items-center space-x-2">
-                              <Switch id="auto-prompt-pro" checked={isAutoPromptEnabled} onCheckedChange={setIsAutoPromptEnabled} />
-                              <Label htmlFor="auto-prompt-pro">{t('autoGenerate')}</Label>
-                            </div>
-                            <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={placeholderText} rows={4} disabled={isAutoPromptEnabled} />
-                          </AccordionContent>
-                        </AccordionItem>
-                        <AccordionItem value="item-3">
-                          <TooltipProvider>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <AccordionTrigger className="text-primary animate-pulse">{t('proSettings')}</AccordionTrigger>
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                <p>{t('proSettingsTooltip')}</p>
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-                          <AccordionContent className="pt-4">
-                            <InpaintingSettings
-                              numAttempts={numAttempts} setNumAttempts={setNumAttempts}
-                              maskExpansion={maskExpansion} setMaskExpansion={setMaskExpansion}
-                              disabled={isLoading}
-                            />
-                          </AccordionContent>
-                        </AccordionItem>
-                      </Accordion>
-                    )}
-                  </CardContent>
-                </Card>
-                <Button size="lg" className="w-full" onClick={handleGenerate} disabled={isGenerateDisabled}>
-                  {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-                  {t('generate')}
-                </Button>
-              </div>
-            </div>
-
-            <div className="lg:col-span-2 bg-muted rounded-lg flex flex-col items-stretch justify-center relative min-h-[60vh] lg:min-h-0">
-              {sourceImageUrl && !selectedJob ? (
-                <>
-                  <div className="w-full flex-1 flex items-center justify-center relative p-2 overflow-hidden">
-                    <div className="absolute top-2 left-2 z-20 bg-background/80 p-2 rounded-lg shadow-md">
-                      <div className="flex items-center space-x-2">
-                        <Switch id="auto-mask" checked={isAutoMaskEnabled} onCheckedChange={setIsAutoMaskEnabled} disabled={!referenceImageFile} />
-                        <Label htmlFor="auto-mask">{t('autoMask')}</Label>
-                      </div>
-                    </div>
-                    {isAutoMaskEnabled ? (
-                      <div className="text-center text-muted-foreground">
-                        <Sparkles className="h-12 w-12 mx-auto" />
-                        <p className="mt-4 font-semibold">Auto-Mask Enabled</p>
-                        <p className="text-sm">A mask will be generated from your reference image.</p>
-                      </div>
-                    ) : (
-                      <MaskCanvas 
-                        imageUrl={sourceImageUrl} 
-                        onMaskChange={setMaskImage}
-                        brushSize={brushSize}
-                        resetTrigger={resetTrigger}
-                      />
-                    )}
-                  </div>
-                  {!isAutoMaskEnabled && (
-                    <div className="p-2 shrink-0">
-                      <MaskControls 
-                        brushSize={brushSize} 
-                        onBrushSizeChange={setBrushSize} 
-                        onReset={handleResetMask} 
-                      />
-                    </div>
-                  )}
-                </>
-              ) : selectedJob ? (
-                renderJobResult(selectedJob)
-              ) : (
-                <div {...dropzoneProps} className={cn("w-full h-full flex flex-col items-center justify-center cursor-pointer border-2 border-dashed rounded-lg", isDraggingOver && "border-primary")}>
-                  <UploadCloud className="h-12 w-12 text-muted-foreground" />
-                  <p className="mt-4 font-semibold">{t('uploadToBegin')}</p>
-                  <p className="text-sm text-muted-foreground">{t('orSelectRecent')}</p>
-                </div>
-              )}
-            </div>
+            <VTOProSetup
+              selectedJob={selectedJob}
+              resetForm={resetForm}
+              sourceImageFile={sourceImageFile}
+              referenceImageFile={referenceImageFile}
+              onSourceFileSelect={setSourceImageFile}
+              onReferenceFileSelect={setReferenceImageFile}
+              prompt={prompt}
+              setPrompt={setPrompt}
+              isAutoPromptEnabled={isAutoPromptEnabled}
+              setIsAutoPromptEnabled={setIsAutoPromptEnabled}
+              numAttempts={numAttempts}
+              setNumAttempts={setNumAttempts}
+              maskExpansion={maskExpansion}
+              setMaskExpansion={setMaskExpansion}
+              isLoading={isLoading}
+              onGenerate={handleGenerate}
+              isGenerateDisabled={isGenerateDisabled}
+              onGuideOpen={() => setIsGuideOpen(true)}
+            />
+            <VTOProWorkbench
+              selectedJob={selectedJob}
+              sourceImageUrl={sourceImageUrl}
+              onFileSelect={setSourceImageFile}
+              onMaskChange={setMaskImage}
+              brushSize={brushSize}
+              onBrushSizeChange={setBrushSize}
+              resetTrigger={resetTrigger}
+              onResetMask={handleResetMask}
+              onDebugOpen={() => setIsDebugModalOpen(true)}
+            />
           </div>
         </TabsContent>
         <TabsContent value="batch">
