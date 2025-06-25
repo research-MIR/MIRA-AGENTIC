@@ -48,28 +48,45 @@ function expandMask(canvas: Canvas, expansionPercent: number) {
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
+    
+    // Calculate expansion in pixels based on the smaller dimension of the canvas
     const expansionAmount = Math.round(Math.min(canvas.width, canvas.height) * expansionPercent);
     if (expansionAmount <= 0) return;
 
-    console.log(`[expandMask] Applying shadowBlur expansion with amount: ${expansionAmount}px`);
+    console.log(`[expandMask] Applying hard-edge expansion with amount: ${expansionAmount}px`);
 
+    // Create a temporary canvas to hold the original mask state
     const tempCanvas = createCanvas(canvas.width, canvas.height);
     const tempCtx = tempCanvas.getContext('2d');
     if (!tempCtx) return;
     tempCtx.drawImage(canvas, 0, 0);
 
+    // Clear the original canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.shadowColor = 'white';
-    ctx.shadowBlur = expansionAmount;
-    ctx.drawImage(tempCanvas, 0, 0);
-    
-    ctx.shadowBlur = 0;
-    ctx.globalCompositeOperation = 'source-in';
+
+    // Set the fill style to white for drawing the expanded mask
     ctx.fillStyle = 'white';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.globalCompositeOperation = 'source-over';
+
+    // This is a simple but effective way to do dilation without complex morphological operations.
+    // We draw the original mask multiple times with offsets.
+    for (let y = -expansionAmount; y <= expansionAmount; y++) {
+        for (let x = -expansionAmount; x <= expansionAmount; x++) {
+            // This check creates a circular dilation kernel, which looks more natural than a square one.
+            if (x * x + y * y <= expansionAmount * expansionAmount) {
+                ctx.drawImage(tempCanvas, x, y);
+            }
+        }
+    }
     
-    console.log(`[expandMask] shadowBlur expansion and solidification complete.`);
+    // The above loop can leave the interior of the shape semi-transparent due to compositing.
+    // To make it a solid shape, we can use a composite operation.
+    ctx.globalCompositeOperation = 'source-in';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Reset composite operation for future drawing
+    ctx.globalCompositeOperation = 'source-over';
+
+    console.log(`[expandMask] Hard-edge expansion complete.`);
 }
 
 serve(async (req) => {
