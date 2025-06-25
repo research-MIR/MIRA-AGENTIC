@@ -1,9 +1,9 @@
-import React, { useMemo, useEffect, useCallback, useRef, useState } from "react";
+import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Wand2, Brush, Palette, UploadCloud, Sparkles, Loader2, Image as ImageIcon, X, PlusCircle, AlertTriangle, Eye, Settings, History, HelpCircle, Shirt } from "lucide-react";
+import { Wand2, Brush, Palette, UploadCloud, Sparkles, Loader2, Image as ImageIcon, X, PlusCircle, AlertTriangle, Eye, Settings, History, HelpCircle, Shirt, Link2, Users } from "lucide-react";
 import { MaskCanvas } from "@/components/Editor/MaskCanvas";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -24,7 +24,8 @@ import { useLanguage } from "@/context/LanguageContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import ReactMarkdown from "react-markdown";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { optimizeImage } from "@/lib/utils";
+import { optimizeImage, sanitizeFilename } from "@/lib/utils";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -95,86 +96,42 @@ interface VirtualTryOnProProps {
   resetForm: () => void;
   transferredImageUrl?: string | null;
   onTransferConsumed: () => void;
-  // State and setters from parent
-  sourceImageFile: File | null;
-  setSourceImageFile: (file: File | null) => void;
-  referenceImageFile: File | null;
-  setReferenceImageFile: (file: File | null) => void;
-  maskImage: string | null;
-  setMaskImage: (mask: string | null) => void;
-  prompt: string;
-  setPrompt: (prompt: string) => void;
-  brushSize: number;
-  setBrushSize: (size: number) => void;
-  resetTrigger: number;
-  setResetTrigger: (cb: (c: number) => number) => void;
-  isLoading: boolean;
-  setIsLoading: (loading: boolean) => void;
-  isDebugModalOpen: boolean;
-  setIsDebugModalOpen: (open: boolean) => void;
-  isAutoPromptEnabled: boolean;
-  setIsAutoPromptEnabled: (enabled: boolean) => void;
-  isGuideOpen: boolean;
-  setIsGuideOpen: (open: boolean) => void;
-  numAttempts: number;
-  setNumAttempts: (n: number) => void;
-  denoise: number;
-  setDenoise: (d: number) => void;
-  isHighQuality: boolean;
-  setIsHighQuality: (hq: boolean) => void;
-  maskExpansion: number;
-  setMaskExpansion: (me: number) => void;
-  // New props for auto-masking
-  isAutoMasking: boolean;
-  autoMaskUrl: string | null;
-  handleAutoMask: () => void;
-  clearAutoMask: () => void;
 }
 
 export const VirtualTryOnPro = ({
-  recentJobs, isLoadingRecentJobs, selectedJob, handleSelectJob, resetForm, transferredImageUrl, onTransferConsumed,
-  sourceImageFile, setSourceImageFile, referenceImageFile, setReferenceImageFile, maskImage, setMaskImage,
-  prompt, setPrompt, brushSize, setBrushSize, resetTrigger, setResetTrigger, isLoading, setIsLoading,
-  isDebugModalOpen, setIsDebugModalOpen, isAutoPromptEnabled, setIsAutoPromptEnabled, isGuideOpen, setIsGuideOpen,
-  numAttempts, setNumAttempts, denoise, setDenoise, isHighQuality, setIsHighQuality, maskExpansion, setMaskExpansion,
-  isAutoMasking, autoMaskUrl, handleAutoMask, clearAutoMask
+  recentJobs, isLoadingRecentJobs, selectedJob, handleSelectJob, resetForm, transferredImageUrl, onTransferConsumed
 }: VirtualTryOnProProps) => {
   const { supabase, session } = useSession();
   const { t } = useLanguage();
   const { showImage } = useImagePreview();
   const queryClient = useQueryClient();
-  const [isMaskViewerOpen, setIsMaskViewerOpen] = useState(false);
 
-  const [sourcePreview, setSourcePreview] = useState<string | null>(null);
-  const [referencePreview, setReferencePreview] = useState<string | null>(null);
+  // State for Single Inpainting
+  const [sourceImageFile, setSourceImageFile] = useState<File | null>(null);
+  const [referenceImageFile, setReferenceImageFile] = useState<File | null>(null);
+  const [maskImage, setMaskImage] = useState<string | null>(null);
+  const [prompt, setPrompt] = useState("");
+  const [brushSize, setBrushSize] = useState(30);
+  const [resetTrigger, setResetTrigger] = useState(0);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isDebugModalOpen, setIsDebugModalOpen] = useState(false);
+  const [isAutoPromptEnabled, setIsAutoPromptEnabled] = useState(true);
+  const [isGuideOpen, setIsGuideOpen] = useState(false);
+  const [numAttempts, setNumAttempts] = useState(1);
+  const [denoise, setDenoise] = useState(0.99);
+  const [isHighQuality, setIsHighQuality] = useState(false);
+  const [maskExpansion, setMaskExpansion] = useState(3);
 
-  useEffect(() => {
-    if (sourceImageFile) {
-      const url = URL.createObjectURL(sourceImageFile);
-      setSourcePreview(url);
-      return () => URL.revokeObjectURL(url);
-    }
-    setSourcePreview(null);
-  }, [sourceImageFile]);
+  // State for Batch Inpainting
+  const [precisePairs, setPrecisePairs] = useState<{ person: File, garment: File, appendix: string }[]>([]);
+  const [tempPairPerson, setTempPairPerson] = useState<File | null>(null);
+  const [tempPairGarment, setTempPairGarment] = useState<File | null>(null);
+  const [tempPairAppendix, setTempPairAppendix] = useState("");
 
-  useEffect(() => {
-    if (referenceImageFile) {
-      const url = URL.createObjectURL(referenceImageFile);
-      setReferencePreview(url);
-      return () => URL.revokeObjectURL(url);
-    }
-    setReferencePreview(null);
-  }, [referenceImageFile]);
-
-  useEffect(() => {
-    if (selectedJob) {
-      setSourceImageFile(null);
-      setReferenceImageFile(null);
-      setMaskImage(null);
-      setPrompt(selectedJob.metadata?.prompt_used || "");
-      setResetTrigger(c => c + 1);
-    }
-  }, [selectedJob, setSourceImageFile, setReferenceImageFile, setMaskImage, setPrompt, setResetTrigger]);
+  const sourceImageUrl = useMemo(() => sourceImageFile ? URL.createObjectURL(sourceImageFile) : null, [sourceImageFile]);
+  const referenceImageUrl = useMemo(() => referenceImageFile ? URL.createObjectURL(referenceImageFile) : null, [referenceImageFile]);
+  const tempPairPersonUrl = useMemo(() => tempPairPerson ? URL.createObjectURL(tempPairPerson) : null, [tempPairPerson]);
+  const tempPairGarmentUrl = useMemo(() => tempPairGarment ? URL.createObjectURL(tempPairGarment) : null, [tempPairGarment]);
 
   const proJobs = useMemo(() => recentJobs?.filter(job => job.mode === 'inpaint') || [], [recentJobs]);
 
@@ -193,8 +150,10 @@ export const VirtualTryOnPro = ({
   };
 
   const handleGenerate = async () => {
-    if (!sourceImageFile) return showError("Please upload a source image.");
-    if (!maskImage && !autoMaskUrl) return showError("Please draw a mask or use the auto-mask feature.");
+    if (!sourceImageFile || !maskImage) {
+      showError("Please provide a source image and draw a mask.");
+      return;
+    }
     if (!isAutoPromptEnabled && !prompt.trim() && !referenceImageFile) {
       showError("Please provide a prompt or enable auto-prompt.");
       return;
@@ -208,6 +167,7 @@ export const VirtualTryOnPro = ({
       const payload: any = {
         mode: 'inpaint',
         full_source_image_base64: await fileToBase64(optimizedSource),
+        mask_image_base64: maskImage.split(',')[1],
         prompt: prompt,
         auto_prompt_enabled: isAutoPromptEnabled,
         is_garment_mode: true,
@@ -217,12 +177,6 @@ export const VirtualTryOnPro = ({
         resolution: isHighQuality ? 'high' : 'standard',
         mask_expansion_percent: maskExpansion,
       };
-
-      if (autoMaskUrl) {
-        payload.mask_image_url = autoMaskUrl;
-      } else if (maskImage) {
-        payload.mask_image_base64 = maskImage.split(',')[1];
-      }
 
       if (referenceImageFile) {
         const optimizedReference = await optimizeImage(referenceImageFile);
@@ -247,9 +201,56 @@ export const VirtualTryOnPro = ({
     }
   };
 
-  const { dropzoneProps, isDraggingOver } = useDropzone({
-    onDrop: (e) => handleFileSelect(e.target.files?.[0]),
-  });
+  const addPrecisePair = () => {
+    if (tempPairPerson && tempPairGarment) {
+      setPrecisePairs(prev => [...prev, { person: tempPairPerson, garment: tempPairGarment, appendix: tempPairAppendix }]);
+      setTempPairPerson(null);
+      setTempPairGarment(null);
+      setTempPairAppendix("");
+    }
+  };
+
+  const handleBatchSubmit = async () => {
+    if (precisePairs.length === 0) return showError("Please add at least one precise pair.");
+    setIsLoading(true);
+    const toastId = showLoading(`Uploading ${precisePairs.length * 2} images for batch processing...`);
+
+    try {
+      const uploadFile = async (file: File, type: 'person' | 'garment') => {
+        const optimizedFile = await optimizeImage(file);
+        const filePath = `${session?.user.id}/vto-batch-source/${type}-${Date.now()}-${file.name}`;
+        const { error } = await supabase.storage.from('mira-agent-user-uploads').upload(filePath, optimizedFile);
+        if (error) throw new Error(`Upload failed for ${file.name}: ${error.message}`);
+        const { data: { publicUrl } } = supabase.storage.from('mira-agent-user-uploads').getPublicUrl(filePath);
+        return publicUrl;
+      };
+
+      const uploadPromises = precisePairs.map(async (pair) => ({
+        person_url: await uploadFile(pair.person, 'person'),
+        garment_url: await uploadFile(pair.garment, 'garment'),
+        appendix: pair.appendix,
+      }));
+
+      const uploadedPairs = await Promise.all(uploadPromises);
+      dismissToast(toastId);
+      showLoading(`Queuing ${precisePairs.length} jobs...`);
+
+      const { error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-batch-inpaint', {
+        body: { pairs: uploadedPairs, user_id: session?.user.id }
+      });
+
+      if (error) throw error;
+
+      dismissToast(toastId);
+      showSuccess(`${precisePairs.length} jobs queued successfully!`);
+      setPrecisePairs([]);
+    } catch (err: any) {
+      dismissToast(toastId);
+      showError(`Batch submission failed: ${err.message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const renderJobResult = (job: BitStudioJob) => {
     if (job.status === 'failed') return <p className="text-destructive text-sm p-2">{t('jobFailed', { errorMessage: job.error_message })}</p>;
@@ -281,157 +282,193 @@ export const VirtualTryOnPro = ({
     );
   };
 
-  const isGenerateDisabled = isLoading || !!selectedJob || !sourceImageFile || (!maskImage && !autoMaskUrl) || (!isAutoPromptEnabled && !prompt.trim() && !referenceImageFile);
+  const isGenerateDisabled = isLoading || !!selectedJob || !sourceImageFile || !maskImage || (!isAutoPromptEnabled && !prompt.trim() && !referenceImageFile);
   const placeholderText = isAutoPromptEnabled ? t('promptPlaceholderVTO') : t('promptPlaceholderVTO');
 
   return (
     <>
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-1 flex flex-col gap-4">
-          <div className="space-y-4">
-            <Card>
-              <CardHeader>
-                <div className="flex justify-between items-center">
-                  <CardTitle>{selectedJob ? t('selectedJob') : t('setup')}</CardTitle>
-                  <div className="flex items-center gap-2">
-                      <Button variant="ghost" size="icon" onClick={() => setIsGuideOpen(true)}>
-                          <HelpCircle className="h-5 w-5" />
-                      </Button>
-                      {(selectedJob || sourceImageFile) && <Button variant="outline" size="sm" onClick={resetForm}><PlusCircle className="h-4 w-4 mr-2" />{t('new')}</Button>}
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                {selectedJob ? (
-                  <div className="space-y-4">
-                    <p className="text-sm text-muted-foreground">{t('viewingJob')}</p>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <Label>{t('sourceImage')}</Label>
-                        <div className="mt-1 aspect-square w-full bg-muted rounded-md overflow-hidden">
-                          <SecureImageDisplay imageUrl={selectedJob.source_person_image_url} alt="Source Person" />
-                        </div>
-                      </div>
-                      <div>
-                        <Label>{t('garmentReference')}</Label>
-                        <div className="mt-1 aspect-square w-full bg-muted rounded-md overflow-hidden">
-                          <SecureImageDisplay imageUrl={selectedJob.source_garment_image_url} alt="Source Garment" />
-                        </div>
+      <Tabs defaultValue="single" className="w-full">
+        <TabsList className="grid w-full grid-cols-2">
+          <TabsTrigger value="single">Single Inpainting</TabsTrigger>
+          <TabsTrigger value="batch">Batch Inpainting</TabsTrigger>
+        </TabsList>
+        <TabsContent value="single" className="pt-6">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="lg:col-span-1 flex flex-col gap-4">
+              <div className="space-y-4">
+                <Card>
+                  <CardHeader>
+                    <div className="flex justify-between items-center">
+                      <CardTitle>{selectedJob ? t('selectedJob') : t('setup')}</CardTitle>
+                      <div className="flex items-center gap-2">
+                          <Button variant="ghost" size="icon" onClick={() => setIsGuideOpen(true)}>
+                              <HelpCircle className="h-5 w-5" />
+                          </Button>
+                          {(selectedJob || sourceImageFile) && <Button variant="outline" size="sm" onClick={resetForm}><PlusCircle className="h-4 w-4 mr-2" />{t('new')}</Button>}
                       </div>
                     </div>
-                    <div>
-                      <Label>{t('prompt')}</Label>
-                      <p className="text-sm p-2 bg-muted rounded-md mt-1">{selectedJob.metadata?.prompt_used || "N/A"}</p>
-                    </div>
-                  </div>
-                ) : (
-                  <Accordion type="multiple" defaultValue={['item-1']} className="w-full">
-                    <AccordionItem value="item-1">
-                      <AccordionTrigger>{t('inputs')}</AccordionTrigger>
-                      <AccordionContent className="pt-4 space-y-4">
+                  </CardHeader>
+                  <CardContent>
+                    {selectedJob ? (
+                      <div className="space-y-4">
+                        <p className="text-sm text-muted-foreground">{t('viewingJob')}</p>
                         <div className="grid grid-cols-2 gap-4">
-                          <ImageUploader onFileSelect={setSourceImageFile} title={t('sourceImage')} imageUrl={sourcePreview} onClear={resetForm} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
-                          <ImageUploader onFileSelect={setReferenceImageFile} title={t('garmentReference')} imageUrl={referencePreview} onClear={() => setReferenceImageFile(null)} icon={<Shirt className="h-8 w-8 text-muted-foreground" />} />
+                          <div>
+                            <Label>{t('sourceImage')}</Label>
+                            <div className="mt-1 aspect-square w-full bg-muted rounded-md overflow-hidden">
+                              <SecureImageDisplay imageUrl={selectedJob.source_person_image_url} alt="Source Person" />
+                            </div>
+                          </div>
+                          <div>
+                            <Label>{t('garmentReference')}</Label>
+                            <div className="mt-1 aspect-square w-full bg-muted rounded-md overflow-hidden">
+                              <SecureImageDisplay imageUrl={selectedJob.source_garment_image_url} alt="Source Garment" />
+                            </div>
+                          </div>
                         </div>
-                        <Button className="w-full" onClick={handleAutoMask} disabled={isAutoMasking || !sourceImageFile || !referenceImageFile}>
-                          {isAutoMasking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
-                          {t('autoMask')}
-                        </Button>
-                      </AccordionContent>
-                    </AccordionItem>
-                    <AccordionItem value="item-2">
-                      <AccordionTrigger>{t('promptSectionTitle')}</AccordionTrigger>
-                      <AccordionContent className="pt-4 space-y-2">
-                        <div className="flex items-center space-x-2">
-                          <Switch id="auto-prompt-pro" checked={isAutoPromptEnabled} onCheckedChange={setIsAutoPromptEnabled} disabled={!referenceImageFile} />
-                          <Label htmlFor="auto-prompt-pro">{t('autoGenerate')}</Label>
+                        <div>
+                          <Label>{t('prompt')}</Label>
+                          <p className="text-sm p-2 bg-muted rounded-md mt-1">{selectedJob.metadata?.prompt_used || "N/A"}</p>
                         </div>
-                        <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={placeholderText} rows={4} disabled={isAutoPromptEnabled} />
-                      </AccordionContent>
-                    </AccordionItem>
-                    <AccordionItem value="item-3">
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <AccordionTrigger className="text-primary animate-pulse">{t('proSettings')}</AccordionTrigger>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p>{t('proSettingsTooltip')}</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                      <AccordionContent className="pt-4">
-                        <ProModeSettings
-                          numAttempts={numAttempts} setNumAttempts={setNumAttempts}
-                          denoise={denoise} setDenoise={setDenoise}
-                          isHighQuality={isHighQuality} setIsHighQuality={setIsHighQuality}
-                          maskExpansion={maskExpansion} setMaskExpansion={setMaskExpansion}
-                          disabled={isLoading}
-                        />
-                      </AccordionContent>
-                    </AccordionItem>
-                  </Accordion>
-                )}
-              </CardContent>
-            </Card>
-            <Button size="lg" className="w-full" onClick={handleGenerate} disabled={isGenerateDisabled}>
-              {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-              {t('generate')}
-            </Button>
-          </div>
-        </div>
-
-        <div className="lg:col-span-2 bg-muted rounded-lg flex flex-col items-stretch justify-center relative min-h-[60vh] lg:min-h-0">
-          {sourcePreview && !selectedJob ? (
-            <>
-              <div className="w-full flex-1 flex items-center justify-center relative p-2 overflow-hidden">
-                {autoMaskUrl ? (
-                  <div className="relative w-full h-full flex items-center justify-center">
-                    <img src={sourcePreview} alt="Source" className="absolute top-0 left-0 w-full h-full object-contain" />
-                    <SecureImageDisplay 
-                        imageUrl={autoMaskUrl} 
-                        alt="Auto-generated Mask" 
-                        className="absolute top-0 left-0 w-full h-full object-contain opacity-50 mix-blend-screen pointer-events-none" 
-                        style={{ filter: 'brightness(0) invert(1) sepia(1) saturate(10000%) hue-rotate(330deg)' }}
-                    />
-                    <div className="absolute top-2 right-2 flex gap-2">
-                        <Button variant="secondary" size="sm" onClick={() => setIsMaskViewerOpen(true)}><Eye className="h-4 w-4 mr-2" />View Mask</Button>
-                        <Button variant="destructive" size="sm" onClick={clearAutoMask}><X className="h-4 w-4 mr-2" />Clear Mask</Button>
-                    </div>
-                  </div>
-                ) : (
-                  <MaskCanvas 
-                    imageUrl={sourcePreview} 
-                    onMaskChange={setMaskImage}
-                    brushSize={brushSize}
-                    resetTrigger={resetTrigger}
-                  />
-                )}
+                      </div>
+                    ) : (
+                      <Accordion type="multiple" defaultValue={['item-1']} className="w-full">
+                        <AccordionItem value="item-1">
+                          <AccordionTrigger>{t('inputs')}</AccordionTrigger>
+                          <AccordionContent className="pt-4 space-y-4">
+                            <div className="grid grid-cols-2 gap-4">
+                              <ImageUploader onFileSelect={setSourceImageFile} title={t('sourceImage')} imageUrl={sourceImageUrl} onClear={resetForm} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
+                              <ImageUploader onFileSelect={setReferenceImageFile} title={t('garmentReference')} imageUrl={referenceImageUrl} onClear={() => setReferenceImageFile(null)} icon={<Shirt className="h-8 w-8 text-muted-foreground" />} />
+                            </div>
+                          </AccordionContent>
+                        </AccordionItem>
+                        <AccordionItem value="item-2">
+                          <AccordionTrigger>{t('promptSectionTitle')}</AccordionTrigger>
+                          <AccordionContent className="pt-4 space-y-2">
+                            <div className="flex items-center space-x-2">
+                              <Switch id="auto-prompt-pro" checked={isAutoPromptEnabled} onCheckedChange={setIsAutoPromptEnabled} disabled={!referenceImageFile} />
+                              <Label htmlFor="auto-prompt-pro">{t('autoGenerate')}</Label>
+                            </div>
+                            <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={placeholderText} rows={4} disabled={isAutoPromptEnabled} />
+                          </AccordionContent>
+                        </AccordionItem>
+                        <AccordionItem value="item-3">
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <AccordionTrigger className="text-primary animate-pulse">{t('proSettings')}</AccordionTrigger>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p>{t('proSettingsTooltip')}</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                          <AccordionContent className="pt-4">
+                            <ProModeSettings
+                              numAttempts={numAttempts} setNumAttempts={setNumAttempts}
+                              denoise={denoise} setDenoise={setDenoise}
+                              isHighQuality={isHighQuality} setIsHighQuality={setIsHighQuality}
+                              maskExpansion={maskExpansion} setMaskExpansion={setMaskExpansion}
+                              disabled={isLoading}
+                            />
+                          </AccordionContent>
+                        </AccordionItem>
+                      </Accordion>
+                    )}
+                  </CardContent>
+                </Card>
+                <Button size="lg" className="w-full" onClick={handleGenerate} disabled={isGenerateDisabled}>
+                  {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+                  {t('generate')}
+                </Button>
               </div>
-              {!autoMaskUrl && (
-                <div className="p-2 shrink-0">
-                  <MaskControls 
-                    brushSize={brushSize} 
-                    onBrushSizeChange={setBrushSize} 
-                    onReset={handleResetMask} 
-                  />
+            </div>
+
+            <div className="lg:col-span-2 bg-muted rounded-lg flex flex-col items-stretch justify-center relative min-h-[60vh] lg:min-h-0">
+              {sourceImageUrl && !selectedJob ? (
+                <>
+                  <div className="w-full flex-1 flex items-center justify-center relative p-2 overflow-hidden">
+                    <MaskCanvas 
+                      imageUrl={sourceImageUrl} 
+                      onMaskChange={setMaskImage}
+                      brushSize={brushSize}
+                      resetTrigger={resetTrigger}
+                    />
+                  </div>
+                  <div className="p-2 shrink-0">
+                    <MaskControls 
+                      brushSize={brushSize} 
+                      onBrushSizeChange={setBrushSize} 
+                      onReset={handleResetMask} 
+                    />
+                  </div>
+                </>
+              ) : selectedJob ? (
+                renderJobResult(selectedJob)
+              ) : (
+                <div {...dropzoneProps} className={cn("w-full h-full flex flex-col items-center justify-center cursor-pointer border-2 border-dashed rounded-lg", isDraggingOver && "border-primary")}>
+                  <UploadCloud className="h-12 w-12 text-muted-foreground" />
+                  <p className="mt-4 font-semibold">{t('uploadToBegin')}</p>
+                  <p className="text-sm text-muted-foreground">{t('orSelectRecent')}</p>
                 </div>
               )}
-            </>
-          ) : selectedJob ? (
-            renderJobResult(selectedJob)
-          ) : (
-            <div {...dropzoneProps} className={cn("w-full h-full flex flex-col items-center justify-center cursor-pointer border-2 border-dashed rounded-lg", isDraggingOver && "border-primary")}>
-              <UploadCloud className="h-12 w-12 text-muted-foreground" />
-              <p className="mt-4 font-semibold">{t('uploadToBegin')}</p>
-              <p className="text-sm text-muted-foreground">{t('orSelectRecent')}</p>
             </div>
-          )}
-        </div>
-      </div>
-      
-      <Card className="mt-4">
-        <CardHeader><CardTitle><div className="flex items-center gap-2"><History className="h-4 w-4" />{t('recentProJobs')}</div></CardTitle></CardHeader>
+          </div>
+        </TabsContent>
+        <TabsContent value="batch" className="pt-6">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div className="lg:col-span-1 space-y-6">
+              <Card>
+                <CardHeader><CardTitle>{t('precisePairs')}</CardTitle><CardDescription>{t('precisePairsDescription')}</CardDescription></CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-2 gap-2">
+                    <ImageUploader onFileSelect={setTempPairPerson} title={t('person')} imageUrl={tempPairPersonUrl} onClear={() => setTempPairPerson(null)} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
+                    <ImageUploader onFileSelect={setTempPairGarment} title={t('garment')} imageUrl={tempPairGarmentUrl} onClear={() => setTempPairGarment(null)} icon={<Shirt className="h-8 w-8 text-muted-foreground" />} />
+                  </div>
+                  <div>
+                    <Label htmlFor="pair-appendix">{t('promptAppendixPair')}</Label>
+                    <Input id="pair-appendix" value={tempPairAppendix} onChange={(e) => setTempPairAppendix(e.target.value)} placeholder={t('promptAppendixPairPlaceholder')} />
+                  </div>
+                  <Button className="w-full" onClick={addPrecisePair} disabled={!tempPairPerson || !tempPairGarment}>{t('addPair')}</Button>
+                </CardContent>
+              </Card>
+              <Button size="lg" className="w-full" onClick={handleBatchSubmit} disabled={isLoading || precisePairs.length === 0}>
+                {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+                {t('startBatchTryOn')}
+              </Button>
+            </div>
+            <div className="lg:col-span-2">
+              <Card className="min-h-[75vh]">
+                <CardHeader><CardTitle>{t('batchQueue')}</CardTitle></CardHeader>
+                <CardContent>
+                  <ScrollArea className="h-[65vh]">
+                    {precisePairs.length > 0 ? (
+                      <div className="space-y-2 pr-4">
+                        {precisePairs.map((pair, i) => (
+                          <div key={i} className="flex gap-2 items-center bg-muted p-2 rounded-md">
+                            <img src={URL.createObjectURL(pair.person)} className="w-16 h-16 object-cover rounded-md" />
+                            <PlusCircle className="h-5 w-5 text-muted-foreground" />
+                            <img src={URL.createObjectURL(pair.garment)} className="w-16 h-16 object-cover rounded-md" />
+                            <p className="text-xs text-muted-foreground flex-1 truncate italic">"{pair.appendix}"</p>
+                            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setPrecisePairs(p => p.filter((_, idx) => idx !== i))}><X className="h-4 w-4" /></Button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
+                        <ImageIcon className="h-12 w-12" />
+                        <p className="mt-4">Add pairs to start a batch.</p>
+                      </div>
+                    )}
+                  </ScrollArea>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        </TabsContent>
+      </Tabs>
+      <Card className="mt-8">
+        <CardHeader><CardTitle>{t('recentProJobs')}</CardTitle></CardHeader>
         <CardContent>
           {isLoadingRecentJobs ? <Skeleton className="h-24 w-full" /> : proJobs.length > 0 ? (
             <ScrollArea className="h-32">
@@ -449,20 +486,23 @@ export const VirtualTryOnPro = ({
           ) : <p className="text-muted-foreground text-sm">{t('noRecentProJobs')}</p>}
         </CardContent>
       </Card>
-
-      <Dialog open={isMaskViewerOpen} onOpenChange={setIsMaskViewerOpen}>
+      <DebugStepsModal 
+        isOpen={isDebugModalOpen}
+        onClose={() => setIsDebugModalOpen(false)}
+        assets={selectedJob?.metadata?.debug_assets || null}
+      />
+      <Dialog open={isGuideOpen} onOpenChange={setIsGuideOpen}>
         <DialogContent className="max-w-2xl">
             <DialogHeader>
-                <DialogTitle>Raw Segmentation Mask</DialogTitle>
-                <DialogDescription>
-                    This is the raw black and white mask generated by the AI. White areas will be replaced, black areas will be kept.
-                </DialogDescription>
+                <DialogTitle>{t('inpaintingGuideTitle')}</DialogTitle>
             </DialogHeader>
-            <div className="py-4 flex items-center justify-center bg-gray-800 rounded-md">
-                <SecureImageDisplay imageUrl={autoMaskUrl} alt="Raw Mask" />
-            </div>
+            <ScrollArea className="max-h-[70vh] pr-4">
+                <div className="space-y-4 markdown-content">
+                    <ReactMarkdown>{t('inpaintingGuideContent')}</ReactMarkdown>
+                </div>
+            </ScrollArea>
             <DialogFooter>
-                <Button onClick={() => setIsMaskViewerOpen(false)}>Close</Button>
+                <Button onClick={() => setIsGuideOpen(false)}>{t('done')}</Button>
             </DialogFooter>
         </DialogContent>
       </Dialog>
