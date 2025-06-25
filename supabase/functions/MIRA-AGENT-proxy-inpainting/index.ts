@@ -11,7 +11,7 @@ const corsHeaders = {
 const workflowTemplate = `{
   "3": {
     "inputs": {
-      "seed": 1079021567648476,
+      "seed": 964164525614180,
       "steps": 20,
       "cfg": 1,
       "sampler_name": "euler",
@@ -72,7 +72,7 @@ const workflowTemplate = `{
     "inputs": {
       "filename_prefix": "ComfyUI_Inpaint",
       "images": [
-        "54",
+        "66",
         0
       ]
     },
@@ -83,7 +83,7 @@ const workflowTemplate = `{
   },
   "17": {
     "inputs": {
-      "image": "5fd7f7c5-929f-41ac-900c-745063316fef.png"
+      "image": "6e53e41b-409c-4055-b8b6-f628b72f5bef.png"
     },
     "class_type": "LoadImage",
     "_meta": {
@@ -92,7 +92,7 @@ const workflowTemplate = `{
   },
   "23": {
     "inputs": {
-      "text": "two photorealistic, classic black plastic buttons with four holes each, realistically rendered with subtle reflections and shadows, as if sewn onto fabric",
+      "text": "short  pink ordered hair",
       "clip": [
         "34",
         0
@@ -178,7 +178,7 @@ const workflowTemplate = `{
   },
   "45": {
     "inputs": {
-      "image": "ComfyUI_temp_czavg_00003_.png"
+      "image": "clipspace/clipspace-mask-7067741.png [input]"
     },
     "class_type": "LoadImage",
     "_meta": {
@@ -189,7 +189,7 @@ const workflowTemplate = `{
     "inputs": {
       "channel": "red",
       "image": [
-        "45",
+        "64",
         0
       ]
     },
@@ -200,7 +200,7 @@ const workflowTemplate = `{
   },
   "53": {
     "inputs": {
-      "expand": 12,
+      "expand": 26,
       "incremental_expandrate": 0,
       "tapered_corners": true,
       "flip_input": false,
@@ -216,24 +216,6 @@ const workflowTemplate = `{
     "class_type": "GrowMaskWithBlur",
     "_meta": {
       "title": "Grow Mask With Blur"
-    }
-  },
-  "54": {
-    "inputs": {
-      "method": "mkl",
-      "strength": 0.30000000000000004,
-      "image_ref": [
-        "17",
-        0
-      ],
-      "image_target": [
-        "8",
-        0
-      ]
-    },
-    "class_type": "ColorMatch",
-    "_meta": {
-      "title": "Color Match"
     }
   },
   "55": {
@@ -262,7 +244,7 @@ const workflowTemplate = `{
   },
   "58": {
     "inputs": {
-      "multiplier": 1.0100000000000002,
+      "multiplier": 1.0010000000000003,
       "model": [
         "31",
         0
@@ -272,19 +254,19 @@ const workflowTemplate = `{
         0
       ],
       "mask": [
-        "53",
+        "47",
         0
       ]
     },
     "class_type": "DifferentialDiffusionAdvanced",
     "_meta": {
-      "title": "Apply Flux PAG Attention"
+      "title": "Differential Diffusion Advanced"
     }
   },
   "59": {
     "inputs": {
       "pixels": [
-        "17",
+        "62",
         0
       ],
       "vae": [
@@ -311,6 +293,82 @@ const workflowTemplate = `{
     "class_type": "VAEDecode",
     "_meta": {
       "title": "VAE Decode"
+    }
+  },
+  "62": {
+    "inputs": {
+      "upscale_model": [
+        "63",
+        0
+      ],
+      "image": [
+        "17",
+        0
+      ]
+    },
+    "class_type": "ImageUpscaleWithModel",
+    "_meta": {
+      "title": "Upscale Image (using Model)"
+    }
+  },
+  "63": {
+    "inputs": {
+      "model_name": "4x-UltraSharp.pth"
+    },
+    "class_type": "UpscaleModelLoader",
+    "_meta": {
+      "title": "Load Upscale Model"
+    }
+  },
+  "64": {
+    "inputs": {
+      "upscale_model": [
+        "65",
+        0
+      ],
+      "image": [
+        "45",
+        0
+      ]
+    },
+    "class_type": "ImageUpscaleWithModel",
+    "_meta": {
+      "title": "Upscale Image (using Model)"
+    }
+  },
+  "65": {
+    "inputs": {
+      "model_name": "4x-UltraSharp.pth"
+    },
+    "class_type": "UpscaleModelLoader",
+    "_meta": {
+      "title": "Load Upscale Model"
+    }
+  },
+  "66": {
+    "inputs": {
+      "upscale_method": "lanczos",
+      "scale_by": 0.25000000000000006,
+      "image": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "ImageScaleBy",
+    "_meta": {
+      "title": "Upscale Image By"
+    }
+  },
+  "68": {
+    "inputs": {
+      "images": [
+        "64",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
     }
   }
 }`;
@@ -412,7 +470,7 @@ serve(async (req) => {
 
     if (maxX < minX || maxY < minY) throw new Error("The provided mask is empty or invalid after processing.");
 
-    const padding = Math.round(Math.max(maxX - minX, maxY - minY) * 0.20);
+    const padding = Math.round(Math.max(maxX - minX, maxY - minY) * 0.30);
     const bbox = {
       x: Math.max(0, minX - padding),
       y: Math.max(0, minY - padding),
