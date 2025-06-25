@@ -7,11 +7,15 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
 serve(async (req) => {
+  console.log(`[BatchInpaintProxy] Received request. Method: ${req.method}`);
+
   if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
+    console.log('[BatchInpaintProxy] Handling OPTIONS preflight request.');
+    return new Response('ok', { headers: corsHeaders });
   }
 
   try {
