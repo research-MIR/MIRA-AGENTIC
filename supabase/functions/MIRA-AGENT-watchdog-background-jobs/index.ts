@@ -9,8 +9,9 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const STALLED_POLLER_THRESHOLD_SECONDS = 30;
-const STALLED_AGGREGATION_THRESHOLD_SECONDS = 60; // 1 minute
+// Reduced thresholds for faster response times.
+const STALLED_POLLER_THRESHOLD_SECONDS = 15;
+const STALLED_AGGREGATION_THRESHOLD_SECONDS = 20;
 
 serve(async (req) => {
   const requestId = `watchdog-bg-${Date.now()}`;
