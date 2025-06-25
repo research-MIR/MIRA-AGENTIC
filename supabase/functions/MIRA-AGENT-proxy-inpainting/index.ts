@@ -360,7 +360,7 @@ serve(async (req) => {
     const fullSourceImage = await loadImage(`data:image/png;base64,${source_image_base64}`);
     const rawMaskImage = await loadImage(`data:image/png;base64,${mask_image_base64}`);
 
-    const maskCanvas = createCanvas(rawMaskImage.width(), rawMaskImage.height());
+    const maskCanvas = createCanvas(rawMaskImage.width, rawMaskImage.height);
     const maskCtx = maskCanvas.getContext('2d');
     maskCtx.drawImage(rawMaskImage, 0, 0);
     const maskImageData = maskCtx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
@@ -384,8 +384,8 @@ serve(async (req) => {
     const bbox = {
       x: Math.max(0, minX - padding),
       y: Math.max(0, minY - padding),
-      width: Math.min(fullSourceImage.width(), maxX + padding) - Math.max(0, minX - padding),
-      height: Math.min(fullSourceImage.height(), maxY + padding) - Math.max(0, minY - padding),
+      width: Math.min(fullSourceImage.width, maxX + padding) - Math.max(0, minX - padding),
+      height: Math.min(fullSourceImage.height, maxY + padding) - Math.max(0, minY - padding),
     };
 
     if (bbox.width <= 0 || bbox.height <= 0) throw new Error(`Invalid bounding box dimensions: ${bbox.width}x${bbox.height}.`);
@@ -403,7 +403,10 @@ serve(async (req) => {
       uploadImageToComfyUI(sanitizedAddress, croppedMaskBlob, 'mask.png')
     ]);
 
-    const sourceImageUrl = await uploadToSupabaseStorage(supabase, new Blob([fullSourceImage.toBuffer()]), user_id, 'full_source.png');
+    const sourceImageBuffer = decodeBase64(source_image_base64);
+    const sourceImageBlob = new Blob([sourceImageBuffer], { type: 'image/png' });
+    const sourceImageUrl = await uploadToSupabaseStorage(supabase, sourceImageBlob, user_id, 'full_source.png');
+    
     let referenceImageUrl: string | null = null;
     if (reference_image_base64) {
         const referenceBlob = new Blob([decodeBase64(reference_image_base64)], { type: 'image/png' });
