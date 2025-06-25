@@ -218,6 +218,8 @@ serve(async (req) => {
     expandMask(combinedCanvas, expansion_percent);
     console.log(`[Orchestrator][${requestId}] Post-vote expansion complete.`);
 
+    // --- START OF NEW LOGGING ---
+    console.log(`[Orchestrator][${requestId}] Starting final image data processing...`);
     const finalImageData = combinedCtx.getImageData(0, 0, image_dimensions.width, image_dimensions.height);
     const finalData = finalImageData.data;
     for (let i = 0; i < finalData.length; i += 4) {
@@ -234,22 +236,33 @@ serve(async (req) => {
         }
     }
     combinedCtx.putImageData(finalImageData, 0, 0);
+    console.log(`[Orchestrator][${requestId}] Final pixel data processed and put on canvas.`);
 
     const finalDataUrl = combinedCanvas.toDataURL('image/png');
+    console.log(`[Orchestrator][${requestId}] Generated Data URL (first 50 chars): ${finalDataUrl.substring(0, 50)}`);
+
     if (!finalDataUrl || !finalDataUrl.includes(',')) {
         throw new Error("Failed to generate data URL from final canvas.");
     }
     const finalBase64 = finalDataUrl.split(',')[1];
-    const finalImageBuffer = decodeBase64(finalBase64);
+    console.log(`[Orchestrator][${requestId}] Extracted Base64 string. Length: ${finalBase64.length}`);
 
-    if (!finalImageBuffer) {
+    const finalImageBuffer = decodeBase64(finalBase64);
+    console.log(`[Orchestrator][${requestId}] Decoded Base64 to buffer. Buffer length: ${finalImageBuffer.length}`);
+
+    if (!finalImageBuffer || finalImageBuffer.length === 0) {
         throw new Error("Failed to convert final canvas to buffer. The canvas might be empty or invalid.");
     }
+    
+    console.log(`[Orchestrator][${requestId}] Uploading final mask to storage...`);
     const finalPublicUrl = await uploadBufferToStorage(supabase, finalImageBuffer, user_id, 'final_mask.png');
+    console.log(`[Orchestrator][${requestId}] Upload complete. Public URL: ${finalPublicUrl}`);
 
     await supabase.from('mira-agent-mask-aggregation-jobs')
       .update({ status: 'complete', final_mask_base64: finalPublicUrl })
       .eq('id', aggregationJobId);
+    console.log(`[Orchestrator][${requestId}] Final database update complete. Job finished.`);
+    // --- END OF NEW LOGGING ---
 
     return new Response(JSON.stringify({ success: true, finalMaskUrl: finalPublicUrl, rawResponse: allResults }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
