@@ -11,14 +11,14 @@ const corsHeaders = {
 const workflowTemplate = `{
   "3": {
     "inputs": {
-      "seed": 1083577032522281,
+      "seed": 1079021567648476,
       "steps": 20,
       "cfg": 1,
       "sampler_name": "euler",
       "scheduler": "normal",
       "denoise": 1,
       "model": [
-        "39",
+        "58",
         0
       ],
       "positive": [
@@ -83,7 +83,7 @@ const workflowTemplate = `{
   },
   "17": {
     "inputs": {
-      "image": "ComfyUI_Inpaint_00034_.png"
+      "image": "5fd7f7c5-929f-41ac-900c-745063316fef.png"
     },
     "class_type": "LoadImage",
     "_meta": {
@@ -92,7 +92,7 @@ const workflowTemplate = `{
   },
   "23": {
     "inputs": {
-      "text": "shoes",
+      "text": "two photorealistic, classic black plastic buttons with four holes each, realistically rendered with subtle reflections and shadows, as if sewn onto fabric",
       "clip": [
         "34",
         0
@@ -149,7 +149,7 @@ const workflowTemplate = `{
   },
   "38": {
     "inputs": {
-      "noise_mask": false,
+      "noise_mask": true,
       "positive": [
         "26",
         0
@@ -163,7 +163,7 @@ const workflowTemplate = `{
         0
       ],
       "pixels": [
-        "17",
+        "60",
         0
       ],
       "mask": [
@@ -176,21 +176,9 @@ const workflowTemplate = `{
       "title": "InpaintModelConditioning"
     }
   },
-  "39": {
-    "inputs": {
-      "model": [
-        "31",
-        0
-      ]
-    },
-    "class_type": "DifferentialDiffusion",
-    "_meta": {
-      "title": "Differential Diffusion"
-    }
-  },
   "45": {
     "inputs": {
-      "image": "ComfyUI_temp_czavg_00001_.png"
+      "image": "ComfyUI_temp_czavg_00003_.png"
     },
     "class_type": "LoadImage",
     "_meta": {
@@ -210,22 +198,13 @@ const workflowTemplate = `{
       "title": "Convert Image to Mask"
     }
   },
-  "48": {
-    "inputs": {
-      "style_model_name": "fluxcontrolnetupscale.safetensors"
-    },
-    "class_type": "StyleModelLoader",
-    "_meta": {
-      "title": "Load Style Model"
-    }
-  },
   "53": {
     "inputs": {
-      "expand": 3,
+      "expand": 12,
       "incremental_expandrate": 0,
       "tapered_corners": true,
       "flip_input": false,
-      "blur_radius": 1.5,
+      "blur_radius": 5.9,
       "lerp_alpha": 1,
       "decay_factor": 1,
       "fill_holes": false,
@@ -281,13 +260,57 @@ const workflowTemplate = `{
       "title": "MASKDEBUG"
     }
   },
-  "57": {
+  "58": {
     "inputs": {
-      "image": "ComfyUI_Inpaint_00034_.png"
+      "multiplier": 1.0100000000000002,
+      "model": [
+        "31",
+        0
+      ],
+      "samples": [
+        "59",
+        0
+      ],
+      "mask": [
+        "53",
+        0
+      ]
     },
-    "class_type": "LoadImage",
+    "class_type": "DifferentialDiffusionAdvanced",
     "_meta": {
-      "title": "Input Image"
+      "title": "Differential Diffusion Advanced"
+    }
+  },
+  "59": {
+    "inputs": {
+      "pixels": [
+        "17",
+        0
+      ],
+      "vae": [
+        "32",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE Encode"
+    }
+  },
+  "60": {
+    "inputs": {
+      "samples": [
+        "58",
+        1
+      ],
+      "vae": [
+        "32",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
     }
   }
 }`;
@@ -328,6 +351,7 @@ serve(async (req) => {
       prompt,
       is_garment_mode,
       denoise,
+      style_strength,
       mask_expansion_percent = 2,
     } = await req.json();
 
@@ -448,6 +472,7 @@ serve(async (req) => {
       metadata: { 
         prompt: finalPrompt, 
         denoise, 
+        style_strength,
         source_image_url: sourceImageUrl,
         reference_image_url: referenceImageUrl,
         full_source_image_base64: source_image_base64,

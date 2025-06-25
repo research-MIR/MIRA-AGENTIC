@@ -13,13 +13,13 @@ import { useSession } from "@/components/Auth/SessionContextProvider";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { useImagePreview } from "@/context/ImagePreviewContext";
 import { useSecureImage } from "@/hooks/useSecureImage";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Skeleton } from "../ui/skeleton";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DebugStepsModal } from "@/components/VTO/DebugStepsModal";
-import { Switch } from "@/components/ui/switch";
+import { Switch } from "../ui/switch";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { InpaintingSettings } from "@/components/Inpainting/InpaintingSettings";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { ScrollArea } from "../ui/scroll-area";
 import { useLanguage } from "@/context/LanguageContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import ReactMarkdown from "react-markdown";
@@ -27,6 +27,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { optimizeImage } from "@/lib/utils";
 import { useImageTransferStore } from "@/store/imageTransferStore";
 import { RealtimeChannel } from "@supabase/supabase-js";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -103,6 +104,7 @@ const Inpainting = () => {
   const [isGuideOpen, setIsGuideOpen] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [isAutoPromptEnabled, setIsAutoPromptEnabled] = useState(true);
+  const [isSizeWarningOpen, setIsSizeWarningOpen] = useState(false);
 
   const [styleStrength, setStyleStrength] = useState(0.3);
   const [maskExpansion, setMaskExpansion] = useState(3);
@@ -215,16 +217,8 @@ const Inpainting = () => {
     setResetTrigger(c => c + 1);
   };
 
-  const handleGenerate = async () => {
-    if (!sourceImageFile || !maskImage) {
-      showError("Please provide a source image and draw a mask.");
-      return;
-    }
-    if (!isAutoPromptEnabled && !prompt.trim() && !referenceImageFile) {
-      showError("Please provide a prompt or enable auto-prompt.");
-      return;
-    }
-    
+  const proceedWithGeneration = async () => {
+    if (!sourceImageFile || !maskImage) return;
     setIsLoading(true);
     let toastId = showLoading(t('sendingJob'));
 
@@ -239,7 +233,7 @@ const Inpainting = () => {
         });
         if (enhancerError) throw enhancerError;
         finalPrompt = enhancedData.enhanced_prompt;
-        setPrompt(finalPrompt); // Update the UI with the enhanced prompt
+        setPrompt(finalPrompt);
         dismissToast(toastId);
         toastId = showLoading(t('sendingJob'));
       }
@@ -278,6 +272,50 @@ const Inpainting = () => {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleGenerate = async () => {
+    if (!sourceImageFile || !maskImage) {
+      showError("Please provide a source image and draw a mask.");
+      return;
+    }
+    if (!isAutoPromptEnabled && !prompt.trim() && !referenceImageFile) {
+      showError("Please provide a prompt or enable auto-prompt.");
+      return;
+    }
+
+    const maskImg = new Image();
+    maskImg.src = maskImage;
+    maskImg.onload = () => {
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = maskImg.width;
+      tempCanvas.height = maskImg.height;
+      const ctx = tempCanvas.getContext('2d');
+      if (!ctx) return;
+      ctx.drawImage(maskImg, 0, 0);
+      const imageData = ctx.getImageData(0, 0, tempCanvas.width, tempCanvas.height).data;
+      
+      let minX = tempCanvas.width, minY = tempCanvas.height, maxX = 0, maxY = 0;
+      for (let i = 0; i < imageData.length; i += 4) {
+        if (imageData[i + 3] > 0) { // Check alpha channel
+          const x = (i / 4) % tempCanvas.width;
+          const y = Math.floor((i / 4) / tempCanvas.width);
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+
+      const bboxWidth = maxX - minX;
+      const bboxHeight = maxY - minY;
+
+      if (bboxWidth < 512 || bboxHeight < 512) {
+        setIsSizeWarningOpen(true);
+      } else {
+        proceedWithGeneration();
+      }
+    };
   };
 
   const { dropzoneProps, isDraggingOver } = useDropzone({
@@ -488,6 +526,21 @@ const Inpainting = () => {
             </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={isSizeWarningOpen} onOpenChange={setIsSizeWarningOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Small Selection Warning</AlertDialogTitle>
+            <AlertDialogDescription>
+              The area you've selected is smaller than 512x512 pixels. For best results with fine details, we recommend upscaling the source image first using the "Upscale" page. Would you like to continue anyway?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={proceedWithGeneration}>Continue Anyway</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 };
