@@ -16,6 +16,28 @@ const blobToBase64 = async (blob: Blob): Promise<string> => {
     return encodeBase64(buffer);
 };
 
+async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
+    const url = new URL(publicUrl);
+    // Example path: /storage/v1/object/public/mira-agent-user-uploads/user-id/vto-batch-source/file.png
+    const pathStartIndex = url.pathname.indexOf(UPLOAD_BUCKET);
+    if (pathStartIndex === -1) {
+        throw new Error(`Could not find bucket name '${UPLOAD_BUCKET}' in URL path: ${publicUrl}`);
+    }
+    const filePath = decodeURIComponent(url.pathname.substring(pathStartIndex + UPLOAD_BUCKET.length + 1));
+
+    if (!filePath) {
+        throw new Error(`Could not parse file path from URL: ${publicUrl}`);
+    }
+
+    console.log(`[BatchInpaintWorker] Downloading from storage path: ${filePath}`);
+    const { data, error } = await supabase.storage.from(UPLOAD_BUCKET).download(filePath);
+
+    if (error) {
+        throw new Error(`Failed to download from Supabase storage: ${error.message}`);
+    }
+    return data;
+}
+
 async function processPair(supabase: SupabaseClient, pair: any, userId: string, pairIndex: number) {
     const pairId = `pair-${pairIndex}-${Date.now()}`;
     console.log(`[BatchInpaintWorker][${pairId}] Starting processing.`);
@@ -24,11 +46,11 @@ async function processPair(supabase: SupabaseClient, pair: any, userId: string, 
 
     // 1. Download images and convert to base64
     console.log(`[BatchInpaintWorker][${pairId}] Step 1: Downloading images...`);
-    const [personRes, garmentRes] = await Promise.all([fetch(person_url), fetch(garment_url)]);
-    if (!personRes.ok) throw new Error(`Failed to download person image from ${person_url}. Status: ${personRes.status}`);
-    if (!garmentRes.ok) throw new Error(`Failed to download garment image from ${garment_url}. Status: ${garmentRes.status}`);
+    const [personBlob, garmentBlob] = await Promise.all([
+        downloadFromSupabase(supabase, person_url),
+        downloadFromSupabase(supabase, garment_url)
+    ]);
     
-    const [personBlob, garmentBlob] = await Promise.all([personRes.blob(), garmentRes.blob()]);
     const [personBase64, garmentBase64] = await Promise.all([
         blobToBase64(personBlob),
         blobToBase64(garmentBlob)
