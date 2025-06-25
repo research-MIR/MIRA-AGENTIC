@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -113,8 +113,8 @@ export const VTOProSetup = ({
                                     <AccordionTrigger>{t('inputs')}</AccordionTrigger>
                                     <AccordionContent className="pt-4 space-y-4">
                                         <div className="grid grid-cols-2 gap-4">
-                                            <ImageUploader onFileSelect={(file) => onSourceFileSelect(file)} title={t('sourceImage')} imageUrl={sourceImageUrl} onClear={resetForm} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
-                                            <ImageUploader onFileSelect={(file) => onReferenceFileSelect(file)} title={t('referenceImage')} imageUrl={referenceImageUrl} onClear={() => onReferenceFileSelect(null)} icon={<Shirt className="h-8 w-8 text-muted-foreground" />} />
+                                            <ImageUploader onFileSelect={onSourceFileSelect} title={t('sourceImage')} imageUrl={sourceImageUrl} onClear={resetForm} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
+                                            <ImageUploader onFileSelect={onReferenceFileSelect} title={t('referenceImage')} imageUrl={referenceImageUrl} onClear={() => onReferenceFileSelect(null)} icon={<Shirt className="h-8 w-8 text-muted-foreground" />} />
                                         </div>
                                     </AccordionContent>
                                 </AccordionItem>

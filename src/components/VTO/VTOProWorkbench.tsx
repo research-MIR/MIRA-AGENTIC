@@ -1,4 +1,5 @@
 import React from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Loader2, Image as ImageIcon, UploadCloud, Eye } from "lucide-react";
 import { MaskCanvas } from "@/components/Editor/MaskCanvas";
