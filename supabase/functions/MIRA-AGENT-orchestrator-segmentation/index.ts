@@ -190,8 +190,17 @@ serve(async (req) => {
     const finalImageData = combinedCtx.getImageData(0, 0, image_dimensions.width, image_dimensions.height);
     const finalData = finalImageData.data;
     for (let i = 0; i < finalData.length; i += 4) {
-        if (finalData[i] > 128) { finalData[i] = 255; finalData[i + 1] = 0; finalData[i + 2] = 0; finalData[i + 3] = 150; } 
-        else { finalData[i + 3] = 0; }
+        if (finalData[i] > 128) { // This is a mask pixel
+            finalData[i] = 255;     // R (White)
+            finalData[i + 1] = 255; // G (White)
+            finalData[i + 2] = 255; // B (White)
+            finalData[i + 3] = 255; // Alpha (Opaque)
+        } else { // This is not a mask pixel
+            finalData[i] = 0;       // R (Black)
+            finalData[i + 1] = 0;   // G (Black)
+            finalData[i + 2] = 0;   // B (Black)
+            finalData[i + 3] = 255; // Alpha (Opaque)
+        }
     }
     combinedCtx.putImageData(finalImageData, 0, 0);
 
