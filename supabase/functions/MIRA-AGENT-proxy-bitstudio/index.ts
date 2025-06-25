@@ -81,7 +81,7 @@ serve(async (req) => {
 
   try {
     const body = await req.json();
-    const { user_id, mode } = body;
+    const { user_id, mode, batch_pair_job_id } = body; // Added batch_pair_job_id
     if (!user_id || !mode) {
       throw new Error("user_id and mode are required.");
     }
@@ -273,7 +273,8 @@ serve(async (req) => {
 
         const { data: newJob, error: insertError } = await supabase.from('mira-agent-bitstudio-jobs').insert({
           user_id, mode, status: 'queued', bitstudio_task_id: inpaintResult.id,
-          metadata: metadataToSave
+          metadata: metadataToSave,
+          batch_pair_job_id: batch_pair_job_id // Save the link to the batch pair
         }).select('id').single();
         if (insertError) throw insertError;
         jobIds.push(newJob.id);
@@ -317,6 +318,7 @@ serve(async (req) => {
       const { data: newJob, error: insertError } = await supabase.from('mira-agent-bitstudio-jobs').insert({
         user_id, mode, status: 'queued', source_person_image_url: person_image_url, source_garment_image_url: garment_image_url,
         bitstudio_person_image_id: personImageId, bitstudio_garment_image_id: outfitImageId, bitstudio_task_id: taskId,
+        batch_pair_job_id: batch_pair_job_id // Also save for VTO mode if provided
       }).select('id').single();
       if (insertError) throw insertError;
       jobIds.push(newJob.id);

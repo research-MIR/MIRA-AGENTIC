@@ -80,14 +80,29 @@ serve(async (req) => {
           final_image_url: finalImageUrl,
         }).eq('id', job_id);
       }
+      
+      // If this job was part of a batch, update the parent pair job
+      if (job.batch_pair_job_id) {
+        console.log(`[BitStudioPoller][${job.id}] This job is part of batch pair ${job.batch_pair_job_id}. Updating parent.`);
+        await supabase.from('mira-agent-batch-inpaint-pair-jobs')
+          .update({ status: 'complete', final_image_url: finalImageUrl })
+          .eq('id', job.batch_pair_job_id);
+      }
+
       console.log(`[BitStudioPoller][${job.id}] Polling finished for this cycle.`);
 
     } else if (jobStatus === 'failed') {
       console.error(`[BitStudioPoller][${job.id}] Status is 'failed'. Updating job with error.`);
+      const errorMessage = 'BitStudio processing failed.';
       await supabase.from('mira-agent-bitstudio-jobs').update({
         status: 'failed',
-        error_message: 'BitStudio processing failed.',
+        error_message: errorMessage,
       }).eq('id', job_id);
+      if (job.batch_pair_job_id) {
+        await supabase.from('mira-agent-batch-inpaint-pair-jobs')
+          .update({ status: 'failed', error_message: errorMessage })
+          .eq('id', job.batch_pair_job_id);
+      }
     } else {
       console.log(`[BitStudioPoller][${job.id}] Status is '${jobStatus}'. Updating status to 'processing' and awaiting next watchdog cycle.`);
       await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'processing' }).eq('id', job_id);
@@ -96,8 +111,16 @@ serve(async (req) => {
     return new Response(JSON.stringify({ success: true, status: jobStatus }), { headers: corsHeaders });
 
   } catch (error) {
-    console.error(`[BitStudioPoller][${job.id}] Error:`, error);
+    console.error(`[BitStudioPoller][${job_id}] Error:`, error);
     await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'failed', error_message: error.message }).eq('id', job_id);
+    if (job_id) { // Check if job_id is defined before trying to update the parent
+        const { data: job } = await supabase.from('mira-agent-bitstudio-jobs').select('batch_pair_job_id').eq('id', job_id).single();
+        if (job?.batch_pair_job_id) {
+            await supabase.from('mira-agent-batch-inpaint-pair-jobs')
+              .update({ status: 'failed', error_message: error.message })
+              .eq('id', job.batch_pair_job_id);
+        }
+    }
     return new Response(JSON.stringify({ error: error.message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
   }
 });
