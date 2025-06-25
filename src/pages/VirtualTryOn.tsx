@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { useLanguage } from "@/context/LanguageContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -19,16 +19,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { ScrollArea } from "@/components/ui/scroll-area";
 import ReactMarkdown from "react-markdown";
 import { useImageTransferStore } from "@/store/imageTransferStore";
-import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
-
-const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => resolve((reader.result as string).split(',')[1]);
-      reader.onerror = (error) => reject(error);
-    });
-};
 
 interface BitStudioJob {
   id: string;
@@ -41,6 +31,8 @@ interface BitStudioJob {
   metadata?: {
     debug_assets?: any;
     prompt_used?: string;
+    source_image_url?: string;
+    reference_image_url?: string;
   }
 }
 
@@ -73,14 +65,11 @@ const VirtualTryOn = () => {
   const { consumeImageUrl, imageUrlToTransfer, vtoTarget } = useImageTransferStore();
 
   useEffect(() => {
-    console.log('[VTO Page] Image transfer effect triggered.');
     if (imageUrlToTransfer && vtoTarget) {
       if (vtoTarget === 'pro-source' && !isProMode) {
-        console.log('[VTO Page] Switching to PRO mode for transferred image.');
         toggleProMode();
       }
       if (vtoTarget === 'base' && isProMode) {
-        console.log('[VTO Page] Switching to Base mode for transferred image.');
         toggleProMode();
       }
     }
@@ -109,49 +98,22 @@ const VirtualTryOn = () => {
   }, [isProMode, resetForm]);
 
   useEffect(() => {
-    if (!session?.user?.id) {
-      return;
-    }
+    if (!session?.user?.id) return;
+    if (channelRef.current) supabase.removeChannel(channelRef.current);
 
-    if (channelRef.current) {
-      supabase.removeChannel(channelRef.current);
-      channelRef.current = null;
-    }
-
-    console.log(`[VTO Realtime] Attempting to subscribe for user: ${session.user.id}`);
     const channel = supabase
       .channel(`bitstudio-jobs-tracker-${session.user.id}`)
       .on<BitStudioJob>(
         'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'mira-agent-bitstudio-jobs',
-          filter: `user_id=eq.${session.user.id}`,
-        },
+        { event: '*', schema: 'public', table: 'mira-agent-bitstudio-jobs', filter: `user_id=eq.${session.user.id}` },
         (payload) => {
-          console.log('[VTO Realtime] Received payload:', payload);
           queryClient.invalidateQueries({ queryKey: ['bitstudioJobs', session.user.id] });
         }
-      )
-      .subscribe((status, err) => {
-        console.log(`[VTO Realtime] Subscription status: ${status}`);
-        if (status === 'SUBSCRIBED') {
-          console.log('[VTO Realtime] Successfully subscribed to bitstudio-jobs updates.');
-        }
-        if (status === 'CHANNEL_ERROR' || err) {
-          console.error('[VTO Realtime] Subscription channel error:', err);
-        }
-      });
-
+      ).subscribe();
     channelRef.current = channel;
 
     return () => {
-      if (channelRef.current) {
-        console.log('[VTO Realtime] Cleaning up subscription.');
-        supabase.removeChannel(channelRef.current);
-        channelRef.current = null;
-      }
+      if (channelRef.current) supabase.removeChannel(channelRef.current);
     };
   }, [session?.user?.id, supabase, queryClient]);
 
@@ -182,7 +144,7 @@ const VirtualTryOn = () => {
         <div className="flex-1 overflow-y-auto">
           {isProMode ? (
             <VirtualTryOnPro 
-              recentJobs={recentJobs}
+              recentJobs={recentJobs?.filter(j => j.mode === 'inpaint')}
               isLoadingRecentJobs={isLoadingRecentJobs}
               selectedJob={selectedJob}
               handleSelectJob={handleSelectJob}
