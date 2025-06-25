@@ -64,12 +64,26 @@ export const ActiveJobsTracker = () => {
     const updateQueryData = (queryKey: any[], updatedJob: any) => {
       queryClient.setQueryData(queryKey, (oldData: any) => {
         if (!oldData) return oldData;
-        const newPages = oldData.pages.map((page: any[]) =>
-          page.map((job: any) =>
+
+        // Handle infinite query data structure
+        if (oldData.pages && Array.isArray(oldData.pages)) {
+          const newPages = oldData.pages.map((page: any[]) =>
+            page.map((job: any) =>
+              job.id === updatedJob.id ? { ...job, ...updatedJob } : job
+            )
+          );
+          return { ...oldData, pages: newPages };
+        }
+        
+        // Handle standard flat array data structure
+        if (Array.isArray(oldData)) {
+          return oldData.map((job: any) =>
             job.id === updatedJob.id ? { ...job, ...updatedJob } : job
-          )
-        );
-        return { ...oldData, pages: newPages };
+          );
+        }
+
+        // Return old data if the structure is not recognized
+        return oldData;
       });
     };
 
@@ -77,7 +91,6 @@ export const ActiveJobsTracker = () => {
       console.log('[ActiveJobsTracker] Realtime ComfyUI event:', payload.eventType, payload.new.id);
       const updatedJob = payload.new;
       
-      // Immediately update the UI by modifying the query cache
       updateQueryData(['recentRefinerJobs', session.user.id], updatedJob);
       queryClient.invalidateQueries({ queryKey: ['activeJobs', session.user.id] });
 
@@ -88,7 +101,6 @@ export const ActiveJobsTracker = () => {
         } else if (updatedJob.status === 'failed') {
           showError(`Upscale failed: ${updatedJob.error_message || 'Unknown error'}`);
         }
-        // Invalidate gallery queries to ensure they refetch eventually
         queryClient.invalidateQueries({ queryKey: ['galleryAgentJobs'] });
       }
     };
@@ -97,7 +109,6 @@ export const ActiveJobsTracker = () => {
       console.log('[ActiveJobsTracker] Realtime VTO event:', payload.eventType, payload.new.id);
       const updatedJob = payload.new;
 
-      // Immediately update the UI by modifying the query cache
       updateQueryData(['bitstudioJobs', session.user.id], updatedJob);
       queryClient.invalidateQueries({ queryKey: ['activeJobs', session.user.id] });
 
@@ -108,7 +119,6 @@ export const ActiveJobsTracker = () => {
         } else if (updatedJob.status === 'failed') {
           showError(`Virtual Try-On failed: ${updatedJob.error_message || 'Unknown error'}`);
         }
-        // Invalidate gallery queries to ensure they refetch eventually
         queryClient.invalidateQueries({ queryKey: ['galleryVtoJobs'] });
       }
     };
