@@ -1,17 +1,10 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { useLanguage } from "@/context/LanguageContext";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Skeleton } from "@/components/ui/skeleton";
-import { RealtimeChannel } from "@supabase/supabase-js";
-import { useSecureImage } from "@/hooks/useSecureImage";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SingleTryOn } from "@/components/VTO/SingleTryOn";
 import { BatchTryOn } from "@/components/VTO/BatchTryOn";
 import { VirtualTryOnPro } from "@/components/VTO/VirtualTryOnPro";
-import { cn } from "@/lib/utils";
-import { AlertTriangle, ImageIcon, Loader2, Star, Shirt, HelpCircle } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -20,34 +13,19 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import ReactMarkdown from "react-markdown";
 import { useImageTransferStore } from "@/store/imageTransferStore";
 import { BitStudioJob } from "@/types/vto";
-
-const SecureImageDisplay = ({ imageUrl, alt, onClick, className, style }: { 
-    imageUrl: string | null, 
-    alt: string, 
-    onClick?: (e: React.MouseEvent<HTMLImageElement>) => void, 
-    className?: string,
-    style?: React.CSSProperties 
-}) => {
-    const { displayUrl, isLoading, error } = useSecureImage(imageUrl);
-    const hasClickHandler = !!onClick;
-  
-    if (!imageUrl) return <div className={cn("w-full h-full bg-muted rounded-md flex items-center justify-center", className)} style={style}><ImageIcon className="h-6 w-6 text-muted-foreground" /></div>;
-    if (isLoading) return <div className={cn("w-full h-full bg-muted rounded-md flex items-center justify-center", className)} style={style}><Loader2 className="h-6 w-6 animate-spin" /></div>;
-    if (error) return <div className={cn("w-full h-full bg-muted rounded-md flex items-center justify-center", className)} style={style}><AlertTriangle className="h-6 w-6 text-destructive" /></div>;
-    
-    return <img src={displayUrl} alt={alt} className={cn("max-w-full max-h-full object-contain rounded-md", hasClickHandler && "cursor-pointer", className)} onClick={onClick} style={style} />;
-};
+import { useVTOJobs } from "@/hooks/useVTOJobs";
+import { RecentJobsList } from "@/components/VTO/RecentJobsList";
+import { Star, HelpCircle } from "lucide-react";
 
 const VirtualTryOn = () => {
-  const { supabase, session, isProMode, toggleProMode } = useSession();
+  const { isProMode, toggleProMode } = useSession();
   const { t } = useLanguage();
-  const queryClient = useQueryClient();
   
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
-  const channelRef = useRef<RealtimeChannel | null>(null);
   
   const { consumeImageUrl, imageUrlToTransfer, vtoTarget } = useImageTransferStore();
+  const { jobs, isLoading: isLoadingRecentJobs } = useVTOJobs();
 
   useEffect(() => {
     if (imageUrlToTransfer && vtoTarget) {
@@ -60,18 +38,7 @@ const VirtualTryOn = () => {
     }
   }, [imageUrlToTransfer, vtoTarget, isProMode, toggleProMode]);
 
-  const { data: recentJobs, isLoading: isLoadingRecentJobs } = useQuery<BitStudioJob[]>({
-    queryKey: ['bitstudioJobs', session?.user?.id],
-    queryFn: async () => {
-      if (!session?.user) return [];
-      const { data, error } = await supabase.from('mira-agent-bitstudio-jobs').select('*').eq('user_id', session.user.id).order('created_at', { ascending: false }).limit(20);
-      if (error) throw error;
-      return data;
-    },
-    enabled: !!session?.user,
-  });
-
-  const selectedJob = useMemo(() => recentJobs?.find(job => job.id === selectedJobId), [recentJobs, selectedJobId]);
+  const selectedJob = useMemo(() => jobs?.find(job => job.id === selectedJobId), [jobs, selectedJobId]);
 
   const resetForm = useCallback(() => {
     setSelectedJobId(null);
@@ -81,26 +48,6 @@ const VirtualTryOn = () => {
   useEffect(() => {
     resetForm();
   }, [isProMode, resetForm]);
-
-  useEffect(() => {
-    if (!session?.user?.id) return;
-    if (channelRef.current) supabase.removeChannel(channelRef.current);
-
-    const channel = supabase
-      .channel(`bitstudio-jobs-tracker-${session.user.id}`)
-      .on<BitStudioJob>(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'mira-agent-bitstudio-jobs', filter: `user_id=eq.${session.user.id}` },
-        (payload) => {
-          queryClient.invalidateQueries({ queryKey: ['bitstudioJobs', session.user.id] });
-        }
-      ).subscribe();
-    channelRef.current = channel;
-
-    return () => {
-      if (channelRef.current) supabase.removeChannel(channelRef.current);
-    };
-  }, [session?.user?.id, supabase, queryClient]);
 
   const handleSelectJob = (job: BitStudioJob) => {
     setSelectedJobId(job.id);
@@ -129,7 +76,7 @@ const VirtualTryOn = () => {
         <div className="flex-1 overflow-y-auto">
           {isProMode ? (
             <VirtualTryOnPro 
-              recentJobs={recentJobs?.filter(j => j.mode === 'inpaint')}
+              recentJobs={jobs}
               isLoadingRecentJobs={isLoadingRecentJobs}
               selectedJob={selectedJob}
               handleSelectJob={handleSelectJob}
@@ -158,23 +105,15 @@ const VirtualTryOn = () => {
                   <BatchTryOn />
                 </TabsContent>
               </Tabs>
-              <Card className="mt-8">
-                <CardHeader><CardTitle>{t('recentJobs')}</CardTitle></CardHeader>
-                <CardContent>
-                  {isLoadingRecentJobs ? <Skeleton className="h-24 w-full" /> : recentJobs && recentJobs.length > 0 ? (
-                    <div className="flex gap-4 overflow-x-auto pb-2">
-                      {recentJobs.filter(j => j.mode === 'base').map(job => {
-                        const urlToPreview = job.final_image_url || job.source_person_image_url;
-                        return (
-                          <button key={job.id} onClick={() => handleSelectJob(job)} className={cn("border-2 rounded-lg p-1 flex-shrink-0 w-24 h-24", selectedJobId === job.id ? "border-primary" : "border-transparent")}>
-                            <SecureImageDisplay imageUrl={urlToPreview || null} alt="Recent job" />
-                          </button>
-                        )
-                      })}
-                    </div>
-                  ) : <p className="text-muted-foreground text-sm">{t('noRecentJobsVTO')}</p>}
-                </CardContent>
-              </Card>
+              <div className="mt-8">
+                <RecentJobsList 
+                    jobs={jobs}
+                    isLoading={isLoadingRecentJobs}
+                    selectedJobId={selectedJobId}
+                    onSelectJob={handleSelectJob}
+                    mode="base"
+                />
+              </div>
             </div>
           )}
         </div>

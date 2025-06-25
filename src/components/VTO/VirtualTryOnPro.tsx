@@ -13,7 +13,6 @@ import { useSession } from "@/components/Auth/SessionContextProvider";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { useImagePreview } from "@/context/ImagePreviewContext";
 import { useSecureImage } from "@/hooks/useSecureImage";
-import { Skeleton } from "@/components/ui/skeleton";
 import { useQueryClient } from "@tanstack/react-query";
 import { DebugStepsModal } from "./DebugStepsModal";
 import { Switch } from "@/components/ui/switch";
@@ -28,6 +27,7 @@ import { optimizeImage } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { BatchInpaintPro } from "./BatchInpaintPro";
 import { BitStudioJob } from "@/types/vto";
+import { RecentJobsList } from "./RecentJobsList";
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -111,8 +111,6 @@ export const VirtualTryOnPro = ({
 
   const sourceImageUrl = useMemo(() => sourceImageFile ? URL.createObjectURL(sourceImageFile) : null, [sourceImageFile]);
   const referenceImageUrl = useMemo(() => referenceImageFile ? URL.createObjectURL(referenceImageFile) : null, [referenceImageFile]);
-
-  const proJobs = useMemo(() => recentJobs || [], [recentJobs]);
 
   const handleReferenceFileSelect = (file: File | null) => {
     setReferenceImageFile(file);
@@ -469,25 +467,15 @@ export const VirtualTryOnPro = ({
           <BatchInpaintPro />
         </TabsContent>
       </Tabs>
-      <Card className="mt-4">
-        <CardHeader><CardTitle><div className="flex items-center gap-2"><History className="h-4 w-4" />{t('recentProJobs')}</div></CardTitle></CardHeader>
-        <CardContent>
-          {isLoadingRecentJobs ? <Skeleton className="h-24 w-full" /> : proJobs.length > 0 ? (
-            <ScrollArea className="h-32">
-              <div className="flex gap-4 pb-2">
-                {proJobs.map(job => {
-                  const urlToPreview = job.final_image_url || job.metadata?.source_image_url;
-                  return (
-                    <button key={job.id} onClick={() => handleSelectJob(job)} className={cn("border-2 rounded-lg p-0.5 flex-shrink-0 w-24 h-24", selectedJob?.id === job.id ? "border-primary" : "border-transparent")}>
-                      <SecureImageDisplay imageUrl={urlToPreview || null} alt="Recent job" className="w-full h-full object-cover" />
-                    </button>
-                  )
-                })}
-              </div>
-            </ScrollArea>
-          ) : <p className="text-muted-foreground text-sm">{t('noRecentProJobs')}</p>}
-        </CardContent>
-      </Card>
+      <div className="mt-4">
+        <RecentJobsList 
+            jobs={recentJobs}
+            isLoading={isLoadingRecentJobs}
+            selectedJobId={selectedJob?.id || null}
+            onSelectJob={handleSelectJob}
+            mode="inpaint"
+        />
+      </div>
       <DebugStepsModal 
         isOpen={isDebugModalOpen}
         onClose={() => setIsDebugModalOpen(false)}
