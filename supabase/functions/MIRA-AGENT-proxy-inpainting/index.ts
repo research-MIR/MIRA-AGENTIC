@@ -146,20 +146,8 @@ serve(async (req) => {
     croppedMaskCanvas.getContext('2d').drawImage(dilatedCanvas, bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
     const croppedDilatedMaskBase64 = encodeBase64(croppedMaskCanvas.toBuffer('image/png'));
 
-    let sourceToSendBase64 = croppedSourceBase64;
-    let maskToSendBase64 = croppedDilatedMaskBase64;
-    const TARGET_LONG_SIDE = 768;
-    const cropLongestSide = Math.max(bbox.width, bbox.height);
-
-    if (cropLongestSide < TARGET_LONG_SIDE) {
-        const upscaleFactor = TARGET_LONG_SIDE / cropLongestSide;
-        const { data: upscaleData, error: upscaleError } = await supabase.functions.invoke('MIRA-AGENT-tool-upscale-crop', {
-            body: { source_crop_base64: croppedSourceBase64, mask_crop_base64: croppedDilatedMaskBase64, upscale_factor: upscaleFactor }
-        });
-        if (upscaleError) throw new Error(`Upscaling failed: ${upscaleError.message}`);
-        sourceToSendBase64 = upscaleData.upscaled_source_base64;
-        maskToSendBase64 = upscaleData.upscaled_mask_base64;
-    }
+    const sourceToSendBase64 = croppedSourceBase64;
+    const maskToSendBase64 = croppedDilatedMaskBase64;
 
     const sourceBlob = new Blob([decodeBase64(sourceToSendBase64)], { type: 'image/png' });
     const maskBlob = new Blob([decodeBase64(maskToSendBase64)], { type: 'image/png' });
