@@ -189,26 +189,11 @@ serve(async (req) => {
 
     const finalImageData = combinedCtx.getImageData(0, 0, image_dimensions.width, image_dimensions.height);
     const finalData = finalImageData.data;
-    
-    // Create a pure black and white mask
     for (let i = 0; i < finalData.length; i += 4) {
-        // Thresholding based on the red channel (since the blurred shape is white)
-        if (finalData[i] > 128) { 
-            // Set pixel to pure white
-            finalData[i] = 255;
-            finalData[i + 1] = 255;
-            finalData[i + 2] = 255;
-            finalData[i + 3] = 255; // Opaque
-        } else {
-            // Set pixel to pure black
-            finalData[i] = 0;
-            finalData[i + 1] = 0;
-            finalData[i + 2] = 0;
-            finalData[i + 3] = 255; // Opaque
-        }
+        if (finalData[i] > 128) { finalData[i] = 255; finalData[i + 1] = 0; finalData[i + 2] = 0; finalData[i + 3] = 150; } 
+        else { finalData[i + 3] = 0; }
     }
     combinedCtx.putImageData(finalImageData, 0, 0);
-    console.log(`[Orchestrator][${requestId}] Converted final mask to pure black and white.`);
 
     const finalDataUrl = combinedCanvas.toDataURL('image/png');
     if (!finalDataUrl || !finalDataUrl.includes(',')) {
