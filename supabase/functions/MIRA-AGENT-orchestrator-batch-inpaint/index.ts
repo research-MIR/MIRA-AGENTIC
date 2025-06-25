@@ -16,26 +16,34 @@ const blobToBase64 = async (blob: Blob): Promise<string> => {
     return encodeBase64(buffer);
 };
 
-async function processPair(supabase: SupabaseClient, pair: any, userId: string) {
+async function processPair(supabase: SupabaseClient, pair: any, userId: string, pairIndex: number) {
+    const pairId = `pair-${pairIndex}-${Date.now()}`;
+    console.log(`[BatchInpaintWorker][${pairId}] Starting processing.`);
     const { person_url, garment_url, appendix } = pair;
-    console.log(`[BatchInpaintWorker] Processing pair: Person=${person_url}, Garment=${garment_url}`);
+    console.log(`[BatchInpaintWorker][${pairId}] Person URL: ${person_url}, Garment URL: ${garment_url}`);
 
     // 1. Download images and convert to base64
+    console.log(`[BatchInpaintWorker][${pairId}] Step 1: Downloading images...`);
     const [personRes, garmentRes] = await Promise.all([fetch(person_url), fetch(garment_url)]);
-    if (!personRes.ok || !garmentRes.ok) throw new Error("Failed to download images.");
+    if (!personRes.ok) throw new Error(`Failed to download person image from ${person_url}. Status: ${personRes.status}`);
+    if (!garmentRes.ok) throw new Error(`Failed to download garment image from ${garment_url}. Status: ${garmentRes.status}`);
+    
     const [personBlob, garmentBlob] = await Promise.all([personRes.blob(), garmentRes.blob()]);
     const [personBase64, garmentBase64] = await Promise.all([
         blobToBase64(personBlob),
         blobToBase64(garmentBlob)
     ]);
+    console.log(`[BatchInpaintWorker][${pairId}] Images downloaded and encoded successfully.`);
 
     // 2. Get image dimensions
+    console.log(`[BatchInpaintWorker][${pairId}] Step 2: Getting image dimensions...`);
     const { loadImage } = await import('https://deno.land/x/canvas@v1.4.1/mod.ts');
     const personImage = await loadImage(await personBlob.arrayBuffer());
     const image_dimensions = { width: personImage.width(), height: personImage.height() };
+    console.log(`[BatchInpaintWorker][${pairId}] Source image dimensions: ${image_dimensions.width}x${image_dimensions.height}`);
 
     // 3. Auto-mask
-    console.log(`[BatchInpaintWorker] Invoking segmentation for pair...`);
+    console.log(`[BatchInpaintWorker][${pairId}] Step 3: Invoking segmentation orchestrator...`);
     const { data: segmentationData, error: segmentationError } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-segmentation', {
         body: {
             user_id: userId,
@@ -48,10 +56,10 @@ async function processPair(supabase: SupabaseClient, pair: any, userId: string) 
     });
     if (segmentationError) throw new Error(`Segmentation failed: ${segmentationError.message}`);
     const mask_image_url = segmentationData.finalMaskUrl;
-    console.log(`[BatchInpaintWorker] Segmentation complete. Mask URL: ${mask_image_url}`);
+    console.log(`[BatchInpaintWorker][${pairId}] Segmentation complete. Mask URL: ${mask_image_url}`);
 
     // 4. Auto-prompt
-    console.log(`[BatchInpaintWorker] Generating prompt for pair...`);
+    console.log(`[BatchInpaintWorker][${pairId}] Step 4: Generating prompt...`);
     const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-prompt-helper', {
         body: {
             person_image_base64: personBase64,
@@ -64,10 +72,10 @@ async function processPair(supabase: SupabaseClient, pair: any, userId: string) 
     });
     if (promptError) throw new Error(`Prompt generation failed: ${promptError.message}`);
     const finalPrompt = promptData.final_prompt;
-    console.log(`[BatchInpaintWorker] Prompt generated.`);
+    console.log(`[BatchInpaintWorker][${pairId}] Prompt generated: "${finalPrompt.substring(0, 60)}..."`);
 
     // 5. Queue inpainting job
-    console.log(`[BatchInpaintWorker] Queuing final inpainting job...`);
+    console.log(`[BatchInpaintWorker][${pairId}] Step 5: Queuing final inpainting job...`);
     const { error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
         body: {
             mode: 'inpaint',
@@ -83,7 +91,7 @@ async function processPair(supabase: SupabaseClient, pair: any, userId: string) 
         }
     });
     if (proxyError) throw new Error(`Job queuing failed: ${proxyError.message}`);
-    console.log(`[BatchInpaintWorker] Pair processed and job queued successfully.`);
+    console.log(`[BatchInpaintWorker][${pairId}] Pair processed and job queued successfully.`);
 }
 
 serve(async (req) => {
@@ -98,16 +106,25 @@ serve(async (req) => {
     }
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
+    console.log(`[BatchInpaintOrchestrator] Received batch request with ${pairs.length} pairs for user ${user_id}.`);
 
     // Don't await this. Let it run in the background.
-    Promise.allSettled(pairs.map(pair => processPair(supabase, pair, user_id)))
+    Promise.allSettled(pairs.map((pair, index) => processPair(supabase, pair, user_id, index)))
         .then(results => {
-            const failedCount = results.filter(r => r.status === 'rejected').length;
-            console.log(`[BatchInpaintOrchestrator] Batch complete. ${pairs.length - failedCount}/${pairs.length} jobs queued successfully.`);
+            let successCount = 0;
+            results.forEach((result, index) => {
+                if (result.status === 'fulfilled') {
+                    successCount++;
+                    console.log(`[BatchInpaintOrchestrator] Worker for pair ${index} completed successfully.`);
+                } else {
+                    console.error(`[BatchInpaintOrchestrator] Worker for pair ${index} FAILED. Reason:`, result.reason);
+                }
+            });
+            console.log(`[BatchInpaintOrchestrator] Batch complete. ${successCount}/${pairs.length} jobs queued successfully.`);
             // In a real app, you might send a notification to the user here.
         });
 
-    return new Response(JSON.stringify({ success: true, message: `${pairs.length} jobs are being processed.` }), {
+    return new Response(JSON.stringify({ success: true, message: `${pairs.length} jobs are being processed in the background.` }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });
