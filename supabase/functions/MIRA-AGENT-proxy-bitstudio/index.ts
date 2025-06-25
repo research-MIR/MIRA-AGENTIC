@@ -81,7 +81,7 @@ serve(async (req) => {
 
   try {
     const body = await req.json();
-    const { user_id, mode, batch_pair_job_id } = body; // Added batch_pair_job_id
+    const { user_id, mode, batch_pair_job_id } = body;
     if (!user_id || !mode) {
       throw new Error("user_id and mode are required.");
     }
@@ -93,7 +93,7 @@ serve(async (req) => {
       console.log(`[BitStudioProxy][${requestId}] Starting inpaint workflow.`);
       let { 
         full_source_image_base64, mask_image_base64, mask_image_url, prompt, reference_image_base64, 
-        auto_prompt_enabled, is_garment_mode,
+        is_garment_mode,
         num_attempts = 1, denoise = 1.0, resolution = 'standard', mask_expansion_percent = 2 
       } = body;
       
@@ -205,15 +205,18 @@ serve(async (req) => {
           console.log(`[BitStudioProxy][${requestId}] Crop's longest side (${cropLongestSide}px) is sufficient. Skipping upscale.`);
       }
 
-      if (auto_prompt_enabled) {
-        console.log(`[BitStudioProxy][${requestId}] Auto-prompt is enabled. Generating prompt...`);
+      if (!prompt || prompt.trim() === "") {
+        if (!reference_image_base64) {
+            throw new Error("A text prompt is required when no reference image is provided.");
+        }
+        console.log(`[BitStudioProxy][${requestId}] No prompt provided. Auto-generating from reference...`);
         const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-prompt-helper', {
           body: { 
-            person_image_base64: sourceToSendBase64, 
+            person_image_base64: sourceToSendBase64,
             person_image_mime_type: 'image/png',
             garment_image_base64: reference_image_base64,
             garment_image_mime_type: 'image/png',
-            is_garment_mode: is_garment_mode ?? true
+            is_garment_mode: is_garment_mode ?? false // Default to general inpainting
           }
         });
         if (promptError) throw new Error(`Auto-prompt generation failed: ${promptError.message}`);
@@ -228,23 +231,28 @@ serve(async (req) => {
         const sourceBlob = new Blob([decodeBase64(sourceToSendBase64)], { type: 'image/png' });
         const finalMaskBlob = new Blob([decodeBase64(maskToSendBase64)], { type: 'image/png' });
 
-        console.log(`[BitStudioProxy][${requestId}] Attempt ${i + 1}: Uploading source image to BitStudio...`);
-        console.log(`[BitStudioProxy][${requestId}] Attempt ${i + 1}: Uploading mask image to BitStudio...`);
+        const uploadPromises: Promise<{ type: string, id: string | null }>[] = [];
+
+        console.log(`[BitStudioProxy][${requestId}] Attempt ${i + 1}: Uploading inpaint-base...`);
+        uploadPromises.push(uploadToBitStudio(sourceBlob, 'inpaint-base', `source_${i}.png`).then(id => ({ type: 'source', id })));
+        
+        console.log(`[BitStudioProxy][${requestId}] Attempt ${i + 1}: Uploading inpaint-mask...`);
+        uploadPromises.push(uploadToBitStudio(finalMaskBlob, 'inpaint-mask', `mask_${i}.png`).then(id => ({ type: 'mask', id })));
+
         if (reference_image_base64) {
-          console.log(`[BitStudioProxy][${requestId}] Attempt ${i + 1}: Uploading reference image to BitStudio...`);
+          console.log(`[BitStudioProxy][${requestId}] Attempt ${i + 1}: Uploading inpaint-reference...`);
+          const referenceBlob = new Blob([decodeBase64(reference_image_base64)], { type: 'image/png' });
+          uploadPromises.push(uploadToBitStudio(referenceBlob, 'inpaint-reference', `reference_${i}.png`).then(id => ({ type: 'reference', id })));
         }
 
-        const uploadPromises: Promise<string | null>[] = [
-          uploadToBitStudio(sourceBlob, 'inpaint-base', `source_${i}.png`),
-          uploadToBitStudio(finalMaskBlob, 'inpaint-mask', `mask_${i}.png`)
-        ];
-        if (reference_image_base64) {
-          const referenceBlob = new Blob([decodeBase64(reference_image_base64)], { type: 'image/png' });
-          uploadPromises.push(uploadToBitStudio(referenceBlob, 'inpaint-reference', `reference_${i}.png`));
-        } else {
-          uploadPromises.push(Promise.resolve(null));
+        const uploadResults = await Promise.all(uploadPromises);
+        const sourceImageId = uploadResults.find(r => r.type === 'source')?.id;
+        const maskImageId = uploadResults.find(r => r.type === 'mask')?.id;
+        const referenceImageId = uploadResults.find(r => r.type === 'reference')?.id;
+
+        if (!sourceImageId || !maskImageId) {
+            throw new Error("Failed to upload essential source or mask images to BitStudio.");
         }
-        const [sourceImageId, maskImageId, referenceImageId] = await Promise.all(uploadPromises);
         console.log(`[BitStudioProxy][${requestId}] Attempt ${i + 1}: BitStudio Image IDs -> Source: ${sourceImageId}, Mask: ${maskImageId}, Reference: ${referenceImageId || 'N/A'}`);
 
         const inpaintUrl = `${BITSTUDIO_API_BASE}/images/${sourceImageId}/inpaint`;
@@ -285,7 +293,7 @@ serve(async (req) => {
         const { data: newJob, error: insertError } = await supabase.from('mira-agent-bitstudio-jobs').insert({
           user_id, mode, status: 'queued', bitstudio_task_id: inpaintResult.id,
           metadata: metadataToSave,
-          batch_pair_job_id: batch_pair_job_id // Save the link to the batch pair
+          batch_pair_job_id: batch_pair_job_id
         }).select('id').single();
         if (insertError) throw insertError;
         jobIds.push(newJob.id);
@@ -329,7 +337,7 @@ serve(async (req) => {
       const { data: newJob, error: insertError } = await supabase.from('mira-agent-bitstudio-jobs').insert({
         user_id, mode, status: 'queued', source_person_image_url: person_image_url, source_garment_image_url: garment_image_url,
         bitstudio_person_image_id: personImageId, bitstudio_garment_image_id: outfitImageId, bitstudio_task_id: taskId,
-        batch_pair_job_id: batch_pair_job_id // Also save for VTO mode if provided
+        batch_pair_job_id: batch_pair_job_id
       }).select('id').single();
       if (insertError) throw insertError;
       jobIds.push(newJob.id);
