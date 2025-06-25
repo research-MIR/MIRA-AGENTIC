@@ -17,16 +17,7 @@ import { Switch } from "@/components/ui/switch";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { SingleTryOnSettings } from "./SingleTryOnSettings";
 import { useImagePreview } from "@/context/ImagePreviewContext";
-
-interface BitStudioJob {
-  id: string;
-  status: 'queued' | 'processing' | 'complete' | 'failed';
-  source_person_image_url: string;
-  source_garment_image_url: string;
-  final_image_url?: string;
-  error_message?: string;
-  mode: 'base' | 'pro';
-}
+import { BitStudioJob } from "@/types/vto";
 
 const ImageUploader = ({ onFileSelect, title, imageUrl, onClear }: { onFileSelect: (file: File) => void, title: string, imageUrl: string | null, onClear: () => void }) => {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -238,8 +229,8 @@ export const SingleTryOn = ({ selectedJob, resetForm, transferredImageUrl, onTra
     const isTryOnDisabled = isLoading || !personImageFile || !garmentImageFile || (isAutoPromptEnabled ? !promptReady : !prompt.trim());
 
     return (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <div className="lg:col-span-1 space-y-4">
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 max-w-7xl mx-auto">
+            <div className="space-y-4">
               <Card>
                 <CardHeader>
                   <div className="flex justify-between items-center">
@@ -249,9 +240,12 @@ export const SingleTryOn = ({ selectedJob, resetForm, transferredImageUrl, onTra
                 </CardHeader>
                 <CardContent>
                   {selectedJob ? (
-                    <div className="grid grid-cols-2 gap-4">
-                      <SecureImageDisplay imageUrl={selectedJob.source_person_image_url} alt="Person" onClick={() => showImage({ images: [{ url: selectedJob.source_person_image_url }], currentIndex: 0 })} />
-                      <SecureImageDisplay imageUrl={selectedJob.source_garment_image_url} alt="Garment" onClick={() => showImage({ images: [{ url: selectedJob.source_garment_image_url }], currentIndex: 0 })} />
+                    <div className="space-y-4">
+                      <p className="text-sm text-muted-foreground">{t('viewingJob')}</p>
+                      <div className="grid grid-cols-2 gap-4">
+                        <SecureImageDisplay imageUrl={selectedJob.source_person_image_url || null} alt="Person" onClick={() => showImage({ images: [{ url: selectedJob.source_person_image_url! }], currentIndex: 0 })} />
+                        <SecureImageDisplay imageUrl={selectedJob.source_garment_image_url || null} alt="Garment" onClick={() => showImage({ images: [{ url: selectedJob.source_garment_image_url! }], currentIndex: 0 })} />
+                      </div>
                     </div>
                   ) : (
                     <Accordion type="multiple" defaultValue={['item-1']} className="w-full">
@@ -300,7 +294,7 @@ export const SingleTryOn = ({ selectedJob, resetForm, transferredImageUrl, onTra
                 {t('startVirtualTryOn')}
               </Button>
             </div>
-            <div className="lg:col-span-2">
+            <div>
               <Card className="h-full flex flex-col min-h-[500px]">
                 <CardHeader><CardTitle>{t('result')}</CardTitle></CardHeader>
                 <CardContent className="flex-1 flex items-center justify-center overflow-hidden p-2">
