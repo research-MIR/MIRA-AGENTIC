@@ -48,7 +48,7 @@ const MaskCanvasComponent = ({ imageUrl, onMaskChange, brushSize, resetTrigger }
     }
 
     finalCtx.putImageData(finalMaskImageData, 0, 0);
-    onMaskChange(finalMaskCanvas.toDataURL('image/jpeg'));
+    onMaskChange(finalMaskCanvas.toDataURL('image/png'));
   }, [onMaskChange]);
 
   const clearCanvas = useCallback(() => {

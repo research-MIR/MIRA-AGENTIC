@@ -99,7 +99,7 @@ serve(async (req) => {
     if (!finalPrompt) throw new Error("Prompt is required for inpainting.");
 
     const fullSourceImage = await loadImage(`data:image/png;base64,${source_image_base64}`);
-    const rawMaskImage = await loadImage(`data:image/jpeg;base64,${mask_image_base64}`);
+    const rawMaskImage = await loadImage(`data:image/png;base64,${mask_image_base64}`);
 
     const dilatedCanvas = createCanvas(rawMaskImage.width(), rawMaskImage.height());
     const dilateCtx = dilatedCanvas.getContext('2d');
