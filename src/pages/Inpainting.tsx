@@ -96,8 +96,6 @@ const Inpainting = () => {
   const [sourceImageFile, setSourceImageFile] = useState<File | null>(null);
   const [referenceImageFile, setReferenceImageFile] = useState<File | null>(null);
   const [maskImage, setMaskImage] = useState<string | null>(null);
-  const [autoMaskUrl, setAutoMaskUrl] = useState<string | null>(null);
-  const [isAutoMasking, setIsAutoMasking] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [brushSize, setBrushSize] = useState(30);
   const [resetTrigger, setResetTrigger] = useState(0);
@@ -133,7 +131,6 @@ const Inpainting = () => {
     setSourceImageFile(null);
     setReferenceImageFile(null);
     setMaskImage(null);
-    setAutoMaskUrl(null);
     setPrompt("");
     setResetTrigger(c => c + 1);
     consumeImageUrl();
@@ -187,7 +184,6 @@ const Inpainting = () => {
       setSourceImageFile(null);
       setReferenceImageFile(null);
       setMaskImage(null);
-      setAutoMaskUrl(null);
       setPrompt(selectedJob.metadata?.prompt_used || "");
       setResetTrigger(c => c + 1);
     }
@@ -220,78 +216,14 @@ const Inpainting = () => {
 
   const handleResetMask = () => {
     setResetTrigger(c => c + 1);
-    setAutoMaskUrl(null);
-  };
-
-  const handleAutoMask = async () => {
-    if (!sourceImageFile || !referenceImageFile) {
-      showError("Please upload both a source and a reference image for automasking.");
-      return;
-    }
-    setIsAutoMasking(true);
-    const toastId = showLoading("Generating AI mask... This may take a moment.");
-
-    try {
-      const sourceBase64 = await fileToBase64(sourceImageFile);
-      const referenceBase64 = await fileToBase64(referenceImageFile);
-      
-      const img = new Image();
-      img.src = URL.createObjectURL(sourceImageFile);
-      await new Promise(resolve => img.onload = resolve);
-      const image_dimensions = { width: img.naturalWidth, height: img.naturalHeight };
-
-      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-segmentation', {
-        body: {
-          user_id: session?.user.id,
-          image_base64: sourceBase64,
-          mime_type: sourceImageFile.type,
-          prompt: "Segment the garment from the reference image onto the source image.",
-          reference_image_base64: referenceBase64,
-          reference_mime_type: referenceImageFile.type,
-          image_dimensions: image_dimensions,
-          expansion_percent: 0.02,
-        }
-      });
-
-      if (error) throw error;
-      
-      setAutoMaskUrl(data.finalMaskUrl);
-      setMaskImage(null);
-      dismissToast(toastId);
-      showSuccess("AI mask generated successfully!");
-
-    } catch (err: any) {
-      dismissToast(toastId);
-      showError(`Mask generation failed: ${err.message}`);
-    } finally {
-      setIsAutoMasking(false);
-    }
-  };
-
-  const getMaskBase64 = async (): Promise<string | null> => {
-    if (autoMaskUrl) {
-      const response = await fetch(autoMaskUrl);
-      if (!response.ok) throw new Error("Failed to fetch auto-generated mask.");
-      const blob = await response.blob();
-      const file = new File([blob], "mask.png", { type: "image/png" });
-      return await fileToBase64(file);
-    }
-    if (maskImage) {
-      return maskImage.split(',')[1];
-    }
-    return null;
   };
 
   const proceedWithGeneration = async () => {
+    if (!sourceImageFile || !maskImage) return;
     setIsLoading(true);
     let toastId = showLoading(t('sendingJob'));
 
     try {
-      const finalMaskBase64 = await getMaskBase64();
-      if (!sourceImageFile || !finalMaskBase64) {
-        throw new Error("Source image or mask data is missing.");
-      }
-
       let finalPrompt = prompt;
 
       if (!isAutoPromptEnabled && prompt.trim()) {
@@ -311,7 +243,7 @@ const Inpainting = () => {
 
       const payload: any = {
         source_image_base64: await fileToBase64(optimizedSource),
-        mask_image_base64: finalMaskBase64,
+        mask_image_base64: maskImage.split(',')[1],
         prompt: finalPrompt,
         is_garment_mode: false,
         user_id: session?.user.id,
@@ -343,8 +275,8 @@ const Inpainting = () => {
   };
 
   const handleGenerate = async () => {
-    if (!sourceImageFile || (!maskImage && !autoMaskUrl)) {
-      showError("Please provide a source image and draw or generate a mask.");
+    if (!sourceImageFile || !maskImage) {
+      showError("Please provide a source image and draw a mask.");
       return;
     }
     if (!isAutoPromptEnabled && !prompt.trim() && !referenceImageFile) {
@@ -352,11 +284,8 @@ const Inpainting = () => {
       return;
     }
 
-    const maskToCheck = autoMaskUrl || maskImage;
-    if (!maskToCheck) return;
-
     const maskImg = new Image();
-    maskImg.src = maskToCheck;
+    maskImg.src = maskImage;
     maskImg.onload = () => {
       const tempCanvas = document.createElement('canvas');
       tempCanvas.width = maskImg.width;
@@ -368,7 +297,7 @@ const Inpainting = () => {
       
       let minX = tempCanvas.width, minY = tempCanvas.height, maxX = 0, maxY = 0;
       for (let i = 0; i < imageData.length; i += 4) {
-        if (imageData[i + 3] > 0) {
+        if (imageData[i + 3] > 0) { // Check alpha channel
           const x = (i / 4) % tempCanvas.width;
           const y = Math.floor((i / 4) / tempCanvas.width);
           if (x < minX) minX = x;
@@ -423,7 +352,7 @@ const Inpainting = () => {
     );
   };
 
-  const isGenerateDisabled = isLoading || !!selectedJob || !sourceImageFile || (!maskImage && !autoMaskUrl) || (!isAutoPromptEnabled && !prompt.trim() && !referenceImageFile);
+  const isGenerateDisabled = isLoading || !!selectedJob || !sourceImageFile || !maskImage || (!isAutoPromptEnabled && !prompt.trim() && !referenceImageFile);
   const placeholderText = isAutoPromptEnabled ? t('promptPlaceholderInpaintingOptional') : t('promptPlaceholderInpaintingRequired');
 
   return (
@@ -491,10 +420,6 @@ const Inpainting = () => {
                               <Label htmlFor="auto-prompt-pro">{t('autoGenerate')}</Label>
                             </div>
                             <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={placeholderText} rows={4} disabled={isAutoPromptEnabled} />
-                            <Button onClick={handleAutoMask} disabled={isAutoMasking || !sourceImageFile || !referenceImageFile}>
-                                {isAutoMasking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-                                {t('generateMaskWithAI')}
-                            </Button>
                           </AccordionContent>
                         </AccordionItem>
                         <AccordionItem value="item-3">
@@ -531,36 +456,20 @@ const Inpainting = () => {
               {sourceImageUrl && !selectedJob ? (
                 <>
                   <div className="w-full flex-1 flex items-center justify-center relative p-2 overflow-hidden">
-                    {autoMaskUrl ? (
-                      <div className="relative w-full h-full">
-                        <img src={sourceImageUrl} alt="Source" className="max-w-full max-h-full object-contain" />
-                        <img src={autoMaskUrl} alt="AI Mask" className="absolute top-0 left-0 w-full h-full object-contain pointer-events-none" />
-                      </div>
-                    ) : (
-                      <MaskCanvas 
-                        imageUrl={sourceImageUrl} 
-                        onMaskChange={setMaskImage}
-                        brushSize={brushSize}
-                        resetTrigger={resetTrigger}
-                      />
-                    )}
+                    <MaskCanvas 
+                      imageUrl={sourceImageUrl} 
+                      onMaskChange={setMaskImage}
+                      brushSize={brushSize}
+                      resetTrigger={resetTrigger}
+                    />
                   </div>
-                  {autoMaskUrl ? (
-                    <div className="absolute top-2 right-2 z-10">
-                      <Button onClick={() => setAutoMaskUrl(null)} variant="secondary">
-                        <Brush className="mr-2 h-4 w-4" />
-                        {t('editManually')}
-                      </Button>
-                    </div>
-                  ) : (
-                    <div className="p-2 shrink-0">
-                      <MaskControls 
-                        brushSize={brushSize} 
-                        onBrushSizeChange={setBrushSize} 
-                        onReset={handleResetMask} 
-                      />
-                    </div>
-                  )}
+                  <div className="p-2 shrink-0">
+                    <MaskControls 
+                      brushSize={brushSize} 
+                      onBrushSizeChange={setBrushSize} 
+                      onReset={handleResetMask} 
+                    />
+                  </div>
                 </>
               ) : selectedJob ? (
                 renderJobResult(selectedJob)

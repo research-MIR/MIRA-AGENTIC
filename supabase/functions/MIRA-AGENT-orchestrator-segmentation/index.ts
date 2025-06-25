@@ -104,9 +104,7 @@ serve(async (req) => {
     aggregationJobId = newJob.id;
     console.log(`[Orchestrator][${requestId}] Aggregation job ${aggregationJobId} created.`);
 
-    if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not set.");
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-    
     const userParts: Part[] = [
         { text: "SOURCE IMAGE:" }, { inlineData: { mimeType: mime_type, data: image_base64 } },
     ];
@@ -116,30 +114,23 @@ serve(async (req) => {
     userParts.push({ text: prompt });
     const contents: Content[] = [{ role: 'user', parts: userParts }];
 
-    const allResults = [];
-    console.log(`[Orchestrator][${requestId}] Starting ${NUM_WORKERS} workers sequentially...`);
-    for (let i = 0; i < NUM_WORKERS; i++) {
-        console.log(`[Orchestrator][${requestId}] Invoking worker ${i + 1}/${NUM_WORKERS}...`);
-        try {
-            const result = await ai.models.generateContent({
-                model: MODEL_NAME,
-                contents: contents,
-                generationConfig: { responseMimeType: "application/json" },
-                safetySettings,
-            });
-            if (!result.text) throw new Error(`Model worker ${i + 1} returned an empty response.`);
-            const responseJson = extractJson(result.text);
-            allResults.push(responseJson);
-            console.log(`[Orchestrator][${requestId}] Worker ${i + 1} succeeded.`);
-        } catch (err) {
-            console.error(`[Orchestrator][${requestId}] Worker ${i + 1} failed: ${err.message}`);
-            allResults.push({ error: `Worker ${i + 1} failed: ${err.message}` });
-        }
-    }
-    console.log(`[Orchestrator][${requestId}] All workers finished.`);
+    const workerPromises = Array.from({ length: NUM_WORKERS }).map((_, i) => 
+        ai.models.generateContent({
+            model: MODEL_NAME,
+            contents: contents,
+            generationConfig: { responseMimeType: "application/json" },
+            safetySettings,
+        }).then(result => {
+            if (!result.text) throw new Error(`Model worker ${i} returned an empty response.`);
+            return extractJson(result.text);
+        }).catch(err => ({ error: `Worker ${i} failed: ${err.message}` }))
+    );
+
+    const settledResults = await Promise.allSettled(workerPromises);
+    const allResults = settledResults.map(r => r.status === 'fulfilled' ? r.value : { error: r.reason.message });
     
     await supabase.from('mira-agent-mask-aggregation-jobs').update({ results: allResults }).eq('id', aggregationJobId);
-    console.log(`[Orchestrator][${requestId}] All worker results saved to DB.`);
+    console.log(`[Orchestrator][${requestId}] All workers finished. Results saved to DB.`);
 
     const validRuns = allResults.filter(run => run && !run.error && Array.isArray(run) && run.length > 0);
     if (validRuns.length === 0) throw new Error("No valid mask data found in any of the segmentation runs.");

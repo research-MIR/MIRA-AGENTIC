@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import React, { useMemo, useEffect, useCallback, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -25,7 +25,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import ReactMarkdown from "react-markdown";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { optimizeImage } from "@/lib/utils";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -97,10 +96,6 @@ interface VirtualTryOnProProps {
   setReferenceImageFile: (file: File | null) => void;
   maskImage: string | null;
   setMaskImage: (mask: string | null) => void;
-  autoMaskUrl: string | null;
-  setAutoMaskUrl: (url: string | null) => void;
-  isAutoMasking: boolean;
-  setIsAutoMasking: (masking: boolean) => void;
   prompt: string;
   setPrompt: (prompt: string) => void;
   brushSize: number;
@@ -128,7 +123,6 @@ interface VirtualTryOnProProps {
 export const VirtualTryOnPro = ({
   recentJobs, isLoadingRecentJobs, selectedJob, handleSelectJob, resetForm, transferredImageUrl, onTransferConsumed,
   sourceImageFile, setSourceImageFile, referenceImageFile, setReferenceImageFile, maskImage, setMaskImage,
-  autoMaskUrl, setAutoMaskUrl, isAutoMasking, setIsAutoMasking,
   prompt, setPrompt, brushSize, setBrushSize, resetTrigger, setResetTrigger, isLoading, setIsLoading,
   isDebugModalOpen, setIsDebugModalOpen, isAutoPromptEnabled, setIsAutoPromptEnabled, isGuideOpen, setIsGuideOpen,
   numAttempts, setNumAttempts, denoise, setDenoise, isHighQuality, setIsHighQuality, maskExpansion, setMaskExpansion
@@ -137,7 +131,6 @@ export const VirtualTryOnPro = ({
   const { t } = useLanguage();
   const { showImage } = useImagePreview();
   const queryClient = useQueryClient();
-  const [isSizeWarningOpen, setIsSizeWarningOpen] = useState(false);
 
   const sourceImageUrl = useMemo(() => sourceImageFile ? URL.createObjectURL(sourceImageFile) : null, [sourceImageFile]);
   const referenceImageUrl = useMemo(() => referenceImageFile ? URL.createObjectURL(referenceImageFile) : null, [referenceImageFile]);
@@ -156,11 +149,11 @@ export const VirtualTryOnPro = ({
           const bucketName = pathSegments[objectIndex + 2];
           const pathStartIndex = url.pathname.indexOf(bucketName) + bucketName.length + 1;
           const storagePath = decodeURIComponent(url.pathname.substring(pathStartIndex));
-    
+
           const { data: blob, error } = await supabase.storage
             .from(bucketName)
             .download(storagePath);
-    
+
           if (error) throw error;
           if (!blob) throw new Error("Downloaded blob is null.");
           console.log('[VirtualTryOnPro] Image blob downloaded successfully from Supabase.');
@@ -191,11 +184,10 @@ export const VirtualTryOnPro = ({
       setSourceImageFile(null);
       setReferenceImageFile(null);
       setMaskImage(null);
-      setAutoMaskUrl(null);
       setPrompt(selectedJob.metadata?.prompt_used || "");
       setResetTrigger(c => c + 1);
     }
-  }, [selectedJob, setSourceImageFile, setReferenceImageFile, setMaskImage, setAutoMaskUrl, setPrompt, setResetTrigger]);
+  }, [selectedJob, setSourceImageFile, setReferenceImageFile, setMaskImage, setPrompt, setResetTrigger]);
 
   const proJobs = useMemo(() => recentJobs?.filter(job => job.mode === 'inpaint') || [], [recentJobs]);
 
@@ -203,125 +195,38 @@ export const VirtualTryOnPro = ({
     if (file && file.type.startsWith("image/")) {
       resetForm();
       setSourceImageFile(file);
+      setReferenceImageFile(null);
+      setMaskImage(null);
+      setResetTrigger(c => c + 1);
     }
   };
-
-  const handleReferenceFileSelect = (file: File | null) => {
-    setReferenceImageFile(file);
-    if (file) {
-      setIsAutoPromptEnabled(true);
-    }
-  };
-
-  useEffect(() => {
-    if (!referenceImageFile) {
-      setIsAutoPromptEnabled(false);
-    }
-  }, [referenceImageFile]);
 
   const handleResetMask = () => {
     setResetTrigger(c => c + 1);
-    setAutoMaskUrl(null);
   };
 
-  const handleAutoMask = async () => {
-    if (!sourceImageFile || !referenceImageFile) {
-      showError("Please upload both a source and a reference image for automasking.");
+  const handleGenerate = async () => {
+    if (!sourceImageFile || !maskImage) {
+      showError("Please provide a source image and draw a mask.");
       return;
     }
-    setIsAutoMasking(true);
-    const toastId = showLoading("Generating AI mask... This may take a moment.");
-
-    try {
-      const sourceBase64 = await fileToBase64(sourceImageFile);
-      const referenceBase64 = await fileToBase64(referenceImageFile);
-      
-      const img = new Image();
-      img.src = URL.createObjectURL(sourceImageFile);
-      await new Promise(resolve => img.onload = resolve);
-      const image_dimensions = { width: img.naturalWidth, height: img.naturalHeight };
-
-      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-segmentation', {
-        body: {
-          user_id: session?.user.id,
-          image_base64: sourceBase64,
-          mime_type: sourceImageFile.type,
-          prompt: "Segment the garment from the reference image onto the source image.",
-          reference_image_base64: referenceBase64,
-          reference_mime_type: referenceImageFile.type,
-          image_dimensions: image_dimensions,
-          expansion_percent: 0.02,
-        }
-      });
-
-      if (error) throw error;
-      
-      setAutoMaskUrl(data.finalMaskUrl);
-      setMaskImage(null);
-      dismissToast(toastId);
-      showSuccess("AI mask generated successfully!");
-
-    } catch (err: any) {
-      dismissToast(toastId);
-      showError(`Mask generation failed: ${err.message}`);
-    } finally {
-      setIsAutoMasking(false);
+    if (!isAutoPromptEnabled && !prompt.trim() && !referenceImageFile) {
+      showError("Please provide a prompt or enable auto-prompt.");
+      return;
     }
-  };
-
-  const getMaskBase64 = async (): Promise<string | null> => {
-    if (autoMaskUrl) {
-      const response = await fetch(autoMaskUrl);
-      if (!response.ok) throw new Error("Failed to fetch auto-generated mask.");
-      const blob = await response.blob();
-      const file = new File([blob], "mask.png", { type: "image/png" });
-      return await fileToBase64(file);
-    }
-    if (maskImage) {
-      return maskImage.split(',')[1];
-    }
-    return null;
-  };
-
-  const proceedWithGeneration = async () => {
     setIsLoading(true);
-    let toastId = showLoading(t('sendingJob'));
+    const toastId = showLoading(t('sendingJob'));
 
     try {
-      const finalMaskBase64 = await getMaskBase64();
-      if (!sourceImageFile || !finalMaskBase64) {
-        throw new Error("Source image or mask data is missing.");
-      }
-
-      let finalPrompt = prompt;
-
-      if (isAutoPromptEnabled && referenceImageFile) {
-        dismissToast(toastId);
-        toastId = showLoading(t('generatingPrompt'));
-        const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-prompt-helper', {
-          body: { 
-            person_image_base64: await fileToBase64(sourceImageFile), 
-            person_image_mime_type: sourceImageFile.type,
-            garment_image_base64: await fileToBase64(referenceImageFile),
-            garment_image_mime_type: referenceImageFile.type,
-            is_garment_mode: true
-          }
-        });
-        if (promptError) throw promptError;
-        finalPrompt = promptData.final_prompt;
-        setPrompt(finalPrompt);
-        dismissToast(toastId);
-        toastId = showLoading(t('sendingJob'));
-      }
-
       const optimizedSource = await optimizeImage(sourceImageFile, { forceOriginalDimensions: true });
 
       const payload: any = {
         mode: 'inpaint',
         full_source_image_base64: await fileToBase64(optimizedSource),
-        mask_image_base64: finalMaskBase64,
-        prompt: finalPrompt,
-        is_garment_mode: true,
+        mask_image_base64: maskImage.split(',')[1],
+        prompt: prompt,
+        auto_prompt_enabled: isAutoPromptEnabled,
+        is_garment_mode: true, // VTO Pro Mode is always garment-focused
         user_id: session?.user.id,
         num_attempts: numAttempts,
         denoise: denoise,
@@ -341,7 +246,7 @@ export const VirtualTryOnPro = ({
       dismissToast(toastId);
       showSuccess(`${numAttempts} inpainting job(s) started! You can track progress in the sidebar.`);
       queryClient.invalidateQueries({ queryKey: ['activeJobs'] });
-      queryClient.invalidateQueries({ queryKey: ['bitstudioJobs', session.user.id] });
+      queryClient.invalidateQueries({ queryKey: ['bitstudioJobs', session?.user?.id] });
       resetForm();
 
     } catch (err: any) {
@@ -350,53 +255,6 @@ export const VirtualTryOnPro = ({
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const handleGenerate = async () => {
-    if (!sourceImageFile || (!maskImage && !autoMaskUrl)) {
-      showError("Please provide a source image and draw or generate a mask.");
-      return;
-    }
-    if (!isAutoPromptEnabled && !prompt.trim() && !referenceImageFile) {
-      showError("Please provide a prompt or enable auto-prompt.");
-      return;
-    }
-
-    const maskToCheck = autoMaskUrl || maskImage;
-    if (!maskToCheck) return;
-
-    const maskImg = new Image();
-    maskImg.src = maskToCheck;
-    maskImg.onload = () => {
-      const tempCanvas = document.createElement('canvas');
-      tempCanvas.width = maskImg.width;
-      tempCanvas.height = maskImg.height;
-      const ctx = tempCanvas.getContext('2d');
-      if (!ctx) return;
-      ctx.drawImage(maskImg, 0, 0);
-      const imageData = ctx.getImageData(0, 0, tempCanvas.width, tempCanvas.height).data;
-      
-      let minX = tempCanvas.width, minY = tempCanvas.height, maxX = 0, maxY = 0;
-      for (let i = 0; i < imageData.length; i += 4) {
-        if (imageData[i + 3] > 0) {
-          const x = (i / 4) % tempCanvas.width;
-          const y = Math.floor((i / 4) / tempCanvas.width);
-          if (x < minX) minX = x;
-          if (x > maxX) maxX = x;
-          if (y < minY) minY = y;
-          if (y > maxY) maxY = y;
-        }
-      }
-
-      const bboxWidth = maxX - minX;
-      const bboxHeight = maxY - minY;
-
-      if (bboxWidth < 512 || bboxHeight < 512) {
-        setIsSizeWarningOpen(true);
-      } else {
-        proceedWithGeneration();
-      }
-    };
   };
 
   const { dropzoneProps, isDraggingOver } = useDropzone({
@@ -433,7 +291,7 @@ export const VirtualTryOnPro = ({
     );
   };
 
-  const isGenerateDisabled = isLoading || !!selectedJob || !sourceImageFile || (!maskImage && !autoMaskUrl) || (!isAutoPromptEnabled && !prompt.trim() && !referenceImageFile);
+  const isGenerateDisabled = isLoading || !!selectedJob || !sourceImageFile || !maskImage || (!isAutoPromptEnabled && !prompt.trim() && !referenceImageFile);
   const placeholderText = isAutoPromptEnabled ? t('promptPlaceholderVTO') : t('promptPlaceholderVTO');
 
   return (
@@ -482,23 +340,19 @@ export const VirtualTryOnPro = ({
                       <AccordionTrigger>{t('inputs')}</AccordionTrigger>
                       <AccordionContent className="pt-4 space-y-4">
                         <div className="grid grid-cols-2 gap-4">
-                          <ImageUploader onFileSelect={handleFileSelect} title={t('sourceImage')} imageUrl={sourceImageUrl} onClear={resetForm} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
-                          <ImageUploader onFileSelect={handleReferenceFileSelect} title={t('garmentReference')} imageUrl={referenceImageUrl} onClear={() => setReferenceImageFile(null)} icon={<Shirt className="h-8 w-8 text-muted-foreground" />} />
+                          <ImageUploader onFileSelect={setSourceImageFile} title={t('sourceImage')} imageUrl={sourceImageUrl} onClear={resetForm} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
+                          <ImageUploader onFileSelect={setReferenceImageFile} title={t('garmentReference')} imageUrl={referenceImageUrl} onClear={() => setReferenceImageFile(null)} icon={<Shirt className="h-8 w-8 text-muted-foreground" />} />
                         </div>
                       </AccordionContent>
                     </AccordionItem>
                     <AccordionItem value="item-2">
-                      <AccordionTrigger>{t('promptOptional')}</AccordionTrigger>
+                      <AccordionTrigger>{t('promptSectionTitle')}</AccordionTrigger>
                       <AccordionContent className="pt-4 space-y-2">
                         <div className="flex items-center space-x-2">
                           <Switch id="auto-prompt-pro" checked={isAutoPromptEnabled} onCheckedChange={setIsAutoPromptEnabled} disabled={!referenceImageFile} />
                           <Label htmlFor="auto-prompt-pro">{t('autoGenerate')}</Label>
                         </div>
                         <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={placeholderText} rows={4} disabled={isAutoPromptEnabled} />
-                        <Button onClick={handleAutoMask} disabled={isAutoMasking || !sourceImageFile || !referenceImageFile}>
-                            {isAutoMasking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-                            {t('generateMaskWithAI')}
-                        </Button>
                       </AccordionContent>
                     </AccordionItem>
                     <AccordionItem value="item-3">
@@ -537,36 +391,20 @@ export const VirtualTryOnPro = ({
           {sourceImageUrl && !selectedJob ? (
             <>
               <div className="w-full flex-1 flex items-center justify-center relative p-2 overflow-hidden">
-                {autoMaskUrl ? (
-                  <div className="relative w-full h-full">
-                    <img src={sourceImageUrl} alt="Source" className="max-w-full max-h-full object-contain" />
-                    <img src={autoMaskUrl} alt="AI Mask" className="absolute top-0 left-0 w-full h-full object-contain pointer-events-none" />
-                  </div>
-                ) : (
-                  <MaskCanvas 
-                    imageUrl={sourceImageUrl} 
-                    onMaskChange={setMaskImage}
-                    brushSize={brushSize}
-                    resetTrigger={resetTrigger}
-                  />
-                )}
+                <MaskCanvas 
+                  imageUrl={sourceImageUrl} 
+                  onMaskChange={setMaskImage}
+                  brushSize={brushSize}
+                  resetTrigger={resetTrigger}
+                />
               </div>
-              {autoMaskUrl ? (
-                <div className="absolute top-2 right-2 z-10">
-                  <Button onClick={() => setAutoMaskUrl(null)} variant="secondary">
-                    <Brush className="mr-2 h-4 w-4" />
-                    {t('editManually')}
-                  </Button>
-                </div>
-              ) : (
-                <div className="p-2 shrink-0">
-                  <MaskControls 
-                    brushSize={brushSize} 
-                    onBrushSizeChange={setBrushSize} 
-                    onReset={handleResetMask} 
-                  />
-                </div>
-              )}
+              <div className="p-2 shrink-0">
+                <MaskControls 
+                  brushSize={brushSize} 
+                  onBrushSizeChange={setBrushSize} 
+                  onReset={handleResetMask} 
+                />
+              </div>
             </>
           ) : selectedJob ? (
             renderJobResult(selectedJob)
@@ -587,7 +425,7 @@ export const VirtualTryOnPro = ({
             <ScrollArea className="h-32">
               <div className="flex gap-4 pb-2">
                 {proJobs.map(job => {
-                  const urlToPreview = job.final_image_url || job.metadata?.source_image_url;
+                  const urlToPreview = job.final_image_url || job.source_person_image_url;
                   return (
                     <button key={job.id} onClick={() => handleSelectJob(job)} className={cn("border-2 rounded-lg p-0.5 flex-shrink-0 w-24 h-24", selectedJob?.id === job.id ? "border-primary" : "border-transparent")}>
                       <SecureImageDisplay imageUrl={urlToPreview || null} alt="Recent job" className="w-full h-full object-cover" />
@@ -599,43 +437,6 @@ export const VirtualTryOnPro = ({
           ) : <p className="text-muted-foreground text-sm">{t('noRecentProJobs')}</p>}
         </CardContent>
       </Card>
-
-      <DebugStepsModal 
-        isOpen={isDebugModalOpen}
-        onClose={() => setIsDebugModalOpen(false)}
-        assets={selectedJob?.metadata?.debug_assets || null}
-      />
-
-      <Dialog open={isGuideOpen} onOpenChange={setIsGuideOpen}>
-        <DialogContent className="max-w-2xl">
-            <DialogHeader>
-                <DialogTitle>{t('inpaintingGuideTitle')}</DialogTitle>
-            </DialogHeader>
-            <ScrollArea className="max-h-[70vh] pr-4">
-                <div className="space-y-4 markdown-content">
-                    <ReactMarkdown>{t('inpaintingGuideContent')}</ReactMarkdown>
-                </div>
-            </ScrollArea>
-            <DialogFooter>
-                <Button onClick={() => setIsGuideOpen(false)}>{t('done')}</Button>
-            </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <AlertDialog open={isSizeWarningOpen} onOpenChange={setIsSizeWarningOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Small Selection Warning</AlertDialogTitle>
-            <AlertDialogDescription>
-              The area you've selected is smaller than 512x512 pixels. For best results with fine details, we recommend upscaling the source image first using the "Upscale" page. Would you like to continue anyway?
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={proceedWithGeneration}>Continue Anyway</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </>
   );
 };

@@ -84,8 +84,6 @@ export const inpaintingTranslations = {
     promptPlaceholderInpaintingRequired: "Descrivi cosa vuoi inserire nell'area mascherata. Questo campo è obbligatorio senza un'immagine di riferimento.",
     enhancingPrompt: "Miglioramento prompt...",
     styleStrength: "Influenza Stile: {strength}",
-    generateMaskWithAI: "Genera Maschera con AI",
-    editManually: "Modifica Manualmente",
     inpaintingGuideContent: `
 ### Strategie per Risultati Migliori
 
@@ -208,8 +206,6 @@ L'inpainting è uno strumento potente per sostituire o modificare parti di un'im
     promptPlaceholderInpaintingRequired: "Describe what to inpaint in the masked area. This is required without a reference image.",
     enhancingPrompt: "Enhancing prompt...",
     styleStrength: "Style Influence: {strength}",
-    generateMaskWithAI: "Generate Mask with AI",
-    editManually: "Edit Manually",
     inpaintingGuideContent: `
 ### Strategies for Better Results
 
