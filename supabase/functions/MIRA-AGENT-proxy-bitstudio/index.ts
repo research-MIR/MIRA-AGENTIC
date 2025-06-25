@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { decodeBase64, encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
+import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
+import { createCanvas, loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -58,6 +59,22 @@ async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string)
     return data;
 }
 
+async function getMaskBlob(supabase: SupabaseClient, maskUrl: string): Promise<Blob> {
+    const url = new URL(maskUrl);
+    const pathSegments = url.pathname.split('/');
+    const bucketName = pathSegments[pathSegments.indexOf('object') + 2];
+    const pathStartIndex = url.pathname.indexOf(bucketName) + bucketName.length + 1;
+    const storagePath = decodeURIComponent(url.pathname.substring(pathStartIndex));
+
+    if (!bucketName || !storagePath) {
+        throw new Error(`Could not parse bucket or path from mask URL: ${maskUrl}`);
+    }
+
+    const { data, error } = await supabase.storage.from(bucketName).download(storagePath);
+    if (error) throw new Error(`Failed to download mask from Supabase: ${error.message}`);
+    return data;
+}
+
 serve(async (req) => {
   const requestId = `proxy-${Date.now()}`;
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
@@ -75,41 +92,24 @@ serve(async (req) => {
     if (mode === 'inpaint') {
       console.log(`[BitStudioProxy][${requestId}] Starting inpaint workflow.`);
       let { 
-        full_source_image_base64, mask_image_base64, prompt, reference_image_base64, 
+        full_source_image_base64, mask_image_base64, mask_image_url, prompt, reference_image_base64, 
         auto_prompt_enabled, is_garment_mode,
         num_attempts = 1, denoise = 1.0, resolution = 'standard', mask_expansion_percent = 2 
       } = body;
       
-      if (!full_source_image_base64 || !mask_image_base64) {
-        throw new Error("Missing required parameters for inpaint mode: full_source_image_base64 and mask_image_base64 are required.");
+      if (!full_source_image_base64 || (!mask_image_base64 && !mask_image_url)) {
+        throw new Error("Missing required parameters for inpaint mode: full_source_image_base64 and one of mask_image_base64 or mask_image_url are required.");
       }
 
-      const { createCanvas, loadImage } = await import('https://deno.land/x/canvas@v1.4.1/mod.ts');
+      let maskBlob: Blob;
+      if (mask_image_url) {
+          console.log(`[BitStudioProxy][${requestId}] Fetching mask from URL: ${mask_image_url}`);
+          maskBlob = await getMaskBlob(supabase, mask_image_url);
+      } else {
+          maskBlob = new Blob([decodeBase64(mask_image_base64)], { type: 'image/png' });
+      }
       
-      let fullSourceImage = await loadImage(`data:image/png;base64,${full_source_image_base64}`);
-      console.log(`[BitStudioProxy][${requestId}] Initial source image loaded. Dimensions: ${fullSourceImage.width()}x${fullSourceImage.height()}`);
-
-      // Enforce maximum resolution of 3000px on the longest side
-      const MAX_LONG_SIDE = 3000;
-      const longestSide = Math.max(fullSourceImage.width(), fullSourceImage.height());
-
-      if (longestSide > MAX_LONG_SIDE) {
-        console.log(`[BitStudioProxy][${requestId}] Image is too large (${longestSide}px). Resizing to max ${MAX_LONG_SIDE}px.`);
-        const scaleFactor = MAX_LONG_SIDE / longestSide;
-        const newWidth = Math.round(fullSourceImage.width() * scaleFactor);
-        const newHeight = Math.round(fullSourceImage.height() * scaleFactor);
-
-        const resizeCanvas = createCanvas(newWidth, newHeight);
-        const resizeCtx = resizeCanvas.getContext('2d');
-        resizeCtx.drawImage(fullSourceImage, 0, 0, newWidth, newHeight);
-        
-        const resizedBase64 = resizeCanvas.toDataURL().split(',')[1];
-        full_source_image_base64 = resizedBase64; // Update the base64 variable for later use
-        fullSourceImage = await loadImage(`data:image/png;base64,${resizedBase64}`); // Reload the image object
-        console.log(`[BitStudioProxy][${requestId}] Image resized to ${newWidth}x${newHeight}.`);
-      }
-
-      const rawMaskImage = await loadImage(`data:image/jpeg;base64,${mask_image_base64}`);
+      const rawMaskImage = await loadImage(await maskBlob.arrayBuffer());
       console.log(`[BitStudioProxy][${requestId}] Mask image loaded into memory.`);
 
       const dilatedCanvas = createCanvas(rawMaskImage.width(), rawMaskImage.height());
@@ -143,6 +143,7 @@ serve(async (req) => {
         throw new Error("The provided mask is empty or invalid after processing.");
       }
 
+      const fullSourceImage = await loadImage(`data:image/png;base64,${full_source_image_base64}`);
       const padding = Math.round(Math.max(maxX - minX, maxY - minY) * 0.05);
 
       const x1 = Math.max(0, minX - padding);
@@ -223,11 +224,11 @@ serve(async (req) => {
       for (let i = 0; i < num_attempts; i++) {
         console.log(`[BitStudioProxy][${requestId}] Starting attempt ${i + 1}/${num_attempts}.`);
         const sourceBlob = new Blob([decodeBase64(sourceToSendBase64)], { type: 'image/png' });
-        const maskBlob = new Blob([decodeBase64(maskToSendBase64)], { type: 'image/png' });
+        const finalMaskBlob = new Blob([decodeBase64(maskToSendBase64)], { type: 'image/png' });
 
         const uploadPromises: Promise<string | null>[] = [
           uploadToBitStudio(sourceBlob, 'inpaint-base', `source_${i}.png`),
-          uploadToBitStudio(maskBlob, 'inpaint-mask', `mask_${i}.png`)
+          uploadToBitStudio(finalMaskBlob, 'inpaint-mask', `mask_${i}.png`)
         ];
         if (reference_image_base64) {
           const referenceBlob = new Blob([decodeBase64(reference_image_base64)], { type: 'image/png' });
