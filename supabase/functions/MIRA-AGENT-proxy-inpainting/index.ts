@@ -8,27 +8,29 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const workflowTemplate = {
+const workflowTemplate = `{
   "3": { "inputs": { "seed": 1062983749859779, "steps": 20, "cfg": 1, "sampler_name": "euler", "scheduler": "normal", "denoise": 1, "model": ["39", 0], "positive": ["38", 0], "negative": ["38", 1], "latent_image": ["38", 2] }, "class_type": "KSampler", "_meta": { "title": "KSampler" } },
   "7": { "inputs": { "text": "", "clip": ["34", 0] }, "class_type": "CLIPTextEncode", "_meta": { "title": "CLIP Text Encode (Negative Prompt)" } },
   "8": { "inputs": { "samples": ["3", 0], "vae": ["32", 0] }, "class_type": "VAEDecode", "_meta": { "title": "VAE Decode" } },
-  "9": { "inputs": { "filename_prefix": "ComfyUI_Inpaint", "images": ["8", 0] }, "class_type": "SaveImage", "_meta": { "title": "Save Image" } },
+  "9": { "inputs": { "filename_prefix": "ComfyUI_Inpaint", "images": ["54", 0] }, "class_type": "SaveImage", "_meta": { "title": "Save Image" } },
   "17": { "inputs": { "image": "source_image.png" }, "class_type": "LoadImage", "_meta": { "title": "Input Image" } },
   "23": { "inputs": { "text": "Wearing pink Maxi Dress", "clip": ["34", 0] }, "class_type": "CLIPTextEncode", "_meta": { "title": "PROMPT" } },
   "26": { "inputs": { "guidance": 30, "conditioning": ["23", 0] }, "class_type": "FluxGuidance", "_meta": { "title": "FluxGuidance" } },
   "31": { "inputs": { "unet_name": "fluxfill.safetensors", "weight_dtype": "default" }, "class_type": "UNETLoader", "_meta": { "title": "Load Diffusion Model" } },
   "32": { "inputs": { "vae_name": "ae.safetensors" }, "class_type": "VAELoader", "_meta": { "title": "Load VAE" } },
   "34": { "inputs": { "clip_name1": "clip_l.safetensors", "clip_name2": "t5xxl_fp16.safetensors", "type": "flux", "device": "default" }, "class_type": "DualCLIPLoader", "_meta": { "title": "DualCLIPLoader" } },
-  "38": { "inputs": { "noise_mask": false, "positive": ["51", 0], "negative": ["7", 0], "vae": ["32", 0], "pixels": ["17", 0], "mask": ["47", 0] }, "class_type": "InpaintModelConditioning", "_meta": { "title": "InpaintModelConditioning" } },
+  "38": { "inputs": { "noise_mask": false, "positive": ["51", 0], "negative": ["7", 0], "vae": ["32", 0], "pixels": ["17", 0], "mask": ["53", 0] }, "class_type": "InpaintModelConditioning", "_meta": { "title": "InpaintModelConditioning" } },
   "39": { "inputs": { "model": ["31", 0] }, "class_type": "DifferentialDiffusion", "_meta": { "title": "Differential Diffusion" } },
   "45": { "inputs": { "image": "mask_image.png" }, "class_type": "LoadImage", "_meta": { "title": "Input Mask" } },
   "47": { "inputs": { "channel": "red", "image": ["45", 0] }, "class_type": "ImageToMask", "_meta": { "title": "Convert Image to Mask" } },
   "48": { "inputs": { "style_model_name": "fluxcontrolnetupscale.safetensors" }, "class_type": "StyleModelLoader", "_meta": { "title": "Load Style Model" } },
   "49": { "inputs": { "clip_name": "sigclip_vision_patch14_384.safetensors" }, "class_type": "CLIPVisionLoader", "_meta": { "title": "Load CLIP Vision" } },
-  "50": { "inputs": { "crop": "center", "clip_vision": ["49", 0], "image": ["52", 0] }, "class_type": "CLIPVisionEncode", "_meta": { "title": "CLIP Vision Encode" } },
-  "51": { "inputs": { "strength": 0.3, "strength_type": "attn_bias", "conditioning": ["26", 0], "style_model": ["48", 0], "clip_vision_output": ["50", 0] }, "class_type": "StyleModelApply", "_meta": { "title": "Apply Style Model" } },
-  "52": { "inputs": { "image": "reference_image.png" }, "class_type": "LoadImage", "_meta": { "title": "Input Reference" } }
-};
+  "50": { "inputs": { "crop": "none", "clip_vision": ["49", 0], "image": ["52", 0] }, "class_type": "CLIPVisionEncode", "_meta": { "title": "CLIP Vision Encode" } },
+  "51": { "inputs": { "strength": 0.30000000000000004, "strength_type": "attn_bias", "conditioning": ["26", 0], "style_model": ["48", 0], "clip_vision_output": ["50", 0] }, "class_type": "StyleModelApply", "_meta": { "title": "Apply Style Model" } },
+  "52": { "inputs": { "image": "reference_image.png" }, "class_type": "LoadImage", "_meta": { "title": "Input Reference" } },
+  "53": { "inputs": { "expand": 20, "incremental_expandrate": 0, "tapered_corners": true, "flip_input": false, "blur_radius": 3.1, "lerp_alpha": 1, "decay_factor": 1, "fill_holes": false, "mask": ["47", 0] }, "class_type": "GrowMaskWithBlur", "_meta": { "title": "Grow Mask With Blur" } },
+  "54": { "inputs": { "method": "mkl", "strength": 0.30000000000000004, "image_ref": ["17", 0], "image_target": ["8", 0] }, "class_type": "ColorMatch", "_meta": { "title": "Color Match" } }
+}`;
 
 async function uploadImageToComfyUI(comfyUiUrl: string, imageBlob: Blob, filename: string) {
   const formData = new FormData();
@@ -170,7 +172,7 @@ serve(async (req) => {
       uploadImageToComfyUI(sanitizedAddress, maskBlob, 'mask.png')
     ]);
 
-    const finalWorkflow = JSON.parse(JSON.stringify(workflowTemplate));
+    const finalWorkflow = JSON.parse(workflowTemplate);
     finalWorkflow['17'].inputs.image = sourceFilename;
     finalWorkflow['45'].inputs.image = maskFilename;
     finalWorkflow['23'].inputs.text = finalPrompt;
