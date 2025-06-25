@@ -213,55 +213,45 @@ serve(async (req) => {
     combinedCtx.putImageData(combinedImageData, 0, 0);
     console.log(`[Orchestrator][${requestId}] Majority voting complete with threshold ${majorityThreshold}.`);
 
-    const expansion_percent = 0.03;
+    const expansion_percent = 0.03; // Fixed expansion value
+    console.log(`[Orchestrator][${requestId}] Applying post-vote expansion of ${expansion_percent * 100}% to the combined mask.`);
     expandMask(combinedCanvas, expansion_percent);
     console.log(`[Orchestrator][${requestId}] Post-vote expansion complete.`);
 
-    // Create B&W mask for the modal
-    const bwCanvas = createCanvas(image_dimensions.width, image_dimensions.height);
-    const bwCtx = bwCanvas.getContext('2d');
-    const bwImageData = combinedCtx.getImageData(0, 0, image_dimensions.width, image_dimensions.height);
-    const bwData = bwImageData.data;
-    for (let i = 0; i < bwData.length; i += 4) {
-        if (bwData[i] > 128) { // Is a mask pixel
-            bwData[i] = 255; bwData[i + 1] = 255; bwData[i + 2] = 255; bwData[i + 3] = 255;
-        } else { // Is background
-            bwData[i] = 0; bwData[i + 1] = 0; bwData[i + 2] = 0; bwData[i + 3] = 255;
+    const finalImageData = combinedCtx.getImageData(0, 0, image_dimensions.width, image_dimensions.height);
+    const finalData = finalImageData.data;
+    for (let i = 0; i < finalData.length; i += 4) {
+        if (finalData[i] > 128) { // This is a mask pixel
+            finalData[i] = 255;     // R (White)
+            finalData[i + 1] = 255; // G (White)
+            finalData[i + 2] = 255; // B (White)
+            finalData[i + 3] = 255; // Alpha (Opaque)
+        } else { // This is not a mask pixel
+            finalData[i] = 0;       // R (Black)
+            finalData[i + 1] = 0;   // G (Black)
+            finalData[i + 2] = 0;   // B (Black)
+            finalData[i + 3] = 255; // Alpha (Opaque)
         }
     }
-    bwCtx.putImageData(bwImageData, 0, 0);
-    const bwBase64 = bwCanvas.toDataURL('image/png').split(',')[1];
+    combinedCtx.putImageData(finalImageData, 0, 0);
 
-    // Create Red-on-Transparent overlay for display
-    const overlayCanvas = createCanvas(image_dimensions.width, image_dimensions.height);
-    const overlayCtx = overlayCanvas.getContext('2d');
-    const overlayImageData = combinedCtx.getImageData(0, 0, image_dimensions.width, image_dimensions.height);
-    const overlayData = overlayImageData.data;
-    for (let i = 0; i < overlayData.length; i += 4) {
-        if (overlayData[i] > 128) { // Is a mask pixel
-            overlayData[i] = 255;     // R
-            overlayData[i + 1] = 0;   // G
-            overlayData[i + 2] = 0;   // B
-            overlayData[i + 3] = 150; // Alpha (semi-transparent)
-        } else { // Is background
-            overlayData[i + 3] = 0;   // Alpha (fully transparent)
-        }
+    const finalDataUrl = combinedCanvas.toDataURL('image/png');
+    if (!finalDataUrl || !finalDataUrl.includes(',')) {
+        throw new Error("Failed to generate data URL from final canvas.");
     }
-    overlayCtx.putImageData(overlayImageData, 0, 0);
+    const finalBase64 = finalDataUrl.split(',')[1];
+    const finalImageBuffer = decodeBase64(finalBase64);
 
-    const finalOverlayBuffer = overlayCanvas.toBuffer('image/png');
-    const finalPublicUrl = await uploadBufferToStorage(supabase, finalOverlayBuffer, user_id, 'final_overlay.png');
+    if (!finalImageBuffer) {
+        throw new Error("Failed to convert final canvas to buffer. The canvas might be empty or invalid.");
+    }
+    const finalPublicUrl = await uploadBufferToStorage(supabase, finalImageBuffer, user_id, 'final_mask.png');
 
     await supabase.from('mira-agent-mask-aggregation-jobs')
       .update({ status: 'complete', final_mask_base64: finalPublicUrl })
       .eq('id', aggregationJobId);
 
-    return new Response(JSON.stringify({ 
-        success: true, 
-        finalMaskUrl: finalPublicUrl,
-        rawMaskBase64: bwBase64,
-        rawResponse: allResults 
-    }), {
+    return new Response(JSON.stringify({ success: true, finalMaskUrl: finalPublicUrl, rawResponse: allResults }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });

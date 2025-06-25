@@ -89,7 +89,6 @@ const VirtualTryOn = () => {
   const [maskExpansion, setMaskExpansion] = useState(3);
   const [isAutoMasking, setIsAutoMasking] = useState(false);
   const [autoMaskUrl, setAutoMaskUrl] = useState<string | null>(null);
-  const [rawMaskForModal, setRawMaskForModal] = useState<string | null>(null);
 
   useEffect(() => {
     console.log('[VTO Page] Image transfer effect triggered.');
@@ -126,7 +125,6 @@ const VirtualTryOn = () => {
     setPrompt("");
     setResetTrigger(c => c + 1);
     setAutoMaskUrl(null);
-    setRawMaskForModal(null);
     consumeImageUrl();
   }, [consumeImageUrl]);
 
@@ -212,7 +210,6 @@ const VirtualTryOn = () => {
 
       if (error) throw error;
       setAutoMaskUrl(data.finalMaskUrl);
-      setRawMaskForModal(`data:image/png;base64,${data.rawMaskBase64}`);
       dismissToast(toastId);
       showSuccess("Auto-mask generated!");
     } catch (err: any) {
@@ -270,8 +267,7 @@ const VirtualTryOn = () => {
               isAutoMasking={isAutoMasking}
               autoMaskUrl={autoMaskUrl}
               handleAutoMask={handleAutoMask}
-              clearAutoMask={() => { setAutoMaskUrl(null); setRawMaskForModal(null); }}
-              rawMaskForModal={rawMaskForModal}
+              clearAutoMask={() => setAutoMaskUrl(null)}
             />
           ) : (
             <div className="h-full">
