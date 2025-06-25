@@ -21,7 +21,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { ProModeSettings } from "./ProModeSettings";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useLanguage } from "@/context/LanguageContext";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import ReactMarkdown from "react-markdown";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { optimizeImage } from "@/lib/utils";
@@ -143,27 +143,17 @@ export const VirtualTryOnPro = ({
   const { t } = useLanguage();
   const { showImage } = useImagePreview();
   const queryClient = useQueryClient();
+  const [isMaskViewerOpen, setIsMaskViewerOpen] = useState(false);
 
-  const [sourcePreview, setSourcePreview] = useState<string | null>(null);
-  const [referencePreview, setReferencePreview] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (sourceImageFile) {
-      const url = URL.createObjectURL(sourceImageFile);
-      setSourcePreview(url);
-      return () => URL.revokeObjectURL(url);
-    }
-    setSourcePreview(null);
-  }, [sourceImageFile]);
+  const sourceImageUrl = useMemo(() => sourceImageFile ? URL.createObjectURL(sourceImageFile) : null, [sourceImageFile]);
+  const referenceImageUrl = useMemo(() => referenceImageFile ? URL.createObjectURL(referenceImageFile) : null, [referenceImageFile]);
 
   useEffect(() => {
-    if (referenceImageFile) {
-      const url = URL.createObjectURL(referenceImageFile);
-      setReferencePreview(url);
-      return () => URL.revokeObjectURL(url);
-    }
-    setReferencePreview(null);
-  }, [referenceImageFile]);
+    return () => {
+      if (sourceImageUrl) URL.revokeObjectURL(sourceImageUrl);
+      if (referenceImageUrl) URL.revokeObjectURL(referenceImageUrl);
+    };
+  }, [sourceImageUrl, referenceImageUrl]);
 
   useEffect(() => {
     if (selectedJob) {
@@ -329,8 +319,8 @@ export const VirtualTryOnPro = ({
                       <AccordionTrigger>{t('inputs')}</AccordionTrigger>
                       <AccordionContent className="pt-4 space-y-4">
                         <div className="grid grid-cols-2 gap-4">
-                          <ImageUploader onFileSelect={setSourceImageFile} title={t('sourceImage')} imageUrl={sourcePreview} onClear={resetForm} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
-                          <ImageUploader onFileSelect={setReferenceImageFile} title={t('garmentReference')} imageUrl={referencePreview} onClear={() => setReferenceImageFile(null)} icon={<Shirt className="h-8 w-8 text-muted-foreground" />} />
+                          <ImageUploader onFileSelect={setSourceImageFile} title={t('sourceImage')} imageUrl={sourceImageUrl} onClear={resetForm} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
+                          <ImageUploader onFileSelect={setReferenceImageFile} title={t('garmentReference')} imageUrl={referenceImageUrl} onClear={() => setReferenceImageFile(null)} icon={<Shirt className="h-8 w-8 text-muted-foreground" />} />
                         </div>
                         <Button className="w-full" onClick={handleAutoMask} disabled={isAutoMasking || !sourceImageFile || !referenceImageFile}>
                           {isAutoMasking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
@@ -381,23 +371,26 @@ export const VirtualTryOnPro = ({
         </div>
 
         <div className="lg:col-span-2 bg-muted rounded-lg flex flex-col items-stretch justify-center relative min-h-[60vh] lg:min-h-0">
-          {sourcePreview && !selectedJob ? (
+          {sourceImageUrl && !selectedJob ? (
             <>
               <div className="w-full flex-1 flex items-center justify-center relative p-2 overflow-hidden">
                 {autoMaskUrl ? (
                   <div className="relative w-full h-full">
-                    <img src={sourcePreview} alt="Source" className="max-w-full max-h-full object-contain" />
+                    <img src={sourceImageUrl} alt="Source" className="max-w-full max-h-full object-contain" />
                     <SecureImageDisplay 
                         imageUrl={autoMaskUrl} 
                         alt="Auto-generated Mask" 
                         className="absolute top-0 left-0 w-full h-full object-contain opacity-50 mix-blend-screen pointer-events-none" 
                         style={{ filter: 'brightness(0) invert(1) sepia(1) saturate(10000%) hue-rotate(330deg)' }}
                     />
-                    <Button variant="destructive" size="sm" className="absolute top-2 right-2" onClick={clearAutoMask}><X className="h-4 w-4 mr-2" />Clear Mask</Button>
+                    <div className="absolute top-2 right-2 flex gap-2">
+                        <Button variant="secondary" size="sm" onClick={() => setIsMaskViewerOpen(true)}><Eye className="h-4 w-4 mr-2" />View Mask</Button>
+                        <Button variant="destructive" size="sm" onClick={clearAutoMask}><X className="h-4 w-4 mr-2" />Clear Mask</Button>
+                    </div>
                   </div>
                 ) : (
                   <MaskCanvas 
-                    imageUrl={sourcePreview} 
+                    imageUrl={sourceImageUrl} 
                     onMaskChange={setMaskImage}
                     brushSize={brushSize}
                     resetTrigger={resetTrigger}
@@ -445,6 +438,23 @@ export const VirtualTryOnPro = ({
           ) : <p className="text-muted-foreground text-sm">{t('noRecentProJobs')}</p>}
         </CardContent>
       </Card>
+
+      <Dialog open={isMaskViewerOpen} onOpenChange={setIsMaskViewerOpen}>
+        <DialogContent className="max-w-2xl">
+            <DialogHeader>
+                <DialogTitle>Raw Segmentation Mask</DialogTitle>
+                <DialogDescription>
+                    This is the raw black and white mask generated by the AI. White areas will be replaced, black areas will be kept.
+                </DialogDescription>
+            </DialogHeader>
+            <div className="py-4 flex items-center justify-center bg-gray-800 rounded-md">
+                <SecureImageDisplay imageUrl={autoMaskUrl} alt="Raw Mask" />
+            </div>
+            <DialogFooter>
+                <Button onClick={() => setIsMaskViewerOpen(false)}>Close</Button>
+            </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 };
