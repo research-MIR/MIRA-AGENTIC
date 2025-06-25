@@ -4,7 +4,7 @@ import { useLanguage } from "@/context/LanguageContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SingleTryOn } from "@/components/VTO/SingleTryOn";
 import { BatchTryOn } from "@/components/VTO/BatchTryOn";
-import { VirtualTryOnPro } from "@/components/VTO/VirtualTryOnPro";
+import VirtualTryOnPro from "@/components/VTO/VirtualTryOnPro";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
