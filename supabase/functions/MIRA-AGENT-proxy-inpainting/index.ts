@@ -349,76 +349,111 @@ serve(async (req) => {
       mask_image_base64,
       reference_image_base64,
       prompt,
+      is_garment_mode,
       denoise,
+      style_strength,
+      mask_expansion_percent = 2,
       num_attempts = 1,
     } = await req.json();
 
-    if (!user_id || !source_image_base64 || !mask_image_base64 || !prompt) {
-      throw new Error("Missing required parameters: user_id, source_image_base64, mask_image_base64, and prompt are required.");
+    if (!user_id || !source_image_base64 || !mask_image_base64) {
+      throw new Error("Missing required parameters: user_id, source_image_base64, and mask_image_base64 are required.");
     }
+
+    let finalPrompt = prompt;
+    if (!finalPrompt || finalPrompt.trim() === "") {
+        if (!reference_image_base64) {
+            throw new Error("A text prompt is required when no reference image is provided.");
+        }
+        console.log(`[InpaintingProxy] No prompt provided. Auto-generating from reference...`);
+        const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-prompt-helper', {
+          body: { 
+            person_image_base64: source_image_base64, 
+            person_image_mime_type: 'image/png',
+            garment_image_base64: reference_image_base64,
+            garment_image_mime_type: 'image/png',
+            is_garment_mode: is_garment_mode ?? true
+          }
+        });
+        if (promptError) throw new Error(`Auto-prompt generation failed: ${promptError.message}`);
+        finalPrompt = promptData.final_prompt;
+        console.log(`[InpaintingProxy] Auto-prompt generated successfully.`);
+    }
+
+    if (!finalPrompt) throw new Error("Prompt is required for inpainting.");
 
     const fullSourceImage = await loadImage(`data:image/png;base64,${source_image_base64}`);
     const rawMaskImage = await loadImage(`data:image/png;base64,${mask_image_base64}`);
 
-    const maskCanvas = createCanvas(rawMaskImage.width, rawMaskImage.height);
-    const maskCtx = maskCanvas.getContext('2d');
-    maskCtx.drawImage(rawMaskImage, 0, 0);
-    const maskImageData = maskCtx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
-    const maskData = maskImageData.data;
-
-    let minX = maskCanvas.width, minY = maskCanvas.height, maxX = 0, maxY = 0;
-    for (let i = 0; i < maskData.length; i += 4) {
-      if (maskData[i + 3] > 0) { // Check alpha channel
-        const x = (i / 4) % maskCanvas.width;
-        const y = Math.floor((i / 4) / maskCanvas.width);
+    const dilatedCanvas = createCanvas(rawMaskImage.width(), rawMaskImage.height());
+    const dilateCtx = dilatedCanvas.getContext('2d');
+    const dilationAmount = Math.max(10, Math.round(rawMaskImage.width() * (mask_expansion_percent / 100)));
+    dilateCtx.filter = `blur(${dilationAmount}px)`;
+    dilateCtx.drawImage(rawMaskImage, 0, 0);
+    dilateCtx.filter = 'none';
+    
+    const dilatedImageData = dilateCtx.getImageData(0, 0, dilatedCanvas.width, dilatedCanvas.height);
+    const imageData = dilatedImageData.data;
+    let minX = dilatedCanvas.width, minY = dilatedCanvas.height, maxX = 0, maxY = 0;
+    for (let i = 0; i < imageData.length; i += 4) {
+      if (imageData[i] > 128) {
+        imageData[i] = imageData[i+1] = imageData[i+2] = 255;
+        const x = (i / 4) % dilatedCanvas.width;
+        const y = Math.floor((i / 4) / dilatedCanvas.width);
         if (x < minX) minX = x;
         if (x > maxX) maxX = x;
         if (y < minY) minY = y;
         if (y > maxY) maxY = y;
+      } else {
+        imageData[i] = imageData[i+1] = imageData[i+2] = 0;
       }
     }
+    dilateCtx.putImageData(dilatedImageData, 0, 0);
 
-    if (maxX < minX || maxY < minY) throw new Error("The provided mask is empty or invalid.");
+    if (maxX < minX || maxY < minY) throw new Error("The provided mask is empty or invalid after processing.");
 
     const padding = Math.round(Math.max(maxX - minX, maxY - minY) * 0.20);
     const bbox = {
       x: Math.max(0, minX - padding),
       y: Math.max(0, minY - padding),
-      width: Math.min(fullSourceImage.width, maxX + padding) - Math.max(0, minX - padding),
-      height: Math.min(fullSourceImage.height, maxY + padding) - Math.max(0, minY - padding),
+      width: Math.min(fullSourceImage.width(), maxX + padding) - Math.max(0, minX - padding),
+      height: Math.min(fullSourceImage.height(), maxY + padding) - Math.max(0, minY - padding),
     };
 
     if (bbox.width <= 0 || bbox.height <= 0) throw new Error(`Invalid bounding box dimensions: ${bbox.width}x${bbox.height}.`);
 
     const croppedCanvas = createCanvas(bbox.width, bbox.height);
-    croppedCanvas.getContext('2d')!.drawImage(fullSourceImage, bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
-    const croppedSourceBlob = new Blob([croppedCanvas.toBuffer('image/png')], { type: 'image/png' });
+    croppedCanvas.getContext('2d').drawImage(fullSourceImage, bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
+    const croppedSourceBase64 = encodeBase64(croppedCanvas.toBuffer('image/png'));
 
     const croppedMaskCanvas = createCanvas(bbox.width, bbox.height);
-    croppedMaskCanvas.getContext('2d')!.drawImage(rawMaskImage, bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
-    const croppedMaskBlob = new Blob([croppedMaskCanvas.toBuffer('image/png')], { type: 'image/png' });
+    croppedMaskCanvas.getContext('2d').drawImage(dilatedCanvas, bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
+    const croppedDilatedMaskBase64 = encodeBase64(croppedMaskCanvas.toBuffer('image/png'));
 
-    const [sourceFilename, maskFilename] = await Promise.all([
-      uploadImageToComfyUI(sanitizedAddress, croppedSourceBlob, 'source.png'),
-      uploadImageToComfyUI(sanitizedAddress, croppedMaskBlob, 'mask.png')
-    ]);
+    const sourceToSendBase64 = croppedSourceBase64;
+    const maskToSendBase64 = croppedDilatedMaskBase64;
 
-    const sourceImageBuffer = decodeBase64(source_image_base64);
-    const sourceImageBlob = new Blob([sourceImageBuffer], { type: 'image/png' });
-    const sourceImageUrl = await uploadToSupabaseStorage(supabase, sourceImageBlob, user_id, 'full_source.png');
+    const sourceBlob = new Blob([decodeBase64(sourceToSendBase64)], { type: 'image/png' });
+    const maskBlob = new Blob([decodeBase64(maskToSendBase64)], { type: 'image/png' });
     
+    const sourceImageUrl = await uploadToSupabaseStorage(supabase, sourceBlob, user_id, 'source.png');
     let referenceImageUrl: string | null = null;
     if (reference_image_base64) {
         const referenceBlob = new Blob([decodeBase64(reference_image_base64)], { type: 'image/png' });
         referenceImageUrl = await uploadToSupabaseStorage(supabase, referenceBlob, user_id, 'reference.png');
     }
+    
+    const [sourceFilename, maskFilename] = await Promise.all([
+      uploadImageToComfyUI(sanitizedAddress, sourceBlob, 'source.png'),
+      uploadImageToComfyUI(sanitizedAddress, maskBlob, 'mask.png')
+    ]);
 
     const jobIds: string[] = [];
     for (let i = 0; i < num_attempts; i++) {
       const finalWorkflow = JSON.parse(workflowTemplate);
       finalWorkflow['17'].inputs.image = sourceFilename;
       finalWorkflow['45'].inputs.image = maskFilename;
-      finalWorkflow['23'].inputs.text = prompt;
+      finalWorkflow['23'].inputs.text = finalPrompt;
       finalWorkflow['3'].inputs.seed = Math.floor(Math.random() * 1000000000000000);
       if (denoise) finalWorkflow['3'].inputs.denoise = denoise;
 
@@ -439,12 +474,14 @@ serve(async (req) => {
         comfyui_prompt_id: comfyUIResponse.prompt_id,
         status: 'queued',
         metadata: { 
-          prompt_used: prompt, 
-          denoise,
+          prompt: finalPrompt, 
+          denoise, 
+          style_strength,
           source_image_url: sourceImageUrl,
           reference_image_url: referenceImageUrl,
           full_source_image_base64: source_image_base64,
           bbox: bbox,
+          cropped_dilated_mask_base64: croppedDilatedMaskBase64,
         }
       }).select('id').single();
       if (insertError) throw insertError;
