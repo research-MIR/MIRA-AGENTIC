@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { useQueryClient } from "@tanstack/react-query";
@@ -48,7 +48,6 @@ const VirtualTryOnPro = ({
 
   const [numAttempts, setNumAttempts] = useState(1);
   const [maskExpansion, setMaskExpansion] = useState(3);
-  const [resolution, setResolution] = useState<'standard' | 'high'>('high');
 
   const sourceImageUrl = useMemo(() => sourceImageFile ? URL.createObjectURL(sourceImageFile) : null, [sourceImageFile]);
 
@@ -91,13 +90,23 @@ const VirtualTryOnPro = ({
     setResetTrigger(c => c + 1);
   };
 
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => resolve((reader.result as string).split(',')[1]);
-      reader.onerror = (error) => reject(error);
-    });
+  const uploadFile = async (file: File, type: 'person' | 'garment') => {
+    if (!session?.user) throw new Error("User session not found.");
+    const optimizedFile = await optimizeImage(file);
+    const sanitizedName = sanitizeFilename(optimizedFile.name);
+    const filePath = `${session.user.id}/vto-source/${type}-${Date.now()}-${sanitizedName}`;
+    
+    const { error } = await supabase.storage
+      .from('mira-agent-user-uploads')
+      .upload(filePath, optimizedFile);
+    
+    if (error) throw new Error(`Failed to upload ${type} image: ${error.message}`);
+    
+    const { data: { publicUrl } } = supabase.storage
+      .from('mira-agent-user-uploads')
+      .getPublicUrl(filePath);
+      
+    return publicUrl;
   };
 
   const handleGenerate = async () => {
@@ -107,22 +116,17 @@ const VirtualTryOnPro = ({
     const toastId = showLoading(t('sendingJob'));
 
     try {
-      const [source_image_base64, reference_image_base64] = await Promise.all([
-        fileToBase64(sourceImageFile),
-        fileToBase64(referenceImageFile)
+      const [person_url, garment_url] = await Promise.all([
+        uploadFile(sourceImageFile, 'person'),
+        uploadFile(referenceImageFile, 'garment')
       ]);
 
-      const { error } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
+      const pairs = [{ person_url, garment_url, appendix: prompt }];
+
+      const { error } = await supabase.functions.invoke('MIRA-AGENT-proxy-batch-inpaint', {
         body: {
-          mode: 'inpaint',
-          user_id: session?.user?.id,
-          full_source_image_base64: source_image_base64,
-          reference_image_base64: reference_image_base64,
-          prompt: prompt,
-          is_garment_mode: true,
-          num_attempts: numAttempts,
-          mask_expansion_percent: maskExpansion,
-          resolution: resolution,
+          pairs: pairs,
+          user_id: session?.user?.id
         }
       });
 
@@ -179,8 +183,6 @@ const VirtualTryOnPro = ({
               onGenerate={handleGenerate}
               isGenerateDisabled={isGenerateDisabled}
               onGuideOpen={() => setIsGuideOpen(true)}
-              resolution={resolution}
-              setResolution={setResolution}
             />
             <VTOProWorkbench
               selectedJob={selectedJob}
