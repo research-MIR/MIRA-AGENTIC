@@ -8,25 +8,20 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import ReactMarkdown from "react-markdown";
 import { Button } from "@/components/ui/button";
 import { useLanguage } from "@/context/LanguageContext";
-import { optimizeImage, sanitizeFilename } from "@/lib/utils";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { BatchInpaintPro } from "./BatchInpaintPro";
-import { BitStudioJob } from "@/types/vto";
-import { useVTOJobs } from "@/hooks/useVTOJobs";
-import { RecentJobsList } from "./RecentJobsList";
 import { VTOProSetup } from "./VTOProSetup";
 import { VTOProWorkbench } from "./VTOProWorkbench";
-import { useImageTransferStore } from "@/store/imageTransferStore";
-import { HelpCircle, Info } from "lucide-react";
+import { BitStudioJob } from "@/types/vto";
+import { HelpCircle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Info } from "lucide-react";
 
 const VirtualTryOnPro = ({
-  recentJobs, isLoadingRecentJobs, selectedJob, handleSelectJob, resetForm, transferredImageUrl, onTransferConsumed
+  selectedJob,
+  resetForm,
+  transferredImageUrl,
+  onTransferConsumed
 }: {
-  recentJobs: BitStudioJob[] | undefined;
-  isLoadingRecentJobs: boolean;
   selectedJob: BitStudioJob | undefined;
-  handleSelectJob: (job: BitStudioJob) => void;
   resetForm: () => void;
   transferredImageUrl?: string | null;
   onTransferConsumed: () => void;
@@ -37,10 +32,7 @@ const VirtualTryOnPro = ({
 
   const [sourceImageFile, setSourceImageFile] = useState<File | null>(null);
   const [referenceImageFile, setReferenceImageFile] = useState<File | null>(null);
-  const [maskImage, setMaskImage] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
-  const [brushSize, setBrushSize] = useState(30);
-  const [resetTrigger, setResetTrigger] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [isDebugModalOpen, setIsDebugModalOpen] = useState(false);
   const [isAutoPromptEnabled, setIsAutoPromptEnabled] = useState(true);
@@ -48,8 +40,6 @@ const VirtualTryOnPro = ({
 
   const [numAttempts, setNumAttempts] = useState(1);
   const [maskExpansion, setMaskExpansion] = useState(3);
-
-  const sourceImageUrl = useMemo(() => sourceImageFile ? URL.createObjectURL(sourceImageFile) : null, [sourceImageFile]);
 
   useEffect(() => {
     if (transferredImageUrl) {
@@ -71,43 +61,12 @@ const VirtualTryOnPro = ({
   }, [transferredImageUrl, onTransferConsumed]);
 
   useEffect(() => {
-    return () => {
-      if (sourceImageUrl) URL.revokeObjectURL(sourceImageUrl);
-    };
-  }, [sourceImageUrl]);
-
-  useEffect(() => {
     if (selectedJob) {
       setSourceImageFile(null);
       setReferenceImageFile(null);
-      setMaskImage(null);
       setPrompt(selectedJob.metadata?.prompt_used || "");
-      setResetTrigger(c => c + 1);
     }
   }, [selectedJob]);
-
-  const handleResetMask = () => {
-    setResetTrigger(c => c + 1);
-  };
-
-  const uploadFile = async (file: File, type: 'person' | 'garment') => {
-    if (!session?.user) throw new Error("User session not found.");
-    const optimizedFile = await optimizeImage(file);
-    const sanitizedName = sanitizeFilename(optimizedFile.name);
-    const filePath = `${session.user.id}/vto-source/${type}-${Date.now()}-${sanitizedName}`;
-    
-    const { error } = await supabase.storage
-      .from('mira-agent-user-uploads')
-      .upload(filePath, optimizedFile);
-    
-    if (error) throw new Error(`Failed to upload ${type} image: ${error.message}`);
-    
-    const { data: { publicUrl } } = supabase.storage
-      .from('mira-agent-user-uploads')
-      .getPublicUrl(filePath);
-      
-    return publicUrl;
-  };
 
   const handleGenerate = async () => {
     if (!sourceImageFile || !referenceImageFile) return showError("Please provide both a source and a reference image.");
@@ -116,19 +75,24 @@ const VirtualTryOnPro = ({
     const toastId = showLoading(t('sendingJob'));
 
     try {
-      const [person_url, garment_url] = await Promise.all([
-        uploadFile(sourceImageFile, 'person'),
-        uploadFile(referenceImageFile, 'garment')
+      const payload: any = {
+        user_id: session?.user.id,
+        mode: 'inpaint',
+        prompt: prompt,
+        num_attempts: numAttempts,
+        mask_expansion_percent: maskExpansion,
+        is_garment_mode: true,
+      };
+
+      const [sourceBase64, referenceBase64] = await Promise.all([
+        fileToBase64(sourceImageFile),
+        fileToBase64(referenceImageFile)
       ]);
 
-      const pairs = [{ person_url, garment_url, appendix: prompt }];
+      payload.full_source_image_base64 = sourceBase64;
+      payload.reference_image_base64 = referenceBase64;
 
-      const { error } = await supabase.functions.invoke('MIRA-AGENT-proxy-batch-inpaint', {
-        body: {
-          pairs: pairs,
-          user_id: session?.user?.id
-        }
-      });
+      const { error } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', { body: payload });
 
       if (error) throw error;
 
@@ -146,75 +110,52 @@ const VirtualTryOnPro = ({
     }
   };
 
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve((reader.result as string).split(',')[1]);
+      reader.onerror = (error) => reject(error);
+    });
+  };
+
   const isGenerateDisabled = isLoading || !!selectedJob || !sourceImageFile || !referenceImageFile;
 
   return (
     <>
-      <Tabs defaultValue="single" className="w-full">
-        <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="single">{t('singleInpaint')}</TabsTrigger>
-          <TabsTrigger value="batch">{t('batchInpaint')}</TabsTrigger>
-        </TabsList>
-        <TabsContent value="single" className="pt-6">
-          <Alert className="mb-6">
-            <Info className="h-4 w-4" />
-            <AlertTitle>{t('proMode')}</AlertTitle>
-            <AlertDescription>
-              {t('vtoProModeDescription')}
-            </AlertDescription>
-          </Alert>
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <VTOProSetup
-              selectedJob={selectedJob}
-              resetForm={resetForm}
-              sourceImageFile={sourceImageFile}
-              referenceImageFile={referenceImageFile}
-              onSourceFileSelect={setSourceImageFile}
-              onReferenceFileSelect={setReferenceImageFile}
-              prompt={prompt}
-              setPrompt={setPrompt}
-              isAutoPromptEnabled={isAutoPromptEnabled}
-              setIsAutoPromptEnabled={setIsAutoPromptEnabled}
-              numAttempts={numAttempts}
-              setNumAttempts={setNumAttempts}
-              maskExpansion={maskExpansion}
-              setMaskExpansion={setMaskExpansion}
-              isLoading={isLoading}
-              onGenerate={handleGenerate}
-              isGenerateDisabled={isGenerateDisabled}
-              onGuideOpen={() => setIsGuideOpen(true)}
-            />
-            <VTOProWorkbench
-              selectedJob={selectedJob}
-              sourceImageUrl={sourceImageUrl}
-              onFileSelect={setSourceImageFile}
-              onMaskChange={setMaskImage}
-              brushSize={brushSize}
-              onBrushSizeChange={setBrushSize}
-              resetTrigger={resetTrigger}
-              onResetMask={handleResetMask}
-              onDebugOpen={() => setIsDebugModalOpen(true)}
-            />
-          </div>
-        </TabsContent>
-        <TabsContent value="batch" className="pt-6">
-          <Alert className="mb-6">
-            <Info className="h-4 w-4" />
-            <AlertTitle>{t('proMode')}</AlertTitle>
-            <AlertDescription>
-              {t('vtoProModeDescription')}
-            </AlertDescription>
-          </Alert>
-          <BatchInpaintPro />
-        </TabsContent>
-      </Tabs>
-      <div className="mt-4">
-        <RecentJobsList 
-            jobs={recentJobs}
-            isLoading={isLoadingRecentJobs}
-            selectedJobId={selectedJob?.id || null}
-            onSelectJob={handleSelectJob}
-            mode="inpaint"
+      <Alert className="mb-6">
+        <Info className="h-4 w-4" />
+        <AlertTitle>{t('proMode')}</AlertTitle>
+        <AlertDescription>
+          {t('vtoProModeDescription')}
+        </AlertDescription>
+      </Alert>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <VTOProSetup
+          selectedJob={selectedJob}
+          resetForm={resetForm}
+          sourceImageFile={sourceImageFile}
+          referenceImageFile={referenceImageFile}
+          onSourceFileSelect={setSourceImageFile}
+          onReferenceFileSelect={setReferenceImageFile}
+          prompt={prompt}
+          setPrompt={setPrompt}
+          isAutoPromptEnabled={isAutoPromptEnabled}
+          setIsAutoPromptEnabled={setIsAutoPromptEnabled}
+          numAttempts={numAttempts}
+          setNumAttempts={setNumAttempts}
+          maskExpansion={maskExpansion}
+          setMaskExpansion={setMaskExpansion}
+          isLoading={isLoading}
+          onGenerate={handleGenerate}
+          isGenerateDisabled={isGenerateDisabled}
+          onGuideOpen={() => setIsGuideOpen(true)}
+        />
+        <VTOProWorkbench
+          selectedJob={selectedJob}
+          sourceImageUrl={sourceImageFile ? URL.createObjectURL(sourceImageFile) : null}
+          onFileSelect={setSourceImageFile}
+          onDebugOpen={() => setIsDebugModalOpen(true)}
         />
       </div>
       <DebugStepsModal 

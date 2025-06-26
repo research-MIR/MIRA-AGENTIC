@@ -75,15 +75,23 @@ const VirtualTryOn = () => {
         
         <div className="flex-1 overflow-y-auto">
           {isProMode ? (
-            <VirtualTryOnPro 
-              recentJobs={jobs}
-              isLoadingRecentJobs={isLoadingRecentJobs}
-              selectedJob={selectedJob}
-              handleSelectJob={handleSelectJob}
-              resetForm={resetForm}
-              transferredImageUrl={vtoTarget === 'pro-source' ? imageUrlToTransfer : null}
-              onTransferConsumed={consumeImageUrl}
-            />
+            <div className="h-full">
+              <VirtualTryOnPro 
+                selectedJob={selectedJob}
+                resetForm={resetForm}
+                transferredImageUrl={vtoTarget === 'pro-source' ? imageUrlToTransfer : null}
+                onTransferConsumed={consumeImageUrl}
+              />
+              <div className="mt-4">
+                <RecentJobsList 
+                    jobs={jobs}
+                    isLoading={isLoadingRecentJobs}
+                    selectedJobId={selectedJobId}
+                    onSelectJob={handleSelectJob}
+                    mode="inpaint"
+                />
+              </div>
+            </div>
           ) : (
             <div className="h-full">
               <Tabs defaultValue="single" className="w-full">
