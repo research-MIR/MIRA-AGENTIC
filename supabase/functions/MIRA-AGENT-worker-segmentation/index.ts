@@ -46,17 +46,15 @@ function extractJson(text: string): any {
 }
 
 async function appendResultToJob(supabase: any, jobId: string, result: any) {
-    // This RPC now just appends the data. The trigger will handle the rest.
-    const { error } = await supabase.rpc('append_to_jsonb_array', {
-        table_name: 'mira-agent-mask-aggregation-jobs',
-        row_id: jobId,
-        column_name: 'results',
-        new_element: result
+    const { data: newCount, error } = await supabase.rpc('append_result_and_get_count', {
+        p_job_id: jobId,
+        p_new_element: result
     });
     if (error) {
         console.error(`[SegmentWorker] Failed to append result to aggregation job ${jobId}:`, error);
         throw error;
     }
+    console.log(`[SegmentWorker] Successfully appended result. New count for job ${jobId} is: ${newCount}`);
 }
 
 serve(async (req) => {
@@ -143,7 +141,6 @@ serve(async (req) => {
             }
             
             await appendResultToJob(supabase, aggregation_job_id, responseToStore);
-            console.log(`[SegmentWorker][${requestId}] Successfully appended result. The database trigger will handle the next step.`);
             
             return new Response(JSON.stringify(responseToStore), {
               headers: { ...corsHeaders, 'Content-Type': 'application/json' },
