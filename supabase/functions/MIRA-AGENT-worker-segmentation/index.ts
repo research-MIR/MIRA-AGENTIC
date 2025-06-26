@@ -62,6 +62,11 @@ serve(async (req) => {
     return new Response('ok', { headers: corsHeaders });
   }
 
+  // --- ARTIFICIAL DELAY TO PREVENT RACE CONDITIONS ---
+  const delay = Math.random() * 1000; // Random delay up to 1 second
+  await new Promise(resolve => setTimeout(resolve, delay));
+  // ----------------------------------------------------
+
   const { aggregation_job_id, mime_type, reference_image_base64, reference_mime_type } = await req.json();
   const requestId = `segment-worker-${aggregation_job_id}-${Math.random().toString(36).substring(2, 8)}`;
   console.log(`[SegmentWorker][${requestId}] Invoked for aggregation job ${aggregation_job_id}.`);
