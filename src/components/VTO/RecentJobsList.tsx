@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { useSecureImage } from "@/hooks/useSecureImage";
 import { BitStudioJob } from "@/types/vto";
 import { AlertTriangle, Loader2 } from "lucide-react";
+import { useImagePreview } from "@/context/ImagePreviewContext";
 
 const SecureImageDisplay = ({ imageUrl, alt }: { imageUrl: string | null, alt: string }) => {
     const { displayUrl, isLoading, error } = useSecureImage(imageUrl);
@@ -22,25 +23,33 @@ interface RecentJobsListProps {
     isLoading: boolean;
     selectedJobId: string | null;
     onSelectJob: (job: BitStudioJob) => void;
-    mode: 'base' | 'inpaint';
 }
 
-export const RecentJobsList = ({ jobs, isLoading, selectedJobId, onSelectJob, mode }: RecentJobsListProps) => {
+export const RecentJobsList = ({ jobs, isLoading, selectedJobId, onSelectJob }: RecentJobsListProps) => {
     const { t } = useLanguage();
+    const { showImage } = useImagePreview();
 
-    const filteredJobs = jobs?.filter(j => j.mode === mode) || [];
+    const handleThumbnailClick = (job: BitStudioJob) => {
+        onSelectJob(job);
+        if (job.status === 'complete' && job.final_image_url) {
+            showImage({
+                images: [{ url: job.final_image_url, jobId: job.id }],
+                currentIndex: 0
+            });
+        }
+    };
 
     return (
         <Card>
             <CardHeader><CardTitle>{t('recentJobs')}</CardTitle></CardHeader>
             <CardContent>
-                {isLoading ? <Skeleton className="h-24 w-full" /> : filteredJobs.length > 0 ? (
+                {isLoading ? <Skeleton className="h-24 w-full" /> : jobs && jobs.length > 0 ? (
                     <ScrollArea className="h-32">
                         <div className="flex gap-4 pb-2">
-                            {filteredJobs.map(job => {
+                            {jobs.map(job => {
                                 const urlToPreview = job.final_image_url || job.metadata?.source_image_url || job.source_person_image_url;
                                 return (
-                                    <button key={job.id} onClick={() => onSelectJob(job)} className={cn("border-2 rounded-lg p-1 flex-shrink-0 w-24 h-24", selectedJobId === job.id ? "border-primary" : "border-transparent")}>
+                                    <button key={job.id} onClick={() => handleThumbnailClick(job)} className={cn("border-2 rounded-lg p-1 flex-shrink-0 w-24 h-24", selectedJobId === job.id ? "border-primary" : "border-transparent")}>
                                         <SecureImageDisplay imageUrl={urlToPreview || null} alt="Recent job" />
                                     </button>
                                 )
