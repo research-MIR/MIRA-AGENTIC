@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -55,13 +55,16 @@ interface VTOProSetupProps {
     onGenerate: () => void;
     isGenerateDisabled: boolean;
     onGuideOpen: () => void;
+    resolution: 'standard' | 'high';
+    setResolution: (res: 'standard' | 'high') => void;
 }
 
 export const VTOProSetup = ({
     selectedJob, resetForm, sourceImageFile, referenceImageFile, onSourceFileSelect, onReferenceFileSelect,
     prompt, setPrompt, isAutoPromptEnabled, setIsAutoPromptEnabled,
     numAttempts, setNumAttempts, maskExpansion, setMaskExpansion,
-    isLoading, onGenerate, isGenerateDisabled, onGuideOpen
+    isLoading, onGenerate, isGenerateDisabled, onGuideOpen,
+    resolution, setResolution
 }: VTOProSetupProps) => {
     const { t } = useLanguage();
     const sourceImageUrl = useMemo(() => sourceImageFile ? URL.createObjectURL(sourceImageFile) : null, [sourceImageFile]);
@@ -144,6 +147,8 @@ export const VTOProSetup = ({
                                             numAttempts={numAttempts} setNumAttempts={setNumAttempts}
                                             maskExpansion={maskExpansion} setMaskExpansion={setMaskExpansion}
                                             disabled={isLoading}
+                                            resolution={resolution}
+                                            setResolution={setResolution}
                                         />
                                     </AccordionContent>
                                 </AccordionItem>

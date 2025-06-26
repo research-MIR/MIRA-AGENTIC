@@ -94,13 +94,13 @@ serve(async (req) => {
       let { 
         full_source_image_base64, mask_image_base64, mask_image_url, prompt, reference_image_base64, 
         is_garment_mode,
-        num_attempts = 1, denoise = 1.0, resolution = 'standard', mask_expansion_percent = 2 
+        num_attempts = 1, denoise = 1.0, resolution = 'high', mask_expansion_percent = 2 
       } = body;
       
-      console.log(`[BitStudioProxy][${requestId}] Inpaint mode received with prompt: "${prompt ? prompt.substring(0, 30) + '...' : 'N/A'}", Denoise: ${denoise}, Has Reference: ${!!reference_image_base64}`);
+      console.log(`[BitStudioProxy][${requestId}] Inpaint mode received with prompt: "${prompt ? prompt.substring(0, 30) + '...' : 'N/A'}", Denoise: ${denoise}, Has Reference: ${!!reference_image_base64}, Resolution: ${resolution}`);
 
-      if (!full_source_image_base64 || (!mask_image_base64 && !mask_image_url)) {
-        throw new Error("Missing required parameters for inpaint mode: full_source_image_base64 and one of mask_image_base64 or mask_image_url are required.");
+      if (!full_source_image_base64 && !mask_image_url) {
+        throw new Error("Missing required parameters for inpaint mode: full_source_image_base64 and mask_image_url are required.");
       }
 
       let maskBlob: Blob;

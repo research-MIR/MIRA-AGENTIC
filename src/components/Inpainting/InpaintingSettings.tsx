@@ -2,6 +2,7 @@ import { Slider } from "@/components/ui/slider";
 import { Label } from "@/components/ui/label";
 import { useLanguage } from "@/context/LanguageContext";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 
 interface InpaintingSettingsProps {
   numAttempts: number;
@@ -9,6 +10,8 @@ interface InpaintingSettingsProps {
   maskExpansion: number;
   setMaskExpansion: (me: number) => void;
   disabled: boolean;
+  resolution: 'standard' | 'high';
+  setResolution: (res: 'standard' | 'high') => void;
 }
 
 export const InpaintingSettings = ({
@@ -17,6 +20,8 @@ export const InpaintingSettings = ({
   maskExpansion,
   setMaskExpansion,
   disabled,
+  resolution,
+  setResolution,
 }: InpaintingSettingsProps) => {
   const { t } = useLanguage();
 
@@ -38,6 +43,15 @@ export const InpaintingSettings = ({
             ))}
           </SelectContent>
         </Select>
+      </div>
+      <div className="flex items-center justify-between">
+        <Label htmlFor="resolution-switch">{t('highResolution')}</Label>
+        <Switch
+          id="resolution-switch"
+          checked={resolution === 'high'}
+          onCheckedChange={(checked) => setResolution(checked ? 'high' : 'standard')}
+          disabled={disabled}
+        />
       </div>
       <div>
         <Label>{t('maskExpansion', { maskExpansion })}</Label>
