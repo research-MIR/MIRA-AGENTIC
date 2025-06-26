@@ -68,8 +68,6 @@ export const vtoTranslations = {
     vtoHelpProReference: "**Immagine di Riferimento (Opzionale):** Fornisci un'immagine di un indumento o di una texture da applicare all'area mascherata. Se non viene fornita, l'IA riempirà l'area in base al prompt.",
     vtoHelpProSettings: "**Impostazioni Pro:** Controlla il numero di tentativi, la forza del 'denoise' (quanto l'IA si discosta dall'immagine originale) e l'espansione della maschera per una migliore fusione.",
     viewingJob: "Stai visualizzando un job completato. Clicca 'Nuovo' per iniziarne un altro.",
-    inpaintingGuide: "Guida all'Inpainting",
-    inpaintingGuideTitle: "Guida all'Inpainting Avanzato",
     proSettingsTooltip: "Clicca per sbloccare controlli avanzati per l'inpainting.",
     promptAppendix: "Appendice Prompt (Opzionale)",
     promptAppendixPlaceholder: "es. indossa jeans chiari, con i capelli raccolti",
@@ -81,44 +79,30 @@ export const vtoTranslations = {
     singleInpaint: "Inpaint Singolo",
     batchInpaint: "Inpaint Multiplo",
     vtoProModeDescription: "Questa modalità PRO è specializzata per l'abbigliamento. Il sistema identificherà e applicherà automaticamente l'indumento di riferimento. Per mascheratura manuale e modifiche generiche, usa la pagina 'Inpainting'.",
-    inpaintingGuideContent: `
-### Strategie per Risultati Migliori
+    vtoProGuideTitle: "Guida alla Modalità Pro (Prova Virtuale)",
+    vtoProGuideContent: `
+### Come Funziona la Modalità Pro VTO
 
-L'inpainting è uno strumento potente per sostituire parti di un'immagine, ma richiede un approccio specifico per ottenere i migliori risultati.
+Questa modalità è uno strumento specializzato progettato per la **sostituzione di indumenti** ad alta fedeltà. Utilizza un'IA avanzata per identificare e scambiare automaticamente i vestiti. Ecco cosa devi sapere:
 
-#### 1. Il Prompt Preciso: Lascia Fare all'IA
-- **Usa l'Auto-Prompt (Consigliato):** Per risultati ottimali, ti consigliamo vivamente di lasciare attiva l'opzione "Auto-Genera". L'IA analizzerà la tua immagine sorgente e quella di riferimento per creare un prompt tecnicamente perfetto che descrive come il nuovo indumento dovrebbe apparire nel contesto della scena originale (illuminazione, posa, ecc.).
-- **Se Scrivi Manualmente:** Se preferisci il controllo manuale, ricorda che stai sostituendo il lavoro dell'IA. Il tuo prompt deve descrivere in dettaglio l'oggetto da inserire *come se fosse nella scena*.
-  - **Descrivi solo la sostituzione:** Il tuo prompt dovrebbe descrivere solo ciò che vuoi che appaia *all'interno* dell'area mascherata. Non descrivere l'intera immagine.
-  - **Sii dettagliato:** Includi dettagli su materiale, texture, stile e illuminazione per aiutare l'IA a integrare l'oggetto in modo realistico.
-  - **❌ Esempio negativo:** "una donna che indossa una maglietta blu" (Descrive l'intera scena)
-  - **✅ Esempio positivo:** "una maglietta blu in cotone fotorealistica con pieghe morbide, sotto una luce da studio diffusa" (Descrive solo l'oggetto e il suo contesto di illuminazione)
+#### 1. La Mascheratura è Automatica
+Questo strumento **rileva automaticamente l'indumento** da sostituire basandosi sulla tua immagine di riferimento. Non c'è un pennello manuale o uno strumento di mascheratura qui. Per un controllo manuale e preciso su qualsiasi parte di un'immagine, si prega di utilizzare la pagina dedicata **'Inpainting'**.
 
-#### 2. La Maschera è Tutto: Strategie per il Try-On
-- **Sii Generoso:** È meglio mascherare un'area leggermente più grande del necessario. Questo aiuta l'IA ad avere più spazio per fondere il nuovo contenuto.
-- **Usa l'Espansione:** L'impostazione "Espansione Maschera" è la tua migliore amica. Aumentala per ammorbidire i bordi e ottenere una transizione più naturale.
-- **Strategie di Copertura per Indumenti:**
-  1.  **Se il nuovo indumento è più piccolo del vecchio:** Assicurati di coprire completamente l'intero indumento originale per rimuoverlo del tutto.
-  2.  **Se il nuovo indumento è più grande del vecchio:** Maschera l'area che il nuovo indumento andrebbe a coprire. (Es: per aggiungere maniche a una canottiera, maschera anche le spalle).
-  3.  **Se le forme sono diverse:** Maschera l'area totale che entrambi gli indumenti coprirebbero. Questo garantisce che il vecchio venga rimosso e il nuovo abbia lo spazio necessario.
-- **Gestione delle Braccia:**
-  - Se il nuovo indumento non copre le braccia (es. una canottiera), evita di mascherarle.
-  - Se il nuovo indumento copre le braccia (es. una giacca) e noti che la posa del braccio viene alterata in modo innaturale, prova ad abbassare gradualmente l'intensità del "Denoise" (partendo da 0.95 e scendendo) per incoraggiare l'IA a preservare meglio la posa originale.
+#### 2. È Guidata dal Riferimento
+L'**Immagine di Riferimento** è la chiave. L'IA analizza l'indumento nella tua immagine di riferimento (es. una t-shirt, una scarpa, una borsa) e poi trova e sostituisce l'articolo corrispondente sulla persona nella tua **Immagine Sorgente**.
+-   Un riferimento di una **scarpa** sostituirà le scarpe.
+-   Un riferimento di una **camicia** sostituirà la camicia.
 
-#### 3. Il Riferimento Prodotto (Opzionale)
-- **È per il Prodotto, non per lo Stile:** A differenza di altri strumenti, qui l'immagine di riferimento serve a mostrare all'IA il **prodotto specifico** che vuoi inserire nell'area mascherata. L'IA cercherà di replicare l'indumento di riferimento.
-- **Esempio:** Se fornisci l'immagine di una specifica giacca di pelle, l'IA tenterà di ricreare *quella giacca* nell'area che hai disegnato, adattandola alla posa e all'illuminazione del modello.
+#### 3. Ideale per Indumenti Simili
+Per i migliori risultati, usa questo strumento per scambiare tipi di abbigliamento simili. Per esempio:
+-   Sostituire una t-shirt su un modello con un'altra t-shirt.
+-   Cambiare la texture o il colore di una giacca esistente.
+È meno efficace nel posizionare un indumento su una persona che indossa qualcosa di completamente diverso (es. mettere una t-shirt a un modello che indossa un ingombrante cappotto invernale).
 
-#### 4. Denoise e Creatività
-- **Controlla la libertà dell'IA:** L'impostazione "Intensità Denoise" determina quanto l'IA può deviare dall'immagine originale all'interno della maschera.
-  - **Basso Denoise (es. 0.5-0.7):** Ideale quando la forma dell'indumento originale è simile a quella desiderata. Ottimo per cambi di texture o colore, aiuta a fondere meglio il risultato.
-  - **Alto Denoise (es. 0.8-1.0):** Concede all'IA più libertà creativa. Usalo se vuoi cambiare significativamente la forma dell'indumento (es. trasformare una t-shirt in una giacca) o se l'impostazione più bassa non è abbastanza forte.
-
-#### 5. Impostazioni PRO Spiegate
-- **Numero di Tentativi:** Genera più variazioni della stessa richiesta di inpainting. Utile per ottenere diverse interpretazioni dall'IA.
-- **Alta Risoluzione:** Aumenta la risoluzione dell'output. Richiede più tempo ma produce risultati di qualità superiore.
-- **Intensità Denoise:** Controlla la libertà creativa dell'IA. Un valore basso (es. 0.5) preserva la struttura originale, ideale per texture changes. Un valore alto (es. 0.9) permette all'IA di essere più creativa, utile per cambiare la forma di un indumento.
-- **Espansione Maschera:** Ammorbidisce i bordi della maschera, creando una fusione più naturale tra l'area generata e l'immagine originale. Aumenta questo valore se noti bordi netti nel risultato.
+#### 4. Un Capo alla Volta
+Questo strumento elabora un indumento alla volta. Se hai bisogno di creare un outfit completo con più pezzi (es. una t-shirt e dei jeans), devi eseguire due operazioni separate:
+1.  Prima, esegui il processo con la persona e il riferimento della t-shirt.
+2.  Poi, usa l'immagine risultante come nuova immagine sorgente ed esegui nuovamente il processo con il riferimento dei jeans.
 `
   },
   en: {
@@ -190,8 +174,6 @@ L'inpainting è uno strumento potente per sostituire parti di un'immagine, ma ri
     vtoHelpProReference: "**Reference Image (Optional):** Provide an image of a garment or texture to apply to the masked area. If none is provided, the AI will fill the area based on the prompt.",
     vtoHelpProSettings: "**Pro Settings:** Control the number of attempts, the 'denoise' strength (how much the AI deviates from the original), and mask expansion for better blending.",
     viewingJob: "You are viewing a completed job. Click 'New' to start another.",
-    inpaintingGuide: "Inpainting Guide",
-    inpaintingGuideTitle: "Advanced Inpainting Guide",
     proSettingsTooltip: "Click to unlock advanced controls for inpainting.",
     promptAppendix: "Prompt Appendix (Optional)",
     promptAppendixPlaceholder: "e.g. wearing light jeans, with hair up",
@@ -203,44 +185,30 @@ L'inpainting è uno strumento potente per sostituire parti di un'immagine, ma ri
     singleInpaint: "Single Inpaint",
     batchInpaint: "Batch Inpaint",
     vtoProModeDescription: "This PRO mode is specialized for garments. The system will automatically identify and apply the reference garment. For manual masking and general editing, please use the 'Inpainting' page.",
-    inpaintingGuideContent: `
-### Strategie per Risultati Migliori
+    vtoProGuideTitle: "Virtual Try-On (Pro Mode) Guide",
+    vtoProGuideContent: `
+### How VTO Pro Mode Works
 
-L'inpainting è uno strumento potente per sostituire parti di un'immagine, ma richiede un approccio specifico per ottenere i migliori risultati.
+This mode is a specialized tool designed for high-fidelity **garment replacement**. It uses an advanced AI to automatically identify and swap clothing. Here's what you need to know:
 
-#### 1. Il Prompt Preciso: Lascia Fare all'IA
-- **Usa l'Auto-Prompt (Consigliato):** Per risultati ottimali, ti consigliamo vivamente di lasciare attiva l'opzione "Auto-Genera". L'IA analizzerà la tua immagine sorgente e quella di riferimento per creare un prompt tecnicamente perfetto che descrive come il nuovo indumento dovrebbe apparire nel contesto della scena originale (illuminazione, posa, ecc.).
-- **Se Scrivi Manualmente:** Se preferisci il controllo manuale, ricorda che stai sostituendo il lavoro dell'IA. Il tuo prompt deve descrivere in dettaglio l'oggetto da inserire *come se fosse nella scena*.
-  - **Descrivi solo la sostituzione:** Il tuo prompt dovrebbe descrivere solo ciò che vuoi che appaia *all'interno* dell'area mascherata. Non descrivere l'intera immagine.
-  - **Sii dettagliato:** Includi dettagli su materiale, texture, stile e illuminazione per aiutare l'IA a integrare l'oggetto in modo realistico.
-  - **❌ Esempio negativo:** "una donna che indossa una maglietta blu" (Descrive l'intera scena)
-  - **✅ Esempio positivo:** "una maglietta blu in cotone fotorealistica con pieghe morbide, sotto una luce da studio diffusa" (Descrive solo l'oggetto e il suo contesto di illuminazione)
+#### 1. Masking is Automatic
+This tool **automatically detects the garment** to be replaced based on your reference image. There is no manual brush or masking tool here. For precise, manual control over any part of an image, please use the dedicated **'Inpainting'** page.
 
-#### 2. La Maschera è Tutto: Strategie per il Try-On
-- **Sii Generoso:** È meglio mascherare un'area leggermente più grande del necessario. Questo aiuta l'IA ad avere più spazio per fondere il nuovo contenuto.
-- **Usa l'Espansione:** L'impostazione "Espansione Maschera" è la tua migliore amica. Aumentala per ammorbidire i bordi e ottenere una transizione più naturale.
-- **Strategie di Copertura per Indumenti:**
-  1.  **Se il nuovo indumento è più piccolo del vecchio:** Assicurati di coprire completamente l'intero indumento originale per rimuoverlo del tutto.
-  2.  **Se il nuovo indumento è più grande del vecchio:** Maschera l'area che il nuovo indumento andrebbe a coprire. (Es: per aggiungere maniche a una canottiera, maschera anche le spalle).
-  3.  **Se le forme sono diverse:** Maschera l'area totale che entrambi gli indumenti coprirebbero. Questo garantisce che il vecchio venga rimosso e il nuovo abbia lo spazio necessario.
-- **Gestione delle Braccia:**
-  - Se il nuovo indumento non copre le braccia (es. una canottiera), evita di mascherarle.
-  - Se il nuovo indumento copre le braccia (es. una giacca) e noti che la posa del braccio viene alterata in modo innaturale, prova ad abbassare gradualmente l'intensità del "Denoise" (partendo da 0.95 e scendendo) per incoraggiare l'IA a preservare meglio la posa originale.
+#### 2. It's Reference-Driven
+The **Reference Image** is the key. The AI analyzes the garment in your reference image (e.g., a t-shirt, a shoe, a handbag) and then finds and replaces the corresponding item on the person in your **Source Image**.
+-   A **shoe** reference will replace the shoes.
+-   A **shirt** reference will replace the shirt.
 
-#### 3. Il Riferimento Prodotto (Opzionale)
-- **È per il Prodotto, non per lo Stile:** A differenza di altri strumenti, qui l'immagine di riferimento serve a mostrare all'IA il **prodotto specifico** che vuoi inserire nell'area mascherata. L'IA cercherà di replicare l'indumento di riferimento.
-- **Esempio:** Se fornisci l'immagine di una specifica giacca di pelle, l'IA tenterà di ricreare *quella giacca* nell'area che hai disegnato, adattandola alla posa e all'illuminazione del modello.
+#### 3. Best for Similar Garments
+For the best results, use this tool to swap similar types of clothing. For example:
+-   Replacing a t-shirt on a model with another t-shirt.
+-   Changing the texture or color of an existing jacket.
+It is less effective at placing a garment onto a person wearing something completely different (e.g., putting a t-shirt on a model wearing a bulky winter coat).
 
-#### 4. Denoise e Creatività
-- **Controlla la libertà dell'IA:** L'impostazione "Intensità Denoise" determina quanto l'IA può deviare dall'immagine originale all'interno della maschera.
-  - **Basso Denoise (es. 0.5-0.7):** Ideale quando la forma dell'indumento originale è simile a quella desiderata. Ottimo per cambi di texture o colore, aiuta a fondere meglio il risultato.
-  - **Alto Denoise (es. 0.8-1.0):** Concede all'IA più libertà creativa. Usalo se vuoi cambiare significativamente la forma dell'indumento (es. trasformare una t-shirt in una giacca) o se l'impostazione più bassa non è abbastanza forte.
-
-#### 5. Impostazioni PRO Spiegate
-- **Numero di Tentativi:** Genera più variazioni della stessa richiesta di inpainting. Utile per ottenere diverse interpretazioni dall'IA.
-- **Alta Risoluzione:** Aumenta la risoluzione dell'output. Richiede più tempo ma produce risultati di qualità superiore.
-- **Intensità Denoise:** Controlla la libertà creativa dell'IA. Un valore basso (es. 0.5) preserva la struttura originale, ideale per texture changes. Un valore alto (es. 0.9) permette all'IA di essere più creativa, utile per cambiare la forma di un indumento.
-- **Espansione Maschera:** Ammorbidisce i bordi della maschera, creando una fusione più naturale tra l'area generata e l'immagine originale. Aumenta questo valore se noti bordi netti nel risultato.
+#### 4. One Piece at a Time
+This tool processes one garment at a time. If you need to create a full outfit with multiple pieces (e.g., a t-shirt and jeans), you must perform two separate operations:
+1.  First, run the process with the person and the t-shirt reference.
+2.  Then, use the resulting image as the new source image and run the process again with the jeans reference.
 `
   },
 };

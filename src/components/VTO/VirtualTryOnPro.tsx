@@ -225,11 +225,11 @@ const VirtualTryOnPro = ({
       <Dialog open={isGuideOpen} onOpenChange={setIsGuideOpen}>
         <DialogContent className="max-w-2xl">
             <DialogHeader>
-                <DialogTitle>{t('inpaintingGuideTitle')}</DialogTitle>
+                <DialogTitle>{t('vtoProGuideTitle')}</DialogTitle>
             </DialogHeader>
             <ScrollArea className="max-h-[70vh] pr-4">
                 <div className="space-y-4 markdown-content">
-                    <ReactMarkdown>{t('inpaintingGuideContent')}</ReactMarkdown>
+                    <ReactMarkdown>{t('vtoProGuideContent')}</ReactMarkdown>
                 </div>
             </ScrollArea>
             <DialogFooter>
