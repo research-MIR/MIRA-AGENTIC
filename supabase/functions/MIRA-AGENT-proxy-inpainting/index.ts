@@ -410,7 +410,6 @@ async function getMaskBlob(supabase: SupabaseClient, maskUrl: string): Promise<B
 
 serve(async (req) => {
   const COMFYUI_ENDPOINT_URL = Deno.env.get('COMFYUI_ENDPOINT_URL');
-  const requestId = `inpaint-proxy-${Date.now()}`;
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
   if (!COMFYUI_ENDPOINT_URL) throw new Error("COMFYUI_ENDPOINT_URL is not set.");
 
@@ -430,7 +429,6 @@ serve(async (req) => {
       style_strength,
       mask_expansion_percent = 2,
       num_attempts = 1,
-      batch_pair_job_id
     } = await req.json();
 
     if (!user_id || !source_image_base64 || (!mask_image_base64 && !mask_image_url)) {
@@ -442,7 +440,7 @@ serve(async (req) => {
         if (!reference_image_base64) {
             throw new Error("A text prompt is required when no reference image is provided.");
         }
-        console.log(`[InpaintingProxy][${requestId}] No prompt provided. Auto-generating from reference...`);
+        console.log(`[InpaintingProxy] No prompt provided. Auto-generating from reference...`);
         const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-prompt-helper', {
           body: { 
             person_image_base64: source_image_base64, 
@@ -454,7 +452,7 @@ serve(async (req) => {
         });
         if (promptError) throw new Error(`Auto-prompt generation failed: ${promptError.message}`);
         finalPrompt = promptData.final_prompt;
-        console.log(`[InpaintingProxy][${requestId}] Auto-prompt generated successfully.`);
+        console.log(`[InpaintingProxy] Auto-prompt generated successfully.`);
     }
 
     if (!finalPrompt) throw new Error("Prompt is required for inpainting.");
@@ -463,7 +461,7 @@ serve(async (req) => {
     
     let maskBlob: Blob;
     if (mask_image_url) {
-        console.log(`[InpaintingProxy][${requestId}] Fetching mask from URL: ${mask_image_url}`);
+        console.log(`[InpaintingProxy] Fetching mask from URL: ${mask_image_url}`);
         maskBlob = await getMaskBlob(supabase, mask_image_url);
     } else {
         maskBlob = new Blob([decodeBase64(mask_image_base64)], { type: 'image/png' });
@@ -478,11 +476,11 @@ serve(async (req) => {
     dilateCtx.filter = 'none';
     
     const dilatedImageData = dilateCtx.getImageData(0, 0, dilatedCanvas.width, dilatedCanvas.height);
-    const data = dilatedImageData.data;
+    const imageData = dilatedImageData.data;
     let minX = dilatedCanvas.width, minY = dilatedCanvas.height, maxX = 0, maxY = 0;
-    for (let i = 0; i < data.length; i += 4) {
-      if (data[i] > 128) {
-        data[i] = data[i+1] = data[i+2] = 255;
+    for (let i = 0; i < imageData.length; i += 4) {
+      if (imageData[i] > 128) {
+        imageData[i] = imageData[i+1] = imageData[i+2] = 255;
         const x = (i / 4) % dilatedCanvas.width;
         const y = Math.floor((i / 4) / dilatedCanvas.width);
         if (x < minX) minX = x;
@@ -490,7 +488,7 @@ serve(async (req) => {
         if (y < minY) minY = y;
         if (y > maxY) maxY = y;
       } else {
-        data[i] = data[i+1] = data[i+2] = 0;
+        imageData[i] = imageData[i+1] = imageData[i+2] = 0;
       }
     }
     dilateCtx.putImageData(dilatedImageData, 0, 0);
@@ -511,54 +509,12 @@ serve(async (req) => {
     croppedCanvas.getContext('2d').drawImage(fullSourceImage, bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
     const croppedSourceBase64 = encodeBase64(croppedCanvas.toBuffer('image/png'));
 
-    // --- NEW LOGO DETECTION STEP ---
-    let logoDetected = false;
-    try {
-        console.log(`[InpaintingProxy][${requestId}] Invoking logo detection on source crop...`);
-        const { data: logoData, error: logoError } = await supabase.functions.invoke('MIRA-AGENT-tool-detect-logo-on-crop', {
-            body: {
-                image_base64: croppedSourceBase64,
-                mime_type: 'image/png'
-            }
-        });
-
-        if (logoError) {
-            console.warn(`[InpaintingProxy][${requestId}] Logo detection failed, but continuing process. Error:`, logoError.message);
-        }
-        logoDetected = logoData?.logo_present || false;
-        console.log(`[InpaintingProxy][${requestId}] Logo detected on source crop: ${logoDetected}`);
-    } catch (e) {
-        console.warn(`[InpaintingProxy][${requestId}] Caught exception during logo detection. Defaulting to false. Error:`, e.message);
-    }
-    // --- END OF NEW LOGO DETECTION STEP ---
-
     const croppedMaskCanvas = createCanvas(bbox.width, bbox.height);
     croppedMaskCanvas.getContext('2d').drawImage(dilatedCanvas, bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
     const croppedDilatedMaskBase64 = encodeBase64(croppedMaskCanvas.toBuffer('image/png'));
 
-    let sourceToSendBase64 = croppedSourceBase64;
-    let maskToSendBase64 = croppedDilatedMaskBase64;
-    
-    const TARGET_LONG_SIDE = 768;
-    const cropLongestSide = Math.max(bbox.width, bbox.height);
-
-    if (cropLongestSide < TARGET_LONG_SIDE) {
-        const upscaleFactor = TARGET_LONG_SIDE / cropLongestSide;
-        console.log(`[InpaintingProxy][${requestId}] Upscaling crop by factor of ${upscaleFactor.toFixed(2)}...`);
-        
-        const { data: upscaleData, error: upscaleError } = await supabase.functions.invoke('MIRA-AGENT-tool-upscale-crop', {
-            body: {
-                source_crop_base64: croppedSourceBase64,
-                mask_crop_base64: croppedDilatedMaskBase64,
-                upscale_factor: upscaleFactor
-            }
-        });
-
-        if (upscaleError) throw new Error(`Upscaling failed: ${upscaleError.message}`);
-        
-        sourceToSendBase64 = upscaleData.upscaled_source_base64;
-        maskToSendBase64 = upscaleData.upscaled_mask_base64;
-    }
+    const sourceToSendBase64 = croppedSourceBase64;
+    const maskToSendBase64 = croppedDilatedMaskBase64;
 
     const sourceBlob = new Blob([decodeBase64(sourceToSendBase64)], { type: 'image/png' });
     const finalMaskBlob = new Blob([decodeBase64(maskToSendBase64)], { type: 'image/png' });
@@ -595,23 +551,21 @@ serve(async (req) => {
       const comfyUIResponse = await response.json();
       if (!comfyUIResponse.prompt_id) throw new Error("ComfyUI did not return a prompt_id.");
 
-      const metadataToSave = {
-        prompt_used: finalPrompt,
-        source_image_url: sourceImageUrl,
-        reference_image_url: referenceImageUrl,
-        full_source_image_base64,
-        bbox,
-        cropped_dilated_mask_base64: croppedDilatedMaskBase64,
-        logo_detected_on_source_crop: logoDetected,
-      };
-
       const { data: newJob, error: insertError } = await supabase.from('mira-agent-inpainting-jobs').insert({
         user_id,
         comfyui_address: sanitizedAddress,
         comfyui_prompt_id: comfyUIResponse.prompt_id,
         status: 'queued',
-        metadata: metadataToSave,
-        batch_pair_job_id: batch_pair_job_id
+        metadata: { 
+          prompt: finalPrompt, 
+          denoise, 
+          style_strength,
+          source_image_url: sourceImageUrl,
+          reference_image_url: referenceImageUrl,
+          full_source_image_base64: source_image_base64,
+          bbox: bbox,
+          cropped_dilated_mask_base64: croppedDilatedMaskBase64,
+        }
       }).select('id').single();
       if (insertError) throw insertError;
       jobIds.push(newJob.id);
@@ -623,7 +577,7 @@ serve(async (req) => {
 
     return new Response(JSON.stringify({ success: true, jobIds }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (error) {
-    console.error(`[InpaintingProxy][${requestId}] Error:`, error);
+    console.error("[InpaintingProxy] Error:", error);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,
