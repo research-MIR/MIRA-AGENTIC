@@ -151,8 +151,8 @@ const VirtualTryOnPro = ({
     <>
       <Tabs defaultValue="single" className="w-full">
         <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="single">Single Inpaint</TabsTrigger>
-          <TabsTrigger value="batch">Batch Inpaint</TabsTrigger>
+          <TabsTrigger value="single">{t('singleInpaint')}</TabsTrigger>
+          <TabsTrigger value="batch">{t('batchInpaint')}</TabsTrigger>
         </TabsList>
         <TabsContent value="single" className="pt-6">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">

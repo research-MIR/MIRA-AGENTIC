@@ -94,501 +94,398 @@ const ImageUploader = ({ onFileSelect, title, imageUrl, onClear, icon }: { onFil
 const Inpainting = () => {
   const { supabase, session } = useSession();
   const { t } = useLanguage();
-  const { showImage } = useImagePreview();
   const queryClient = useQueryClient();
-  const { consumeImageUrl } = useImageTransferStore();
-  const channelRef = useRef<RealtimeChannel | null>(null);
+  const { uploadedFiles, setUploadedFiles, handleFileUpload, removeFile } = useFileUpload();
+  const [batchFiles, setBatchFiles] = useState<UploadedFile[]>([]);
+  const batchInputRef = useRef<HTMLInputElement>(null);
+  const singleInputRef = useRef<HTMLInputElement>(null);
 
-  const [sourceImageFile, setSourceImageFile] = useState<File | null>(null);
-  const [referenceImageFile, setReferenceImageFile] = useState<File | null>(null);
-  const [maskImage, setMaskImage] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
-  const [brushSize, setBrushSize] = useState(30);
-  const [resetTrigger, setResetTrigger] = useState(0);
-  const [isLoading, setIsLoading] = useState(false);
-  const [isDebugModalOpen, setIsDebugModalOpen] = useState(false);
-  const [isGuideOpen, setIsGuideOpen] = useState(false);
+  const [upscaleFactor, setUpscaleFactor] = useState(1.5);
+  const [useAutoPrompt, setUseAutoPrompt] = useState(true);
+  
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
+  const [promptReady, setPromptReady] = useState(false);
+  const [openAccordion, setOpenAccordion] = useState("");
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
-  const [isAutoPromptEnabled, setIsAutoPromptEnabled] = useState(true);
-  const [isAutoMaskEnabled, setIsAutoMaskEnabled] = useState(false);
-  const [isSizeWarningOpen, setIsSizeWarningOpen] = useState(false);
+  const [isCompareModalOpen, setIsCompareModalOpen] = useState(false);
 
-  const [numAttempts, setNumAttempts] = useState(1);
-  const [maskExpansion, setMaskExpansion] = useState(3);
-
-  const sourceImageUrl = useMemo(() => sourceImageFile ? URL.createObjectURL(sourceImageFile) : null, [sourceImageFile]);
-  const referenceImageUrl = useMemo(() => referenceImageFile ? URL.createObjectURL(referenceImageFile) : null, [referenceImageFile]);
-
-  const { data: recentJobs, isLoading: isLoadingRecentJobs } = useQuery<InpaintingJob[]>({
-    queryKey: ['inpaintingJobs', session?.user?.id],
+  const { data: recentJobs, isLoading: isLoadingRecent } = useQuery<InpaintingJob[]>({
+    queryKey: ['recentRefinerJobs', session?.user?.id],
     queryFn: async () => {
       if (!session?.user) return [];
-      const { data, error } = await supabase.from('mira-agent-inpainting-jobs').select('*').eq('user_id', session.user.id).order('created_at', { ascending: false }).limit(20);
+      const { data, error } = await supabase
+        .from('mira-agent-comfyui-jobs')
+        .select('id, status, final_result, metadata')
+        .eq('metadata->>source', 'refiner')
+        .eq('user_id', session.user.id)
+        .order('created_at', { ascending: false })
+        .limit(10);
       if (error) throw error;
       return data;
     },
     enabled: !!session?.user,
   });
 
-  const proJobs = useMemo(() => recentJobs || [], [recentJobs]);
-  const selectedJob = useMemo(() => recentJobs?.find(job => job.id === selectedJobId), [recentJobs, selectedJobId]);
+  const selectedJob = useMemo(() => recentJobs?.find(j => j.id === selectedJobId), [recentJobs, selectedJobId]);
 
-  const resetForm = useCallback(() => {
-    setSelectedJobId(null);
-    setSourceImageFile(null);
-    setReferenceImageFile(null);
-    setMaskImage(null);
-    setPrompt("");
-    setResetTrigger(c => c + 1);
-    consumeImageUrl();
-  }, [consumeImageUrl]);
+  const sourceImageUrl = useMemo(() => {
+    if (selectedJob) return selectedJob.metadata?.source_image_url;
+    if (uploadedFiles.length > 0) return uploadedFiles[0].previewUrl;
+    return null;
+  }, [selectedJob, uploadedFiles]);
 
-  const handleSelectJob = (job: InpaintingJob) => {
-    setSelectedJobId(job.id);
-  };
-
-  const handleReferenceFileSelect = (file: File | null) => {
-    setReferenceImageFile(file);
-    if (file) {
-      setIsAutoPromptEnabled(true);
-      setIsAutoMaskEnabled(true);
-    } else {
-      setIsAutoMaskEnabled(false);
-    }
-  };
-
-  useEffect(() => {
-    const { url } = consumeImageUrl();
-    if (url) {
-      const fetchImageAsFile = async (imageUrl: string) => {
-        try {
-          const response = await fetch(imageUrl);
-          const blob = await response.blob();
-          const filename = imageUrl.split('/').pop() || 'image.png';
-          const file = new File([blob], filename, { type: blob.type });
-          setSourceImageFile(file);
-        } catch (e) {
-          console.error("Failed to fetch transferred image for Inpainting:", e);
-          showError("Could not load the transferred image.");
-        }
-      };
-      fetchImageAsFile(url);
-    }
-  }, [consumeImageUrl]);
-
-  useEffect(() => {
-    return () => {
-      if (sourceImageUrl) URL.revokeObjectURL(sourceImageUrl);
-      if (referenceImageUrl) URL.revokeObjectURL(referenceImageUrl);
-    };
-  }, [sourceImageUrl, referenceImageUrl]);
-
-  useEffect(() => {
-    if (selectedJob) {
-      setSourceImageFile(null);
-      setReferenceImageFile(null);
-      setMaskImage(null);
-      setPrompt(selectedJob.metadata?.prompt_used || "");
-      setResetTrigger(c => c + 1);
-    }
+  const resultImageUrl = useMemo(() => {
+    return selectedJob?.status === 'complete' ? selectedJob.final_result?.publicUrl : null;
   }, [selectedJob]);
 
-  useEffect(() => {
-    if (!session?.user?.id) return;
-    if (channelRef.current) supabase.removeChannel(channelRef.current);
-
-    const channel = supabase.channel(`inpainting-jobs-tracker-${session.user.id}`)
-      .on<InpaintingJob>('postgres_changes', { event: '*', schema: 'public', table: 'mira-agent-inpainting-jobs', filter: `user_id=eq.${session.user.id}` },
-        (payload) => {
-          console.log('[Inpainting Realtime] Received payload:', payload);
-          queryClient.invalidateQueries({ queryKey: ['inpaintingJobs', session.user.id] });
-        }
-      ).subscribe();
-    channelRef.current = channel;
-
-    return () => {
-      if (channelRef.current) supabase.removeChannel(channelRef.current);
-    };
-  }, [session?.user?.id, supabase, queryClient]);
-
-  const handleFileSelect = (file: File | null) => {
-    if (file && file.type.startsWith("image/")) {
-      resetForm();
-      setSourceImageFile(file);
-    }
-  };
-
-  const handleResetMask = () => {
-    setResetTrigger(c => c + 1);
-  };
-
-  const proceedWithGeneration = async (maskToUse: string) => {
-    if (!sourceImageFile) return;
-    setIsLoading(true);
-    let toastId = showLoading(t('sendingJob'));
-
+  const handleGeneratePrompt = async () => {
+    if (uploadedFiles.length === 0) return showError("Please upload an image first.");
+    setIsGeneratingPrompt(true);
+    setPromptReady(false);
+    const toastId = showLoading(t('generating'));
     try {
-      let finalPrompt = prompt;
+      const file = uploadedFiles[0].file;
+      const base64Data = await fileToBase64(file);
 
-      if (isAutoPromptEnabled && (prompt.trim() || referenceImageFile)) {
-        dismissToast(toastId);
-        toastId = showLoading(t('enhancingPrompt'));
-        const { data: enhancedData, error: enhancerError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-prompt-helper', {
-          body: { 
-            person_image_base64: await fileToBase64(sourceImageFile),
-            person_image_mime_type: sourceImageFile.type,
-            garment_image_base64: referenceImageFile ? await fileToBase64(referenceImageFile) : null,
-            garment_image_mime_type: referenceImageFile?.type,
-            prompt_appendix: prompt,
-            is_garment_mode: false,
-          }
-        });
-        if (enhancerError) throw enhancerError;
-        finalPrompt = enhancedData.final_prompt;
-        setPrompt(finalPrompt);
-        dismissToast(toastId);
-        toastId = showLoading(t('sendingJob'));
-      }
-
-      const optimizedSource = await optimizeImage(sourceImageFile, { forceOriginalDimensions: true });
-
-      const payload: any = {
-        source_image_base64: await fileToBase64(optimizedSource),
-        mask_image_base64: maskToUse.split(',')[1],
-        prompt: finalPrompt,
-        is_garment_mode: false,
-        user_id: session?.user.id,
-        num_attempts: numAttempts,
-        mask_expansion_percent: maskExpansion,
-      };
-
-      const { error } = await supabase.functions.invoke('MIRA-AGENT-proxy-inpainting', { body: payload });
-
+      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-auto-describe-image', {
+        body: { base64_image_data: base64Data, mime_type: file.type }
+      });
       if (error) throw error;
-
+      setPrompt(data.auto_prompt);
+      setPromptReady(true);
       dismissToast(toastId);
-      showSuccess(`${numAttempts} inpainting job(s) started! You can track progress in the sidebar.`);
-      queryClient.invalidateQueries({ queryKey: ['activeJobs'] });
-      queryClient.invalidateQueries({ queryKey: ['inpaintingJobs', session.user.id] });
-      resetForm();
-
+      showSuccess(t('promptReady'));
     } catch (err: any) {
       dismissToast(toastId);
-      showError(`Processing failed: ${err.message}`);
+      showError(`Failed to generate prompt: ${err.message}`);
     } finally {
-      setIsLoading(false);
+      setIsGeneratingPrompt(false);
     }
   };
 
-  const handleGenerate = async () => {
-    if (!sourceImageFile) return showError("Please provide a source image.");
-    if (!isAutoMaskEnabled && !maskImage) return showError("Please draw a mask or enable auto-masking.");
-    if (!isAutoPromptEnabled && !prompt.trim() && !referenceImageFile) return showError("Please provide a prompt or enable auto-prompt.");
+  const startNew = () => {
+    setSelectedJobId(null);
+    setUploadedFiles([]);
+    setPrompt("");
+    setPromptReady(false);
+    setOpenAccordion("");
+  };
 
-    if (isAutoMaskEnabled) {
-      if (!referenceImageFile) return showError("Auto-mask requires a reference image.");
-      setIsLoading(true);
-      const toastId = showLoading("Generating automatic mask...");
-      try {
-        const sourceBase64 = await fileToBase64(sourceImageFile);
-        const referenceBase64 = await fileToBase64(referenceImageFile);
-        const img = new Image();
-        img.onload = async () => {
-          const { data, error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-segmentation', {
-            body: {
-              user_id: session?.user.id,
-              image_base64: sourceBase64,
-              mime_type: sourceImageFile.type,
-              reference_image_base64: referenceBase64,
-              reference_mime_type: referenceImageFile.type,
-              image_dimensions: { width: img.width, height: img.height },
-            }
-          });
-          if (error) throw error;
-          dismissToast(toastId);
-          proceedWithGeneration(data.finalMaskUrl);
+  const handleSubmit = async (workflowType?: 'conservative_skin') => {
+    if (!sourceImageUrl) return showError("Please upload or select an image to refine.");
+    if (!prompt.trim()) return showError("Please provide a refinement prompt.");
+    
+    setIsSubmitting(true);
+    const toastId = showLoading(t('sendingJob'));
+
+    try {
+        const payload: any = {
+            prompt_text: prompt,
+            invoker_user_id: session?.user?.id,
+            upscale_factor: upscaleFactor,
+            original_prompt_for_gallery: prompt,
+            source: 'refiner',
+            workflow_type: workflowType,
         };
-        img.src = URL.createObjectURL(sourceImageFile);
-      } catch (err: any) {
-        dismissToast(toastId);
-        showError(`Auto-masking failed: ${err.message}`);
-        setIsLoading(false);
-      }
-    } else {
-      const maskImg = new Image();
-      maskImg.src = maskImage!;
-      maskImg.onload = () => {
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = maskImg.width;
-        tempCanvas.height = maskImg.height;
-        const ctx = tempCanvas.getContext('2d');
-        if (!ctx) return;
-        ctx.drawImage(maskImg, 0, 0);
-        const imageData = ctx.getImageData(0, 0, tempCanvas.width, tempCanvas.height).data;
-        
-        let minX = tempCanvas.width, minY = tempCanvas.height, maxX = 0, maxY = 0;
-        for (let i = 0; i < imageData.length; i += 4) {
-          if (imageData[i + 3] > 0) {
-            const x = (i / 4) % tempCanvas.width;
-            const y = Math.floor((i / 4) / tempCanvas.width);
-            if (x < minX) minX = x;
-            if (x > maxX) maxX = x;
-            if (y < minY) minY = y;
-            if (y > maxY) maxY = y;
-          }
-        }
 
-        const bboxWidth = maxX - minX;
-        const bboxHeight = maxY - minY;
-
-        if (bboxWidth < 512 || bboxHeight < 512) {
-          setIsSizeWarningOpen(true);
+        if (sourceImageUrl.startsWith('blob:')) {
+            const file = uploadedFiles[0].file;
+            payload.base64_image_data = await fileToBase64(file);
+            payload.mime_type = file.type;
+            payload.metadata = { source_image_url: sourceImageUrl };
         } else {
-          proceedWithGeneration(maskImage!);
+            payload.image_url = sourceImageUrl;
+            payload.metadata = { source_image_url: sourceImageUrl };
         }
-      };
+
+        const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-comfyui', { body: payload });
+
+        if (error) throw error;
+        
+        dismissToast(toastId);
+        showSuccess("Refinement job started! You can track its progress in the sidebar.");
+        queryClient.invalidateQueries({ queryKey: ['activeComfyJobs'] });
+        queryClient.invalidateQueries({ queryKey: ['recentRefinerJobs'] });
+        startNew();
+    } catch (err: any) {
+        dismissToast(toastId);
+        showError(`Job submission failed: ${err.message}`);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  const { dropzoneProps, isDraggingOver } = useDropzone({
-    onDrop: (e) => handleFileSelect(e.target.files?.[0]),
-  });
+  const handleBatchSubmit = async (workflowType?: 'conservative_skin') => {
+    if (batchFiles.length === 0) return showError("Please upload images for batch processing.");
+    setIsSubmitting(true);
+    const toastId = showLoading(`Queuing ${batchFiles.length} jobs...`);
 
-  const renderJobResult = (job: InpaintingJob) => {
-    if (job.status === 'failed') return <p className="text-destructive text-sm p-2">{t('jobFailed', { errorMessage: job.error_message })}</p>;
-    if (job.status === 'complete' && job.final_result?.publicUrl) {
-      return (
-        <div className="relative group w-full h-full">
-          <SecureImageDisplay imageUrl={job.final_result.publicUrl} alt="Final Result" onClick={() => showImage({ images: [{ url: job.final_result!.publicUrl }], currentIndex: 0 })} />
-          {job.metadata?.debug_assets && (
-            <Button 
-              variant="secondary" 
-              className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
-              onClick={(e) => {
-                e.stopPropagation();
-                setIsDebugModalOpen(true);
-              }}
-            >
-              <Eye className="mr-2 h-4 w-4" />
-              Show Steps
-            </Button>
-          )}
-        </div>
-      );
-    }
-    return (
-      <div className="text-center text-muted-foreground">
-        <Loader2 className="h-12 w-12 mx-auto animate-spin" />
-        <p className="mt-4">{t('jobStatus', { status: job.status })}</p>
-      </div>
-    );
+    const promises = batchFiles.map(async (file) => {
+      try {
+        const base64Data = await fileToBase64(file.file);
+        const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-auto-describe-image', {
+          body: { base64_image_data: base64Data, mime_type: file.file.type }
+        });
+        if (promptError) throw promptError;
+        const autoPrompt = promptData.auto_prompt;
+
+        const payload = {
+          prompt_text: autoPrompt,
+          invoker_user_id: session?.user?.id,
+          upscale_factor: upscaleFactor,
+          original_prompt_for_gallery: `Upscaled: ${file.name}`,
+          source: 'refiner',
+          base64_image_data: base64Data,
+          mime_type: file.file.type,
+          metadata: { source_image_url: file.previewUrl },
+          workflow_type: workflowType,
+        };
+        const { error: queueError } = await supabase.functions.invoke('MIRA-AGENT-proxy-comfyui', { body: payload });
+        if (queueError) throw queueError;
+      } catch (err) {
+        console.error(`Failed to queue job for ${file.name}:`, err);
+        // Don't rethrow, let other jobs succeed
+      }
+    });
+
+    await Promise.all(promises);
+    dismissToast(toastId);
+    showSuccess(`${batchFiles.length} jobs sent for upscaling.`);
+    queryClient.invalidateQueries({ queryKey: ['activeComfyJobs'] });
+    setBatchFiles([]);
+    setIsSubmitting(false);
   };
 
-  const isGenerateDisabled = isLoading || !!selectedJob || !sourceImageFile || (!isAutoMaskEnabled && !maskImage) || (!isAutoPromptEnabled && !prompt.trim() && !referenceImageFile);
-  const placeholderText = isAutoPromptEnabled ? t('promptPlaceholderInpaintingOptional') : t('promptPlaceholderInpaintingRequired');
+  const { dropzoneProps: batchDropzoneProps, isDraggingOver: isDraggingOverBatch } = useDropzone({ onDrop: (e) => handleFileUpload(e.dataTransfer.files, true).then(setBatchFiles) });
+  const { dropzoneProps: singleDropzoneProps, isDraggingOver: isDraggingOverSingle } = useDropzone({ onDrop: (e) => handleFileUpload(e.target.files) });
 
   return (
     <>
-      <div className="p-4 md:p-8 h-screen flex flex-col">
-        <header className="pb-4 mb-4 border-b shrink-0">
-          <h1 className="text-3xl font-bold">{t('inpainting')}</h1>
-          <p className="text-muted-foreground">{t('inpaintingDescription')}</p>
+      <div className="p-4 md:p-8 h-screen overflow-y-auto">
+        <header className="pb-4 mb-8 border-b">
+          <h1 className="text-3xl font-bold">{t('refineAndUpscale')}</h1>
+          <p className="text-muted-foreground">{t('refinePageDescription')}</p>
         </header>
-        <div className="flex-1 overflow-y-auto">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <div className="lg:col-span-1 flex flex-col gap-4">
-              <div className="space-y-4">
+
+        <Tabs defaultValue="single" className="w-full">
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="single"><ImageIcon className="mr-2 h-4 w-4" />{t('singleImage')}</TabsTrigger>
+            <TabsTrigger value="batch"><Layers className="mr-2 h-4 w-4" />{t('batchProcess')}</TabsTrigger>
+          </TabsList>
+          <TabsContent value="single" className="pt-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              <div className="lg:col-span-1 space-y-6">
                 <Card>
-                  <CardHeader>
-                    <div className="flex justify-between items-center">
-                      <CardTitle>{selectedJob ? t('selectedJob') : t('setup')}</CardTitle>
-                      <div className="flex items-center gap-2">
-                          <Button variant="ghost" size="icon" onClick={() => setIsGuideOpen(true)}>
-                              <HelpCircle className="h-5 w-5" />
-                          </Button>
-                          {(selectedJob || sourceImageFile) && <Button variant="outline" size="sm" onClick={resetForm}><PlusCircle className="h-4 w-4 mr-2" />{t('new')}</Button>}
-                      </div>
-                    </div>
-                  </CardHeader>
+                  <CardHeader><CardTitle>{t('sourceImage')}</CardTitle></CardHeader>
                   <CardContent>
-                    {selectedJob ? (
-                      <div className="space-y-4">
-                        <p className="text-sm text-muted-foreground">{t('viewingJob')}</p>
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <Label>{t('sourceImage')}</Label>
-                            <div className="mt-1 aspect-square w-full bg-muted rounded-md overflow-hidden">
-                              <SecureImageDisplay imageUrl={selectedJob.metadata?.source_image_url || null} alt="Source Person" />
-                            </div>
-                          </div>
-                          <div>
-                            <Label>{t('referenceImage')}</Label>
-                            <div className="mt-1 aspect-square w-full bg-muted rounded-md overflow-hidden">
-                              <SecureImageDisplay imageUrl={selectedJob.metadata?.reference_image_url || null} alt="Source Garment" />
-                            </div>
-                          </div>
-                        </div>
-                        <div>
-                          <Label>{t('prompt')}</Label>
-                          <p className="text-sm p-2 bg-muted rounded-md mt-1">{selectedJob.metadata?.prompt_used || "N/A"}</p>
+                    {sourceImageUrl ? (
+                      <div className="max-w-sm mx-auto">
+                        <div className="w-full aspect-square bg-muted rounded-md overflow-hidden flex justify-center items-center">
+                          <SecureDisplayImage imageUrl={sourceImageUrl} onClear={startNew} showClearButton={true} />
                         </div>
                       </div>
                     ) : (
-                      <Accordion type="multiple" defaultValue={['item-1']} className="w-full">
-                        <AccordionItem value="item-1">
-                          <AccordionTrigger>{t('inputs')}</AccordionTrigger>
-                          <AccordionContent className="pt-4 space-y-4">
-                            <div className="grid grid-cols-2 gap-4">
-                              <ImageUploader onFileSelect={handleFileSelect} title={t('sourceImage')} imageUrl={sourceImageUrl} onClear={resetForm} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
-                              <ImageUploader onFileSelect={handleReferenceFileSelect} title={t('referenceImage')} imageUrl={referenceImageUrl} onClear={() => setReferenceImageFile(null)} icon={<Palette className="h-8 w-8 text-muted-foreground" />} />
-                            </div>
-                          </AccordionContent>
-                        </AccordionItem>
-                        <AccordionItem value="item-2">
-                          <AccordionTrigger>{t('promptOptional')}</AccordionTrigger>
-                          <AccordionContent className="pt-4 space-y-2">
-                            <div className="flex items-center space-x-2">
-                              <Switch id="auto-prompt-pro" checked={isAutoPromptEnabled} onCheckedChange={setIsAutoPromptEnabled} />
-                              <Label htmlFor="auto-prompt-pro">{t('autoGenerate')}</Label>
-                            </div>
-                            <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={placeholderText} rows={4} disabled={isAutoPromptEnabled} />
-                          </AccordionContent>
-                        </AccordionItem>
-                        <AccordionItem value="item-3">
-                          <TooltipProvider>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <AccordionTrigger className="text-primary animate-pulse">{t('proSettings')}</AccordionTrigger>
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                <p>{t('proSettingsTooltip')}</p>
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-                          <AccordionContent className="pt-4">
-                            <InpaintingSettings
-                              numAttempts={numAttempts} setNumAttempts={setNumAttempts}
-                              maskExpansion={maskExpansion} setMaskExpansion={setMaskExpansion}
-                              disabled={isLoading}
-                            />
-                          </AccordionContent>
-                        </AccordionItem>
-                      </Accordion>
+                      <div {...singleDropzoneProps} onClick={() => singleInputRef.current?.click()} className={cn("p-4 border-2 border-dashed rounded-lg text-center cursor-pointer hover:border-primary transition-colors", isDraggingOverSingle && "border-primary bg-primary/10")}>
+                        <UploadCloud className="mx-auto h-8 w-8 text-muted-foreground" />
+                        <p className="mt-2 text-sm font-medium">{t('uploadAFile')}</p>
+                        <p className="text-xs text-muted-foreground">{t('dragAndDrop')}</p>
+                        <Input ref={singleInputRef} id="refine-upload" type="file" className="hidden" accept="image/*" onChange={(e) => handleFileUpload(e.target.files)} />
+                      </div>
                     )}
                   </CardContent>
                 </Card>
-                <Button size="lg" className="w-full" onClick={handleGenerate} disabled={isGenerateDisabled}>
-                  {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-                  {t('generate')}
-                </Button>
-              </div>
-            </div>
-
-            <div className="lg:col-span-2 bg-muted rounded-lg flex flex-col items-stretch justify-center relative min-h-[60vh] lg:min-h-0">
-              {sourceImageUrl && !selectedJob ? (
-                <>
-                  <div className="w-full flex-1 flex items-center justify-center relative p-2 overflow-hidden">
-                    <div className="absolute top-2 left-2 z-20 bg-background/80 p-2 rounded-lg shadow-md">
-                      <div className="flex items-center space-x-2">
-                        <Switch id="auto-mask" checked={isAutoMaskEnabled} onCheckedChange={setIsAutoMaskEnabled} disabled={!referenceImageFile} />
-                        <Label htmlFor="auto-mask">{t('autoMask')}</Label>
-                      </div>
+                <Card>
+                  <CardHeader><CardTitle>{t('refinementPrompt')}</CardTitle></CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="flex items-center space-x-2">
+                      <Switch id="auto-prompt" checked={useAutoPrompt} onCheckedChange={(checked) => {
+                        setUseAutoPrompt(checked);
+                        if (!checked) {
+                          setPrompt("");
+                          setPromptReady(false);
+                        }
+                      }} />
+                      <Label htmlFor="auto-prompt">{t('autoPrompt')}</Label>
                     </div>
-                    {isAutoMaskEnabled ? (
-                      <div className="text-center text-muted-foreground">
-                        <Sparkles className="h-12 w-12 mx-auto" />
-                        <p className="mt-4 font-semibold">Auto-Mask Enabled</p>
-                        <p className="text-sm">A mask will be generated from your reference image.</p>
+                    {useAutoPrompt ? (
+                      <>
+                        <Button className="w-full" onClick={handleGeneratePrompt} disabled={isGeneratingPrompt || promptReady || uploadedFiles.length === 0}>
+                          {isGeneratingPrompt ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> {t('generating')}</>
+                            : promptReady ? <><CheckCircle className="mr-2 h-4 w-4" /> {t('promptReady')}</>
+                            : <><Sparkles className="mr-2 h-4 w-4" /> {t('generatePrompt')}</>
+                          }
+                        </Button>
+                        {prompt && (
+                          <Accordion type="single" collapsible className="w-full" value={openAccordion} onValueChange={(value) => { setOpenAccordion(value); if (value) setPromptReady(false); }}>
+                            <AccordionItem value="item-1">
+                              <AccordionTrigger className={cn(promptReady && "text-primary animate-pulse")}>{t('viewGeneratedPrompt')}</AccordionTrigger>
+                              <AccordionContent>
+                                <p className="text-sm p-2 bg-muted rounded-md">{prompt}</p>
+                              </AccordionContent>
+                            </AccordionItem>
+                          </Accordion>
+                        )}
+                      </>
+                    ) : (
+                      <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t('refinementPromptPlaceholder')} />
+                    )}
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader><CardTitle>{t('upscaleSettings')}</CardTitle></CardHeader>
+                  <CardContent>
+                    <Label>{t('upscaleFactor')}: {upscaleFactor}x</Label>
+                    <Slider value={[upscaleFactor]} onValueChange={(v) => setUpscaleFactor(v[0])} min={1} max={3} step={0.1} />
+                  </CardContent>
+                </Card>
+                <div className="space-y-2">
+                  <Button size="lg" className="w-full" onClick={() => handleSubmit()} disabled={isSubmitting || !sourceImageUrl || !prompt}>
+                    {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+                    {t('refineButton')}
+                  </Button>
+                  <Button size="lg" variant="secondary" className="w-full" onClick={() => handleSubmit('conservative_skin')} disabled={isSubmitting || !sourceImageUrl || !prompt}>
+                    <Wand2 className="mr-2 h-4 w-4" />
+                    {t('refineButtonSkin')}
+                  </Button>
+                </div>
+              </div>
+              <div className="lg:col-span-2 space-y-6">
+                <Card>
+                  <CardHeader>
+                    <div className="flex justify-between items-center">
+                      <CardTitle>{t('workbench')}</CardTitle>
+                      {selectedJob && <Button variant="outline" onClick={startNew}>{t('startNewJob')}</Button>}
+                    </div>
+                    <p className="text-sm text-muted-foreground">{t('refineWorkbenchTooltip')}</p>
+                  </CardHeader>
+                  <CardContent className="min-h-[400px]">
+                    {selectedJob ? (
+                      <div className="space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="w-full aspect-square bg-muted rounded-md overflow-hidden flex justify-center items-center">
+                            <h3 className="font-semibold mb-2 absolute top-2 left-2 bg-background/80 px-2 py-1 rounded-full text-xs">{t('originalImage')}</h3>
+                            <SecureDisplayImage imageUrl={selectedJob.metadata?.source_image_url || null} />
+                          </div>
+                          <div className="w-full aspect-square bg-muted rounded-md overflow-hidden flex justify-center items-center">
+                            <h3 className="font-semibold mb-2 absolute top-2 left-2 bg-background/80 px-2 py-1 rounded-full text-xs">{t('refinedImage')}</h3>
+                            {resultImageUrl ? (
+                              <SecureDisplayImage imageUrl={resultImageUrl} />
+                            ) : (
+                              <div className="w-full h-full flex flex-col items-center justify-center text-muted-foreground">
+                                <Loader2 className="h-8 w-8 animate-spin" />
+                                <p className="mt-2 text-sm">{t('inProgress')}</p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        {resultImageUrl && (
+                          <Button className="w-full mt-4" onClick={() => setIsCompareModalOpen(true)}>{t('compareResults')}</Button>
+                        )}
                       </div>
                     ) : (
-                      <MaskCanvas 
-                        imageUrl={sourceImageUrl} 
-                        onMaskChange={setMaskImage}
-                        brushSize={brushSize}
-                        resetTrigger={resetTrigger}
-                      />
+                      <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+                        <ImageIcon className="h-16 w-16" />
+                        <p className="mt-4 text-center">{t('uploadOrSelect')}</p>
+                      </div>
                     )}
-                  </div>
-                  {!isAutoMaskEnabled && (
-                    <div className="p-2 shrink-0">
-                      <MaskControls 
-                        brushSize={brushSize} 
-                        onBrushSizeChange={setBrushSize} 
-                        onReset={handleResetMask} 
-                      />
-                    </div>
-                  )}
-                </>
-              ) : selectedJob ? (
-                renderJobResult(selectedJob)
-              ) : (
-                <div {...dropzoneProps} className={cn("w-full h-full flex flex-col items-center justify-center cursor-pointer border-2 border-dashed rounded-lg", isDraggingOver && "border-primary")}>
-                  <UploadCloud className="h-12 w-12 text-muted-foreground" />
-                  <p className="mt-4 font-semibold">{t('uploadToBegin')}</p>
-                  <p className="text-sm text-muted-foreground">{t('orSelectRecent')}</p>
-                </div>
-              )}
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader><CardTitle>{t('recentRefinements')}</CardTitle></CardHeader>
+                  <CardContent>
+                    {isLoadingRecent ? <Skeleton className="h-24 w-full" /> : recentJobs && recentJobs.length > 0 ? (
+                      <ScrollArea className="h-32">
+                        <div className="flex gap-4 pb-2">
+                          {recentJobs.map(job => (
+                            <RecentJobThumbnail
+                              key={job.id}
+                              job={job}
+                              onClick={() => setSelectedJobId(job.id)}
+                              isSelected={selectedJobId === job.id}
+                            />
+                          ))}
+                        </div>
+                      </ScrollArea>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">{t('noRecentJobs')}</p>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
             </div>
-          </div>
-          
-          <Card className="mt-4">
-            <CardHeader><CardTitle><div className="flex items-center gap-2"><History className="h-4 w-4" />{t('recentProJobs')}</div></CardTitle></CardHeader>
-            <CardContent>
-              {isLoadingRecentJobs ? <Skeleton className="h-24 w-full" /> : proJobs.length > 0 ? (
-                <ScrollArea className="h-32">
-                  <div className="flex gap-4 pb-2">
-                    {proJobs.map(job => {
-                      const urlToPreview = job.final_result?.publicUrl || job.metadata?.source_image_url;
-                      return (
-                        <button key={job.id} onClick={() => handleSelectJob(job)} className={cn("border-2 rounded-lg p-0.5 flex-shrink-0 w-24 h-24", selectedJob?.id === job.id ? "border-primary" : "border-transparent")}>
-                          <SecureImageDisplay imageUrl={urlToPreview || null} alt="Recent job" className="w-full h-full object-cover" />
-                        </button>
-                      )
-                    })}
-                  </div>
-                </ScrollArea>
-              ) : <p className="text-muted-foreground text-sm">{t('noRecentProJobs')}</p>}
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-      
-      <DebugStepsModal 
-        isOpen={isDebugModalOpen}
-        onClose={() => setIsDebugModalOpen(false)}
-        assets={selectedJob?.metadata?.debug_assets || null}
-      />
-
-      <Dialog open={isGuideOpen} onOpenChange={setIsGuideOpen}>
-        <DialogContent className="max-w-2xl">
-            <DialogHeader>
-                <DialogTitle>{t('inpaintingGuideTitle')}</DialogTitle>
-            </DialogHeader>
-            <ScrollArea className="max-h-[70vh] pr-4">
-                <div className="space-y-4 markdown-content">
-                    <ReactMarkdown>{t('inpaintingGuideContent')}</ReactMarkdown>
+          </TabsContent>
+          <TabsContent value="batch" className="pt-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              <div className="lg:col-span-1 space-y-6">
+                <Card>
+                  <CardHeader><CardTitle>{t('uploadImages')}</CardTitle></CardHeader>
+                  <CardContent>
+                    <div {...batchDropzoneProps} onClick={() => batchInputRef.current?.click()} className={cn("p-6 border-2 border-dashed rounded-lg text-center cursor-pointer hover:border-primary transition-colors", isDraggingOverBatch && "border-primary bg-primary/10")}>
+                      <UploadCloud className="mx-auto h-12 w-12 text-muted-foreground" />
+                      <p className="mt-4 text-sm font-medium">{t('uploadMultipleImages')}</p>
+                      <p className="text-xs text-muted-foreground">{t('dragOrClick')}</p>
+                      <Input ref={batchInputRef} type="file" multiple className="hidden" accept="image/*" onChange={(e) => handleFileUpload(e.target.files, true).then(setBatchFiles)} />
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader><CardTitle>{t('configureUpscale')}</CardTitle></CardHeader>
+                  <CardContent>
+                    <Label>{t('upscaleFactor')}: {upscaleFactor}x</Label>
+                    <Slider value={[upscaleFactor]} onValueChange={(v) => setUpscaleFactor(v[0])} min={1} max={3} step={0.1} />
+                  </CardContent>
+                </Card>
+                <div className="space-y-2">
+                  <Button size="lg" className="w-full" onClick={() => handleBatchSubmit()} disabled={isSubmitting || batchFiles.length === 0}>
+                    {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+                    {t('upscaleImages', { count: batchFiles.length })}
+                  </Button>
+                  <Button size="lg" variant="secondary" className="w-full" onClick={() => handleBatchSubmit('conservative_skin')} disabled={isSubmitting || batchFiles.length === 0}>
+                    <Wand2 className="mr-2 h-4 w-4" />
+                    {t('upscaleImagesSkin', { count: batchFiles.length })}
+                  </Button>
                 </div>
-            </ScrollArea>
-            <DialogFooter>
-                <Button onClick={() => setIsGuideOpen(false)}>{t('done')}</Button>
-            </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <AlertDialog open={isSizeWarningOpen} onOpenChange={setIsSizeWarningOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Small Selection Warning</AlertDialogTitle>
-            <AlertDialogDescription>
-              The area you've selected is smaller than 512x512 pixels. For best results with fine details, we recommend upscaling the source image first using the "Upscale" page. Would you like to continue anyway?
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => proceedWithGeneration(maskImage!)}>Continue Anyway</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+              </div>
+              <div className="lg:col-span-2">
+                <Card>
+                  <CardHeader><CardTitle>{t('selectedForBatch')}</CardTitle></CardHeader>
+                  <CardContent>
+                    {batchFiles.length > 0 ? (
+                      <ScrollArea className="h-[60vh]">
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 pr-4">
+                          {batchFiles.map((file, index) => (
+                            <div key={index} className="relative aspect-square">
+                              <img src={file.previewUrl} alt={file.name} className="w-full h-full object-cover rounded-md" />
+                              <Button variant="destructive" size="icon" className="absolute top-1 right-1 h-6 w-6" onClick={() => setBatchFiles(files => files.filter((_, i) => i !== index))}>
+                                <X className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      </ScrollArea>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
+                        <ImageIcon className="h-12 w-12" />
+                        <p className="mt-4">{t('yourUploadedImages')}</p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          </TabsContent>
+        </Tabs>
+      </div>
+      {isCompareModalOpen && sourceImageUrl && resultImageUrl && (
+        <ImageCompareModal 
+          isOpen={isCompareModalOpen}
+          onClose={() => setIsCompareModalOpen(false)}
+          beforeUrl={sourceImageUrl}
+          afterUrl={resultImageUrl}
+        />
+      )}
     </>
   );
 };
