@@ -46,15 +46,16 @@ function extractJson(text: string): any {
 }
 
 async function appendResultToJob(supabase: any, jobId: string, result: any) {
+    console.log(`[SegmentWorker] ATTEMPTING TO CALL RPC 'append_result_and_get_count' for job ID: ${jobId}`);
     const { data: newCount, error } = await supabase.rpc('append_result_and_get_count', {
         p_job_id: jobId,
         p_new_element: result
     });
     if (error) {
-        console.error(`[SegmentWorker] Failed to append result to aggregation job ${jobId}:`, error);
+        console.error(`[SegmentWorker] RPC 'append_result_and_get_count' FAILED for job ${jobId}:`, error);
         throw error;
     }
-    console.log(`[SegmentWorker] Successfully appended result. New count for job ${jobId} is: ${newCount}`);
+    console.log(`[SegmentWorker] RPC 'append_result_and_get_count' SUCCEEDED for job ${jobId}. New count is: ${newCount}`);
 }
 
 serve(async (req) => {
