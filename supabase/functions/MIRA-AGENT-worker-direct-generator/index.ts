@@ -59,19 +59,10 @@ serve(async (req) => {
     if (provider === 'google') {
         toolToInvoke = 'MIRA-AGENT-tool-generate-image-google';
         payload.size = context.size;
-    } else if (provider === 'fal.ai') { // Corrected from 'fal-ai' to 'fal.ai'
+    } else if (provider === 'fal.ai') {
         toolToInvoke = 'MIRA-AGENT-tool-generate-image-fal-seedream';
-        const sizeMap: { [key: string]: string } = {
-            '1024x1024': '1:1',
-            '1408x768': '16:9',
-            '768x1408': '9:16',
-            '1280x896': '4:3',
-            '896x1280': '3:4',
-            '1152x768': '3:2',
-            '768x1152': '2:3',
-            '1536x640': '21:9',
-        };
-        payload.size = sizeMap[context.size] || '1:1';
+        // The seedream tool expects a size string like '1024x1024' and will map it internally.
+        payload.size = context.size;
     } else {
         throw new Error(`Unsupported provider '${provider}' for direct generation.`);
     }
