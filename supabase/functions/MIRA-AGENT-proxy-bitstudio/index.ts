@@ -94,7 +94,7 @@ serve(async (req) => {
       let { 
         full_source_image_base64, mask_image_base64, mask_image_url, prompt, reference_image_base64, 
         is_garment_mode,
-        num_attempts = 1, denoise = 1.0, resolution = 'high', mask_expansion_percent = 2 
+        num_attempts = 1, denoise = 1.0, mask_expansion_percent = 2 
       } = body;
       
       console.log(`[BitStudioProxy][${requestId}] Inpaint mode received with prompt: "${prompt ? prompt.substring(0, 30) + '...' : 'N/A'}", Denoise: ${denoise}, Has Reference: ${!!reference_image_base64}`);
@@ -146,7 +146,7 @@ serve(async (req) => {
       }
 
       const fullSourceImage = await loadImage(`data:image/png;base64,${full_source_image_base64}`);
-      const padding = Math.round(Math.max(maxX - minX, maxY - minY) * 0.05);
+      const padding = Math.round(Math.max(maxX - minX, maxY - minY) * 0.30);
 
       const x1 = Math.max(0, minX - padding);
       const y1 = Math.max(0, minY - padding);
@@ -259,7 +259,7 @@ serve(async (req) => {
         const inpaintPayload: any = { 
             mask_image_id: maskImageId, 
             prompt, 
-            resolution, 
+            resolution: 'high', 
             denoise,
             seed: Math.floor(Math.random() * 1000000000)
         };
@@ -301,7 +301,7 @@ serve(async (req) => {
       }
 
     } else { // Default to virtual-try-on
-      const { person_image_url, garment_image_url, resolution, num_images, prompt, prompt_appendix } = body;
+      const { person_image_url, garment_image_url, num_images, prompt, prompt_appendix } = body;
       if (!person_image_url || !garment_image_url) throw new Error("person_image_url and garment_image_url are required for try-on mode.");
 
       const [personBlob, garmentBlob] = await Promise.all([
@@ -318,7 +318,7 @@ serve(async (req) => {
       const vtoPayload: any = {
         person_image_id: personImageId,
         outfit_image_id: outfitImageId,
-        resolution: resolution || "standard",
+        resolution: 'high',
         num_images: num_images || 1,
       };
       if (prompt) vtoPayload.prompt = prompt;
