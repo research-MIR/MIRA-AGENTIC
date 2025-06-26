@@ -67,17 +67,17 @@ serve(async (req) => {
     }
 
     const results = job.results || [];
-    console.log(`[Compositor][${job.id}] Raw results from database:`, JSON.stringify(results, null, 2));
+    console.log(`[Compositor][${job_id}] Raw results from database:`, JSON.stringify(results, null, 2));
 
-    // CORRECTED FILTERING LOGIC
-    const validMasks = results.filter((mask: any) => 
+    const flattenedResults = results.flat();
+    const validMasks = flattenedResults.filter((mask: any) => 
         mask && 
         !mask.error && 
         mask.mask &&
         typeof mask.mask === 'string' &&
         mask.box_2d
     );
-    console.log(`[Compositor][${job.id}] Found ${validMasks.length} valid masks after filtering.`);
+    console.log(`[Compositor][${job_id}] Found ${validMasks.length} valid masks after filtering.`);
 
     if (validMasks.length === 0) throw new Error("No valid mask data found in any of the segmentation runs.");
     
@@ -135,7 +135,6 @@ serve(async (req) => {
     const finalImageBuffer = combinedCanvas.toBuffer('image/png');
     const finalPublicUrl = await uploadBufferToStorage(supabase, finalImageBuffer, job.user_id, 'final_mask.png');
 
-    // RE-IMPLEMENTED CLEANUP LOGIC
     await supabase.from('mira-agent-mask-aggregation-jobs')
       .update({ status: 'complete', final_mask_base64: finalPublicUrl, source_image_base64: null })
       .eq('id', job.id);
@@ -182,8 +181,8 @@ serve(async (req) => {
     return new Response(JSON.stringify({ success: true, finalMaskUrl: finalPublicUrl }), { headers: corsHeaders });
 
   } catch (error) {
-    console.error(`[Compositor][${job.id}] Error:`, error);
-    await supabase.from('mira-agent-mask-aggregation-jobs').update({ status: 'failed', error_message: error.message }).eq('id', job.id);
+    console.error(`[Compositor][${job_id}] Error:`, error);
+    await supabase.from('mira-agent-mask-aggregation-jobs').update({ status: 'failed', error_message: error.message }).eq('id', job_id);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,
