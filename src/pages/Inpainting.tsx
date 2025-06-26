@@ -32,6 +32,7 @@ import { useFileUpload, UploadedFile } from "@/hooks/useFileUpload";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ImageCompareModal } from "@/components/ImageCompareModal";
 import { RecentJobThumbnail } from "@/components/Jobs/RecentJobThumbnail";
+import { Slider } from "@/components/ui/slider";
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
