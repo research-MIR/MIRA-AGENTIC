@@ -28,6 +28,7 @@ import { optimizeImage } from "@/lib/utils";
 import { useImageTransferStore } from "@/store/imageTransferStore";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { useFileUpload, UploadedFile } from "@/hooks/useFileUpload";
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -71,7 +72,7 @@ const SecureImageDisplay = ({ imageUrl, alt, onClick, className, style }: {
 };
 
 const ImageUploader = ({ onFileSelect, title, imageUrl, onClear, icon }: { onFileSelect: (file: File) => void, title: string, imageUrl: string | null, onClear: () => void, icon: React.ReactNode }) => {
-    const inputRef = useRef<HTMLInputElement>(null);
+    const inputRef = React.useRef<HTMLInputElement>(null);
     const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: (e) => e.dataTransfer.files && onFileSelect(e.dataTransfer.files[0]) });
   
     if (imageUrl) {
