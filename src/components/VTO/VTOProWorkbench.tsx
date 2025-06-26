@@ -2,8 +2,6 @@ import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Loader2, Image as ImageIcon, UploadCloud, Eye } from "lucide-react";
-import { MaskCanvas } from "@/components/Editor/MaskCanvas";
-import { MaskControls } from "@/components/Editor/MaskControls";
 import { useLanguage } from "@/context/LanguageContext";
 import { cn } from "@/lib/utils";
 import { useDropzone } from "@/hooks/useDropzone";
@@ -15,21 +13,16 @@ interface VTOProWorkbenchProps {
     selectedJob: BitStudioJob | undefined;
     sourceImageUrl: string | null;
     onFileSelect: (file: File | null) => void;
-    onMaskChange: (dataUrl: string) => void;
-    brushSize: number;
-    onBrushSizeChange: (size: number) => void;
-    resetTrigger: number;
-    onResetMask: () => void;
     onDebugOpen: () => void;
 }
 
 export const VTOProWorkbench = ({
-    selectedJob, sourceImageUrl, onFileSelect, onMaskChange, brushSize, onBrushSizeChange, resetTrigger, onResetMask, onDebugOpen
+    selectedJob, sourceImageUrl, onFileSelect, onDebugOpen
 }: VTOProWorkbenchProps) => {
     const { t } = useLanguage();
     const { showImage } = useImagePreview();
     const { dropzoneProps, isDraggingOver } = useDropzone({
-        onDrop: (e) => onFileSelect(e.target.files?.[0]),
+        onDrop: (e) => onFileSelect(e.dataTransfer.files?.[0]),
     });
 
     const renderJobResult = (job: BitStudioJob) => {
@@ -65,28 +58,9 @@ export const VTOProWorkbench = ({
     return (
         <div className="lg:col-span-2 bg-muted rounded-lg flex flex-col items-stretch justify-center relative min-h-[60vh] lg:min-h-0">
             {sourceImageUrl && !selectedJob ? (
-                <>
-                    <div className="w-full flex-1 flex items-center justify-center relative p-2 overflow-hidden">
-                        <div className="absolute top-2 left-2 z-20 bg-background/80 p-2 rounded-lg shadow-md">
-                            <div className="flex items-center space-x-2">
-                                {/* Auto-mask switch can be added back here if needed */}
-                            </div>
-                        </div>
-                        <MaskCanvas 
-                            imageUrl={sourceImageUrl} 
-                            onMaskChange={onMaskChange}
-                            brushSize={brushSize}
-                            resetTrigger={resetTrigger}
-                        />
-                    </div>
-                    <div className="p-2 shrink-0">
-                        <MaskControls 
-                            brushSize={brushSize} 
-                            onBrushSizeChange={onBrushSizeChange} 
-                            onReset={onResetMask} 
-                        />
-                    </div>
-                </>
+                <div className="w-full h-full flex items-center justify-center p-2">
+                    <SecureImageDisplay imageUrl={sourceImageUrl} alt="Source for VTO Pro" />
+                </div>
             ) : selectedJob ? (
                 renderJobResult(selectedJob)
             ) : (
