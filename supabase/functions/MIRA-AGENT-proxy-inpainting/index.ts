@@ -9,368 +9,27 @@ const corsHeaders = {
 };
 
 const workflowTemplate = `{
-  "3": {
-    "inputs": {
-      "seed": 964164525614180,
-      "steps": 20,
-      "cfg": 1,
-      "sampler_name": "euler",
-      "scheduler": "normal",
-      "denoise": 1,
-      "model": [
-        "58",
-        0
-      ],
-      "positive": [
-        "38",
-        0
-      ],
-      "negative": [
-        "38",
-        1
-      ],
-      "latent_image": [
-        "38",
-        2
-      ]
-    },
-    "class_type": "KSampler",
-    "_meta": {
-      "title": "KSampler"
-    }
-  },
-  "7": {
-    "inputs": {
-      "text": "",
-      "clip": [
-        "34",
-        0
-      ]
-    },
-    "class_type": "CLIPTextEncode",
-    "_meta": {
-      "title": "CLIP Text Encode (Negative Prompt)"
-    }
-  },
-  "8": {
-    "inputs": {
-      "samples": [
-        "3",
-        0
-      ],
-      "vae": [
-        "32",
-        0
-      ]
-    },
-    "class_type": "VAEDecode",
-    "_meta": {
-      "title": "VAE Decode"
-    }
-  },
-  "9": {
-    "inputs": {
-      "filename_prefix": "ComfyUI_Inpaint",
-      "images": [
-        "66",
-        0
-      ]
-    },
-    "class_type": "SaveImage",
-    "_meta": {
-      "title": "Save Image"
-    }
-  },
-  "17": {
-    "inputs": {
-      "image": "6e53e41b-409c-4055-b8b6-f628b72f5bef.png"
-    },
-    "class_type": "LoadImage",
-    "_meta": {
-      "title": "Input Image"
-    }
-  },
-  "23": {
-    "inputs": {
-      "text": "short  pink ordered hair",
-      "clip": [
-        "34",
-        0
-      ]
-    },
-    "class_type": "CLIPTextEncode",
-    "_meta": {
-      "title": "PROMPT"
-    }
-  },
-  "26": {
-    "inputs": {
-      "guidance": 30,
-      "conditioning": [
-        "23",
-        0
-      ]
-    },
-    "class_type": "FluxGuidance",
-    "_meta": {
-      "title": "FluxGuidance"
-    }
-  },
-  "31": {
-    "inputs": {
-      "unet_name": "fluxfill.safetensors",
-      "weight_dtype": "default"
-    },
-    "class_type": "UNETLoader",
-    "_meta": {
-      "title": "Load Diffusion Model"
-    }
-  },
-  "32": {
-    "inputs": {
-      "vae_name": "ae.safetensors"
-    },
-    "class_type": "VAELoader",
-    "_meta": {
-      "title": "Load VAE"
-    }
-  },
-  "34": {
-    "inputs": {
-      "clip_name1": "clip_l.safetensors",
-      "clip_name2": "t5xxl_fp16.safetensors",
-      "type": "flux",
-      "device": "default"
-    },
-    "class_type": "DualCLIPLoader",
-    "_meta": {
-      "title": "DualCLIPLoader"
-    }
-  },
-  "38": {
-    "inputs": {
-      "noise_mask": true,
-      "positive": [
-        "26",
-        0
-      ],
-      "negative": [
-        "7",
-        0
-      ],
-      "vae": [
-        "32",
-        0
-      ],
-      "pixels": [
-        "60",
-        0
-      ],
-      "mask": [
-        "53",
-        0
-      ]
-    },
-    "class_type": "InpaintModelConditioning",
-    "_meta": {
-      "title": "InpaintModelConditioning"
-    }
-  },
-  "45": {
-    "inputs": {
-      "image": "clipspace/clipspace-mask-7067741.png [input]"
-    },
-    "class_type": "LoadImage",
-    "_meta": {
-      "title": "Input Mask"
-    }
-  },
-  "47": {
-    "inputs": {
-      "channel": "red",
-      "image": [
-        "64",
-        0
-      ]
-    },
-    "class_type": "ImageToMask",
-    "_meta": {
-      "title": "Convert Image to Mask"
-    }
-  },
-  "53": {
-    "inputs": {
-      "expand": 26,
-      "incremental_expandrate": 0,
-      "tapered_corners": true,
-      "flip_input": false,
-      "blur_radius": 5.9,
-      "lerp_alpha": 1,
-      "decay_factor": 1,
-      "fill_holes": false,
-      "mask": [
-        "47",
-        0
-      ]
-    },
-    "class_type": "GrowMaskWithBlur",
-    "_meta": {
-      "title": "Grow Mask With Blur"
-    }
-  },
-  "55": {
-    "inputs": {
-      "mask": [
-        "53",
-        0
-      ]
-    },
-    "class_type": "MaskToImage",
-    "_meta": {
-      "title": "Convert Mask to Image"
-    }
-  },
-  "56": {
-    "inputs": {
-      "images": [
-        "55",
-        0
-      ]
-    },
-    "class_type": "PreviewImage",
-    "_meta": {
-      "title": "MASKDEBUG"
-    }
-  },
-  "58": {
-    "inputs": {
-      "multiplier": 1.0010000000000003,
-      "model": [
-        "31",
-        0
-      ],
-      "samples": [
-        "59",
-        0
-      ],
-      "mask": [
-        "47",
-        0
-      ]
-    },
-    "class_type": "DifferentialDiffusionAdvanced",
-    "_meta": {
-      "title": "Apply Differential Diffusion"
-    }
-  },
-  "59": {
-    "inputs": {
-      "pixels": [
-        "62",
-        0
-      ],
-      "vae": [
-        "32",
-        0
-      ]
-    },
-    "class_type": "VAEEncode",
-    "_meta": {
-      "title": "VAE Encode"
-    }
-  },
-  "60": {
-    "inputs": {
-      "samples": [
-        "58",
-        1
-      ],
-      "vae": [
-        "32",
-        0
-      ]
-    },
-    "class_type": "VAEDecode",
-    "_meta": {
-      "title": "VAE Decode"
-    }
-  },
-  "62": {
-    "inputs": {
-      "upscale_model": [
-        "63",
-        0
-      ],
-      "image": [
-        "17",
-        0
-      ]
-    },
-    "class_type": "ImageUpscaleWithModel",
-    "_meta": {
-      "title": "Upscale Image (using Model)"
-    }
-  },
-  "63": {
-    "inputs": {
-      "model_name": "4x-UltraSharp.pth"
-    },
-    "class_type": "UpscaleModelLoader",
-    "_meta": {
-      "title": "Load Upscale Model"
-    }
-  },
-  "64": {
-    "inputs": {
-      "upscale_model": [
-        "65",
-        0
-      ],
-      "image": [
-        "45",
-        0
-      ]
-    },
-    "class_type": "ImageUpscaleWithModel",
-    "_meta": {
-      "title": "Upscale Image (using Model)"
-    }
-  },
-  "65": {
-    "inputs": {
-      "model_name": "4x-UltraSharp.pth"
-    },
-    "class_type": "UpscaleModelLoader",
-    "_meta": {
-      "title": "Load Upscale Model"
-    }
-  },
-  "66": {
-    "inputs": {
-      "upscale_method": "lanczos",
-      "scale_by": 0.25000000000000006,
-      "image": [
-        "8",
-        0
-      ]
-    },
-    "class_type": "ImageScaleBy",
-    "_meta": {
-      "title": "Upscale Image By"
-    }
-  },
-  "68": {
-    "inputs": {
-      "images": [
-        "64",
-        0
-      ]
-    },
-    "class_type": "PreviewImage",
-    "_meta": {
-      "title": "Preview Image"
-    }
-  }
+  "3": { "inputs": { "seed": 1062983749859779, "steps": 20, "cfg": 1, "sampler_name": "euler", "scheduler": "normal", "denoise": 1, "model": ["39", 0], "positive": ["38", 0], "negative": ["38", 1], "latent_image": ["38", 2] }, "class_type": "KSampler", "_meta": { "title": "KSampler" } },
+  "7": { "inputs": { "text": "", "clip": ["34", 0] }, "class_type": "CLIPTextEncode", "_meta": { "title": "CLIP Text Encode (Negative Prompt)" } },
+  "8": { "inputs": { "samples": ["3", 0], "vae": ["32", 0] }, "class_type": "VAEDecode", "_meta": { "title": "VAE Decode" } },
+  "9": { "inputs": { "filename_prefix": "ComfyUI_Inpaint", "images": ["54", 0] }, "class_type": "SaveImage", "_meta": { "title": "Save Image" } },
+  "17": { "inputs": { "image": "source_image.png" }, "class_type": "LoadImage", "_meta": { "title": "Input Image" } },
+  "23": { "inputs": { "text": "Wearing pink Maxi Dress", "clip": ["34", 0] }, "class_type": "CLIPTextEncode", "_meta": { "title": "PROMPT" } },
+  "26": { "inputs": { "guidance": 30, "conditioning": ["23", 0] }, "class_type": "FluxGuidance", "_meta": { "title": "FluxGuidance" } },
+  "31": { "inputs": { "unet_name": "fluxfill.safetensors", "weight_dtype": "default" }, "class_type": "UNETLoader", "_meta": { "title": "Load Diffusion Model" } },
+  "32": { "inputs": { "vae_name": "ae.safetensors" }, "class_type": "VAELoader", "_meta": { "title": "Load VAE" } },
+  "34": { "inputs": { "clip_name1": "clip_l.safetensors", "clip_name2": "t5xxl_fp16.safetensors", "type": "flux", "device": "default" }, "class_type": "DualCLIPLoader", "_meta": { "title": "DualCLIPLoader" } },
+  "38": { "inputs": { "noise_mask": false, "positive": ["51", 0], "negative": ["7", 0], "vae": ["32", 0], "pixels": ["17", 0], "mask": ["53", 0] }, "class_type": "InpaintModelConditioning", "_meta": { "title": "InpaintModelConditioning" } },
+  "39": { "inputs": { "model": ["31", 0] }, "class_type": "DifferentialDiffusion", "_meta": { "title": "Differential Diffusion" } },
+  "45": { "inputs": { "image": "mask_image.png" }, "class_type": "LoadImage", "_meta": { "title": "Input Mask" } },
+  "47": { "inputs": { "channel": "red", "image": ["45", 0] }, "class_type": "ImageToMask", "_meta": { "title": "Convert Image to Mask" } },
+  "48": { "inputs": { "style_model_name": "fluxcontrolnetupscale.safetensors" }, "class_type": "StyleModelLoader", "_meta": { "title": "Load Style Model" } },
+  "49": { "inputs": { "clip_name": "sigclip_vision_patch14_384.safetensors" }, "class_type": "CLIPVisionLoader", "_meta": { "title": "Load CLIP Vision" } },
+  "50": { "inputs": { "crop": "none", "clip_vision": ["49", 0], "image": ["52", 0] }, "class_type": "CLIPVisionEncode", "_meta": { "title": "CLIP Vision Encode" } },
+  "51": { "inputs": { "strength": 0.30000000000000004, "strength_type": "attn_bias", "conditioning": ["26", 0], "style_model": ["48", 0], "clip_vision_output": ["50", 0] }, "class_type": "StyleModelApply", "_meta": { "title": "Apply Style Model" } },
+  "52": { "inputs": { "image": "reference_image.png" }, "class_type": "LoadImage", "_meta": { "title": "Input Reference" } },
+  "53": { "inputs": { "expand": 20, "incremental_expandrate": 0, "tapered_corners": true, "flip_input": false, "blur_radius": 3.1, "lerp_alpha": 1, "decay_factor": 1, "fill_holes": false, "mask": ["47", 0] }, "class_type": "GrowMaskWithBlur", "_meta": { "title": "Grow Mask With Blur" } },
+  "54": { "inputs": { "method": "mkl", "strength": 0.30000000000000004, "image_ref": ["17", 0], "image_target": ["8", 0] }, "class_type": "ColorMatch", "_meta": { "title": "Color Match" } }
 }`;
 
 async function uploadImageToComfyUI(comfyUiUrl: string, imageBlob: Blob, filename: string) {
@@ -392,22 +51,6 @@ async function uploadToSupabaseStorage(supabase: SupabaseClient, blob: Blob, use
     return publicUrl;
 }
 
-async function getMaskBlob(supabase: SupabaseClient, maskUrl: string): Promise<Blob> {
-    const url = new URL(maskUrl);
-    const pathSegments = url.pathname.split('/');
-    const bucketName = pathSegments[pathSegments.indexOf('object') + 2];
-    const pathStartIndex = url.pathname.indexOf(bucketName) + bucketName.length + 1;
-    const storagePath = decodeURIComponent(url.pathname.substring(pathStartIndex));
-
-    if (!bucketName || !storagePath) {
-        throw new Error(`Could not parse bucket or path from mask URL: ${maskUrl}`);
-    }
-
-    const { data, error } = await supabase.storage.from(bucketName).download(storagePath);
-    if (error) throw new Error(`Failed to download mask from Supabase: ${error.message}`);
-    return data;
-}
-
 serve(async (req) => {
   const COMFYUI_ENDPOINT_URL = Deno.env.get('COMFYUI_ENDPOINT_URL');
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
@@ -421,18 +64,16 @@ serve(async (req) => {
       user_id,
       source_image_base64,
       mask_image_base64,
-      mask_image_url,
       reference_image_base64,
       prompt,
       is_garment_mode,
       denoise,
       style_strength,
       mask_expansion_percent = 2,
-      num_attempts = 1,
     } = await req.json();
 
-    if (!user_id || !source_image_base64 || (!mask_image_base64 && !mask_image_url)) {
-      throw new Error("Missing required parameters: user_id, source_image_base64, and one of mask_image_base64 or mask_image_url are required.");
+    if (!user_id || !source_image_base64 || !mask_image_base64) {
+      throw new Error("Missing required parameters: user_id, source_image_base64, and mask_image_base64 are required.");
     }
 
     let finalPrompt = prompt;
@@ -458,15 +99,7 @@ serve(async (req) => {
     if (!finalPrompt) throw new Error("Prompt is required for inpainting.");
 
     const fullSourceImage = await loadImage(`data:image/png;base64,${source_image_base64}`);
-    
-    let maskBlob: Blob;
-    if (mask_image_url) {
-        console.log(`[InpaintingProxy] Fetching mask from URL: ${mask_image_url}`);
-        maskBlob = await getMaskBlob(supabase, mask_image_url);
-    } else {
-        maskBlob = new Blob([decodeBase64(mask_image_base64)], { type: 'image/png' });
-    }
-    const rawMaskImage = await loadImage(await maskBlob.arrayBuffer());
+    const rawMaskImage = await loadImage(`data:image/jpeg;base64,${mask_image_base64}`);
 
     const dilatedCanvas = createCanvas(rawMaskImage.width(), rawMaskImage.height());
     const dilateCtx = dilatedCanvas.getContext('2d');
@@ -495,7 +128,7 @@ serve(async (req) => {
 
     if (maxX < minX || maxY < minY) throw new Error("The provided mask is empty or invalid after processing.");
 
-    const padding = Math.round(Math.max(maxX - minX, maxY - minY) * 0.30);
+    const padding = Math.round(Math.max(maxX - minX, maxY - minY) * 0.20);
     const bbox = {
       x: Math.max(0, minX - padding),
       y: Math.max(0, minY - padding),
@@ -513,69 +146,82 @@ serve(async (req) => {
     croppedMaskCanvas.getContext('2d').drawImage(dilatedCanvas, bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
     const croppedDilatedMaskBase64 = encodeBase64(croppedMaskCanvas.toBuffer('image/png'));
 
-    const sourceToSendBase64 = croppedSourceBase64;
-    const maskToSendBase64 = croppedDilatedMaskBase64;
+    let sourceToSendBase64 = croppedSourceBase64;
+    let maskToSendBase64 = croppedDilatedMaskBase64;
+    const TARGET_LONG_SIDE = 768;
+    const cropLongestSide = Math.max(bbox.width, bbox.height);
+
+    if (cropLongestSide < TARGET_LONG_SIDE) {
+        const upscaleFactor = TARGET_LONG_SIDE / cropLongestSide;
+        const { data: upscaleData, error: upscaleError } = await supabase.functions.invoke('MIRA-AGENT-tool-upscale-crop', {
+            body: { source_crop_base64: croppedSourceBase64, mask_crop_base64: croppedDilatedMaskBase64, upscale_factor: upscaleFactor }
+        });
+        if (upscaleError) throw new Error(`Upscaling failed: ${upscaleError.message}`);
+        sourceToSendBase64 = upscaleData.upscaled_source_base64;
+        maskToSendBase64 = upscaleData.upscaled_mask_base64;
+    }
 
     const sourceBlob = new Blob([decodeBase64(sourceToSendBase64)], { type: 'image/png' });
-    const finalMaskBlob = new Blob([decodeBase64(maskToSendBase64)], { type: 'image/png' });
+    const maskBlob = new Blob([decodeBase64(maskToSendBase64)], { type: 'image/png' });
     
     const sourceImageUrl = await uploadToSupabaseStorage(supabase, sourceBlob, user_id, 'source.png');
     let referenceImageUrl: string | null = null;
-    if (reference_image_base64) {
-        const referenceBlob = new Blob([decodeBase64(reference_image_base64)], { type: 'image/png' });
-        referenceImageUrl = await uploadToSupabaseStorage(supabase, referenceBlob, user_id, 'reference.png');
-    }
     
     const [sourceFilename, maskFilename] = await Promise.all([
       uploadImageToComfyUI(sanitizedAddress, sourceBlob, 'source.png'),
-      uploadImageToComfyUI(sanitizedAddress, finalMaskBlob, 'mask.png')
+      uploadImageToComfyUI(sanitizedAddress, maskBlob, 'mask.png')
     ]);
 
-    const jobIds: string[] = [];
-    for (let i = 0; i < num_attempts; i++) {
-      const finalWorkflow = JSON.parse(workflowTemplate);
-      finalWorkflow['17'].inputs.image = sourceFilename;
-      finalWorkflow['45'].inputs.image = maskFilename;
-      finalWorkflow['23'].inputs.text = finalPrompt;
-      finalWorkflow['3'].inputs.seed = Math.floor(Math.random() * 1000000000000000);
-      if (denoise) finalWorkflow['3'].inputs.denoise = denoise;
+    const finalWorkflow = JSON.parse(workflowTemplate);
+    finalWorkflow['17'].inputs.image = sourceFilename;
+    finalWorkflow['45'].inputs.image = maskFilename;
+    finalWorkflow['23'].inputs.text = finalPrompt;
+    if (denoise) finalWorkflow['3'].inputs.denoise = denoise;
 
-      const queueUrl = `${sanitizedAddress}/prompt`;
-      const response = await fetch(queueUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: finalWorkflow })
-      });
-      if (!response.ok) throw new Error(`ComfyUI server error: ${await response.text()}`);
-      
-      const comfyUIResponse = await response.json();
-      if (!comfyUIResponse.prompt_id) throw new Error("ComfyUI did not return a prompt_id.");
-
-      const { data: newJob, error: insertError } = await supabase.from('mira-agent-inpainting-jobs').insert({
-        user_id,
-        comfyui_address: sanitizedAddress,
-        comfyui_prompt_id: comfyUIResponse.prompt_id,
-        status: 'queued',
-        metadata: { 
-          prompt: finalPrompt, 
-          denoise, 
-          style_strength,
-          source_image_url: sourceImageUrl,
-          reference_image_url: referenceImageUrl,
-          full_source_image_base64: source_image_base64,
-          bbox: bbox,
-          cropped_dilated_mask_base64: croppedDilatedMaskBase64,
-        }
-      }).select('id').single();
-      if (insertError) throw insertError;
-      jobIds.push(newJob.id);
+    if (reference_image_base64) {
+        console.log(`[InpaintingProxy] Reference image provided. Using full style model workflow.`);
+        const referenceBlob = new Blob([decodeBase64(reference_image_base64)], { type: 'image/png' });
+        referenceImageUrl = await uploadToSupabaseStorage(supabase, referenceBlob, user_id, 'reference.png');
+        const referenceFilename = await uploadImageToComfyUI(sanitizedAddress, referenceBlob, 'reference.png');
+        finalWorkflow['52'].inputs.image = referenceFilename;
+        if (style_strength) finalWorkflow['51'].inputs.strength = style_strength;
+    } else {
+        console.log(`[InpaintingProxy] No reference image. Bypassing style model nodes.`);
+        finalWorkflow['38'].inputs.positive = ["26", 0];
     }
 
-    jobIds.forEach(jobId => {
-      supabase.functions.invoke('MIRA-AGENT-poller-inpainting', { body: { job_id: jobId } }).catch(console.error);
+    const queueUrl = `${sanitizedAddress}/prompt`;
+    const response = await fetch(queueUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: finalWorkflow })
     });
+    if (!response.ok) throw new Error(`ComfyUI server error: ${await response.text()}`);
+    
+    const comfyUIResponse = await response.json();
+    if (!comfyUIResponse.prompt_id) throw new Error("ComfyUI did not return a prompt_id.");
 
-    return new Response(JSON.stringify({ success: true, jobIds }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    const { data: newJob, error: insertError } = await supabase.from('mira-agent-inpainting-jobs').insert({
+      user_id,
+      comfyui_address: sanitizedAddress,
+      comfyui_prompt_id: comfyUIResponse.prompt_id,
+      status: 'queued',
+      metadata: { 
+        prompt: finalPrompt, 
+        denoise, 
+        style_strength,
+        source_image_url: sourceImageUrl,
+        reference_image_url: referenceImageUrl,
+        full_source_image_base64: source_image_base64,
+        bbox: bbox,
+        cropped_dilated_mask_base64: croppedDilatedMaskBase64,
+      }
+    }).select('id').single();
+    if (insertError) throw insertError;
+
+    supabase.functions.invoke('MIRA-AGENT-poller-inpainting', { body: { job_id: newJob.id } }).catch(console.error);
+
+    return new Response(JSON.stringify({ success: true, jobId: newJob.id }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (error) {
     console.error("[InpaintingProxy] Error:", error);
     return new Response(JSON.stringify({ error: error.message }), {

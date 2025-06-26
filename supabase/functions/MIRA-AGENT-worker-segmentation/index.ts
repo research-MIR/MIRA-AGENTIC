@@ -8,7 +8,6 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 500;
-const NUM_WORKERS = 5; // Must match the orchestrator
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -47,16 +46,17 @@ function extractJson(text: string): any {
 }
 
 async function appendResultToJob(supabase: any, jobId: string, result: any) {
-    const { data: newCount, error: appendError } = await supabase.rpc('append_result_and_get_count', {
-        p_job_id: jobId,
-        p_new_element: result
+    // This RPC now just appends the data. The trigger will handle the rest.
+    const { error } = await supabase.rpc('append_to_jsonb_array', {
+        table_name: 'mira-agent-mask-aggregation-jobs',
+        row_id: jobId,
+        column_name: 'results',
+        new_element: result
     });
-
-    if (appendError) {
-        console.error(`[SegmentWorker] Failed to append result to aggregation job ${jobId}:`, appendError);
-        throw appendError;
+    if (error) {
+        console.error(`[SegmentWorker] Failed to append result to aggregation job ${jobId}:`, error);
+        throw error;
     }
-    return newCount;
 }
 
 serve(async (req) => {
@@ -124,11 +124,9 @@ serve(async (req) => {
 
                 const normalizedResponse = responseJson.map(item => {
                     if (item.mask && typeof item.mask === 'string' && !item.mask.startsWith('data:image/png;base64,')) {
-                        console.log(`[SegmentWorker][${requestId}] Normalizing raw base64 mask.`);
                         item.mask = `data:image/png;base64,${item.mask}`;
                     }
                     if (item.box_2d && Array.isArray(item.box_2d[0])) {
-                        console.log(`[SegmentWorker][${requestId}] Normalizing nested box_2d array.`);
                         item.box_2d = [item.box_2d[0][0], item.box_2d[0][1], item.box_2d[1][0], item.box_2d[1][1]];
                     }
                     return item;
@@ -144,19 +142,9 @@ serve(async (req) => {
                 };
             }
             
-            const newCount = await appendResultToJob(supabase, aggregation_job_id, responseToStore);
-            console.log(`[SegmentWorker][${requestId}] Successfully appended result. New count: ${newCount}.`);
+            await appendResultToJob(supabase, aggregation_job_id, responseToStore);
+            console.log(`[SegmentWorker][${requestId}] Successfully appended result. The database trigger will handle the next step.`);
             
-            if (newCount >= NUM_WORKERS) {
-                console.log(`[SegmentWorker][${requestId}] This is the final worker. Triggering compositor...`);
-                await supabase.from('mira-agent-mask-aggregation-jobs').update({ status: 'compositing' }).eq('id', aggregation_job_id);
-                supabase.functions.invoke('MIRA-AGENT-compositor-segmentation', {
-                    body: { job_id: aggregation_job_id }
-                }).catch(console.error);
-            } else {
-                console.log(`[SegmentWorker][${requestId}] Not the final worker. Current count: ${newCount}/${NUM_WORKERS}.`);
-            }
-
             return new Response(JSON.stringify(responseToStore), {
               headers: { ...corsHeaders, 'Content-Type': 'application/json' },
               status: 200,
