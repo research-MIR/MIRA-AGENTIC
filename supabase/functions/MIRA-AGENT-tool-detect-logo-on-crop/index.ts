@@ -36,14 +36,15 @@ serve(async (req) => {
     return new Response('ok', { headers: corsHeaders });
   }
 
-  const { image_base64, mime_type } = await req.json();
   const requestId = `logo-detector-${Date.now()}`;
-  console.log(`[LogoDetector][${requestId}] Invoked.`);
+  console.log(`[LogoDetector][${requestId}] Function invoked.`);
 
   try {
+    const { image_base64, mime_type } = await req.json();
     if (!image_base64 || !mime_type) {
       throw new Error("image_base64 and mime_type are required.");
     }
+    console.log(`[LogoDetector][${requestId}] Received request with mime_type: ${mime_type}.`);
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
@@ -53,6 +54,7 @@ serve(async (req) => {
     ];
     const contents: Content[] = [{ role: 'user', parts: userParts }];
 
+    console.log(`[LogoDetector][${requestId}] Calling Gemini API...`);
     const result = await ai.models.generateContent({
         model: MODEL_NAME,
         contents: contents,
@@ -61,6 +63,7 @@ serve(async (req) => {
         config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
     });
 
+    console.log(`[LogoDetector][${requestId}] Received raw response from Gemini:`, result.text);
     const responseJson = extractJson(result.text);
     
     if (typeof responseJson.logo_present !== 'boolean') {
