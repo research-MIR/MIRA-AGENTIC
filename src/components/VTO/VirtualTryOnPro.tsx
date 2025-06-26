@@ -17,7 +17,8 @@ import { RecentJobsList } from "./RecentJobsList";
 import { VTOProSetup } from "./VTOProSetup";
 import { VTOProWorkbench } from "./VTOProWorkbench";
 import { useImageTransferStore } from "@/store/imageTransferStore";
-import { HelpCircle } from "lucide-react";
+import { HelpCircle, Info } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 const VirtualTryOnPro = ({
   recentJobs, isLoadingRecentJobs, selectedJob, handleSelectJob, resetForm, transferredImageUrl, onTransferConsumed
@@ -155,6 +156,13 @@ const VirtualTryOnPro = ({
           <TabsTrigger value="batch">{t('batchInpaint')}</TabsTrigger>
         </TabsList>
         <TabsContent value="single" className="pt-6">
+          <Alert className="mb-6">
+            <Info className="h-4 w-4" />
+            <AlertTitle>{t('proMode')}</AlertTitle>
+            <AlertDescription>
+              {t('vtoProModeDescription')}
+            </AlertDescription>
+          </Alert>
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <VTOProSetup
               selectedJob={selectedJob}
@@ -189,7 +197,14 @@ const VirtualTryOnPro = ({
             />
           </div>
         </TabsContent>
-        <TabsContent value="batch">
+        <TabsContent value="batch" className="pt-6">
+          <Alert className="mb-6">
+            <Info className="h-4 w-4" />
+            <AlertTitle>{t('proMode')}</AlertTitle>
+            <AlertDescription>
+              {t('vtoProModeDescription')}
+            </AlertDescription>
+          </Alert>
           <BatchInpaintPro />
         </TabsContent>
       </Tabs>

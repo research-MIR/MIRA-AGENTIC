@@ -80,6 +80,7 @@ export const vtoTranslations = {
     autoMask: "Maschera Automatica da Riferimento",
     singleInpaint: "Inpaint Singolo",
     batchInpaint: "Inpaint Multiplo",
+    vtoProModeDescription: "Questa modalità PRO è specializzata per l'abbigliamento. Il sistema identificherà e applicherà automaticamente l'indumento di riferimento. Per mascheratura manuale e modifiche generiche, usa la pagina 'Inpainting'.",
     inpaintingGuideContent: `
 ### Strategie per Risultati Migliori
 
@@ -201,6 +202,7 @@ L'inpainting è uno strumento potente per sostituire parti di un'immagine, ma ri
     autoMask: "Auto-mask from Reference",
     singleInpaint: "Single Inpaint",
     batchInpaint: "Batch Inpaint",
+    vtoProModeDescription: "This PRO mode is specialized for garments. The system will automatically identify and apply the reference garment. For manual masking and general editing, please use the 'Inpainting' page.",
     inpaintingGuideContent: `
 ### Strategie per Risultati Migliori
 

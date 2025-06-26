@@ -110,7 +110,7 @@ export const VTOProSetup = ({
                         ) : (
                             <Accordion type="multiple" defaultValue={['item-1']} className="w-full">
                                 <AccordionItem value="item-1">
-                                    <AccordionTrigger>{t('inputs')}</AccordionTrigger>
+                                    <AccordionTrigger>{t('uploadImages')}</AccordionTrigger>
                                     <AccordionContent className="pt-4 space-y-4">
                                         <div className="grid grid-cols-2 gap-4">
                                             <ImageUploader onFileSelect={onSourceFileSelect} title={t('sourceImage')} imageUrl={sourceImageUrl} onClear={resetForm} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
