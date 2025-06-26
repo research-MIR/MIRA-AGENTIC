@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Wand2, Brush, Palette, UploadCloud, Sparkles, Loader2, Image as ImageIcon, X, PlusCircle, AlertTriangle, Eye, Settings, History, HelpCircle, Shirt } from "lucide-react";
+import { Wand2, Brush, Palette, UploadCloud, Sparkles, Loader2, Image as ImageIcon, X, PlusCircle, AlertTriangle, Eye, Settings, History, HelpCircle, Shirt, Layers } from "lucide-react";
 import { MaskCanvas } from "@/components/Editor/MaskCanvas";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -29,6 +29,9 @@ import { useImageTransferStore } from "@/store/imageTransferStore";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { useFileUpload, UploadedFile } from "@/hooks/useFileUpload";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ImageCompareModal } from "@/components/ImageCompareModal";
+import { RecentJobThumbnail } from "@/components/Jobs/RecentJobThumbnail";
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -54,42 +57,23 @@ interface InpaintingJob {
   }
 }
 
-const SecureImageDisplay = ({ imageUrl, alt, onClick, className, style }: { 
-    imageUrl: string | null, 
-    alt: string, 
-    onClick?: (e: React.MouseEvent<HTMLImageElement>) => void, 
-    className?: string,
-    style?: React.CSSProperties 
-}) => {
-    const { displayUrl, isLoading, error } = useSecureImage(imageUrl);
-    const hasClickHandler = !!onClick;
-  
-    if (!imageUrl) return <div className={cn("w-full h-full bg-muted rounded-md flex items-center justify-center", className)} style={style}><ImageIcon className="h-6 w-6 text-muted-foreground" /></div>;
-    if (isLoading) return <div className={cn("w-full h-full bg-muted rounded-md flex items-center justify-center", className)} style={style}><Loader2 className="h-6 w-6 animate-spin" /></div>;
-    if (error) return <div className={cn("w-full h-full bg-muted rounded-md flex items-center justify-center", className)} style={style}><AlertTriangle className="h-6 w-6 text-destructive" /></div>;
-    
-    return <img src={displayUrl} alt={alt} className={cn("max-w-full max-h-full object-contain rounded-md", hasClickHandler && "cursor-pointer", className)} onClick={onClick} style={style} />;
-};
+const SecureDisplayImage = ({ imageUrl, onClear, showClearButton = false }: { imageUrl: string | null, onClear?: () => void, showClearButton?: boolean }) => {
+  const { displayUrl, isLoading, error } = useSecureImage(imageUrl);
 
-const ImageUploader = ({ onFileSelect, title, imageUrl, onClear, icon }: { onFileSelect: (file: File) => void, title: string, imageUrl: string | null, onClear: () => void, icon: React.ReactNode }) => {
-    const inputRef = React.useRef<HTMLInputElement>(null);
-    const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: (e) => e.dataTransfer.files && onFileSelect(e.dataTransfer.files[0]) });
-  
-    if (imageUrl) {
-      return (
-        <div className="relative h-32">
-          <img src={imageUrl} alt={title} className="w-full h-full object-cover rounded-md" />
-          <Button variant="destructive" size="icon" className="absolute top-2 right-2 h-6 w-6 z-10" onClick={onClear}><X className="h-4 w-4" /></Button>
-        </div>
-      );
-    }
-  
-    return (
-      <div {...dropzoneProps} className={cn("flex flex-col h-32 justify-center items-center rounded-lg border border-dashed p-4 text-center transition-colors cursor-pointer", isDraggingOver && "border-primary bg-primary/10")} onClick={() => inputRef.current?.click()}>
-        <div className="text-center pointer-events-none">{icon}<p className="mt-2 text-sm font-semibold">{title}</p></div>
-        <Input ref={inputRef} type="file" className="hidden" accept="image/*" onChange={(e) => e.target.files && onFileSelect(e.target.files[0])} />
-      </div>
-    );
+  if (!imageUrl) return null;
+
+  return (
+    <div className="relative w-full h-full">
+      {isLoading && <Skeleton className="w-full h-full" />}
+      {error && <div className="w-full h-full bg-destructive/10 rounded-md flex items-center justify-center text-destructive text-sm p-2"><AlertTriangle className="h-6 w-6 mr-2" />Error loading image.</div>}
+      {displayUrl && <img src={displayUrl} alt="Source for refinement" className="w-full h-full object-contain" />}
+      {showClearButton && onClear && (
+        <Button variant="destructive" size="icon" className="absolute top-2 right-2 h-6 w-6 rounded-full" onClick={onClear}>
+          <X className="h-4 w-4" />
+        </Button>
+      )}
+    </div>
+  );
 };
 
 const Inpainting = () => {
