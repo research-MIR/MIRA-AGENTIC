@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { createCanvas, loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
-import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
+import { Image } from 'https://deno.land/x/imagescript@1.2.15/mod.ts';
+import { decodeBase64, encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -32,6 +32,7 @@ serve(async (req) => {
   }
 
   let aggregationJobId: string | null = null;
+  const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
 
   try {
     const body = await req.json();
@@ -42,8 +43,6 @@ serve(async (req) => {
     
     const requestId = `compositor-${aggregationJobId}`;
     console.log(`[Compositor][${requestId}] Function invoked.`);
-
-    const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
 
     console.time(`[Compositor][${requestId}] Fetch Job from DB`);
     const { data: job, error: fetchError } = await supabase
@@ -58,18 +57,22 @@ serve(async (req) => {
       throw new Error("Job data or source image is missing.");
     }
 
-    const sourceImage = await loadImage(`data:image/png;base64,${job.source_image_base64}`);
+    const sourceImageBuffer = decodeBase64(job.source_image_base64);
+    const sourceImage = await Image.decode(sourceImageBuffer);
     const { width, height } = sourceImage;
-    const finalMaskCanvas = createCanvas(width, height);
-    const finalCtx = finalMaskCanvas.getContext('2d');
-    finalCtx.fillStyle = 'black';
-    finalCtx.fillRect(0, 0, width, height);
+    
+    const finalMask = new Image(width, height).fill(0x000000FF); // Fill with black
 
     const allMasks = (job.results || []).flat().filter((item: any) => item && item.mask && item.box_2d);
     console.log(`[Compositor][${requestId}] Found ${allMasks.length} valid masks to process.`);
 
     for (const maskData of allMasks) {
-        const maskImage = await loadImage(maskData.mask);
+        const maskBase64 = maskData.mask.startsWith('data:image/png;base64,') 
+            ? maskData.mask.split(',')[1] 
+            : maskData.mask;
+        const maskImageBuffer = decodeBase64(maskBase64);
+        const maskImage = await Image.decode(maskImageBuffer);
+        
         const [y0, x0, y1, x1] = maskData.box_2d;
         const absX0 = Math.floor((x0 / 1000) * width);
         const absY0 = Math.floor((y0 / 1000) * height);
@@ -77,12 +80,13 @@ serve(async (req) => {
         const bboxHeight = Math.ceil(((y1 - y0) / 1000) * height);
 
         if (bboxWidth > 0 && bboxHeight > 0) {
-            finalCtx.drawImage(maskImage, absX0, absY0, bboxWidth, bboxHeight);
+            maskImage.resize(bboxWidth, bboxHeight);
+            finalMask.composite(maskImage, absX0, absY0);
         }
     }
-    console.log(`[Compositor][${requestId}] All individual masks have been drawn onto the final canvas.`);
+    console.log(`[Compositor][${requestId}] All individual masks have been composited onto the final mask.`);
 
-    const finalMaskBuffer = finalMaskCanvas.toBuffer('image/png');
+    const finalMaskBuffer = await finalMask.encode(0); // 0 for PNG
     const finalMaskBase64 = encodeBase64(finalMaskBuffer);
 
     const finalMaskUrl = await uploadBufferToStorage(supabase, finalMaskBuffer, job.user_id, 'final_mask.png');
