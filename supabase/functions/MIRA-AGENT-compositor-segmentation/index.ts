@@ -61,7 +61,8 @@ serve(async (req) => {
 
     const sourceImageBuffer = decodeBase64(job.source_image_base64);
     const sourceImage = await loadImage(sourceImageBuffer);
-    const { width, height } = sourceImage;
+    const width = sourceImage.width();
+    const height = sourceImage.height();
     console.log(`[Compositor][${requestId}] Source image decoded with canvas. Dimensions: ${width}x${height}`);
     
     const finalMaskCanvas = createCanvas(width, height);
