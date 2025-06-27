@@ -10,21 +10,14 @@ import { Input } from '@/components/ui/input';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Label } from '@/components/ui/label';
 
-const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => resolve((reader.result as string).split(',')[1]);
-      reader.onerror = (error) => reject(error);
-    });
-};
-
 const SegmentationTool = () => {
   const { supabase, session } = useSession();
   const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [referenceFile, setReferenceFile] = useState<File | null>(null);
   const [sourcePreview, setSourcePreview] = useState<string | null>(null);
   const [referencePreview, setReferencePreview] = useState<string | null>(null);
+  const [sourcePngBase64, setSourcePngBase64] = useState<string | null>(null);
+  const [referencePngBase64, setReferencePngBase64] = useState<string | null>(null);
   const [imageDimensions, setImageDimensions] = useState<{width: number, height: number} | null>(null);
   const [finalMaskUrl, setFinalMaskUrl] = useState<string | null>(null);
   const [rawResponse, setRawResponse] = useState<string>('');
@@ -34,24 +27,35 @@ const SegmentationTool = () => {
   const referenceFileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileSelect = useCallback((file: File | null, type: 'source' | 'reference') => {
-    if (file && file.type.startsWith('image/')) {
-      if (type === 'source') {
-        setSourceFile(file);
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          const img = new Image();
-          img.onload = () => {
-              setImageDimensions({ width: img.width, height: img.height });
-              setSourcePreview(e.target?.result as string);
-          };
-          img.src = e.target?.result as string;
+    if (!file || !file.type.startsWith('image/')) return;
+
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+        const img = new Image();
+        img.src = event.target?.result as string;
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return;
+            ctx.drawImage(img, 0, 0);
+            const pngDataUrl = canvas.toDataURL('image/png');
+            const pngBase64 = pngDataUrl.split(',')[1];
+
+            if (type === 'source') {
+                setSourceFile(file);
+                setSourcePreview(pngDataUrl);
+                setSourcePngBase64(pngBase64);
+                setImageDimensions({ width: img.naturalWidth, height: img.naturalHeight });
+            } else {
+                setReferenceFile(file);
+                setReferencePreview(pngDataUrl);
+                setReferencePngBase64(pngBase64);
+            }
         };
-        reader.readAsDataURL(file);
-      } else {
-        setReferenceFile(file);
-        setReferencePreview(URL.createObjectURL(file));
-      }
-    }
+    };
   }, []);
 
   const { dropzoneProps: sourceDropzoneProps, isDraggingOver: isDraggingOverSource } = useDropzone({
@@ -63,7 +67,7 @@ const SegmentationTool = () => {
   });
 
   const handleSegment = async () => {
-    if (!sourceFile) {
+    if (!sourceFile || !sourcePngBase64) {
       showError("Please upload a source image first.");
       return;
     }
@@ -74,16 +78,13 @@ const SegmentationTool = () => {
     const toastId = showLoading("Starting segmentation process... This may take a moment.");
 
     try {
-      const sourceBase64 = await fileToBase64(sourceFile);
-      const referenceBase64 = referenceFile ? await fileToBase64(referenceFile) : null;
-
       const { data, error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-segmentation', {
         body: {
           user_id: session?.user.id,
-          image_base64: sourceBase64,
-          mime_type: sourceFile.type,
-          reference_image_base64: referenceBase64,
-          reference_mime_type: referenceFile?.type,
+          image_base64: sourcePngBase64,
+          mime_type: 'image/png', // Always sending PNG now
+          reference_image_base64: referencePngBase64,
+          reference_mime_type: referenceFile ? 'image/png' : null,
           image_dimensions: imageDimensions,
         }
       });
