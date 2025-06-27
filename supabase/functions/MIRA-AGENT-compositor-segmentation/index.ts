@@ -13,6 +13,16 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+function logMemoryUsage(step: string, requestId: string) {
+    try {
+        const memory = Deno.memoryUsage();
+        const heapUsedMb = (memory.heapUsed / 1024 / 1024).toFixed(2);
+        console.log(`[Compositor][${requestId}] Memory after step "${step}": Heap usage is ${heapUsedMb} MB`);
+    } catch (e) {
+        console.warn(`[Compositor][${requestId}] Could not read memory usage: ${e.message}`);
+    }
+}
+
 async function uploadBufferToStorage(supabase: SupabaseClient, buffer: Uint8Array, userId: string, filename: string): Promise<string> {
     const filePath = `${userId}/segmentation-debug/${Date.now()}-${filename}`;
     const { error } = await supabase.storage
@@ -28,16 +38,29 @@ function expandMask(canvas: Canvas, expansionPercent: number) {
     const ctx = canvas.getContext('2d');
     const expansionAmount = Math.round(Math.min(canvas.width, canvas.height) * expansionPercent);
     if (expansionAmount <= 0) return;
+    
+    // Create a temporary canvas to draw the blurred shadow onto
     const tempCanvas = createCanvas(canvas.width, canvas.height);
     const tempCtx = tempCanvas.getContext('2d');
+    
+    // Draw the original mask onto the temp canvas
     tempCtx.drawImage(canvas, 0, 0);
+    
+    // Clear the main canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Configure the shadow (the blur effect)
     ctx.shadowColor = 'white';
     ctx.shadowBlur = expansionAmount;
+    
+    // Draw the temp canvas image onto the main canvas. The shadow will be drawn "under" it.
     ctx.drawImage(tempCanvas, 0, 0);
-    ctx.shadowBlur = 0;
+    
+    // To make the expansion solid, draw the original mask again on top of the shadow
+    ctx.shadowBlur = 0; // Turn off the shadow for the next draw
     ctx.drawImage(tempCanvas, 0, 0);
 }
+
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -45,12 +68,14 @@ serve(async (req) => {
   }
 
   const { job_id } = await req.json();
+  const requestId = `compositor-${job_id}`;
   if (!job_id) {
     return new Response(JSON.stringify({ error: "job_id is required." }), { status: 400, headers: corsHeaders });
   }
 
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-  console.log(`[Compositor][${job_id}] Starting composition...`);
+  console.log(`[Compositor][${requestId}] Starting composition...`);
+  logMemoryUsage("Init", requestId);
 
   try {
     const { data: job, error: fetchError } = await supabase
@@ -62,17 +87,21 @@ serve(async (req) => {
     if (fetchError) throw fetchError;
     if (!job) throw new Error("Job not found.");
     if (job.status !== 'compositing') {
-        console.warn(`[Compositor][${job.id}] Job status is '${job.status}', not 'compositing'. Halting.`);
+        console.warn(`[Compositor][${requestId}] Job status is '${job.status}', not 'compositing'. Halting.`);
         return new Response(JSON.stringify({ message: "Job not ready for composition." }), { headers: corsHeaders });
     }
+    logMemoryUsage("Fetch Job", requestId);
 
     const results = job.results || [];
     const validMasks = results.flat().filter((mask: any) => mask && !mask.error && mask.mask && typeof mask.mask === 'string' && mask.box_2d);
     if (validMasks.length === 0) throw new Error("No valid mask data found in any of the segmentation runs.");
     
+    console.log(`[Compositor][${requestId}] Found ${validMasks.length} valid masks to process.`);
     const accumulator = new Uint8Array(job.source_image_dimensions.width * job.source_image_dimensions.height);
 
-    for (const maskData of validMasks) {
+    for (let i = 0; i < validMasks.length; i++) {
+      const maskData = validMasks[i];
+      console.log(`[Compositor][${requestId}] Processing mask ${i + 1}/${validMasks.length}...`);
       try {
         let base64Data = maskData.mask.startsWith('data:') ? maskData.mask.split(',')[1] : maskData.mask;
         const imageBuffer = decodeBase64(base64Data);
@@ -86,20 +115,23 @@ serve(async (req) => {
         const tempCanvas = createCanvas(job.source_image_dimensions.width, job.source_image_dimensions.height);
         tempCanvas.getContext('2d').drawImage(maskImg, absX0, absY0, bboxWidth, bboxHeight);
         const imageData = tempCanvas.getContext('2d').getImageData(0, 0, job.source_image_dimensions.width, job.source_image_dimensions.height).data;
-        for (let i = 0; i < imageData.length; i += 4) {
-          if (imageData[i] > 128) accumulator[i / 4]++;
+        for (let j = 0; j < imageData.length; j += 4) {
+          if (imageData[j] > 128) accumulator[j / 4]++;
         }
       } catch (e) {
-          console.warn(`[Compositor][${job.id}] Skipping one mask due to processing error:`, e.message);
+          console.warn(`[Compositor][${requestId}] Skipping one mask due to processing error:`, e.message);
       }
+      logMemoryUsage(`Process Mask ${i+1}`, requestId);
     }
 
+    console.log(`[Compositor][${requestId}] Mask processing loop complete. Creating final canvas.`);
     const combinedCanvas = createCanvas(job.source_image_dimensions.width, job.source_image_dimensions.height);
     const combinedCtx = combinedCanvas.getContext('2d');
     const combinedImageData = combinedCtx.createImageData(job.source_image_dimensions.width, job.source_image_dimensions.height);
     const combinedData = combinedImageData.data;
     
     const majorityThreshold = Math.floor(NUM_WORKERS / 2.5);
+    console.log(`[Compositor][${requestId}] Using majority threshold of ${majorityThreshold}.`);
     for (let i = 0; i < accumulator.length; i++) {
       if (accumulator[i] >= majorityThreshold) {
         const idx = i * 4;
@@ -107,11 +139,15 @@ serve(async (req) => {
       }
     }
     combinedCtx.putImageData(combinedImageData, 0, 0);
-    
+    logMemoryUsage("Create Final Canvas", requestId);
+
     const rawMaskUrl = await uploadBufferToStorage(supabase, combinedCanvas.toBuffer('image/png'), job.user_id, 'raw_combined_mask.png');
+    console.log(`[Compositor][${requestId}] Raw mask uploaded. Now expanding...`);
     
     expandMask(combinedCanvas, 0.03);
+    logMemoryUsage("Expand Mask", requestId);
     const expandedMaskUrl = await uploadBufferToStorage(supabase, combinedCanvas.toBuffer('image/png'), job.user_id, 'expanded_final_mask.png');
+    console.log(`[Compositor][${requestId}] Expanded mask uploaded. Updating database records.`);
 
     const { data: parentPairJob, error: parentFetchError } = await supabase
         .from('mira-agent-batch-inpaint-pair-jobs')
@@ -119,7 +155,7 @@ serve(async (req) => {
         .eq('metadata->>aggregation_job_id', job.id)
         .maybeSingle();
 
-    if (parentFetchError) console.error(`[Compositor][${job.id}] Error finding parent pair job:`, parentFetchError.message);
+    if (parentFetchError) console.error(`[Compositor][${requestId}] Error finding parent pair job:`, parentFetchError.message);
     else if (parentPairJob) {
         const newMetadata = { ...parentPairJob.metadata, debug_assets: { raw_mask_url: rawMaskUrl, expanded_mask_url: expandedMaskUrl } };
         await supabase.from('mira-agent-batch-inpaint-pair-jobs').update({ metadata: newMetadata }).eq('id', parentPairJob.id);
@@ -128,13 +164,15 @@ serve(async (req) => {
     await supabase.from('mira-agent-mask-aggregation-jobs').update({ status: 'complete', final_mask_base64: expandedMaskUrl, source_image_base64: null }).eq('id', job.id);
     
     if (parentPairJob) {
+        console.log(`[Compositor][${requestId}] Triggering Step 2 worker for parent job ${parentPairJob.id}.`);
         await supabase.functions.invoke('MIRA-AGENT-worker-batch-inpaint-step2', { body: { pair_job_id: parentPairJob.id, final_mask_url: expandedMaskUrl } });
     }
 
+    console.log(`[Compositor][${requestId}] Composition complete.`);
     return new Response(JSON.stringify({ success: true, finalMaskUrl: expandedMaskUrl }), { headers: corsHeaders });
 
   } catch (error) {
-    console.error(`[Compositor][${job_id}] Error:`, error);
+    console.error(`[Compositor][${requestId}] Error:`, error);
     await supabase.from('mira-agent-mask-aggregation-jobs').update({ status: 'failed', error_message: error.message }).eq('id', job_id);
     return new Response(JSON.stringify({ error: error.message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
   }
