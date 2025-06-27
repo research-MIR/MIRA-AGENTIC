@@ -1,4 +1,3 @@
-import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { createCanvas, loadImage, Canvas } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
 import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
@@ -6,7 +5,7 @@ import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
-const NUM_WORKERS = 5; // Must match the orchestrator
+const NUM_WORKERS = 5;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -39,32 +38,21 @@ function expandMask(canvas: Canvas, expansionPercent: number) {
     const expansionAmount = Math.round(Math.min(canvas.width, canvas.height) * expansionPercent);
     if (expansionAmount <= 0) return;
     
-    // Create a temporary canvas to draw the blurred shadow onto
     const tempCanvas = createCanvas(canvas.width, canvas.height);
     const tempCtx = tempCanvas.getContext('2d');
     
-    // Draw the original mask onto the temp canvas
     tempCtx.drawImage(canvas, 0, 0);
-    
-    // Clear the main canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
-    // Configure the shadow (the blur effect)
     ctx.shadowColor = 'white';
     ctx.shadowBlur = expansionAmount;
-    
-    // Draw the temp canvas image onto the main canvas. The shadow will be drawn "under" it.
     ctx.drawImage(tempCanvas, 0, 0);
-    
-    // To make the expansion solid, draw the original mask again on top of the shadow
-    ctx.shadowBlur = 0; // Turn off the shadow for the next draw
+    ctx.shadowBlur = 0;
     ctx.drawImage(tempCanvas, 0, 0);
 }
 
-
-serve(async (req) => {
+export default async (req: Request): Promise<Response> => {
   if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
+    return new Response('ok', { headers: corsHeaders });
   }
 
   const { job_id } = await req.json();
@@ -174,6 +162,9 @@ serve(async (req) => {
   } catch (error) {
     console.error(`[Compositor][${requestId}] Error:`, error);
     await supabase.from('mira-agent-mask-aggregation-jobs').update({ status: 'failed', error_message: error.message }).eq('id', job_id);
-    return new Response(JSON.stringify({ error: error.message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
+    return new Response(JSON.stringify({ error: error.message }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      status: 500,
+    });
   }
-});
+};
