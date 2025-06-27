@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { Image } from 'https://deno.land/x/imagescript@1.2.15/mod.ts';
+import { createCanvas, loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
 import { decodeBase64, encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const corsHeaders = {
@@ -60,11 +60,15 @@ serve(async (req) => {
     console.log(`[Compositor][${requestId}] Job data fetched. Source base64 length: ${job.source_image_base64.length}`);
 
     const sourceImageBuffer = decodeBase64(job.source_image_base64);
-    const sourceImage = await Image.decode(sourceImageBuffer);
+    const sourceImage = await loadImage(sourceImageBuffer);
     const { width, height } = sourceImage;
-    console.log(`[Compositor][${requestId}] Source image decoded. Dimensions: ${width}x${height}`);
+    console.log(`[Compositor][${requestId}] Source image decoded with canvas. Dimensions: ${width}x${height}`);
     
-    const finalMask = new Image(width, height).fill(0x000000FF); // Fill with black
+    const finalMaskCanvas = createCanvas(width, height);
+    const finalMaskCtx = finalMaskCanvas.getContext('2d');
+    finalMaskCtx.fillStyle = 'black';
+    finalMaskCtx.fillRect(0, 0, width, height);
+    console.log(`[Compositor][${requestId}] Created final mask canvas.`);
 
     const allMasks = (job.results || []).flat().filter((item: any) => item && item.mask && item.box_2d);
     console.log(`[Compositor][${requestId}] Found ${allMasks.length} valid masks to process.`);
@@ -76,7 +80,7 @@ serve(async (req) => {
                 ? maskData.mask.split(',')[1] 
                 : maskData.mask;
             const maskImageBuffer = decodeBase64(maskBase64);
-            const maskImage = await Image.decode(maskImageBuffer);
+            const maskImage = await loadImage(maskImageBuffer);
             
             const [y0, x0, y1, x1] = maskData.box_2d;
             const absX0 = Math.floor((x0 / 1000) * width);
@@ -85,20 +89,29 @@ serve(async (req) => {
             const bboxHeight = Math.ceil(((y1 - y0) / 1000) * height);
 
             if (bboxWidth > 0 && bboxHeight > 0) {
-                maskImage.resize(bboxWidth, bboxHeight);
-                finalMask.composite(maskImage, absX0, absY0);
+                finalMaskCtx.drawImage(maskImage, absX0, absY0, bboxWidth, bboxHeight);
             } else {
                 console.warn(`[Compositor][${requestId}] Mask ${index + 1} has invalid dimensions (${bboxWidth}x${bboxHeight}). Skipping.`);
             }
         } catch (maskError) {
             console.error(`[Compositor][${requestId}] Failed to process mask ${index + 1}:`, maskError.message);
-            // Continue to the next mask instead of failing the whole job
         }
         console.timeEnd(`[Compositor][${requestId}] Mask ${index + 1}`);
     }
-    console.log(`[Compositor][${requestId}] All individual masks have been composited onto the final mask.`);
+    console.log(`[Compositor][${requestId}] All individual masks have been drawn onto the final mask canvas.`);
 
-    const finalMaskBuffer = await finalMask.encode(0); // 0 for PNG
+    const finalImageData = finalMaskCtx.getImageData(0, 0, width, height);
+    const data = finalImageData.data;
+    for (let i = 0; i < data.length; i += 4) {
+        if (data[i] > 0 || data[i+1] > 0 || data[i+2] > 0) {
+            data[i] = 255; data[i+1] = 255; data[i+2] = 255;
+        }
+        data[i+3] = 255;
+    }
+    finalMaskCtx.putImageData(finalImageData, 0, 0);
+    console.log(`[Compositor][${requestId}] Final mask canvas processed to be pure B&W.`);
+
+    const finalMaskBuffer = finalMaskCanvas.toBuffer('image/png');
     const finalMaskBase64 = encodeBase64(finalMaskBuffer);
     console.log(`[Compositor][${requestId}] Final mask encoded to PNG buffer. Length: ${finalMaskBuffer.length}`);
 
