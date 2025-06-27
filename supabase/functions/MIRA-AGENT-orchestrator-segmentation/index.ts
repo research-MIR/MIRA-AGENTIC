@@ -1,5 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { Image } from 'https://deno.land/x/imagescript@1.2.15/mod.ts';
+import { decodeBase64, encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
@@ -31,13 +33,22 @@ serve(async (req) => {
       throw new Error("Missing required parameters for new job.");
     }
 
+    // --- Image Standardization Step ---
+    console.log(`[Orchestrator][${requestId}] Standardizing source image to PNG format...`);
+    const originalImageBuffer = decodeBase64(image_base64);
+    const image = await Image.decode(originalImageBuffer);
+    const pngBuffer = await image.encode(0); // 0 for PNG format
+    const pngBase64 = encodeBase64(pngBuffer);
+    console.log(`[Orchestrator][${requestId}] Image successfully standardized to PNG.`);
+    // --- End Standardization ---
+
     const { data: newJob, error: insertError } = await supabase
       .from('mira-agent-mask-aggregation-jobs')
       .insert({ 
           user_id, 
           status: 'aggregating',
           source_image_dimensions: image_dimensions,
-          source_image_base64: image_base64, // Store the base64 for workers
+          source_image_base64: pngBase64, // Store the standardized PNG
           results: [] 
       })
       .select('id')
@@ -52,7 +63,7 @@ serve(async (req) => {
         const promise = supabase.functions.invoke('MIRA-AGENT-worker-segmentation', {
             body: {
                 aggregation_job_id: aggregationJobId,
-                mime_type,
+                mime_type: 'image/png', // Pass the new, standardized mime type
                 reference_image_base64,
                 reference_mime_type,
             }
