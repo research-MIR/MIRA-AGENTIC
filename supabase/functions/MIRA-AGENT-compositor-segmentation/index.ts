@@ -134,7 +134,7 @@ serve(async (req) => {
         .from('mira-agent-batch-inpaint-pair-jobs')
         .select('id')
         .eq('metadata->>aggregation_job_id', aggregationJobId)
-        .single();
+        .maybeSingle();
 
     if (parentFetchError) {
         console.warn(`[Compositor][${requestId}] Could not check for parent job: ${parentFetchError.message}`);
