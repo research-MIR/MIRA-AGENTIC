@@ -65,6 +65,8 @@ export default async (req: Request): Promise<Response> => {
   console.log(`[Compositor][${requestId}] Starting composition...`);
   logMemoryUsage("Init", requestId);
 
+  let combinedCanvas: Canvas | null = null;
+
   try {
     const { data: job, error: fetchError } = await supabase
       .from('mira-agent-mask-aggregation-jobs')
@@ -113,7 +115,7 @@ export default async (req: Request): Promise<Response> => {
     }
 
     console.log(`[Compositor][${requestId}] Mask processing loop complete. Creating final canvas.`);
-    const combinedCanvas = createCanvas(job.source_image_dimensions.width, job.source_image_dimensions.height);
+    combinedCanvas = createCanvas(job.source_image_dimensions.width, job.source_image_dimensions.height);
     const combinedCtx = combinedCanvas.getContext('2d');
     const combinedImageData = combinedCtx.createImageData(job.source_image_dimensions.width, job.source_image_dimensions.height);
     const combinedData = combinedImageData.data;
@@ -166,5 +168,12 @@ export default async (req: Request): Promise<Response> => {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,
     });
+  } finally {
+    // Attempt to manually clean up canvas resources
+    if (combinedCanvas) {
+        combinedCanvas.width = 0;
+        combinedCanvas.height = 0;
+        console.log(`[Compositor][${requestId}] Final canvas resources cleaned up.`);
+    }
   }
 };
