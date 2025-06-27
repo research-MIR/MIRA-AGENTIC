@@ -55,22 +55,17 @@ export default async (req: Request): Promise<Response> => {
     return new Response('ok', { headers: corsHeaders });
   }
 
-  let job_id: string | null = null;
-  let requestId = `compositor-unknown-${Date.now()}`;
+  const { job_id } = await req.json();
+  const requestId = `compositor-${job_id}`;
+  if (!job_id) {
+    return new Response(JSON.stringify({ error: "job_id is required." }), { status: 400, headers: corsHeaders });
+  }
+
+  const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
+  console.log(`[Compositor][${requestId}] Starting composition...`);
+  logMemoryUsage("Init", requestId);
 
   try {
-    const body = await req.json();
-    job_id = body.job_id;
-    requestId = `compositor-${job_id}`;
-
-    if (!job_id) {
-      throw new Error("job_id is required.");
-    }
-
-    const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-    console.log(`[Compositor][${requestId}] Starting composition...`);
-    logMemoryUsage("Init", requestId);
-
     const { data: job, error: fetchError } = await supabase
       .from('mira-agent-mask-aggregation-jobs')
       .select('*')
@@ -166,10 +161,7 @@ export default async (req: Request): Promise<Response> => {
 
   } catch (error) {
     console.error(`[Compositor][${requestId}] Error:`, error);
-    if (job_id) {
-        const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-        await supabase.from('mira-agent-mask-aggregation-jobs').update({ status: 'failed', error_message: error.message }).eq('id', job_id);
-    }
+    await supabase.from('mira-agent-mask-aggregation-jobs').update({ status: 'failed', error_message: error.message }).eq('id', job_id);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,
