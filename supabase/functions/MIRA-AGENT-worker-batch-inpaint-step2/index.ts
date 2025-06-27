@@ -55,7 +55,8 @@ serve(async (req) => {
     if (fetchError) throw new Error(`Failed to fetch pair job: ${fetchError.message}`);
     if (!pairJob) throw new Error(`Pair job with ID ${pair_job_id} not found.`);
 
-    const { user_id, source_person_image_url, source_garment_image_url, prompt_appendix } = pairJob;
+    const { user_id, source_person_image_url, source_garment_image_url, prompt_appendix, metadata } = pairJob;
+    const debug_assets = metadata?.debug_assets || null;
 
     const [personBlob, garmentBlob] = await Promise.all([
         downloadFromSupabase(supabase, source_person_image_url),
@@ -92,7 +93,8 @@ serve(async (req) => {
             resolution: 'standard',
             mask_expansion_percent: 3,
             num_attempts: 1,
-            batch_pair_job_id: pair_job_id
+            batch_pair_job_id: pair_job_id,
+            debug_assets: debug_assets
         }
     });
     if (proxyError) throw new Error(`Job queuing failed: ${proxyError.message}`);

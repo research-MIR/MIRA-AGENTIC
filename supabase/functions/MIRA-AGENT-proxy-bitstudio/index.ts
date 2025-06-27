@@ -94,7 +94,8 @@ serve(async (req) => {
       let { 
         full_source_image_base64, mask_image_base64, mask_image_url, prompt, reference_image_base64, 
         is_garment_mode,
-        num_attempts = 1, denoise = 1.0, mask_expansion_percent = 2 
+        num_attempts = 1, denoise = 1.0, mask_expansion_percent = 2,
+        debug_assets
       } = body;
       
       console.log(`[BitStudioProxy][${requestId}] Inpaint mode received with prompt: "${prompt ? prompt.substring(0, 30) + '...' : 'N/A'}", Denoise: ${denoise}, Has Reference: ${!!reference_image_base64}`);
@@ -288,6 +289,7 @@ serve(async (req) => {
           cropped_dilated_mask_base64: croppedDilatedMaskBase64,
           bbox,
           prompt_used: prompt,
+          debug_assets: debug_assets || {}
         };
 
         const { data: newJob, error: insertError } = await supabase.from('mira-agent-bitstudio-jobs').insert({

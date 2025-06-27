@@ -14,7 +14,7 @@ const corsHeaders = {
 };
 
 async function uploadBufferToStorage(supabase: SupabaseClient, buffer: Uint8Array, userId: string, filename: string): Promise<string> {
-    const filePath = `${userId}/segmentation-final/${Date.now()}-${filename}`;
+    const filePath = `${userId}/segmentation-debug/${Date.now()}-${filename}`;
     const { error } = await supabase.storage
       .from(GENERATED_IMAGES_BUCKET)
       .upload(filePath, buffer, { contentType: 'image/png', upsert: true });
@@ -67,47 +67,25 @@ serve(async (req) => {
     }
 
     const results = job.results || [];
-    console.log(`[Compositor][${job_id}] Raw results from database:`, JSON.stringify(results, null, 2));
-
-    const flattenedResults = results.flat();
-    const validMasks = flattenedResults.filter((mask: any) => 
-        mask && 
-        !mask.error && 
-        mask.mask &&
-        typeof mask.mask === 'string' &&
-        mask.box_2d
-    );
-    console.log(`[Compositor][${job_id}] Found ${validMasks.length} valid masks after filtering.`);
-
+    const validMasks = results.flat().filter((mask: any) => mask && !mask.error && mask.mask && typeof mask.mask === 'string' && mask.box_2d);
     if (validMasks.length === 0) throw new Error("No valid mask data found in any of the segmentation runs.");
     
     const accumulator = new Uint8Array(job.source_image_dimensions.width * job.source_image_dimensions.height);
 
     for (const maskData of validMasks) {
       try {
-        let base64Data = maskData.mask;
-        if (base64Data.startsWith('data:image/png;base64,')) {
-            base64Data = base64Data.split(',')[1];
-        }
+        let base64Data = maskData.mask.startsWith('data:') ? maskData.mask.split(',')[1] : maskData.mask;
         const imageBuffer = decodeBase64(base64Data);
         const maskImg = await loadImage(imageBuffer);
-
-        let box = maskData.box_2d;
-        if (Array.isArray(box[0])) { // Check for nested array
-            box = [box[0][0], box[0][1], box[1][0], box[1][1]];
-        }
-        const [y0, x0, y1, x1] = box;
-
+        const [y0, x0, y1, x1] = Array.isArray(maskData.box_2d[0]) ? [maskData.box_2d[0][0], maskData.box_2d[0][1], maskData.box_2d[1][0], maskData.box_2d[1][1]] : maskData.box_2d;
         const absX0 = Math.floor((x0 / 1000) * job.source_image_dimensions.width);
         const absY0 = Math.floor((y0 / 1000) * job.source_image_dimensions.height);
         const bboxWidth = Math.ceil(((x1 - x0) / 1000) * job.source_image_dimensions.width);
         const bboxHeight = Math.ceil(((y1 - y0) / 1000) * job.source_image_dimensions.height);
         
         const tempCanvas = createCanvas(job.source_image_dimensions.width, job.source_image_dimensions.height);
-        const tempCtx = tempCanvas.getContext('2d');
-        tempCtx.drawImage(maskImg, absX0, absY0, bboxWidth, bboxHeight);
-        
-        const imageData = tempCtx.getImageData(0, 0, job.source_image_dimensions.width, job.source_image_dimensions.height).data;
+        tempCanvas.getContext('2d').drawImage(maskImg, absX0, absY0, bboxWidth, bboxHeight);
+        const imageData = tempCanvas.getContext('2d').getImageData(0, 0, job.source_image_dimensions.width, job.source_image_dimensions.height).data;
         for (let i = 0; i < imageData.length; i += 4) {
           if (imageData[i] > 128) accumulator[i / 4]++;
         }
@@ -130,62 +108,34 @@ serve(async (req) => {
     }
     combinedCtx.putImageData(combinedImageData, 0, 0);
     
+    const rawMaskUrl = await uploadBufferToStorage(supabase, combinedCanvas.toBuffer('image/png'), job.user_id, 'raw_combined_mask.png');
+    
     expandMask(combinedCanvas, 0.03);
-
-    const finalImageBuffer = combinedCanvas.toBuffer('image/png');
-    const finalPublicUrl = await uploadBufferToStorage(supabase, finalImageBuffer, job.user_id, 'final_mask.png');
-
-    await supabase.from('mira-agent-mask-aggregation-jobs')
-      .update({ status: 'complete', final_mask_base64: finalPublicUrl, source_image_base64: null })
-      .eq('id', job.id);
-    console.log(`[Compositor][${job.id}] Composition successful. Job complete and source image cleaned up.`);
+    const expandedMaskUrl = await uploadBufferToStorage(supabase, combinedCanvas.toBuffer('image/png'), job.user_id, 'expanded_final_mask.png');
 
     const { data: parentPairJob, error: parentFetchError } = await supabase
         .from('mira-agent-batch-inpaint-pair-jobs')
-        .select('id')
+        .select('id, metadata')
         .eq('metadata->>aggregation_job_id', job.id)
         .maybeSingle();
 
-    if (parentFetchError) {
-        console.error(`[Compositor][${job.id}] Error checking for parent batch job:`, parentFetchError.message);
+    if (parentFetchError) console.error(`[Compositor][${job.id}] Error finding parent pair job:`, parentFetchError.message);
+    else if (parentPairJob) {
+        const newMetadata = { ...parentPairJob.metadata, debug_assets: { raw_mask_url: rawMaskUrl, expanded_mask_url: expandedMaskUrl } };
+        await supabase.from('mira-agent-batch-inpaint-pair-jobs').update({ metadata: newMetadata }).eq('id', parentPairJob.id);
     }
 
+    await supabase.from('mira-agent-mask-aggregation-jobs').update({ status: 'complete', final_mask_base64: expandedMaskUrl, source_image_base64: null }).eq('id', job.id);
+    
     if (parentPairJob) {
-        console.log(`[Compositor][${job.id}] Found parent batch job ${parentPairJob.id}. Triggering step 2 worker.`);
-        await supabase.from('mira-agent-batch-inpaint-pair-jobs')
-            .update({ status: 'segmented' })
-            .eq('id', parentPairJob.id);
-        
-        try {
-            console.log(`[Compositor][${job.id}] Awaiting invocation of MIRA-AGENT-worker-batch-inpaint-step2...`);
-            const { data: workerData, error: invokeError } = await supabase.functions.invoke('MIRA-AGENT-worker-batch-inpaint-step2', {
-                body: {
-                    pair_job_id: parentPairJob.id,
-                    final_mask_url: finalPublicUrl
-                }
-            });
-
-            if (invokeError) {
-                throw invokeError;
-            }
-            console.log(`[Compositor][${job.id}] Worker invocation successful. Response:`, workerData);
-
-        } catch (e) {
-            console.error(`[Compositor][${job.id}] CRITICAL: Invocation of worker failed. Error:`, e.message);
-            await supabase.from('mira-agent-batch-inpaint-pair-jobs')
-                .update({ status: 'failed', error_message: `Failed to invoke step 2 worker: ${e.message}` })
-                .eq('id', parentPairJob.id);
-        }
+        await supabase.functions.invoke('MIRA-AGENT-worker-batch-inpaint-step2', { body: { pair_job_id: parentPairJob.id, final_mask_url: expandedMaskUrl } });
     }
 
-    return new Response(JSON.stringify({ success: true, finalMaskUrl: finalPublicUrl }), { headers: corsHeaders });
+    return new Response(JSON.stringify({ success: true, finalMaskUrl: expandedMaskUrl }), { headers: corsHeaders });
 
   } catch (error) {
     console.error(`[Compositor][${job_id}] Error:`, error);
     await supabase.from('mira-agent-mask-aggregation-jobs').update({ status: 'failed', error_message: error.message }).eq('id', job_id);
-    return new Response(JSON.stringify({ error: error.message }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 500,
-    });
+    return new Response(JSON.stringify({ error: error.message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
   }
 });
