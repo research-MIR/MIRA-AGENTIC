@@ -43,6 +43,7 @@ serve(async (req) => {
     
     const requestId = `compositor-${aggregationJobId}`;
     console.log(`[Compositor][${requestId}] Function invoked.`);
+    console.time(`[Compositor][${requestId}] Full Process`);
 
     console.time(`[Compositor][${requestId}] Fetch Job from DB`);
     const { data: job, error: fetchError } = await supabase
@@ -56,38 +57,50 @@ serve(async (req) => {
     if (!job || !job.source_image_base64) {
       throw new Error("Job data or source image is missing.");
     }
+    console.log(`[Compositor][${requestId}] Job data fetched. Source base64 length: ${job.source_image_base64.length}`);
 
     const sourceImageBuffer = decodeBase64(job.source_image_base64);
     const sourceImage = await Image.decode(sourceImageBuffer);
     const { width, height } = sourceImage;
+    console.log(`[Compositor][${requestId}] Source image decoded. Dimensions: ${width}x${height}`);
     
     const finalMask = new Image(width, height).fill(0x000000FF); // Fill with black
 
     const allMasks = (job.results || []).flat().filter((item: any) => item && item.mask && item.box_2d);
     console.log(`[Compositor][${requestId}] Found ${allMasks.length} valid masks to process.`);
 
-    for (const maskData of allMasks) {
-        const maskBase64 = maskData.mask.startsWith('data:image/png;base64,') 
-            ? maskData.mask.split(',')[1] 
-            : maskData.mask;
-        const maskImageBuffer = decodeBase64(maskBase64);
-        const maskImage = await Image.decode(maskImageBuffer);
-        
-        const [y0, x0, y1, x1] = maskData.box_2d;
-        const absX0 = Math.floor((x0 / 1000) * width);
-        const absY0 = Math.floor((y0 / 1000) * height);
-        const bboxWidth = Math.ceil(((x1 - x0) / 1000) * width);
-        const bboxHeight = Math.ceil(((y1 - y0) / 1000) * height);
+    for (const [index, maskData] of allMasks.entries()) {
+        console.time(`[Compositor][${requestId}] Mask ${index + 1}`);
+        try {
+            const maskBase64 = maskData.mask.startsWith('data:image/png;base64,') 
+                ? maskData.mask.split(',')[1] 
+                : maskData.mask;
+            const maskImageBuffer = decodeBase64(maskBase64);
+            const maskImage = await Image.decode(maskImageBuffer);
+            
+            const [y0, x0, y1, x1] = maskData.box_2d;
+            const absX0 = Math.floor((x0 / 1000) * width);
+            const absY0 = Math.floor((y0 / 1000) * height);
+            const bboxWidth = Math.ceil(((x1 - x0) / 1000) * width);
+            const bboxHeight = Math.ceil(((y1 - y0) / 1000) * height);
 
-        if (bboxWidth > 0 && bboxHeight > 0) {
-            maskImage.resize(bboxWidth, bboxHeight);
-            finalMask.composite(maskImage, absX0, absY0);
+            if (bboxWidth > 0 && bboxHeight > 0) {
+                maskImage.resize(bboxWidth, bboxHeight);
+                finalMask.composite(maskImage, absX0, absY0);
+            } else {
+                console.warn(`[Compositor][${requestId}] Mask ${index + 1} has invalid dimensions (${bboxWidth}x${bboxHeight}). Skipping.`);
+            }
+        } catch (maskError) {
+            console.error(`[Compositor][${requestId}] Failed to process mask ${index + 1}:`, maskError.message);
+            // Continue to the next mask instead of failing the whole job
         }
+        console.timeEnd(`[Compositor][${requestId}] Mask ${index + 1}`);
     }
     console.log(`[Compositor][${requestId}] All individual masks have been composited onto the final mask.`);
 
     const finalMaskBuffer = await finalMask.encode(0); // 0 for PNG
     const finalMaskBase64 = encodeBase64(finalMaskBuffer);
+    console.log(`[Compositor][${requestId}] Final mask encoded to PNG buffer. Length: ${finalMaskBuffer.length}`);
 
     const finalMaskUrl = await uploadBufferToStorage(supabase, finalMaskBuffer, job.user_id, 'final_mask.png');
     if (!finalMaskUrl) {
@@ -117,7 +130,8 @@ serve(async (req) => {
             body: { pair_job_id: parentPairJob.id, final_mask_url: finalMaskUrl }
         });
     }
-
+    
+    console.timeEnd(`[Compositor][${requestId}] Full Process`);
     return new Response(JSON.stringify({ success: true, finalMaskUrl }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
