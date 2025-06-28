@@ -55,6 +55,16 @@ serve(async (req) => {
     if (fetchError) throw new Error(`Failed to fetch pair job: ${fetchError.message}`);
     if (!pairJob) throw new Error(`Pair job with ID ${pair_job_id} not found.`);
 
+    // --- SAFETY CHECK ---
+    if (pairJob.inpainting_job_id) {
+        console.warn(`[BatchInpaintWorker-Step2][${pair_job_id}] Safety check triggered. Inpainting job already exists (${pairJob.inpainting_job_id}). This is a duplicate invocation. Exiting gracefully.`);
+        return new Response(JSON.stringify({ success: true, message: "Duplicate invocation detected, exiting." }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            status: 200,
+        });
+    }
+    // --- END SAFETY CHECK ---
+
     const { user_id, source_person_image_url, source_garment_image_url, prompt_appendix, metadata } = pairJob;
     const debug_assets = metadata?.debug_assets || null;
 

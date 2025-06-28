@@ -122,14 +122,6 @@ serve(async (req) => {
     }
     console.log(`[Compositor][${requestId}] Final mask uploaded to: ${finalMaskUrl}`);
 
-    await supabase.from('mira-agent-mask-aggregation-jobs')
-      .update({ 
-          status: 'complete', 
-          final_mask_base64: finalMaskBase64,
-          metadata: { final_mask_url: finalMaskUrl }
-      })
-      .eq('id', aggregationJobId);
-
     const { data: parentPairJob, error: parentFetchError } = await supabase
         .from('mira-agent-batch-inpaint-pair-jobs')
         .select('id')
@@ -139,11 +131,19 @@ serve(async (req) => {
     if (parentFetchError) {
         console.warn(`[Compositor][${requestId}] Could not check for parent job: ${parentFetchError.message}`);
     } else if (parentPairJob) {
-        console.log(`[Compositor][${requestId}] Found parent batch job ${parentPairJob.id}. Triggering Step 2 worker.`);
+        console.log(`[Compositor][${requestId}] Found parent batch job ${parentPairJob.id}. Triggering Step 2 worker...`);
         await supabase.functions.invoke('MIRA-AGENT-worker-batch-inpaint-step2', {
             body: { pair_job_id: parentPairJob.id, final_mask_url: finalMaskUrl }
         });
     }
+
+    await supabase.from('mira-agent-mask-aggregation-jobs')
+      .update({ 
+          status: 'complete', 
+          final_mask_base64: finalMaskBase64,
+          metadata: { final_mask_url: finalMaskUrl }
+      })
+      .eq('id', aggregationJobId);
     
     console.timeEnd(`[Compositor][${requestId}] Full Process`);
     return new Response(JSON.stringify({ success: true, finalMaskUrl }), {
