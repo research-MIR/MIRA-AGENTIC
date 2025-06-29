@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Input } from "@/components/ui/input";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
-import { Wand2, Loader2, X, PlusCircle } from "lucide-react";
+import { Wand2, Loader2, X, PlusCircle, Shirt, Users, Link2, Sparkles } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
 import { cn } from "@/lib/utils";
 import { useDropzone } from "@/hooks/useDropzone";
@@ -12,6 +12,9 @@ import { useQueryClient } from "@tanstack/react-query";
 import { optimizeImage, sanitizeFilename } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Info } from "lucide-react";
 
 const ImageUploader = ({ onFileSelect, title, imageUrl, onClear }: { onFileSelect: (file: File) => void, title: string, imageUrl: string | null, onClear: () => void }) => {
     const inputRef = useRef<HTMLInputElement>(null);
@@ -39,10 +42,11 @@ export const BatchInpaintPro = () => {
     const { t } = useLanguage();
     const queryClient = useQueryClient();
 
-    const [precisePairs, setPrecisePairs] = useState<{ person: File, garment: File, appendix: string }[]>([]);
+    const [precisePairs, setPrecisePairs] = useState<{ person: File, garment: File, appendix: string, isHelperEnabled: boolean }[]>([]);
     const [tempPairPerson, setTempPairPerson] = useState<File | null>(null);
     const [tempPairGarment, setTempPairGarment] = useState<File | null>(null);
     const [tempPairAppendix, setTempPairAppendix] = useState("");
+    const [isHelperEnabled, setIsHelperEnabled] = useState(true);
     const [isLoading, setIsLoading] = useState(false);
 
     const uploadFile = async (file: File, type: 'person' | 'garment') => {
@@ -80,7 +84,7 @@ export const BatchInpaintPro = () => {
                     uploadFile(pair.person, 'person'),
                     uploadFile(pair.garment, 'garment')
                 ]);
-                return { person_url, garment_url, appendix: pair.appendix };
+                return { person_url, garment_url, appendix: pair.appendix, is_helper_enabled: pair.isHelperEnabled };
             });
 
             const uploadedPairs = await Promise.all(uploadPromises);
@@ -108,7 +112,7 @@ export const BatchInpaintPro = () => {
 
     const addPrecisePair = () => {
         if (tempPairPerson && tempPairGarment) {
-          setPrecisePairs(prev => [...prev, { person: tempPairPerson, garment: tempPairGarment, appendix: tempPairAppendix }]);
+          setPrecisePairs(prev => [...prev, { person: tempPairPerson, garment: tempPairGarment, appendix: tempPairAppendix, isHelperEnabled }]);
           setTempPairPerson(null);
           setTempPairGarment(null);
           setTempPairAppendix("");
@@ -132,6 +136,23 @@ export const BatchInpaintPro = () => {
                         <Label htmlFor="pair-appendix">{t('promptAppendixPair')}</Label>
                         <Input id="pair-appendix" value={tempPairAppendix} onChange={(e) => setTempPairAppendix(e.target.value)} placeholder={t('promptAppendixPairPlaceholder')} />
                     </div>
+                    <div className="flex items-center justify-between p-2 rounded-md bg-muted/50">
+                        <Label htmlFor="ai-prompt-helper" className="flex items-center gap-2">
+                            <Sparkles className="h-4 w-4 text-primary" />
+                            {t('aiPromptHelper')}
+                        </Label>
+                        <TooltipProvider>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Info className="h-4 w-4 text-muted-foreground cursor-help" />
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                    <p>{t('aiPromptHelperDescription')}</p>
+                                </TooltipContent>
+                            </Tooltip>
+                        </TooltipProvider>
+                        <Switch id="ai-prompt-helper" checked={isHelperEnabled} onCheckedChange={setIsHelperEnabled} />
+                    </div>
                     <Button className="w-full" onClick={addPrecisePair} disabled={!tempPairPerson || !tempPairGarment}>{t('addPair')}</Button>
                 </CardContent>
               </Card>
@@ -152,7 +173,10 @@ export const BatchInpaintPro = () => {
                             <img src={URL.createObjectURL(pair.person)} className="w-16 h-16 object-cover rounded-md" />
                             <PlusCircle className="h-5 w-5 text-muted-foreground" />
                             <img src={URL.createObjectURL(pair.garment)} className="w-16 h-16 object-cover rounded-md" />
-                            <p className="text-xs text-muted-foreground flex-1 truncate italic">"{pair.appendix}"</p>
+                            <div className="flex-1 overflow-hidden">
+                                <p className="text-xs text-muted-foreground truncate italic">"{pair.appendix}"</p>
+                                <p className="text-xs font-semibold">{pair.isHelperEnabled ? "AI Prompt: ON" : "AI Prompt: OFF"}</p>
+                            </div>
                             <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setPrecisePairs(p => p.filter((_, idx) => idx !== i))}><X className="h-4 w-4" /></Button>
                           </div>
                         ))}
@@ -168,4 +192,4 @@ export const BatchInpaintPro = () => {
             </div>
         </div>
     )
-};
+}

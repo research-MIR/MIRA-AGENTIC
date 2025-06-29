@@ -46,6 +46,7 @@ serve(async (req) => {
       source_person_image_url: pair.person_url,
       source_garment_image_url: pair.garment_url,
       prompt_appendix: pair.appendix,
+      metadata: { is_helper_enabled: pair.is_helper_enabled }
     }));
 
     const { error: pairsError } = await supabase

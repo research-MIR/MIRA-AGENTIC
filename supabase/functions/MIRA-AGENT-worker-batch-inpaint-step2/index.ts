@@ -55,7 +55,6 @@ serve(async (req) => {
     if (fetchError) throw new Error(`Failed to fetch pair job: ${fetchError.message}`);
     if (!pairJob) throw new Error(`Pair job with ID ${pair_job_id} not found.`);
 
-    // --- SAFETY CHECK ---
     if (pairJob.inpainting_job_id) {
         console.warn(`[BatchInpaintWorker-Step2][${pair_job_id}] Safety check triggered. Inpainting job already exists (${pairJob.inpainting_job_id}). This is a duplicate invocation. Exiting gracefully.`);
         return new Response(JSON.stringify({ success: true, message: "Duplicate invocation detected, exiting." }), {
@@ -63,42 +62,50 @@ serve(async (req) => {
             status: 200,
         });
     }
-    // --- END SAFETY CHECK ---
 
     const { user_id, source_person_image_url, source_garment_image_url, prompt_appendix, metadata } = pairJob;
     const debug_assets = metadata?.debug_assets || null;
+    const isHelperEnabled = metadata?.is_helper_enabled !== false; // Default to true
 
-    const [personBlob, garmentBlob] = await Promise.all([
-        downloadFromSupabase(supabase, source_person_image_url),
-        downloadFromSupabase(supabase, source_garment_image_url)
-    ]);
-    
-    const [personBase64, garmentBase64] = await Promise.all([
-        blobToBase64(personBlob),
-        blobToBase64(garmentBlob)
-    ]);
+    let finalPrompt = "";
 
-    const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-prompt-helper', {
-        body: {
-            person_image_base64: personBase64,
-            person_image_mime_type: personBlob.type,
-            garment_image_base64: garmentBase64,
-            garment_image_mime_type: garmentBlob.type,
-            prompt_appendix: prompt_appendix,
-            is_garment_mode: true,
-        }
-    });
-    if (promptError) throw new Error(`Prompt generation failed: ${promptError.message}`);
-    const finalPrompt = promptData.final_prompt;
+    if (isHelperEnabled) {
+        console.log(`[BatchInpaintWorker-Step2][${pair_job_id}] AI Prompt Helper is enabled. Generating prompt...`);
+        const [personBlob, garmentBlob] = await Promise.all([
+            downloadFromSupabase(supabase, source_person_image_url),
+            downloadFromSupabase(supabase, source_garment_image_url)
+        ]);
+        
+        const [personBase64, garmentBase64] = await Promise.all([
+            blobToBase64(personBlob),
+            blobToBase64(garmentBlob)
+        ]);
+
+        const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-prompt-helper', {
+            body: {
+                person_image_base64: personBase64,
+                person_image_mime_type: personBlob.type,
+                garment_image_base64: garmentBase64,
+                garment_image_mime_type: garmentBlob.type,
+                prompt_appendix: prompt_appendix,
+                is_garment_mode: true,
+            }
+        });
+        if (promptError) throw new Error(`Prompt generation failed: ${promptError.message}`);
+        finalPrompt = promptData.final_prompt;
+    } else {
+        console.log(`[BatchInpaintWorker-Step2][${pair_job_id}] AI Prompt Helper is disabled. Using empty prompt.`);
+        finalPrompt = prompt_appendix || ""; // Use appendix as prompt if helper is off
+    }
 
     const { data: proxyData, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
         body: {
             mode: 'inpaint',
             user_id: user_id,
-            full_source_image_base64: personBase64,
+            source_image_url: source_person_image_url, // Pass URLs directly
             mask_image_url: final_mask_url,
             prompt: finalPrompt,
-            reference_image_base64: garmentBase64,
+            reference_image_url: source_garment_image_url,
             denoise: 0.99,
             resolution: 'standard',
             mask_expansion_percent: 3,
@@ -111,7 +118,7 @@ serve(async (req) => {
     
     const inpaintingJobId = proxyData.jobIds[0];
     await supabase.from('mira-agent-batch-inpaint-pair-jobs')
-        .update({ status: 'delegated', inpainting_job_id: inpaintingJobId })
+        .update({ status: 'delegated', inpainting_job_id: inpaintingJobId, metadata: { ...metadata, prompt_used: finalPrompt } })
         .eq('id', pair_job_id);
 
     console.log(`[BatchInpaintWorker-Step2][${pair_job_id}] Inpainting job queued successfully. Inpainting Job ID: ${inpaintingJobId}`);
