@@ -110,6 +110,8 @@ Prima di tentare di nuovo, controlla se il tuo lavoro appare nella lista dei "Jo
 
 - **Se il risultato non è buono**, prova a disattivare l'interruttore "Assistente Prompt AI" e riprova.
 - **Se dopo altri 2-3 tentativi non funziona ancora**, fermati e chiedi assistenza.
+
+**Nota:** Il job potrebbe apparire nella lista dei "Job Recenti" anche dopo un minuto. Attendi prima di riprovare. Se non appare, chiedi assistenza.
     `,
     vtoProGuidanceButton: "Ho Capito!",
   },
@@ -224,6 +226,8 @@ Before trying again, please check if your job shows up in the "Recent Jobs" list
 
 - **If the result is not good**, try turning the "AI Prompt Helper" switch off and try again.
 - **If after another 2-3 tries it still does not work**, please stop and ask for assistance.
+
+**Note:** The job may appear in the "Recent Jobs" list after a minute. Please wait before trying again. If it doesn't appear, ask for assistance.
     `,
     vtoProGuidanceButton: "Got It!",
   },
