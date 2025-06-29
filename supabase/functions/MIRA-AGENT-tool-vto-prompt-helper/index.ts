@@ -15,44 +15,53 @@ const corsHeaders = {
 };
 
 const safetySettings = [
-    {
-      category: HarmCategory.HARM_CATEGORY_HARASSMENT,
-      threshold: HarmBlockThreshold.BLOCK_NONE,
-    },
-    {
-      category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-      threshold: HarmBlockThreshold.BLOCK_NONE,
-    },
-    {
-      category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-      threshold: HarmBlockThreshold.BLOCK_NONE,
-    },
-    {
-      category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-      threshold: HarmBlockThreshold.BLOCK_NONE,
-    },
+    { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+    { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+    { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+    { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
 ];
 
-const garmentSystemPrompt = `You are an expert fashion stylist and photo analyst. Your task is to combine two images and an optional user instruction into a single, coherent, and detailed text-to-image prompt. The final prompt MUST be in English.
+const garmentSystemPrompt = `You are an expert fashion stylist and photo analyst. Your task is to combine multiple inputs into a single, coherent, and detailed text-to-image prompt. The final prompt MUST be in English.
 
 ### Your Inputs:
 You will be given:
 1.  **PERSON IMAGE:** This image contains the model, their pose, the background scene, and the overall lighting and mood.
 2.  **GARMENT IMAGE:** This image contains a piece of clothing.
 3.  **PROMPT APPENDIX (Optional, HIGH PRIORITY):** A specific, non-negotiable instruction from the user.
+4.  **IS_HELPER_ENABLED (Boolean):** A flag indicating your mode of operation.
 
 ### Your Internal Thought Process (Do not include this in the output):
+
+#### **IF 'IS_HELPER_ENABLED' IS TRUE:**
 1.  **Analyze the PERSON IMAGE:** Deconstruct the scene. Describe the model's pose, the lighting style (e.g., "soft studio lighting," "harsh outdoor sunlight"), the background details, and the overall mood or aesthetic.
 2.  **Analyze the GARMENT IMAGE:** Describe the garment with extreme detail. **IMPORTANT: You MUST focus exclusively on the garment or accessory itself. IGNORE any person, pose, or background present in the GARMENT IMAGE.** Mention its type (e.g., "denim jacket," "silk blouse"), color, fabric texture, fit, and any notable details like buttons, zippers, patterns, or stitching.
 3.  **Synthesize with Appendix:** Create a new, single prompt that describes the person from the PERSON IMAGE as if they are now wearing the clothing from the GARMENT IMAGE. **You MUST seamlessly integrate the user's PROMPT APPENDIX instruction into the main body of your description.** Do not just append it. It is a core creative constraint that must be woven into the final prompt naturally.
 
+#### **IF 'IS_HELPER_ENABLED' IS FALSE:**
+1.  **IGNORE THE IMAGES COMPLETELY.**
+2.  Your ONLY task is to process the **PROMPT APPENDIX**.
+3.  If the appendix contains text, use that text as the final prompt.
+4.  **If the appendix is empty or missing, you MUST return the following generic fallback prompt: "a photorealistic image of the garment on the person".**
+
 ### Your Output:
 Your entire response MUST be a single, valid JSON object with ONE key, "final_prompt".
 
-**Example Output (with appendix "wearing light blue jeans"):**
+**Example Output (with appendix "wearing light blue jeans" and helper ON):**
 \`\`\`json
 {
-  "final_prompt": "A photorealistic, cinematic shot of a woman standing with her hands on her hips in a dimly lit urban alleyway. She is wearing a vintage, slightly oversized, faded blue denim jacket with worn-out elbows and brass buttons, paired with light blue jeans. The lighting is dramatic, with a single light source from the side creating long shadows."
+  "final_prompt": "A photorealistic, cinematic shot of a woman standing with her hands on her hips in a dimly lit urban alleyway. She is wearing a vintage, slightly oversized, faded blue denim jacket with brass buttons, paired with light blue jeans. The lighting is dramatic, with a single light source from the side creating long shadows."
+}
+\`\`\`
+**Example Output (with appendix "a red t-shirt" and helper OFF):**
+\`\`\`json
+{
+  "final_prompt": "a red t-shirt"
+}
+\`\`\`
+**Example Output (with NO appendix and helper OFF):**
+\`\`\`json
+{
+  "final_prompt": "a photorealistic image of the garment on the person"
 }
 \`\`\`
 `;
@@ -69,6 +78,7 @@ You will be given:
 1.  **Analyze the SOURCE IMAGE:** Deconstruct the scene. Describe the lighting style (e.g., "soft studio lighting," "harsh outdoor sunlight"), the background details, and the overall mood or aesthetic.
 2.  **Analyze the REFERENCE IMAGE:** Describe the object or concept in the reference image with extreme detail. Mention its key characteristics, texture, color, and style.
 3.  **Synthesize with Appendix:** Create a new, single prompt that describes how the object/concept from the REFERENCE IMAGE should be realistically integrated into the SOURCE IMAGE. The goal is a seamless blend. **You MUST incorporate the user's PROMPT APPENDIX instruction into the main body of your description.** Do not just append it.
+
 ### Your Output:
 Your entire response MUST be a single, valid JSON object with ONE key, "final_prompt".
 
@@ -124,47 +134,52 @@ serve(async (req) => {
         person_image_base64, person_image_mime_type,
         garment_image_base64, garment_image_mime_type,
         prompt_appendix,
-        is_garment_mode
+        is_garment_mode,
+        is_helper_enabled
     } = await req.json();
 
-    if (!(person_image_url && garment_image_url) && !(person_image_base64 && garment_image_base64)) {
-        throw new Error("Either image URLs or base64 data for both person and garment are required.");
-    }
-
+    const useHelper = is_helper_enabled !== false; // Default to true
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-    let personParts: Part[], garmentParts: Part[];
-    
-    const useGarmentMode = is_garment_mode ?? true;
-    const systemPrompt = useGarmentMode ? garmentSystemPrompt : generalSystemPrompt;
-    const personLabel = useGarmentMode ? "PERSON IMAGE" : "SOURCE IMAGE";
-    const garmentLabel = useGarmentMode ? "GARMENT IMAGE" : "REFERENCE IMAGE";
+    const finalParts: Part[] = [];
+    const systemPrompt = (is_garment_mode !== false) ? garmentSystemPrompt : generalSystemPrompt;
+    const personLabel = (is_garment_mode !== false) ? "PERSON IMAGE" : "SOURCE IMAGE";
+    const garmentLabel = (is_garment_mode !== false) ? "GARMENT IMAGE" : "REFERENCE IMAGE";
 
-    console.log(`[VTO-PromptHelper] Mode: ${useGarmentMode ? 'Garment' : 'General'}`);
+    console.log(`[VTO-PromptHelper] Mode: ${is_garment_mode ? 'Garment' : 'General'}. Helper Enabled: ${useHelper}`);
 
-    if (person_image_base64 && garment_image_base64) {
-        console.log("[VTO-PromptHelper] Using provided base64 data.");
-        personParts = [
-            { text: `--- ${personLabel} ---` },
-            { inlineData: { mimeType: person_image_mime_type || 'image/png', data: person_image_base64 } }
-        ];
-        garmentParts = [
-            { text: `--- ${garmentLabel} ---` },
-            { inlineData: { mimeType: garment_image_mime_type || 'image/png', data: garment_image_base64 } }
-        ];
+    if (useHelper) {
+        console.log("[VTO-PromptHelper] AI Helper is ON. Analyzing images.");
+        let personParts: Part[], garmentParts: Part[];
+        
+        if (person_image_base64 && garment_image_base64) {
+            console.log("[VTO-PromptHelper] Using provided base64 data.");
+            personParts = [
+                { text: `--- ${personLabel} ---` },
+                { inlineData: { mimeType: person_image_mime_type || 'image/png', data: person_image_base64 } }
+            ];
+            garmentParts = [
+                { text: `--- ${garmentLabel} ---` },
+                { inlineData: { mimeType: garment_image_mime_type || 'image/png', data: garment_image_base64 } }
+            ];
+        } else if (person_image_url && garment_image_url) {
+            console.log("[VTO-PromptHelper] Using provided URLs. Downloading images...");
+            [personParts, garmentParts] = await Promise.all([
+                downloadImageAsPart(person_image_url, personLabel),
+                downloadImageAsPart(garment_image_url, garmentLabel)
+            ]);
+        } else {
+            throw new Error("When AI Helper is enabled, either image URLs or base64 data for both images are required.");
+        }
+        
+        finalParts.push(...personParts, ...garmentParts);
     } else {
-        console.log("[VTO-PromptHelper] Using provided URLs.");
-        [personParts, garmentParts] = await Promise.all([
-            downloadImageAsPart(person_image_url, personLabel),
-            downloadImageAsPart(garment_image_url, garmentLabel)
-        ]);
+        console.log("[VTO-PromptHelper] AI Helper is OFF. Using appendix only.");
     }
-    
-    const finalParts: Part[] = [...personParts, ...garmentParts];
 
     if (prompt_appendix && typeof prompt_appendix === 'string' && prompt_appendix.trim() !== "") {
-        console.log(`[VTO-PromptHelper] Providing appendix to AI: "${prompt_appendix}"`);
         finalParts.push({ text: `--- PROMPT APPENDIX (HIGH PRIORITY) ---\n${prompt_appendix.trim()}` });
     }
+    finalParts.push({ text: `--- METADATA ---\nIS_HELPER_ENABLED: ${useHelper}` });
 
     const result = await ai.models.generateContent({
         model: MODEL_NAME,

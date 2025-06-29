@@ -1,32 +1,13 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-const UPLOAD_BUCKET = 'mira-agent-user-uploads';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
-
-const blobToBase64 = async (blob: Blob): Promise<string> => {
-    const buffer = await blob.arrayBuffer();
-    return encodeBase64(buffer);
-};
-
-async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
-    const url = new URL(publicUrl);
-    const pathStartIndex = url.pathname.indexOf(UPLOAD_BUCKET);
-    if (pathStartIndex === -1) {
-        throw new Error(`Could not find bucket name '${UPLOAD_BUCKET}' in URL path: ${publicUrl}`);
-    }
-    const filePath = decodeURIComponent(url.pathname.substring(pathStartIndex + UPLOAD_BUCKET.length + 1));
-    const { data, error } = await supabase.storage.from(UPLOAD_BUCKET).download(filePath);
-    if (error) throw new Error(`Failed to download from Supabase storage: ${error.message}`);
-    return data;
-}
 
 serve(async (req) => {
   console.log(`[BatchInpaintWorker-Step2] Function invoked.`);
@@ -67,36 +48,22 @@ serve(async (req) => {
     const debug_assets = metadata?.debug_assets || null;
     const isHelperEnabled = metadata?.is_helper_enabled !== false; // Default to true
 
-    let finalPrompt = "";
+    console.log(`[BatchInpaintWorker-Step2][${pair_job_id}] Delegating prompt creation to helper. Helper enabled: ${isHelperEnabled}`);
 
-    if (isHelperEnabled) {
-        console.log(`[BatchInpaintWorker-Step2][${pair_job_id}] AI Prompt Helper is enabled. Generating prompt...`);
-        const [personBlob, garmentBlob] = await Promise.all([
-            downloadFromSupabase(supabase, source_person_image_url),
-            downloadFromSupabase(supabase, source_garment_image_url)
-        ]);
-        
-        const [personBase64, garmentBase64] = await Promise.all([
-            blobToBase64(personBlob),
-            blobToBase64(garmentBlob)
-        ]);
+    // The prompt helper now handles all logic, including downloading images if needed.
+    const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-prompt-helper', {
+        body: {
+            // Pass URLs directly. The helper will decide whether to download them.
+            person_image_url: source_person_image_url,
+            garment_image_url: source_garment_image_url,
+            prompt_appendix: prompt_appendix,
+            is_helper_enabled: isHelperEnabled, // Pass the flag
+            is_garment_mode: true,
+        }
+    });
 
-        const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-prompt-helper', {
-            body: {
-                person_image_base64: personBase64,
-                person_image_mime_type: personBlob.type,
-                garment_image_base64: garmentBase64,
-                garment_image_mime_type: garmentBlob.type,
-                prompt_appendix: prompt_appendix,
-                is_garment_mode: true,
-            }
-        });
-        if (promptError) throw new Error(`Prompt generation failed: ${promptError.message}`);
-        finalPrompt = promptData.final_prompt;
-    } else {
-        console.log(`[BatchInpaintWorker-Step2][${pair_job_id}] AI Prompt Helper is disabled. Using empty prompt.`);
-        finalPrompt = prompt_appendix || ""; // Use appendix as prompt if helper is off
-    }
+    if (promptError) throw new Error(`Prompt generation failed: ${promptError.message}`);
+    const finalPrompt = promptData.final_prompt;
 
     const { data: proxyData, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
         body: {
