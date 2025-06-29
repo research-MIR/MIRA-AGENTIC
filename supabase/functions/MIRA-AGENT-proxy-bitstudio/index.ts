@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { decodeBase64, encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
+import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 import { createCanvas, loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
 
 const corsHeaders = {
@@ -9,16 +9,32 @@ const corsHeaders = {
 };
 
 const UPLOAD_BUCKET = 'mira-agent-user-uploads';
+const BITSTUDIO_API_KEY = Deno.env.get('BITSTUDIO_API_KEY');
+const BITSTUDIO_API_BASE = 'https://api.bitstudio.ai';
 
-async function uploadImageToComfyUI(comfyUiUrl: string, imageBlob: Blob, filename: string) {
-  const formData = new FormData();
-  formData.append('image', imageBlob, filename);
-  formData.append('overwrite', 'true');
-  const uploadUrl = `${comfyUiUrl}/upload/image`;
-  const response = await fetch(uploadUrl, { method: 'POST', body: formData });
-  if (!response.ok) throw new Error(`ComfyUI upload failed: ${await response.text()}`);
-  const data = await response.json();
-  return data.name;
+async function uploadToBitStudio(imageBlob: Blob, type: string, filename: string): Promise<string | null> {
+    if (!BITSTUDIO_API_KEY) {
+        throw new Error("BITSTUDIO_API_KEY is not set.");
+    }
+    const formData = new FormData();
+    formData.append('image', imageBlob, filename);
+    formData.append('type', type);
+
+    const uploadUrl = `${BITSTUDIO_API_BASE}/images`;
+    const response = await fetch(uploadUrl, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}` },
+        body: formData,
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`BitStudio upload failed for type ${type}:`, errorText);
+        throw new Error(`BitStudio upload failed: ${errorText}`);
+    }
+
+    const data = await response.json();
+    return data.id || null;
 }
 
 async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
