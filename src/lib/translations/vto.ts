@@ -103,7 +103,15 @@ Per i migliori risultati, usa questo strumento per scambiare tipi di abbigliamen
 Questo strumento elabora un indumento alla volta. Se hai bisogno di creare un outfit completo con più pezzi (es. una t-shirt e dei jeans), devi eseguire due operazioni separate:
 1.  Prima, esegui il processo con la persona e il riferimento della t-shirt.
 2.  Poi, usa l'immagine risultante come nuova immagine sorgente ed esegui nuovamente il processo con il riferimento dei jeans.
-`
+`,
+    vtoProGuidanceTitle: "Consiglio Rapido per Risultati Migliori",
+    vtoProGuidanceContent: `
+Prima di tentare di nuovo, controlla se il tuo lavoro appare nella lista dei "Job Recenti".
+
+- **Se il risultato non è buono**, prova a disattivare l'interruttore "Assistente Prompt AI" e riprova.
+- **Se dopo altri 2-3 tentativi non funziona ancora**, fermati e chiedi assistenza.
+    `,
+    vtoProGuidanceButton: "Ho Capito!",
   },
   en: {
     proMode: "Pro Mode",
@@ -199,16 +207,24 @@ The **Reference Image** is the key. The AI analyzes the garment in your referenc
 -   A **shoe** reference will replace the shoes.
 -   A **shirt** reference will replace the shirt.
 
-#### 3. Best for Similar Garments
-For the best results, use this tool to swap similar types of clothing. For example:
--   Replacing a t-shirt on a model with another t-shirt.
--   Changing the texture or color of an existing jacket.
-It is less effective at placing a garment onto a person wearing something completely different (e.g., putting a t-shirt on a model wearing a bulky winter coat).
+#### 3. Ideale per Indumenti Simili
+Per i migliori risultati, usa questo strumento per scambiare tipi di abbigliamento simili. Per esempio:
+-   Sostituire una t-shirt su un modello con un'altra t-shirt.
+-   Cambiare la texture o il colore di una giacca esistente.
+È meno efficace nel posizionare un indumento su una persona che indossa qualcosa di completamente diverso (es. mettere una t-shirt a un modello che indossa un ingombrante cappotto invernale).
 
-#### 4. One Piece at a Time
-This tool processes one garment at a time. If you need to create a full outfit with multiple pieces (e.g., a t-shirt and jeans), you must perform two separate operations:
-1.  First, run the process with the person and the t-shirt reference.
-2.  Then, use the resulting image as the new source image and run the process again with the jeans reference.
-`
+#### 4. Un Capo alla Volta
+Questo strumento elabora un indumento alla volta. Se hai bisogno di creare un outfit completo con più pezzi (es. una t-shirt e dei jeans), devi eseguire due operazioni separate:
+1.  Prima, esegui il processo con la persona e il riferimento della t-shirt.
+2.  Poi, usa l'immagine risultante come nuova immagine sorgente ed esegui nuovamente il processo con il riferimento dei jeans.
+`,
+    vtoProGuidanceTitle: "A Quick Tip for Best Results",
+    vtoProGuidanceContent: `
+Before trying again, please check if your job shows up in the "Recent Jobs" list.
+
+- **If the result is not good**, try turning the "AI Prompt Helper" switch off and try again.
+- **If after another 2-3 tries it still does not work**, please stop and ask for assistance.
+    `,
+    vtoProGuidanceButton: "Got It!",
   },
 };

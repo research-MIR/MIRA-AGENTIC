@@ -15,6 +15,9 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Info } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 const ImageUploader = ({ onFileSelect, title, imageUrl, onClear }: { onFileSelect: (file: File) => void, title: string, imageUrl: string | null, onClear: () => void }) => {
     const inputRef = useRef<HTMLInputElement>(null);
@@ -48,6 +51,7 @@ export const BatchInpaintPro = () => {
     const [tempPairAppendix, setTempPairAppendix] = useState("");
     const [isHelperEnabled, setIsHelperEnabled] = useState(true);
     const [isLoading, setIsLoading] = useState(false);
+    const [isGuidanceModalOpen, setIsGuidanceModalOpen] = useState(false);
 
     const uploadFile = async (file: File, type: 'person' | 'garment') => {
         if (!session?.user) throw new Error("User session not found.");
@@ -102,6 +106,7 @@ export const BatchInpaintPro = () => {
             showSuccess(`${precisePairs.length} jobs have been queued for processing.`);
             queryClient.invalidateQueries({ queryKey: ['activeJobs'] });
             resetForm();
+            setIsGuidanceModalOpen(true);
         } catch (err: any) {
             dismissToast(toastId);
             showError(`Failed to queue batch job: ${err.message}`);
@@ -120,76 +125,93 @@ export const BatchInpaintPro = () => {
     };
 
     return (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <div className="lg:col-span-1 space-y-6">
-              <Card>
-                <CardHeader>
-                    <CardTitle>1. Create a Pair</CardTitle>
-                    <CardDescription>{t('precisePairsDescription')}</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                    <div className="grid grid-cols-2 gap-2">
-                        <ImageUploader onFileSelect={setTempPairPerson} title={t('person')} imageUrl={tempPairPerson ? URL.createObjectURL(tempPairPerson) : null} onClear={() => setTempPairPerson(null)} />
-                        <ImageUploader onFileSelect={setTempPairGarment} title={t('garment')} imageUrl={tempPairGarment ? URL.createObjectURL(tempPairGarment) : null} onClear={() => setTempPairGarment(null)} />
-                    </div>
-                    <div>
-                        <Label htmlFor="pair-appendix">{t('promptAppendixPair')}</Label>
-                        <Input id="pair-appendix" value={tempPairAppendix} onChange={(e) => setTempPairAppendix(e.target.value)} placeholder={t('promptAppendixPairPlaceholder')} />
-                    </div>
-                    <div className="flex items-center justify-between p-2 rounded-md bg-muted/50">
-                        <Label htmlFor="ai-prompt-helper" className="flex items-center gap-2">
-                            <Sparkles className="h-4 w-4 text-primary" />
-                            {t('aiPromptHelper')}
-                        </Label>
-                        <TooltipProvider>
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <Info className="h-4 w-4 text-muted-foreground cursor-help" />
-                                </TooltipTrigger>
-                                <TooltipContent>
-                                    <p>{t('aiPromptHelperDescription')}</p>
-                                </TooltipContent>
-                            </Tooltip>
-                        </TooltipProvider>
-                        <Switch id="ai-prompt-helper" checked={isHelperEnabled} onCheckedChange={setIsHelperEnabled} />
-                    </div>
-                    <Button className="w-full" onClick={addPrecisePair} disabled={!tempPairPerson || !tempPairGarment}>{t('addPair')}</Button>
-                </CardContent>
-              </Card>
-              <Button size="lg" className="w-full mt-4" onClick={handleBatchSubmit} disabled={isLoading || precisePairs.length === 0}>
-                {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
-                Start Batch Inpaint ({precisePairs.length})
-              </Button>
-            </div>
-            <div className="lg:col-span-2">
-              <Card className="min-h-[75vh]">
-                <CardHeader><CardTitle>{t('batchQueue')}</CardTitle></CardHeader>
-                <CardContent>
-                  <ScrollArea className="h-[65vh]">
-                    {precisePairs.length > 0 ? (
-                      <div className="space-y-2">
-                        {precisePairs.map((pair, i) => (
-                          <div key={i} className="flex gap-2 items-center bg-muted p-2 rounded-md">
-                            <img src={URL.createObjectURL(pair.person)} className="w-16 h-16 object-cover rounded-md" />
-                            <PlusCircle className="h-5 w-5 text-muted-foreground" />
-                            <img src={URL.createObjectURL(pair.garment)} className="w-16 h-16 object-cover rounded-md" />
-                            <div className="flex-1 overflow-hidden">
-                                <p className="text-xs text-muted-foreground truncate italic">"{pair.appendix}"</p>
-                                <p className="text-xs font-semibold">{pair.isHelperEnabled ? "AI Prompt: ON" : "AI Prompt: OFF"}</p>
-                            </div>
-                            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setPrecisePairs(p => p.filter((_, idx) => idx !== i))}><X className="h-4 w-4" /></Button>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                        <div className="text-center text-muted-foreground py-16">
-                            <p>Add pairs using the form on the left.</p>
+        <>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <div className="lg:col-span-1 space-y-6">
+                <Card>
+                    <CardHeader>
+                        <CardTitle>1. Create a Pair</CardTitle>
+                        <CardDescription>{t('precisePairsDescription')}</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                        <div className="grid grid-cols-2 gap-2">
+                            <ImageUploader onFileSelect={setTempPairPerson} title={t('person')} imageUrl={tempPairPerson ? URL.createObjectURL(tempPairPerson) : null} onClear={() => setTempPairPerson(null)} />
+                            <ImageUploader onFileSelect={setTempPairGarment} title={t('garment')} imageUrl={tempPairGarment ? URL.createObjectURL(tempPairGarment) : null} onClear={() => setTempPairGarment(null)} />
                         </div>
-                    )}
-                  </ScrollArea>
-                </CardContent>
-              </Card>
+                        <div>
+                            <Label htmlFor="pair-appendix">{t('promptAppendixPair')}</Label>
+                            <Input id="pair-appendix" value={tempPairAppendix} onChange={(e) => setTempPairAppendix(e.target.value)} placeholder={t('promptAppendixPairPlaceholder')} />
+                        </div>
+                        <div className="flex items-center justify-between p-2 rounded-md bg-muted/50">
+                            <Label htmlFor="ai-prompt-helper" className="flex items-center gap-2">
+                                <Sparkles className="h-4 w-4 text-primary" />
+                                {t('aiPromptHelper')}
+                            </Label>
+                            <TooltipProvider>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <Info className="h-4 w-4 text-muted-foreground cursor-help" />
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                        <p>{t('aiPromptHelperDescription')}</p>
+                                    </TooltipContent>
+                                </Tooltip>
+                            </TooltipProvider>
+                            <Switch id="ai-prompt-helper" checked={isHelperEnabled} onCheckedChange={setIsHelperEnabled} />
+                        </div>
+                        <Button className="w-full" onClick={addPrecisePair} disabled={!tempPairPerson || !tempPairGarment}>{t('addPair')}</Button>
+                    </CardContent>
+                </Card>
+                <Button size="lg" className="w-full mt-4" onClick={handleBatchSubmit} disabled={isLoading || precisePairs.length === 0}>
+                    {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+                    Start Batch Inpaint ({precisePairs.length})
+                </Button>
+                </div>
+                <div className="lg:col-span-2">
+                <Card className="min-h-[75vh]">
+                    <CardHeader><CardTitle>{t('batchQueue')}</CardTitle></CardHeader>
+                    <CardContent>
+                    <ScrollArea className="h-[65vh]">
+                        {precisePairs.length > 0 ? (
+                        <div className="space-y-2">
+                            {precisePairs.map((pair, i) => (
+                            <div key={i} className="flex gap-2 items-center bg-muted p-2 rounded-md">
+                                <img src={URL.createObjectURL(pair.person)} className="w-16 h-16 object-cover rounded-md" />
+                                <PlusCircle className="h-5 w-5 text-muted-foreground" />
+                                <img src={URL.createObjectURL(pair.garment)} className="w-16 h-16 object-cover rounded-md" />
+                                <div className="flex-1 overflow-hidden">
+                                    <p className="text-xs text-muted-foreground truncate italic">"{pair.appendix}"</p>
+                                    <p className="text-xs font-semibold">{pair.isHelperEnabled ? "AI Prompt: ON" : "AI Prompt: OFF"}</p>
+                                </div>
+                                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setPrecisePairs(p => p.filter((_, idx) => idx !== i))}><X className="h-4 w-4" /></Button>
+                            </div>
+                            ))}
+                        </div>
+                        ) : (
+                            <div className="text-center text-muted-foreground py-16">
+                                <p>Add pairs using the form on the left.</p>
+                            </div>
+                        )}
+                    </ScrollArea>
+                    </CardContent>
+                </Card>
+                </div>
             </div>
-        </div>
+            <Dialog open={isGuidanceModalOpen} onOpenChange={setIsGuidanceModalOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>{t('vtoProGuidanceTitle')}</DialogTitle>
+                    </DialogHeader>
+                    <div className="markdown-content text-sm text-muted-foreground">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {t('vtoProGuidanceContent')}
+                        </ReactMarkdown>
+                    </div>
+                    <DialogFooter>
+                        <Button onClick={() => setIsGuidanceModalOpen(false)}>{t('vtoProGuidanceButton')}</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+        </>
     )
 }
