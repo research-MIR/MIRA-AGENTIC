@@ -148,7 +148,19 @@ serve(async (req) => {
     console.log(`[VTO-PromptHelper] Mode: ${is_garment_mode ? 'Garment' : 'General'}. Helper Enabled: ${useHelper}`);
 
     if (useHelper) {
-        console.log("[VTO-PromptHelper] AI Helper is ON. Analyzing images.");
+        console.log("[VTO-PromptHelper] AI Helper is ON.");
+
+        // If no text prompt is provided, return an empty prompt immediately.
+        if (!prompt_appendix || prompt_appendix.trim() === "") {
+            console.log("[VTO-PromptHelper] No text prompt provided with AI Helper ON. Returning empty prompt as requested by feature design.");
+            return new Response(JSON.stringify({ final_prompt: "" }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            });
+        }
+        
+        // If there IS a text prompt, proceed with image analysis.
+        console.log("[VTO-PromptHelper] Text prompt provided. Analyzing images to synthesize final prompt.");
         let personParts: Part[], garmentParts: Part[];
         
         if (person_image_base64 && garment_image_base64) {
@@ -168,7 +180,7 @@ serve(async (req) => {
                 downloadImageAsPart(garment_image_url, garmentLabel)
             ]);
         } else {
-            throw new Error("When AI Helper is enabled, either image URLs or base64 data for both images are required.");
+            throw new Error("When AI Helper is enabled with a text prompt, either image URLs or base64 data for both images are required.");
         }
         
         finalParts.push(...personParts, ...garmentParts);
