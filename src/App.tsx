@@ -15,9 +15,9 @@ import Editor from "./pages/Editor";
 import Projects from "./pages/Projects";
 import ProjectDetail from "./pages/ProjectDetail";
 import Settings from "./pages/Settings";
-import { useSession } from "./components/Auth/SessionContextProvider.tsx";
-import { useLanguage } from "./context/LanguageContext.tsx";
-import { useOnboardingTour } from "./context/OnboardingTourContext.tsx";
+import { useSession } from "@/components/Auth/SessionContextProvider";
+import { useLanguage } from "@/context/LanguageContext";
+import { useOnboardingTour } from "@/context/OnboardingTourContext";
 import { TourProvider as ReactourProvider, StepType } from '@reactour/tour';
 import SegmentationTool from "./pages/Developer/Segmentation.tsx";
 
