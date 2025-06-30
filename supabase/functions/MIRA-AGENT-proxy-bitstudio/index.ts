@@ -88,6 +88,8 @@ serve(async (req) => {
 
   try {
     const body = await req.json();
+    console.log(`[BitStudioProxy][${requestId}] Received full payload:`, JSON.stringify(body, null, 2));
+
     const { user_id, mode, batch_pair_job_id } = body;
     if (!user_id || !mode) {
       throw new Error("user_id and mode are required.");
@@ -113,7 +115,14 @@ serve(async (req) => {
         debug_assets
       } = body;
       
-      console.log(`[BitStudioProxy][${requestId}] Inpaint mode received with prompt: "${prompt ? prompt.substring(0, 30) + '...' : 'N/A'}", Denoise: ${denoise}, Has Reference: ${!!reference_image_base64 || !!reference_image_url}`);
+      console.log(`[BitStudioProxy][${requestId}] Inpaint mode received with prompt: "${prompt || 'N/A'}"`);
+      console.log(`[BitStudioProxy][${requestId}] Denoise: ${denoise}`);
+      console.log(`[BitStudioProxy][${requestId}] Has Reference URL: ${!!reference_image_url}`);
+      console.log(`[BitStudioProxy][${requestId}] Has Reference Base64: ${!!reference_image_base64}`);
+      console.log(`[BitStudioProxy][${requestId}] Has Source URL: ${!!source_image_url}`);
+      console.log(`[BitStudioProxy][${requestId}] Has Source Base64: ${!!full_source_image_base64}`);
+      console.log(`[BitStudioProxy][${requestId}] Has Mask URL: ${!!mask_image_url}`);
+      console.log(`[BitStudioProxy][${requestId}] Has Mask Base64: ${!!mask_image_base64}`);
 
       if (!full_source_image_base64 && source_image_url) {
         console.log(`[BitStudioProxy][${requestId}] Source image base64 not found. Downloading from URL: ${source_image_url}`);
@@ -132,6 +141,7 @@ serve(async (req) => {
       }
 
       if (!full_source_image_base64 || (!mask_image_base64 && !mask_image_url)) {
+        console.error(`[BitStudioProxy][${requestId}] Validation failed. full_source_image_base64: ${!!full_source_image_base64}, mask_image_base64: ${!!mask_image_base64}, mask_image_url: ${!!mask_image_url}`);
         throw new Error("Missing required parameters for inpaint mode: full_source_image_base64 and one of mask_image_base64 or mask_image_url are required.");
       }
       
