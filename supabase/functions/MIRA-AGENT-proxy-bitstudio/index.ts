@@ -43,8 +43,11 @@ async function uploadToBitStudio(fileBlob: Blob, type: BitStudioImageType, filen
 
 async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
     const url = new URL(publicUrl);
-    const pathStartIndex = url.pathname.indexOf(UPLOAD_BUCKET) + UPLOAD_BUCKET.length + 1;
-    const filePath = decodeURIComponent(url.pathname.substring(pathStartIndex));
+    const pathStartIndex = url.pathname.indexOf(UPLOAD_BUCKET);
+    if (pathStartIndex === -1) {
+        throw new Error(`Could not find bucket name '${UPLOAD_BUCKET}' in URL path: ${publicUrl}`);
+    }
+    const filePath = decodeURIComponent(url.pathname.substring(pathStartIndex + UPLOAD_BUCKET.length + 1));
 
     if (!filePath) {
         throw new Error(`Could not parse file path from URL: ${publicUrl}`);
@@ -92,18 +95,33 @@ serve(async (req) => {
     if (mode === 'inpaint') {
       console.log(`[BitStudioProxy][${requestId}] Starting inpaint workflow.`);
       let { 
-        full_source_image_base64, mask_image_base64, mask_image_url, prompt, reference_image_base64, 
+        full_source_image_base64,
+        source_image_url,
+        mask_image_base64, 
+        mask_image_url, 
+        prompt, 
+        reference_image_base64, 
         is_garment_mode,
-        num_attempts = 1, denoise = 1.0, mask_expansion_percent = 2,
+        num_attempts = 1, 
+        denoise = 1.0, 
+        mask_expansion_percent = 2,
         debug_assets
       } = body;
       
       console.log(`[BitStudioProxy][${requestId}] Inpaint mode received with prompt: "${prompt ? prompt.substring(0, 30) + '...' : 'N/A'}", Denoise: ${denoise}, Has Reference: ${!!reference_image_base64}`);
 
+      if (!full_source_image_base64 && source_image_url) {
+        console.log(`[BitStudioProxy][${requestId}] Source image base64 not found. Downloading from URL: ${source_image_url}`);
+        const sourceBlob = await downloadFromSupabase(supabase, source_image_url);
+        const sourceBuffer = await sourceBlob.arrayBuffer();
+        full_source_image_base64 = encodeBase64(sourceBuffer);
+        console.log(`[BitStudioProxy][${requestId}] Source image downloaded and encoded successfully.`);
+      }
+
       if (!full_source_image_base64 || (!mask_image_base64 && !mask_image_url)) {
         throw new Error("Missing required parameters for inpaint mode: full_source_image_base64 and one of mask_image_base64 or mask_image_url are required.");
       }
-
+      
       let maskBlob: Blob;
       if (mask_image_url) {
           console.log(`[BitStudioProxy][${requestId}] Fetching mask from URL: ${mask_image_url}`);
@@ -217,7 +235,7 @@ serve(async (req) => {
             person_image_mime_type: 'image/png',
             garment_image_base64: reference_image_base64,
             garment_image_mime_type: 'image/png',
-            is_garment_mode: is_garment_mode ?? false // Default to general inpainting
+            is_garment_mode: is_garment_mode ?? true
           }
         });
         if (promptError) throw new Error(`Auto-prompt generation failed: ${promptError.message}`);
