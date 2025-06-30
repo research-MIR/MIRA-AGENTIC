@@ -12,7 +12,6 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const BITSTUDIO_API_KEY = Deno.env.get('BITSTUDIO_API_KEY');
 const BITSTUDIO_API_BASE = 'https://api.bitstudio.ai';
-const UPLOAD_BUCKET = 'mira-agent-user-uploads';
 
 type BitStudioImageType = 
   | 'virtual-try-on-person' 
@@ -44,17 +43,18 @@ async function uploadToBitStudio(fileBlob: Blob, type: BitStudioImageType, filen
 async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
     const url = new URL(publicUrl);
     const pathSegments = url.pathname.split('/');
-    const bucketName = pathSegments.find((segment, index) => pathSegments[index - 1] === 'object');
     
-    if (!bucketName) {
+    const publicSegmentIndex = pathSegments.indexOf('public');
+    
+    if (publicSegmentIndex === -1 || publicSegmentIndex + 1 >= pathSegments.length) {
         throw new Error(`Could not parse bucket name from URL: ${publicUrl}`);
     }
 
-    const pathStartIndex = url.pathname.indexOf(bucketName) + bucketName.length + 1;
-    const filePath = decodeURIComponent(url.pathname.substring(pathStartIndex));
+    const bucketName = pathSegments[publicSegmentIndex + 1];
+    const filePath = pathSegments.slice(publicSegmentIndex + 2).join('/');
 
-    if (!filePath) {
-        throw new Error(`Could not parse file path from URL: ${publicUrl}`);
+    if (!bucketName || !filePath) {
+        throw new Error(`Could not parse bucket or path from URL: ${publicUrl}`);
     }
 
     console.log(`[BitStudioProxy] Downloading from bucket '${bucketName}' with path: ${filePath}`);
