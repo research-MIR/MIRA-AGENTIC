@@ -35,7 +35,9 @@ You will be given:
 #### **IF 'IS_HELPER_ENABLED' IS TRUE:**
 1.  **Analyze the PERSON IMAGE:** Deconstruct the scene. Describe the model's pose, the lighting style (e.g., "soft studio lighting," "harsh outdoor sunlight"), the background details, and the overall mood or aesthetic.
 2.  **Analyze the GARMENT IMAGE:** Describe the garment with extreme detail. **IMPORTANT: You MUST focus exclusively on the garment or accessory itself. IGNORE any person, pose, or background present in the GARMENT IMAGE.** Mention its type (e.g., "denim jacket," "silk blouse"), color, fabric texture, fit, and any notable details like buttons, zippers, patterns, or stitching.
-3.  **Synthesize with Appendix:** Create a new, single prompt that describes the person from the PERSON IMAGE as if they are now wearing the clothing from the GARMENT IMAGE. **You MUST seamlessly integrate the user's PROMPT APPENDIX instruction into the main body of your description.** Do not just append it. It is a core creative constraint that must be woven into the final prompt naturally.
+3.  **Synthesize the Final Prompt:** Create a new, single prompt that describes the person from the PERSON IMAGE as if they are now wearing the clothing from the GARMENT IMAGE.
+    -   **If a PROMPT APPENDIX is provided:** You MUST seamlessly integrate this instruction into the main body of your description. It is a core creative constraint.
+    -   **If NO PROMPT APPENDIX is provided:** Your final prompt should be a rich, detailed description based solely on your analysis of the two images.
 
 #### **IF 'IS_HELPER_ENABLED' IS FALSE:**
 1.  **IGNORE THE IMAGES COMPLETELY.**
@@ -148,19 +150,7 @@ serve(async (req) => {
     console.log(`[VTO-PromptHelper] Mode: ${is_garment_mode ? 'Garment' : 'General'}. Helper Enabled: ${useHelper}`);
 
     if (useHelper) {
-        console.log("[VTO-PromptHelper] AI Helper is ON.");
-
-        // If no text prompt is provided, return an empty prompt immediately.
-        if (!prompt_appendix || prompt_appendix.trim() === "") {
-            console.log("[VTO-PromptHelper] No text prompt provided with AI Helper ON. Returning empty prompt as requested by feature design.");
-            return new Response(JSON.stringify({ final_prompt: "" }), {
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                status: 200,
-            });
-        }
-        
-        // If there IS a text prompt, proceed with image analysis.
-        console.log("[VTO-PromptHelper] Text prompt provided. Analyzing images to synthesize final prompt.");
+        console.log("[VTO-PromptHelper] AI Helper is ON. Analyzing images to synthesize final prompt.");
         let personParts: Part[], garmentParts: Part[];
         
         if (person_image_base64 && garment_image_base64) {
@@ -180,7 +170,7 @@ serve(async (req) => {
                 downloadImageAsPart(garment_image_url, garmentLabel)
             ]);
         } else {
-            throw new Error("When AI Helper is enabled with a text prompt, either image URLs or base64 data for both images are required.");
+            throw new Error("When AI Helper is enabled, either image URLs or base64 data for both images are required.");
         }
         
         finalParts.push(...personParts, ...garmentParts);
