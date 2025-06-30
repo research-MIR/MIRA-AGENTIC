@@ -43,18 +43,22 @@ async function uploadToBitStudio(fileBlob: Blob, type: BitStudioImageType, filen
 
 async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
     const url = new URL(publicUrl);
-    const pathStartIndex = url.pathname.indexOf(UPLOAD_BUCKET);
-    if (pathStartIndex === -1) {
-        throw new Error(`Could not find bucket name '${UPLOAD_BUCKET}' in URL path: ${publicUrl}`);
+    const pathSegments = url.pathname.split('/');
+    const bucketName = pathSegments.find((segment, index) => pathSegments[index - 1] === 'object');
+    
+    if (!bucketName) {
+        throw new Error(`Could not parse bucket name from URL: ${publicUrl}`);
     }
-    const filePath = decodeURIComponent(url.pathname.substring(pathStartIndex + UPLOAD_BUCKET.length + 1));
+
+    const pathStartIndex = url.pathname.indexOf(bucketName) + bucketName.length + 1;
+    const filePath = decodeURIComponent(url.pathname.substring(pathStartIndex));
 
     if (!filePath) {
         throw new Error(`Could not parse file path from URL: ${publicUrl}`);
     }
 
-    console.log(`[BitStudioProxy] Downloading from storage path: ${filePath}`);
-    const { data, error } = await supabase.storage.from(UPLOAD_BUCKET).download(filePath);
+    console.log(`[BitStudioProxy] Downloading from bucket '${bucketName}' with path: ${filePath}`);
+    const { data, error } = await supabase.storage.from(bucketName).download(filePath);
 
     if (error) {
         throw new Error(`Failed to download from Supabase storage: ${error.message}`);
@@ -100,7 +104,8 @@ serve(async (req) => {
         mask_image_base64, 
         mask_image_url, 
         prompt, 
-        reference_image_base64, 
+        reference_image_base64,
+        reference_image_url,
         is_garment_mode,
         num_attempts = 1, 
         denoise = 1.0, 
@@ -108,7 +113,7 @@ serve(async (req) => {
         debug_assets
       } = body;
       
-      console.log(`[BitStudioProxy][${requestId}] Inpaint mode received with prompt: "${prompt ? prompt.substring(0, 30) + '...' : 'N/A'}", Denoise: ${denoise}, Has Reference: ${!!reference_image_base64}`);
+      console.log(`[BitStudioProxy][${requestId}] Inpaint mode received with prompt: "${prompt ? prompt.substring(0, 30) + '...' : 'N/A'}", Denoise: ${denoise}, Has Reference: ${!!reference_image_base64 || !!reference_image_url}`);
 
       if (!full_source_image_base64 && source_image_url) {
         console.log(`[BitStudioProxy][${requestId}] Source image base64 not found. Downloading from URL: ${source_image_url}`);
@@ -116,6 +121,14 @@ serve(async (req) => {
         const sourceBuffer = await sourceBlob.arrayBuffer();
         full_source_image_base64 = encodeBase64(sourceBuffer);
         console.log(`[BitStudioProxy][${requestId}] Source image downloaded and encoded successfully.`);
+      }
+
+      if (!reference_image_base64 && reference_image_url) {
+        console.log(`[BitStudioProxy][${requestId}] Reference image base64 not found. Downloading from URL: ${reference_image_url}`);
+        const referenceBlob = await downloadFromSupabase(supabase, reference_image_url);
+        const referenceBuffer = await referenceBlob.arrayBuffer();
+        reference_image_base64 = encodeBase64(referenceBuffer);
+        console.log(`[BitStudioProxy][${requestId}] Reference image downloaded and encoded successfully.`);
       }
 
       if (!full_source_image_base64 || (!mask_image_base64 && !mask_image_url)) {
