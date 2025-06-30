@@ -79,7 +79,9 @@ You will be given:
 ### Your Internal Thought Process (Do not include this in the output):
 1.  **Analyze the SOURCE IMAGE:** Deconstruct the scene. Describe the lighting style (e.g., "soft studio lighting," "harsh outdoor sunlight"), the background details, and the overall mood or aesthetic.
 2.  **Analyze the REFERENCE IMAGE:** Describe the object or concept in the reference image with extreme detail. Mention its key characteristics, texture, color, and style.
-3.  **Synthesize with Appendix:** Create a new, single prompt that describes how the object/concept from the REFERENCE IMAGE should be realistically integrated into the SOURCE IMAGE. The goal is a seamless blend. **You MUST incorporate the user's PROMPT APPENDIX instruction into the main body of your description.** Do not just append it.
+3.  **Synthesize:** Create a new, single prompt that describes how the object/concept from the REFERENCE IMAGE should be realistically integrated into the SOURCE IMAGE. The goal is a seamless blend.
+    -   **If a PROMPT APPENDIX is provided:** You MUST incorporate the user's instruction into the main body of your description.
+    -   **If NO PROMPT APPENDIX is provided:** Your final prompt should be a rich, detailed description based solely on your analysis of the two images.
 
 ### Your Output:
 Your entire response MUST be a single, valid JSON object with ONE key, "final_prompt".

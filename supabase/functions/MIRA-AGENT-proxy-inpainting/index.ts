@@ -53,13 +53,18 @@ async function uploadToSupabaseStorage(supabase: SupabaseClient, blob: Blob, use
 
 serve(async (req) => {
   const COMFYUI_ENDPOINT_URL = Deno.env.get('COMFYUI_ENDPOINT_URL');
+  const requestId = `proxy-inpainting-${Date.now()}`;
+  console.log(`[InpaintingProxy][${requestId}] Function invoked.`);
+
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
   if (!COMFYUI_ENDPOINT_URL) throw new Error("COMFYUI_ENDPOINT_URL is not set.");
 
   const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
-  const sanitizedAddress = COMFYUI_ENDPOINT_URL.replace(/\/+$/, "");
 
   try {
+    const body = await req.json();
+    console.log(`[InpaintingProxy][${requestId}] Received full payload:`, JSON.stringify(body, null, 2));
+
     const {
       user_id,
       source_image_base64,
@@ -70,7 +75,7 @@ serve(async (req) => {
       denoise,
       style_strength,
       mask_expansion_percent = 2,
-    } = await req.json();
+    } = body;
 
     if (!user_id || !source_image_base64 || !mask_image_base64) {
       throw new Error("Missing required parameters: user_id, source_image_base64, and mask_image_base64 are required.");
@@ -81,10 +86,10 @@ serve(async (req) => {
         if (!reference_image_base64) {
             throw new Error("A text prompt is required when no reference image is provided.");
         }
-        console.log(`[InpaintingProxy] No prompt provided. Auto-generating from reference...`);
+        console.log(`[InpaintingProxy][${requestId}] No prompt provided. Auto-generating from reference...`);
         const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-prompt-helper', {
           body: { 
-            person_image_base64: source_image_base64, 
+            person_image_base64: source_image_base64,
             person_image_mime_type: 'image/png',
             garment_image_base64: reference_image_base64,
             garment_image_mime_type: 'image/png',
@@ -93,7 +98,7 @@ serve(async (req) => {
         });
         if (promptError) throw new Error(`Auto-prompt generation failed: ${promptError.message}`);
         finalPrompt = promptData.final_prompt;
-        console.log(`[InpaintingProxy] Auto-prompt generated successfully.`);
+        console.log(`[InpaintingProxy][${requestId}] Auto-prompt generated successfully.`);
     }
 
     if (!finalPrompt) throw new Error("Prompt is required for inpainting.");
@@ -109,11 +114,11 @@ serve(async (req) => {
     dilateCtx.filter = 'none';
     
     const dilatedImageData = dilateCtx.getImageData(0, 0, dilatedCanvas.width, dilatedCanvas.height);
-    const imageData = dilatedImageData.data;
+    const data = dilatedImageData.data;
     let minX = dilatedCanvas.width, minY = dilatedCanvas.height, maxX = 0, maxY = 0;
-    for (let i = 0; i < imageData.length; i += 4) {
-      if (imageData[i] > 128) {
-        imageData[i] = imageData[i+1] = imageData[i+2] = 255;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i] > 128) {
+        data[i] = data[i+1] = data[i+2] = 255;
         const x = (i / 4) % dilatedCanvas.width;
         const y = Math.floor((i / 4) / dilatedCanvas.width);
         if (x < minX) minX = x;
@@ -121,7 +126,7 @@ serve(async (req) => {
         if (y < minY) minY = y;
         if (y > maxY) maxY = y;
       } else {
-        imageData[i] = imageData[i+1] = imageData[i+2] = 0;
+        data[i] = data[i+1] = data[i+2] = 0;
       }
     }
     dilateCtx.putImageData(dilatedImageData, 0, 0);
@@ -179,14 +184,14 @@ serve(async (req) => {
     if (denoise) finalWorkflow['3'].inputs.denoise = denoise;
 
     if (reference_image_base64) {
-        console.log(`[InpaintingProxy] Reference image provided. Using full style model workflow.`);
+        console.log(`[InpaintingProxy][${requestId}] Reference image provided. Using full style model workflow.`);
         const referenceBlob = new Blob([decodeBase64(reference_image_base64)], { type: 'image/png' });
         referenceImageUrl = await uploadToSupabaseStorage(supabase, referenceBlob, user_id, 'reference.png');
         const referenceFilename = await uploadImageToComfyUI(sanitizedAddress, referenceBlob, 'reference.png');
         finalWorkflow['52'].inputs.image = referenceFilename;
         if (style_strength) finalWorkflow['51'].inputs.strength = style_strength;
     } else {
-        console.log(`[InpaintingProxy] No reference image. Bypassing style model nodes.`);
+        console.log(`[InpaintingProxy][${requestId}] No reference image. Bypassing style model nodes.`);
         finalWorkflow['38'].inputs.positive = ["26", 0];
     }
 
@@ -207,7 +212,7 @@ serve(async (req) => {
       comfyui_prompt_id: comfyUIResponse.prompt_id,
       status: 'queued',
       metadata: { 
-        prompt: finalPrompt, 
+        prompt_used: finalPrompt, 
         denoise, 
         style_strength,
         source_image_url: sourceImageUrl,
@@ -223,7 +228,7 @@ serve(async (req) => {
 
     return new Response(JSON.stringify({ success: true, jobId: newJob.id }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (error) {
-    console.error("[InpaintingProxy] Error:", error);
+    console.error(`[InpaintingProxy][${requestId}] Error:`, error);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,
