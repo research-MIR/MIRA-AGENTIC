@@ -1,7 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { createCanvas, loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
-import { Image } from 'https://deno.land/x/imagescript@1.2.15/mod.ts';
 import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const corsHeaders = {
@@ -12,12 +11,6 @@ const corsHeaders = {
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
-
-// Helper function to decode and re-encode any image into a standard PNG buffer
-async function standardizeImageBuffer(buffer: Uint8Array): Promise<Uint8Array> {
-    const image = await Image.decode(buffer);
-    return await image.encode(0); // 0 for PNG
-}
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -50,17 +43,15 @@ serve(async (req) => {
       throw new Error("Job is missing essential metadata (source image, bbox, or mask) for compositing.");
     }
 
-    // Standardize all incoming images to PNG before processing
-    const fullSourceBuffer = await standardizeImageBuffer(decodeBase64(metadata.full_source_image_base64));
+    const fullSourceBuffer = decodeBase64(metadata.full_source_image_base64);
     const fullSourceImage = await loadImage(fullSourceBuffer);
 
     const inpaintedCropResponse = await fetch(final_image_url);
     if (!inpaintedCropResponse.ok) throw new Error(`Failed to download inpainted crop: ${inpaintedCropResponse.statusText}`);
     const inpaintedCropArrayBuffer = await inpaintedCropResponse.arrayBuffer();
-    const standardizedInpaintedCropBuffer = await standardizeImageBuffer(new Uint8Array(inpaintedCropArrayBuffer));
-    const inpaintedCropImage = await loadImage(standardizedInpaintedCropBuffer);
+    const inpaintedCropImage = await loadImage(new Uint8Array(inpaintedCropArrayBuffer));
 
-    const croppedMaskBuffer = await standardizeImageBuffer(decodeBase64(metadata.cropped_dilated_mask_base64));
+    const croppedMaskBuffer = decodeBase64(metadata.cropped_dilated_mask_base64);
     const croppedMaskImage = await loadImage(croppedMaskBuffer);
 
     // Main canvas for the final image
