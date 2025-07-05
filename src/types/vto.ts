@@ -14,10 +14,4 @@ export interface BitStudioJob {
     source_image_url?: string;
     reference_image_url?: string;
   };
-  verification_result?: {
-    is_match: boolean;
-    confidence_score: number;
-    mismatch_reason: string | null;
-    fix_suggestion: string | null;
-  } | null;
 }

@@ -11,7 +11,6 @@ import { Loader2 } from "lucide-react";
 import { useImagePreview } from "@/context/ImagePreviewContext";
 import { SecureImageDisplay } from "./SecureImageDisplay";
 import { DebugStepsModal } from "./DebugStepsModal";
-import { VerificationResultCard } from "./VerificationResultCard";
 
 interface VirtualTryOnProProps {
     recentJobs: BitStudioJob[] | undefined;
@@ -51,9 +50,6 @@ const VirtualTryOnPro = ({
               </Button>
             )}
           </div>
-          {job.verification_result && (
-            <VerificationResultCard verificationResult={job.verification_result} />
-          )}
         </div>
       );
     }

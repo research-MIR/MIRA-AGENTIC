@@ -64,38 +64,13 @@ serve(async (req) => {
     console.log(`[BitStudioPoller][${job.id}] BitStudio status: ${jobStatus}`);
 
     if (jobStatus === 'completed') {
-      console.log(`[BitStudioPoller][${job.id}] Status is 'completed'. Starting verification step...`);
+      console.log(`[BitStudioPoller][${job.id}] Status is 'completed'.`);
       
-      let verificationResult = null;
-      try {
-        const originalGarmentUrl = job.mode === 'inpaint' 
-            ? job.metadata?.reference_image_url 
-            : job.source_garment_image_url;
-
-        if (!originalGarmentUrl) {
-            console.warn(`[BitStudioPoller][${job.id}] Could not find original garment URL for verification. Skipping step.`);
-        } else {
-            const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-verify-garment-match', {
-                body: {
-                    original_garment_url: originalGarmentUrl,
-                    final_generated_url: finalImageUrl
-                }
-            });
-            if (error) throw error;
-            verificationResult = data;
-            console.log(`[BitStudioPoller][${job.id}] Verification complete. Result:`, verificationResult);
-        }
-      } catch (verificationError) {
-        console.error(`[BitStudioPoller][${job.id}] Verification step failed:`, verificationError.message);
-        // Don't fail the whole job, just log it.
-      }
-
       if (job.mode === 'inpaint') {
         console.log(`[BitStudioPoller][${job.id}] Inpaint job complete. Triggering compositor...`);
         await supabase.from('mira-agent-bitstudio-jobs').update({
           status: 'compositing',
           final_image_url: finalImageUrl,
-          verification_result: verificationResult
         }).eq('id', job_id);
         supabase.functions.invoke('MIRA-AGENT-compositor-inpaint', { body: { job_id } }).catch(console.error);
       } else {
@@ -103,7 +78,6 @@ serve(async (req) => {
         await supabase.from('mira-agent-bitstudio-jobs').update({
           status: 'complete',
           final_image_url: finalImageUrl,
-          verification_result: verificationResult
         }).eq('id', job_id);
       }
       
