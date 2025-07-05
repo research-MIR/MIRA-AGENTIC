@@ -16,7 +16,7 @@ export const useVTOJobs = () => {
 
       const bitstudioPromise = supabase
         .from('mira-agent-bitstudio-jobs')
-        .select('*, batch_pair_job_id')
+        .select('*, batch_pair_job_id, verification_result')
         .eq('user_id', session.user.id)
         .order('created_at', { ascending: false })
         .limit(50);

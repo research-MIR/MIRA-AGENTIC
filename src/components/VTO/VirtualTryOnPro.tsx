@@ -11,12 +11,16 @@ import { Loader2 } from "lucide-react";
 import { useImagePreview } from "@/context/ImagePreviewContext";
 import { SecureImageDisplay } from "./SecureImageDisplay";
 import { DebugStepsModal } from "./DebugStepsModal";
+import { VerificationResultCard } from "./VerificationResultCard";
 
 interface VirtualTryOnProProps {
     recentJobs: BitStudioJob[] | undefined;
     isLoadingRecentJobs: boolean;
     selectedJob: BitStudioJob | undefined;
     handleSelectJob: (job: BitStudioJob) => void;
+    resetForm: () => void;
+    transferredImageUrl: string | null;
+    onTransferConsumed: () => void;
 }
 
 const VirtualTryOnPro = ({
@@ -30,20 +34,25 @@ const VirtualTryOnPro = ({
     if (job.status === 'failed') return <p className="text-destructive text-sm p-2">{t('jobFailed', { errorMessage: job.error_message })}</p>;
     if (job.status === 'complete' && job.final_image_url) {
       return (
-        <div className="relative group w-full h-full">
-          <SecureImageDisplay imageUrl={job.final_image_url} alt="Final Result" onClick={() => showImage({ images: [{ url: job.final_image_url! }], currentIndex: 0 })} />
-          {job.metadata?.debug_assets && (
-            <Button 
-              variant="secondary" 
-              className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
-              onClick={(e) => {
-                e.stopPropagation();
-                setIsDebugModalOpen(true);
-              }}
-            >
-              <Eye className="mr-2 h-4 w-4" />
-              Show Debug
-            </Button>
+        <div className="space-y-4">
+          <div className="relative group w-full h-full">
+            <SecureImageDisplay imageUrl={job.final_image_url} alt="Final Result" onClick={() => showImage({ images: [{ url: job.final_image_url! }], currentIndex: 0 })} />
+            {job.metadata?.debug_assets && (
+              <Button 
+                variant="secondary" 
+                className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsDebugModalOpen(true);
+                }}
+              >
+                <Eye className="mr-2 h-4 w-4" />
+                Show Debug
+              </Button>
+            )}
+          </div>
+          {job.verification_result && (
+            <VerificationResultCard verificationResult={job.verification_result} />
           )}
         </div>
       );

@@ -64,13 +64,30 @@ serve(async (req) => {
     console.log(`[BitStudioPoller][${job.id}] BitStudio status: ${jobStatus}`);
 
     if (jobStatus === 'completed') {
-      console.log(`[BitStudioPoller][${job.id}] Status is 'completed'.`);
+      console.log(`[BitStudioPoller][${job.id}] Status is 'completed'. Starting verification step...`);
       
+      let verificationResult = null;
+      try {
+        const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-verify-garment-match', {
+            body: {
+                original_garment_url: job.source_garment_image_url,
+                final_generated_url: finalImageUrl
+            }
+        });
+        if (error) throw error;
+        verificationResult = data;
+        console.log(`[BitStudioPoller][${job.id}] Verification complete. Result:`, verificationResult);
+      } catch (verificationError) {
+        console.error(`[BitStudioPoller][${job.id}] Verification step failed:`, verificationError.message);
+        // Don't fail the whole job, just log it.
+      }
+
       if (job.mode === 'inpaint') {
         console.log(`[BitStudioPoller][${job.id}] Inpaint job complete. Triggering compositor...`);
         await supabase.from('mira-agent-bitstudio-jobs').update({
           status: 'compositing',
           final_image_url: finalImageUrl,
+          verification_result: verificationResult
         }).eq('id', job_id);
         supabase.functions.invoke('MIRA-AGENT-compositor-inpaint', { body: { job_id } }).catch(console.error);
       } else {
@@ -78,10 +95,10 @@ serve(async (req) => {
         await supabase.from('mira-agent-bitstudio-jobs').update({
           status: 'complete',
           final_image_url: finalImageUrl,
+          verification_result: verificationResult
         }).eq('id', job_id);
       }
       
-      // If this job was part of a batch, update the parent pair job
       if (job.batch_pair_job_id) {
         console.log(`[BitStudioPoller][${job.id}] This job is part of batch pair ${job.batch_pair_job_id}. Updating parent.`);
         await supabase.from('mira-agent-batch-inpaint-pair-jobs')
@@ -113,7 +130,7 @@ serve(async (req) => {
   } catch (error) {
     console.error(`[BitStudioPoller][${job_id}] Error:`, error);
     await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'failed', error_message: error.message }).eq('id', job_id);
-    if (job_id) { // Check if job_id is defined before trying to update the parent
+    if (job_id) {
         const { data: job } = await supabase.from('mira-agent-bitstudio-jobs').select('batch_pair_job_id').eq('id', job_id).single();
         if (job?.batch_pair_job_id) {
             await supabase.from('mira-agent-batch-inpaint-pair-jobs')

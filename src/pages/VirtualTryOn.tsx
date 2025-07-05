@@ -111,7 +111,6 @@ const VirtualTryOn = () => {
                     isLoading={isLoadingRecentJobs}
                     selectedJobId={selectedJobId}
                     onSelectJob={handleSelectJob}
-                    mode="base"
                 />
               </div>
             </div>
