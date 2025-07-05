@@ -1,4 +1,4 @@
-import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
+import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { GoogleGenAI, Content, Part, HarmCategory, HarmBlockThreshold } from 'https://esm.sh/@google/genai@0.15.0';
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 

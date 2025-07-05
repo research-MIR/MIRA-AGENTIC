@@ -1,4 +1,4 @@
-import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
+import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 
 const corsHeaders = {
@@ -128,7 +128,7 @@ serve(async (req) => {
     return new Response(JSON.stringify({ success: true, status: jobStatus }), { headers: corsHeaders });
 
   } catch (error) {
-    console.error(`[BitStudioPoller][${job_id}] Error:`, error);
+    console.error(`[BitStudioPoller][${job.id}] Error:`, error);
     await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'failed', error_message: error.message }).eq('id', job_id);
     if (job_id) {
         const { data: job } = await supabase.from('mira-agent-bitstudio-jobs').select('batch_pair_job_id').eq('id', job_id).single();
