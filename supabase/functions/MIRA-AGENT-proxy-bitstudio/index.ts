@@ -247,7 +247,8 @@ serve(async (req) => {
           console.log(`[BitStudioProxy][${requestId}] Crop's longest side (${cropLongestSide}px) is sufficient. Skipping upscale.`);
       }
 
-      if (!prompt || prompt.trim() === "") {
+      let finalPrompt = prompt;
+      if (!finalPrompt || finalPrompt.trim() === "") {
         if (!reference_image_base64) {
             throw new Error("A text prompt is required when no reference image is provided.");
         }
@@ -262,11 +263,11 @@ serve(async (req) => {
           }
         });
         if (promptError) throw new Error(`Auto-prompt generation failed: ${promptError.message}`);
-        prompt = promptData.final_prompt;
+        finalPrompt = promptData.final_prompt;
         console.log(`[BitStudioProxy][${requestId}] Auto-prompt generated successfully.`);
       }
 
-      if (!prompt) throw new Error("Prompt is required for inpainting.");
+      if (!finalPrompt) throw new Error("Prompt is required for inpainting.");
 
       for (let i = 0; i < num_attempts; i++) {
         console.log(`[BitStudioProxy][${requestId}] Starting attempt ${i + 1}/${num_attempts}.`);
@@ -300,7 +301,7 @@ serve(async (req) => {
         const inpaintUrl = `${BITSTUDIO_API_BASE}/images/${sourceImageId}/inpaint`;
         const inpaintPayload: any = { 
             mask_image_id: maskImageId, 
-            prompt, 
+            prompt: finalPrompt, 
             resolution: 'high', 
             denoise,
             seed: Math.floor(Math.random() * 1000000000)
