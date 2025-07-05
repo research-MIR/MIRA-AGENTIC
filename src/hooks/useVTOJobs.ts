@@ -37,30 +37,33 @@ export const useVTOJobs = () => {
       const bitstudioJobs: BitStudioJob[] = (bitstudioResult.data as any[]) || [];
       const batchPairJobs = batchPairResult.data || [];
 
-      const completedPairJobIds = new Set(
-        bitstudioJobs
-          .map(j => j.batch_pair_job_id)
-          .filter(Boolean)
-      );
+      // Separate base jobs, they are always included
+      const baseJobs = bitstudioJobs.filter(j => j.mode === 'base');
 
-      const unifiedJobs: BitStudioJob[] = [
-        ...bitstudioJobs,
-        ...batchPairJobs
-          .filter(job => !completedPairJobIds.has(job.id))
-          .map(job => ({
-            id: job.id,
-            status: job.status as BitStudioJob['status'],
-            source_person_image_url: job.source_person_image_url,
-            source_garment_image_url: job.source_garment_image_url,
-            final_image_url: undefined,
-            error_message: undefined,
-            mode: 'inpaint',
-            created_at: job.created_at,
-            metadata: {
-              prompt_used: job.prompt_appendix
-            }
-          }))
-      ];
+      // Get pro jobs that are already in bitstudio_jobs
+      const proBitstudioJobs = bitstudioJobs.filter(j => j.mode === 'inpaint');
+
+      // Get the IDs of pro jobs that have already been processed
+      const processedProJobIds = new Set(proBitstudioJobs.map(j => j.batch_pair_job_id).filter(Boolean));
+
+      // Get pending pro jobs that have NOT been processed yet
+      const pendingProJobs = batchPairJobs
+        .filter(job => !processedProJobIds.has(job.id))
+        .map(job => ({
+          id: job.id,
+          status: job.status as BitStudioJob['status'],
+          source_person_image_url: job.source_person_image_url,
+          source_garment_image_url: job.source_garment_image_url,
+          final_image_url: undefined,
+          error_message: undefined,
+          mode: 'inpaint', // Explicitly set mode
+          created_at: job.created_at,
+          metadata: {
+            prompt_used: job.prompt_appendix
+          }
+        } as BitStudioJob));
+
+      const unifiedJobs: BitStudioJob[] = [...baseJobs, ...proBitstudioJobs, ...pendingProJobs];
 
       unifiedJobs.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
