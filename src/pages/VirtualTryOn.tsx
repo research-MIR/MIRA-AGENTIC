@@ -15,7 +15,8 @@ import { useImageTransferStore } from "@/store/imageTransferStore";
 import { BitStudioJob } from "@/types/vto";
 import { useVTOJobs } from "@/hooks/useVTOJobs";
 import { RecentJobsList } from "@/components/VTO/RecentJobsList";
-import { Star, HelpCircle } from "lucide-react";
+import { Star, HelpCircle, Bug } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 const VirtualTryOn = () => {
   const { isProMode, toggleProMode } = useSession();
@@ -25,7 +26,7 @@ const VirtualTryOn = () => {
   const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
   
   const { consumeImageUrl, imageUrlToTransfer, vtoTarget } = useImageTransferStore();
-  const { jobs, isLoading: isLoadingRecentJobs } = useVTOJobs();
+  const { jobs, isLoading: isLoadingRecentJobs, error } = useVTOJobs();
 
   useEffect(() => {
     if (imageUrlToTransfer && vtoTarget) {
@@ -52,6 +53,12 @@ const VirtualTryOn = () => {
   const handleSelectJob = (job: BitStudioJob) => {
     setSelectedJobId(job.id);
   };
+
+  // Debugging data
+  const filteredJobsForDisplay = useMemo(() => {
+    if (!jobs) return [];
+    return jobs.filter(job => job.mode === (isProMode ? 'inpaint' : 'base'));
+  }, [jobs, isProMode]);
 
   return (
     <>
@@ -117,6 +124,36 @@ const VirtualTryOn = () => {
             </div>
           )}
         </div>
+        
+        {/* --- DEBUG PANEL --- */}
+        <Card className="mt-8 border-red-500">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-red-500">
+              <Bug /> Developer Debug Panel
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-3 gap-4 text-sm">
+              <div><strong>Data Loading:</strong> {isLoadingRecentJobs ? 'Loading...' : 'Done'}</div>
+              <div><strong>Pro Mode Active:</strong> {isProMode ? 'Yes' : 'No'}</div>
+              <div><strong>Error:</strong> {error ? error.message : 'None'}</div>
+            </div>
+            <div>
+              <h4 className="font-semibold">Total Jobs Fetched from DB ({jobs?.length || 0}):</h4>
+              <ScrollArea className="h-40 mt-2 p-2 border rounded-md bg-muted">
+                <pre className="text-xs"><code>{JSON.stringify(jobs, null, 2)}</code></pre>
+              </ScrollArea>
+            </div>
+            <div>
+              <h4 className="font-semibold">Jobs After Filtering for Current Mode ({filteredJobsForDisplay.length}):</h4>
+              <ScrollArea className="h-40 mt-2 p-2 border rounded-md bg-muted">
+                <pre className="text-xs"><code>{JSON.stringify(filteredJobsForDisplay, null, 2)}</code></pre>
+              </ScrollArea>
+            </div>
+          </CardContent>
+        </Card>
+        {/* --- END DEBUG PANEL --- */}
+
       </div>
 
       <Dialog open={isHelpModalOpen} onOpenChange={setIsHelpModalOpen}>
