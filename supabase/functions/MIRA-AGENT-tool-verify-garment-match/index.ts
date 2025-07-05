@@ -1,9 +1,12 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { GoogleGenAI, Content, Part, HarmCategory, HarmBlockThreshold } from 'https://esm.sh/@google/genai@0.15.0';
+import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const MODEL_NAME = "gemini-1.5-flash-latest";
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -35,12 +38,26 @@ Your response MUST be a single, valid JSON object with the following structure:
 - fix_suggestion: If 'is_match' is false, provide a single, actionable suggestion for the user to improve the result (e.g., "Try adding 'natural cotton texture' to the prompt appendix," "Attempt the generation again with a lower denoise strength to preserve the original shape better."). If it's a match, this MUST be null.
 `;
 
-async function downloadAndEncodeImage(url: string): Promise<{ base64: string, mimeType: string }> {
-    const response = await fetch(url);
-    if (!response.ok) {
-        throw new Error(`Failed to download image from ${url}. Status: ${response.statusText}`);
+async function downloadAndEncodeImage(supabase: SupabaseClient, url: string): Promise<{ base64: string, mimeType: string }> {
+    const urlObj = new URL(url);
+    const pathSegments = urlObj.pathname.split('/');
+    
+    const publicSegmentIndex = pathSegments.indexOf('public');
+    if (publicSegmentIndex === -1 || publicSegmentIndex + 1 >= pathSegments.length) {
+        throw new Error(`Could not parse bucket name from URL: ${url}`);
     }
-    const blob = await response.blob();
+    
+    const bucketName = pathSegments[publicSegmentIndex + 1];
+    const filePath = pathSegments.slice(publicSegmentIndex + 2).join('/');
+
+    if (!bucketName || !filePath) {
+        throw new Error(`Could not parse bucket or path from URL: ${url}`);
+    }
+
+    const { data: blob, error } = await supabase.storage.from(bucketName).download(filePath);
+    if (error) {
+        throw new Error(`Failed to download image from Supabase storage (${filePath}): ${error.message}`);
+    }
     const buffer = await blob.arrayBuffer();
     const base64 = encodeBase64(buffer);
     return { base64, mimeType: blob.type || 'image/png' };
@@ -63,9 +80,11 @@ serve(async (req) => {
       throw new Error("original_garment_url and final_generated_url are required.");
     }
 
+    const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
+
     const [originalData, finalData] = await Promise.all([
-        downloadAndEncodeImage(original_garment_url),
-        downloadAndEncodeImage(final_generated_url)
+        downloadAndEncodeImage(supabase, original_garment_url),
+        downloadAndEncodeImage(supabase, final_generated_url)
     ]);
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
