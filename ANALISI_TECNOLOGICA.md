@@ -44,24 +44,13 @@ Per raggiungere gli obiettivi di progetto in modo efficiente, propongo i seguent
 
 #### **1️⃣ Confermare lo Stack Tecnologico**
 
-Questa è la decisione più critica da prendere.
-
 **Analisi della Scelta:**
-Supabase non è semplicemente un database; è una piattaforma Backend-as-a-Service (BaaS) completa. Attualmente utilizziamo:
-*   **Supabase Auth** per l'autenticazione.
-*   **Supabase Database** per i dati.
-*   **Supabase Edge Functions** come "cervello" per tutta la nostra logica AI.
-*   **Supabase Storage** per i file.
-*   **Supabase Realtime** per gli aggiornamenti live.
+L'attuale architettura basata su Supabase ci ha permesso di sviluppare l'applicazione in tempi molto rapidi, poiché fornisce una suite completa di servizi pronti all'uso (autenticazione, database, funzioni serverless).
 
-Migrare a Google Cloud significherebbe ricostruire manualmente ciascuno di questi componenti con un equivalente Google (es. Cloud Identity, Cloud SQL, Cloud Functions, GCS). Questo rappresenterebbe un impegno tecnico significativo che devierebbe risorse dallo sviluppo delle nuove funzionalità richieste.
+**Proposta:**
+Per massimizzare la velocità di sviluppo e concentrarci sulla realizzazione delle nuove funzionalità richieste, la nostra raccomandazione è di procedere con lo stack tecnologico attuale.
 
-**Raccomandazione Strategica:**
-Propongo di **adottare un approccio ibrido e pragmatico**:
-*   **Mantenere l'ecosistema Supabase** per il backend (Auth, Database, Edge Functions), sfruttando la sua potenza e la velocità di sviluppo che ci ha già permesso di costruire la base attuale.
-*   **Integrare Google Cloud Storage (GCS) specificamente per lo storage dei file**, come richiesto dalla roadmap.
-
-Questa scelta ci permette di soddisfare il requisito di storage su GCS senza intraprendere una migrazione completa e dispendiosa, consentendoci di concentrare gli sforzi sullo sviluppo delle feature a valore aggiunto.
+La decisione finale sull'architettura a lungo termine, inclusa una potenziale migrazione a Google Cloud, verrà lasciata al team tecnico che verrà internalizzato, in modo che possano valutare la soluzione migliore in base alle loro esigenze operative e di scalabilità future.
 
 #### **2️⃣ Avviare lo Sviluppo delle Feature Mancanti**
 Una volta confermato lo stack, possiamo iniziare immediatamente a sviluppare le funzionalità chiave richieste dalla roadmap, come il sistema di elaborazione in batch e i classificatori di qualità AI.
