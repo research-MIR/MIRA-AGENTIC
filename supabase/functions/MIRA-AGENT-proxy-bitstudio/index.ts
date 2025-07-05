@@ -1,4 +1,4 @@
-import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
+import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { decodeBase64, encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 import { createCanvas, loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
@@ -156,53 +156,36 @@ serve(async (req) => {
       const rawMaskImage = await loadImage(new Uint8Array(await maskBlob.arrayBuffer()));
       console.log(`[BitStudioProxy][${requestId}] Mask image loaded into memory.`);
 
-      // --- BBox Calculation from Raw Mask ---
-      const rawMaskCanvas = createCanvas(rawMaskImage.width(), rawMaskImage.height());
-      const rawMaskCtx = rawMaskCanvas.getContext('2d');
-      if (!rawMaskCtx) throw new Error("Could not get 2D context for raw mask canvas.");
-      rawMaskCtx.drawImage(rawMaskImage, 0, 0);
-      const rawMaskImageData = rawMaskCtx.getImageData(0, 0, rawMaskCanvas.width, rawMaskCanvas.height);
-      const rawMaskData = rawMaskImageData.data;
-      
-      let minX = rawMaskCanvas.width, minY = rawMaskCanvas.height, maxX = 0, maxY = 0;
-      for (let i = 0; i < rawMaskData.length; i += 4) {
-        if (rawMaskData[i] > 10) { // Check if pixel is not black
-          const x = (i / 4) % rawMaskCanvas.width;
-          const y = Math.floor((i / 4) / rawMaskCanvas.width);
-          if (x < minX) minX = x;
-          if (x > maxX) maxX = x;
-          if (y < minY) minY = y;
-          if (y > maxY) maxY = y;
-        }
-      }
-
-      if (maxX < minX || maxY < minY) {
-        throw new Error("The provided mask is empty or invalid after processing.");
-      }
-      console.log(`[BitStudioProxy][${requestId}] BBox calculated from raw mask: [${minX}, ${minY}, ${maxX}, ${maxY}]`);
-
-      // --- Mask Dilation ---
       const dilatedCanvas = createCanvas(rawMaskImage.width(), rawMaskImage.height());
       const dilateCtx = dilatedCanvas.getContext('2d');
-      if (!dilateCtx) throw new Error("Could not get 2D context for dilated canvas.");
+      
       const dilationAmount = Math.max(10, Math.round(rawMaskImage.width() * (mask_expansion_percent / 100)));
       dilateCtx.filter = `blur(${dilationAmount}px)`;
       dilateCtx.drawImage(rawMaskImage, 0, 0);
       dilateCtx.filter = 'none';
       console.log(`[BitStudioProxy][${requestId}] Mask dilated by ${dilationAmount}px.`);
       
-      // Re-threshold the blurred mask to make it pure B&W
       const dilatedImageData = dilateCtx.getImageData(0, 0, dilatedCanvas.width, dilatedCanvas.height);
       const data = dilatedImageData.data;
+      let minX = dilatedCanvas.width, minY = dilatedCanvas.height, maxX = 0, maxY = 0;
       for (let i = 0; i < data.length; i += 4) {
-        if (data[i] > 10) { // Use a low threshold after blurring
+        if (data[i] > 128) {
           data[i] = data[i+1] = data[i+2] = 255;
+          const x = (i / 4) % dilatedCanvas.width;
+          const y = Math.floor((i / 4) / dilatedCanvas.width);
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
         } else {
           data[i] = data[i+1] = data[i+2] = 0;
         }
       }
       dilateCtx.putImageData(dilatedImageData, 0, 0);
-      console.log(`[BitStudioProxy][${requestId}] Dilated mask re-thresholded.`);
+
+      if (maxX < minX || maxY < minY) {
+        throw new Error("The provided mask is empty or invalid after processing.");
+      }
 
       const fullSourceImage = await loadImage(`data:image/png;base64,${full_source_image_base64}`);
       const padding = Math.round(Math.max(maxX - minX, maxY - minY) * 0.30);
@@ -220,11 +203,10 @@ serve(async (req) => {
       }
 
       const bbox = { x: x1, y: y1, width, height };
-      console.log(`[BitStudioProxy][${requestId}] Calculated bounding box with padding: ${JSON.stringify(bbox)}`);
+      console.log(`[BitStudioProxy][${requestId}] Calculated bounding box: ${JSON.stringify(bbox)}`);
 
       const croppedCanvas = createCanvas(bbox.width, bbox.height);
       const cropCtx = croppedCanvas.getContext('2d');
-      if (!cropCtx) throw new Error("Could not get 2D context for cropped source canvas.");
       cropCtx.drawImage(fullSourceImage, bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
       const croppedSourceBuffer = croppedCanvas.toBuffer('image/png');
       if (!croppedSourceBuffer) throw new Error("Failed to create buffer from cropped source canvas.");
@@ -232,7 +214,6 @@ serve(async (req) => {
 
       const croppedMaskCanvas = createCanvas(bbox.width, bbox.height);
       const cropMaskCtx = croppedMaskCanvas.getContext('2d');
-      if (!cropMaskCtx) throw new Error("Could not get 2D context for cropped mask canvas.");
       cropMaskCtx.drawImage(dilatedCanvas, bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
       const croppedDilatedMaskBuffer = croppedMaskCanvas.toBuffer('image/png');
       if (!croppedDilatedMaskBuffer) throw new Error("Failed to create buffer from cropped mask canvas.");
@@ -349,8 +330,7 @@ serve(async (req) => {
           cropped_dilated_mask_base64: croppedDilatedMaskBase64,
           bbox,
           prompt_used: prompt,
-          debug_assets: debug_assets || {},
-          reference_image_url: reference_image_url || null
+          debug_assets: debug_assets || {}
         };
 
         const { data: newJob, error: insertError } = await supabase.from('mira-agent-bitstudio-jobs').insert({

@@ -64,28 +64,22 @@ serve(async (req) => {
     console.log(`[BitStudioPoller][${job.id}] BitStudio status: ${jobStatus}`);
 
     if (jobStatus === 'completed') {
+      console.log(`[BitStudioPoller][${job.id}] Status is 'completed'. Starting verification step...`);
+      
       let verificationResult = null;
-      const originalGarmentUrl = job.mode === 'inpaint' 
-          ? job.metadata?.reference_image_url 
-          : job.source_garment_image_url;
-
-      if (originalGarmentUrl) {
-          console.log(`[BitStudioPoller][${job.id}] Found reference garment URL. Starting verification step...`);
-          try {
-              const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-verify-garment-match', {
-                  body: {
-                      original_garment_url: originalGarmentUrl,
-                      final_generated_url: finalImageUrl
-                  }
-              });
-              if (error) throw error;
-              verificationResult = data;
-              console.log(`[BitStudioPoller][${job.id}] Verification complete. Result:`, verificationResult);
-          } catch (verificationError) {
-              console.error(`[BitStudioPoller][${job.id}] Verification step failed:`, verificationError.message);
-          }
-      } else {
-          console.log(`[BitStudioPoller][${job.id}] No reference garment URL found. Skipping verification step.`);
+      try {
+        const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-verify-garment-match', {
+            body: {
+                original_garment_url: job.source_garment_image_url,
+                final_generated_url: finalImageUrl
+            }
+        });
+        if (error) throw error;
+        verificationResult = data;
+        console.log(`[BitStudioPoller][${job.id}] Verification complete. Result:`, verificationResult);
+      } catch (verificationError) {
+        console.error(`[BitStudioPoller][${job.id}] Verification step failed:`, verificationError.message);
+        // Don't fail the whole job, just log it.
       }
 
       if (job.mode === 'inpaint') {
@@ -134,7 +128,7 @@ serve(async (req) => {
     return new Response(JSON.stringify({ success: true, status: jobStatus }), { headers: corsHeaders });
 
   } catch (error) {
-    console.error(`[BitStudioPoller][${job_id}] Error:`, error);
+    console.error(`[BitStudioPoller][${job.id}] Error:`, error);
     await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'failed', error_message: error.message }).eq('id', job_id);
     if (job_id) {
         const { data: job } = await supabase.from('mira-agent-bitstudio-jobs').select('batch_pair_job_id').eq('id', job_id).single();
