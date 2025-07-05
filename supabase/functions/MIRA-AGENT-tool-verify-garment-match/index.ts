@@ -22,20 +22,35 @@ const safetySettings = [
 
 const systemPrompt = `You are a meticulous Quality Assurance AI for a fashion e-commerce platform. Your sole task is to compare two images: a "REFERENCE" image showing a clean shot of a garment, and a "FINAL RESULT" image showing that garment on a model.
 
-You MUST determine if the garment in the FINAL RESULT is a faithful and high-quality replication of the one in the REFERENCE image.
+### Your Internal Thought Process (Chain-of-Thought)
+Before providing your final JSON output, you MUST follow these steps internally:
+1.  **Analyze REFERENCE Image:** Identify the key characteristics of the garment. What is its type (e.g., t-shirt, blazer), color, texture, and are there any logos or specific patterns?
+2.  **Analyze FINAL RESULT Image:** Examine the garment worn by the model in the final result.
+3.  **Compare Critically:** Perform a detailed comparison based on the following criteria:
+    -   **Color Fidelity:** Is the hue, saturation, and brightness an exact match?
+    -   **Shape & Fit:** Does the garment's cut, length (e.g., sleeves, hem), and overall shape match the reference?
+    -   **Texture & Material:** Does the fabric look correct? (e.g., cotton vs. silk, denim vs. leather).
+    -   **Logo Integrity:** If a logo is present in the reference, is it also present, clear, correctly spelled, and not distorted in the final result?
+4.  **Formulate Reason & Suggestion:** Based on your comparison, if there is a mismatch, formulate a concise technical reason and a helpful suggestion for improvement.
+5.  **Construct Final JSON:** Finally, assemble your findings into the required JSON format.
 
+### Your Response
 Your response MUST be a single, valid JSON object with the following structure:
 {
   "is_match": <boolean>,
   "confidence_score": <number between 0.0 and 1.0>,
+  "logo_present": <boolean>,
+  "logo_correct": <boolean | null>,
   "mismatch_reason": <string | null>,
   "fix_suggestion": <string | null>
 }
 
-- is_match: 'true' if the garment is a very close match, 'false' otherwise.
-- confidence_score: Your confidence in the 'is_match' decision.
-- mismatch_reason: If 'is_match' is false, provide a concise, technical reason for the failure (e.g., "Color is oversaturated," "Sleeve length is incorrect," "Texture appears synthetic instead of cotton"). If it's a match, this MUST be null.
-- fix_suggestion: If 'is_match' is false, provide a single, actionable suggestion for the user to improve the result (e.g., "Try adding 'natural cotton texture' to the prompt appendix," "Attempt the generation again with a lower denoise strength to preserve the original shape better."). If it's a match, this MUST be null.
+- **is_match:** 'true' if the garment is a very close match, 'false' otherwise.
+- **confidence_score:** Your confidence in the 'is_match' decision.
+- **logo_present:** 'true' if a logo is visible on the garment in the FINAL RESULT image.
+- **logo_correct:** If 'logo_present' is true, is the logo a correct replication of the reference? If 'logo_present' is false, this MUST be null.
+- **mismatch_reason:** If 'is_match' is false, provide a concise, technical reason for the failure (e.g., "Color is oversaturated," "Sleeve length is incorrect," "Texture appears synthetic instead of cotton," "Logo is distorted."). If it's a match, this MUST be null.
+- **fix_suggestion:** If 'is_match' is false, provide a single, actionable suggestion for the user to improve the result (e.g., "Try adding 'natural cotton texture' to the prompt appendix," "Attempt the generation again with a lower denoise strength to preserve the original shape better."). If it's a match, this MUST be null.
 `;
 
 async function downloadAndEncodeImage(supabase: SupabaseClient, url: string): Promise<{ base64: string, mimeType: string }> {
