@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -23,11 +24,17 @@ interface RecentJobsListProps {
     isLoading: boolean;
     selectedJobId: string | null;
     onSelectJob: (job: BitStudioJob) => void;
+    mode: 'base' | 'inpaint';
 }
 
-export const RecentJobsList = ({ jobs, isLoading, selectedJobId, onSelectJob }: RecentJobsListProps) => {
+export const RecentJobsList = ({ jobs, isLoading, selectedJobId, onSelectJob, mode }: RecentJobsListProps) => {
     const { t } = useLanguage();
     const { showImage } = useImagePreview();
+
+    const filteredJobs = useMemo(() => {
+        if (!jobs) return [];
+        return jobs.filter(job => job.mode === mode);
+    }, [jobs, mode]);
 
     const handleThumbnailClick = (job: BitStudioJob) => {
         onSelectJob(job);
@@ -43,10 +50,10 @@ export const RecentJobsList = ({ jobs, isLoading, selectedJobId, onSelectJob }: 
         <Card>
             <CardHeader><CardTitle>{t('recentJobs')}</CardTitle></CardHeader>
             <CardContent>
-                {isLoading ? <Skeleton className="h-24 w-full" /> : jobs && jobs.length > 0 ? (
+                {isLoading ? <Skeleton className="h-24 w-full" /> : filteredJobs && filteredJobs.length > 0 ? (
                     <ScrollArea className="h-32">
                         <div className="flex gap-4 pb-2">
-                            {jobs.map(job => {
+                            {filteredJobs.map(job => {
                                 const urlToPreview = job.final_image_url || job.metadata?.source_image_url || job.source_person_image_url;
                                 return (
                                     <button key={job.id} onClick={() => handleThumbnailClick(job)} className={cn("border-2 rounded-lg p-1 flex-shrink-0 w-24 h-24", selectedJobId === job.id ? "border-primary" : "border-transparent")}>
