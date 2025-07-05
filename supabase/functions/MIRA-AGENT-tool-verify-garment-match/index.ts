@@ -30,7 +30,11 @@ Before providing your final JSON output, you MUST follow these steps internally:
     -   **Color Fidelity:** Is the hue, saturation, and brightness an exact match?
     -   **Shape & Fit:** Does the garment's cut, length (e.g., sleeves, hem), and overall shape match the reference?
     -   **Texture & Material:** Does the fabric look correct? (e.g., cotton vs. silk, denim vs. leather).
+    -   **Material Finish:** Does the fabric have the correct sheen? (e.g., matte cotton, glossy satin, slight sheen on silk).
+    -   **Patterns & Prints:** If a pattern exists, is it replicated accurately in terms of scale, color, and orientation? Is it distorted?
+    -   **Hardware & Details:** Are zippers, buttons, stitching, and embroidery present and correctly rendered?
     -   **Logo Integrity:** If a logo is present in the reference, is it also present, clear, correctly spelled, and not distorted in the final result?
+    -   **Overall Garment Integrity:** Check for common AI errors like the garment unnaturally blending into the model's skin, distorted seams, or disconnected parts.
 4.  **Formulate Reason & Suggestion:** Based on your comparison, if there is a mismatch, formulate a concise technical reason and a helpful suggestion for improvement.
 5.  **Construct Final JSON:** Finally, assemble your findings into the required JSON format.
 
