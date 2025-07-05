@@ -72,7 +72,7 @@ serve(async (req) => {
           status: 'compositing',
           final_image_url: finalImageUrl,
         }).eq('id', job_id);
-        supabase.functions.invoke('MIRA-AGENT-compositor-inpaint', { body: { job_id, final_image_url: finalImageUrl } }).catch(console.error);
+        supabase.functions.invoke('MIRA-AGENT-compositor-inpaint', { body: { job_id, final_image_url: finalImageUrl, job_type: 'bitstudio' } }).catch(console.error);
       } else {
         console.log(`[BitStudioPoller][${job.id}] VTO job complete. Finalizing...`);
         await supabase.from('mira-agent-bitstudio-jobs').update({

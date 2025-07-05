@@ -24,18 +24,24 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  const { job_id, final_image_url } = await req.json();
+  const { job_id, final_image_url, job_type = 'comfyui' } = await req.json();
   if (!job_id || !final_image_url) throw new Error("job_id and final_image_url are required.");
   
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-  console.log(`[Compositor-Inpainting][${job_id}] Job started.`);
+  console.log(`[Compositor-Inpainting][${job_id}] Job started. Type: ${job_type}`);
 
   try {
-    const { data: job, error: fetchError } = await supabase
-      .from('mira-agent-inpainting-jobs')
-      .select('metadata, user_id')
+    let job, fetchError;
+    const tableName = job_type === 'bitstudio' ? 'mira-agent-bitstudio-jobs' : 'mira-agent-inpainting-jobs';
+    const selectColumns = 'metadata, user_id';
+
+    console.log(`[Compositor-Inpainting][${job_id}] Fetching from table: ${tableName}`);
+    
+    ({ data: job, error: fetchError } = await supabase
+      .from(tableName)
+      .select(selectColumns)
       .eq('id', job_id)
-      .single();
+      .single());
 
     if (fetchError) throw fetchError;
     
@@ -99,13 +105,26 @@ serve(async (req) => {
 
     const { data: { publicUrl: finalPublicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(finalFilePath);
 
-    await supabase.from('mira-agent-inpainting-jobs')
-      .update({ 
-          status: 'complete',
-          final_result: { publicUrl: finalPublicUrl, storagePath: finalFilePath },
-          metadata: { ...metadata, full_source_image_base64: null, cropped_dilated_mask_base64: null } // Clear large data
-      })
-      .eq('id', job_id);
+    const finalResultPayload = { publicUrl: finalPublicUrl, storagePath: finalFilePath };
+    const finalMetadata = { ...metadata, full_source_image_base64: null, cropped_dilated_mask_base64: null };
+
+    if (job_type === 'bitstudio') {
+        await supabase.from('mira-agent-bitstudio-jobs')
+          .update({ 
+              status: 'complete',
+              final_image_url: finalPublicUrl,
+              metadata: finalMetadata
+          })
+          .eq('id', job_id);
+    } else { // comfyui
+        await supabase.from('mira-agent-inpainting-jobs')
+          .update({ 
+              status: 'complete',
+              final_result: finalResultPayload,
+              metadata: finalMetadata
+          })
+          .eq('id', job_id);
+    }
 
     console.log(`[Compositor-Inpainting][${job_id}] Compositing complete. Final URL: ${finalPublicUrl}`);
     return new Response(JSON.stringify({ success: true, finalImageUrl: finalPublicUrl }), {
@@ -115,7 +134,8 @@ serve(async (req) => {
 
   } catch (error) {
     console.error(`[Compositor-Inpainting][${job_id}] Error:`, error);
-    await supabase.from('mira-agent-inpainting-jobs').update({ status: 'failed', error_message: `Compositor failed: ${error.message}` }).eq('id', job_id);
+    const tableName = job_type === 'bitstudio' ? 'mira-agent-bitstudio-jobs' : 'mira-agent-inpainting-jobs';
+    await supabase.from(tableName).update({ status: 'failed', error_message: `Compositor failed: ${error.message}` }).eq('id', job_id);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,

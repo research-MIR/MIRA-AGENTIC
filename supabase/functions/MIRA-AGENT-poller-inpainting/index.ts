@@ -8,7 +8,6 @@ const corsHeaders = {
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-const GENERATED_IMAGES_BUCKET = 'mira-generations';
 const POLLING_INTERVAL_MS = 2500; // Reduced from 5000ms
 const FINAL_OUTPUT_NODE_ID = "9";
 
@@ -66,7 +65,7 @@ serve(async (req) => {
         }).eq('id', job_id);
 
         console.log(`[InpaintingPoller][${job.id}] Inpainting complete. Triggering compositor...`);
-        supabase.functions.invoke('MIRA-AGENT-compositor-inpainting', { body: { job_id } }).catch(console.error);
+        supabase.functions.invoke('MIRA-AGENT-compositor-inpaint', { body: { job_id, final_image_url: imageUrl, job_type: 'comfyui' } }).catch(console.error);
         
         return new Response(JSON.stringify({ success: true, status: 'compositing' }), { headers: corsHeaders });
     } else {
