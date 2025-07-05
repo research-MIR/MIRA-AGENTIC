@@ -46,6 +46,7 @@ export const commonTranslations = {
     download: "Scarica",
     upscaleAndDownload: "Migliora e Scarica",
     upscaleAndDownloadSkin: "Upscale (Pelle/Costumi)",
+    generateModels: "Genera Modelli",
   },
   en: {
     greeting: "Hi! How can I help you today?",
@@ -94,5 +95,6 @@ export const commonTranslations = {
     download: "Download",
     upscaleAndDownload: "Upscale & Download",
     upscaleAndDownloadSkin: "Upscale (Skin/Swimwear)",
+    generateModels: "Generate Models",
   },
 };
