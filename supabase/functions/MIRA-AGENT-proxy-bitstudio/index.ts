@@ -1,4 +1,4 @@
-import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
+import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { decodeBase64, encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 import { createCanvas, loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
@@ -329,12 +329,19 @@ serve(async (req) => {
           cropped_source_image_base64: croppedSourceBase64,
           cropped_dilated_mask_base64: croppedDilatedMaskBase64,
           bbox,
-          prompt_used: prompt,
-          debug_assets: debug_assets || {}
+          prompt_used: finalPrompt,
+          debug_assets: debug_assets || {},
+          source_image_url: source_image_url,
+          reference_image_url: reference_image_url
         };
 
         const { data: newJob, error: insertError } = await supabase.from('mira-agent-bitstudio-jobs').insert({
-          user_id, mode, status: 'queued', bitstudio_task_id: inpaintResult.id,
+          user_id, 
+          mode, 
+          status: 'queued', 
+          bitstudio_task_id: inpaintResult.id,
+          source_person_image_url: source_image_url,
+          source_garment_image_url: reference_image_url,
           metadata: metadataToSave,
           batch_pair_job_id: batch_pair_job_id
         }).select('id').single();
