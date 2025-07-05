@@ -6,7 +6,7 @@ import { useLanguage } from "@/context/LanguageContext";
 import { cn } from "@/lib/utils";
 import { useSecureImage } from "@/hooks/useSecureImage";
 import { BitStudioJob } from "@/types/vto";
-import { AlertTriangle, Loader2 } from "lucide-react";
+import { AlertTriangle, Loader2, CheckCircle, XCircle } from "lucide-react";
 import { useImagePreview } from "@/context/ImagePreviewContext";
 
 const SecureImageDisplay = ({ imageUrl, alt }: { imageUrl: string | null, alt: string }) => {
@@ -55,9 +55,19 @@ export const RecentJobsList = ({ jobs, isLoading, selectedJobId, onSelectJob, mo
                         <div className="flex gap-4 pb-2">
                             {filteredJobs.map(job => {
                                 const urlToPreview = job.final_image_url || job.metadata?.source_image_url || job.source_person_image_url;
+                                const verification = job.metadata?.verification_result;
                                 return (
-                                    <button key={job.id} onClick={() => handleThumbnailClick(job)} className={cn("border-2 rounded-lg p-1 flex-shrink-0 w-24 h-24", selectedJobId === job.id ? "border-primary" : "border-transparent")}>
+                                    <button key={job.id} onClick={() => handleThumbnailClick(job)} className={cn("border-2 rounded-lg p-0.5 flex-shrink-0 w-24 h-24 relative", selectedJobId === job.id ? "border-primary" : "border-transparent")}>
                                         <SecureImageDisplay imageUrl={urlToPreview || null} alt="Recent job" />
+                                        {verification && (
+                                            <div className="absolute bottom-1 right-1">
+                                                {verification.is_match ? (
+                                                    <CheckCircle className="h-5 w-5 text-white bg-green-600 rounded-full p-0.5" />
+                                                ) : (
+                                                    <XCircle className="h-5 w-5 text-white bg-destructive rounded-full p-0.5" />
+                                                )}
+                                            </div>
+                                        )}
                                     </button>
                                 )
                             })}

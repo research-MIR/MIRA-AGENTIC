@@ -4,13 +4,14 @@ import { BatchInpaintPro } from "./BatchInpaintPro";
 import { BitStudioJob } from "@/types/vto";
 import { RecentJobsList } from "./RecentJobsList";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Info, Eye } from "lucide-react";
+import { Info, Eye, CheckCircle, XCircle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Loader2 } from "lucide-react";
 import { useImagePreview } from "@/context/ImagePreviewContext";
 import { SecureImageDisplay } from "./SecureImageDisplay";
 import { DebugStepsModal } from "./DebugStepsModal";
+import { Badge } from "@/components/ui/badge";
 
 interface VirtualTryOnProProps {
     recentJobs: BitStudioJob[] | undefined;
@@ -32,6 +33,7 @@ const VirtualTryOnPro = ({
   const renderJobResult = (job: BitStudioJob) => {
     if (job.status === 'failed') return <p className="text-destructive text-sm p-2">{t('jobFailed', { errorMessage: job.error_message })}</p>;
     if (job.status === 'complete' && job.final_image_url) {
+      const verification = job.metadata?.verification_result;
       return (
         <div className="space-y-4">
           <div className="relative group w-full h-full">
@@ -50,6 +52,36 @@ const VirtualTryOnPro = ({
               </Button>
             )}
           </div>
+          {verification && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  Verification Result
+                  {verification.is_match ? (
+                    <Badge variant="default" className="bg-green-600 hover:bg-green-700">
+                      <CheckCircle className="h-4 w-4 mr-1" /> Match
+                    </Badge>
+                  ) : (
+                    <Badge variant="destructive">
+                      <XCircle className="h-4 w-4 mr-1" /> Mismatch
+                    </Badge>
+                  )}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {verification.error ? (
+                  <p className="text-sm text-destructive">{verification.error}</p>
+                ) : verification.is_match ? (
+                  <p className="text-sm text-muted-foreground">The generated garment is a good match to the reference.</p>
+                ) : (
+                  <div className="text-sm space-y-2">
+                    <p><strong className="font-medium">Reason:</strong> {verification.mismatch_reason || 'No reason provided.'}</p>
+                    <p><strong className="font-medium">Suggestion:</strong> {verification.fix_suggestion || 'No suggestion provided.'}</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
         </div>
       );
     }
