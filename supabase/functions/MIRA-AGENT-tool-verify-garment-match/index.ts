@@ -39,28 +39,40 @@ Your response MUST be a single, valid JSON object with the following structure:
 `;
 
 async function downloadAndEncodeImage(supabase: SupabaseClient, url: string): Promise<{ base64: string, mimeType: string }> {
-    const urlObj = new URL(url);
-    const pathSegments = urlObj.pathname.split('/');
-    
-    const publicSegmentIndex = pathSegments.indexOf('public');
-    if (publicSegmentIndex === -1 || publicSegmentIndex + 1 >= pathSegments.length) {
-        throw new Error(`Could not parse bucket name from URL: ${url}`);
-    }
-    
-    const bucketName = pathSegments[publicSegmentIndex + 1];
-    const filePath = pathSegments.slice(publicSegmentIndex + 2).join('/');
+    if (url.includes('supabase.co')) {
+        const urlObj = new URL(url);
+        const pathSegments = urlObj.pathname.split('/');
+        
+        const publicSegmentIndex = pathSegments.indexOf('public');
+        if (publicSegmentIndex === -1 || publicSegmentIndex + 1 >= pathSegments.length) {
+            throw new Error(`Could not parse bucket name from Supabase URL: ${url}`);
+        }
+        
+        const bucketName = pathSegments[publicSegmentIndex + 1];
+        const filePath = pathSegments.slice(publicSegmentIndex + 2).join('/');
 
-    if (!bucketName || !filePath) {
-        throw new Error(`Could not parse bucket or path from URL: ${url}`);
-    }
+        if (!bucketName || !filePath) {
+            throw new Error(`Could not parse bucket or path from Supabase URL: ${url}`);
+        }
 
-    const { data: blob, error } = await supabase.storage.from(bucketName).download(filePath);
-    if (error) {
-        throw new Error(`Failed to download image from Supabase storage (${filePath}): ${error.message}`);
+        const { data: blob, error } = await supabase.storage.from(bucketName).download(filePath);
+        if (error) {
+            throw new Error(`Failed to download image from Supabase storage (${filePath}): ${error.message}`);
+        }
+        const buffer = await blob.arrayBuffer();
+        const base64 = encodeBase64(buffer);
+        return { base64, mimeType: blob.type || 'image/png' };
+    } else {
+        // Handle external URLs (like BitStudio)
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`Failed to download image from external URL ${url}. Status: ${response.statusText}`);
+        }
+        const blob = await response.blob();
+        const buffer = await blob.arrayBuffer();
+        const base64 = encodeBase64(buffer);
+        return { base64, mimeType: blob.type || 'image/png' };
     }
-    const buffer = await blob.arrayBuffer();
-    const base64 = encodeBase64(buffer);
-    return { base64, mimeType: blob.type || 'image/png' };
 }
 
 function extractJson(text: string): any {
