@@ -96,8 +96,40 @@ serve(async (req) => {
 
     const { data: { publicUrl: finalPublicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(finalFilePath);
 
+    // --- NEW: Verification Step ---
+    let verificationResult = null;
+    if (metadata.reference_image_url) {
+        console.log(`[Compositor-Inpainting][${job_id}] Reference image found. Triggering verification step.`);
+        try {
+            const { data: verificationData, error: verificationError } = await supabase.functions.invoke('MIRA-AGENT-tool-verify-garment-match', {
+                body: {
+                    original_garment_url: metadata.reference_image_url,
+                    final_generated_url: finalPublicUrl
+                }
+            });
+            if (verificationError) {
+                console.error(`[Compositor-Inpainting][${job_id}] Verification tool failed:`, verificationError.message);
+                verificationResult = { error: verificationError.message };
+            } else {
+                console.log(`[Compositor-Inpainting][${job_id}] Verification successful:`, verificationData);
+                verificationResult = verificationData;
+            }
+        } catch (e) {
+            console.error(`[Compositor-Inpainting][${job_id}] Exception during verification tool invocation:`, e.message);
+            verificationResult = { error: e.message };
+        }
+    } else {
+        console.log(`[Compositor-Inpainting][${job_id}] No reference image in metadata. Skipping verification step.`);
+    }
+    // --- END: Verification Step ---
+
     const finalResultPayload = { publicUrl: finalPublicUrl, storagePath: finalFilePath };
-    const finalMetadata = { ...metadata, full_source_image_base64: null, cropped_dilated_mask_base64: null };
+    const finalMetadata = { 
+        ...metadata, 
+        full_source_image_base64: null, 
+        cropped_dilated_mask_base64: null,
+        verification_result: verificationResult // Store the verification result
+    };
 
     if (job_type === 'bitstudio') {
         await supabase.from('mira-agent-bitstudio-jobs')
