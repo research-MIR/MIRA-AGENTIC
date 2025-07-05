@@ -6,7 +6,12 @@ import { createCanvas, loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.t
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS'
 };
+
+const UPLOAD_BUCKET = 'mira-agent-user-uploads';
+const BITSTUDIO_API_KEY = Deno.env.get('BITSTUDIO_API_KEY');
+const BITSTUDIO_API_BASE = 'https://api.bitstudio.ai';
 
 const workflowTemplate = `{
   "3": { "inputs": { "seed": 1062983749859779, "steps": 20, "cfg": 1, "sampler_name": "euler", "scheduler": "normal", "denoise": 1, "model": ["39", 0], "positive": ["38", 0], "negative": ["38", 1], "latent_image": ["38", 2] }, "class_type": "KSampler", "_meta": { "title": "KSampler" } },
@@ -49,6 +54,38 @@ async function uploadToSupabaseStorage(supabase: SupabaseClient, blob: Blob, use
     if (error) throw new Error(`Supabase storage upload failed: ${error.message}`);
     const { data: { publicUrl } } = supabase.storage.from('mira-agent-user-uploads').getPublicUrl(filePath);
     return publicUrl;
+}
+
+async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
+    const url = new URL(publicUrl);
+    const filePath = url.pathname.split(`/${UPLOAD_BUCKET}/`)[1];
+    if (!filePath) {
+        throw new Error(`Could not parse file path from URL: ${publicUrl}`);
+    }
+
+    const { data, error } = await supabase.storage.from(UPLOAD_BUCKET).download(decodeURIComponent(filePath));
+
+    if (error) {
+        throw new Error(`Failed to download from Supabase storage: ${error.message}`);
+    }
+    return data;
+}
+
+const getMaskBlob = downloadFromSupabase;
+
+async function uploadToBitStudio(imageBlob: Blob, category: string, filename: string) {
+    const formData = new FormData();
+    formData.append('image', imageBlob, filename);
+    formData.append('category', category);
+    const uploadUrl = `${BITSTUDIO_API_BASE}/images/upload`;
+    const response = await fetch(uploadUrl, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}` },
+        body: formData
+    });
+    if (!response.ok) throw new Error(`BitStudio upload failed: ${await response.text()}`);
+    const data = await response.json();
+    return data.id;
 }
 
 serve(async (req) => {
@@ -365,7 +402,7 @@ serve(async (req) => {
 
       const vtoResponse = await fetch(vtoUrl, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}`, 'Content-Type': 'application/json' },
+        headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}` },
         body: JSON.stringify(vtoPayload)
       });
       if (!vtoResponse.ok) throw new Error(`BitStudio VTO request failed: ${await vtoResponse.text()}`);
