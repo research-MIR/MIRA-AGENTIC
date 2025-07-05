@@ -58,15 +58,26 @@ async function uploadToSupabaseStorage(supabase: SupabaseClient, blob: Blob, use
 
 async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
     const url = new URL(publicUrl);
-    const filePath = url.pathname.split(`/${UPLOAD_BUCKET}/`)[1];
-    if (!filePath) {
-        throw new Error(`Could not parse file path from URL: ${publicUrl}`);
+    const pathSegments = url.pathname.split('/');
+    
+    const publicIndex = pathSegments.indexOf('public');
+    if (publicIndex === -1 || publicIndex + 1 >= pathSegments.length) {
+        throw new Error(`Invalid Supabase storage URL format. Could not find 'public' segment in: ${publicUrl}`);
     }
 
-    const { data, error } = await supabase.storage.from(UPLOAD_BUCKET).download(decodeURIComponent(filePath));
+    const bucketName = pathSegments[publicIndex + 1];
+    const filePath = pathSegments.slice(publicIndex + 2).join('/');
+
+    if (!bucketName || !filePath) {
+        throw new Error(`Could not parse bucket name or file path from URL: ${publicUrl}`);
+    }
+
+    console.log(`[downloadFromSupabase] Parsed bucket: ${bucketName}, path: ${filePath}`);
+
+    const { data, error } = await supabase.storage.from(bucketName).download(decodeURIComponent(filePath));
 
     if (error) {
-        throw new Error(`Failed to download from Supabase storage: ${error.message}`);
+        throw new Error(`Failed to download from Supabase storage (${bucketName}/${filePath}): ${error.message}`);
     }
     return data;
 }
@@ -402,7 +413,7 @@ serve(async (req) => {
 
       const vtoResponse = await fetch(vtoUrl, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}` },
+        headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(vtoPayload)
       });
       if (!vtoResponse.ok) throw new Error(`BitStudio VTO request failed: ${await vtoResponse.text()}`);
