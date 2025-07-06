@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useLanguage } from "@/context/LanguageContext";
 import { SettingsPanel } from "@/components/GenerateModels/SettingsPanel";
 import { ResultsDisplay } from "@/components/GenerateModels/ResultsDisplay";
@@ -10,16 +10,21 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Plus, Trash2, Sparkles, Loader2 } from "lucide-react";
+import { Plus, Trash2, Sparkles, Loader2, Image as ImageIcon, UploadCloud } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { RecentJobThumbnail } from "@/components/GenerateModels/RecentJobThumbnail";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { optimizeImage } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 
 interface Pose {
-  type: 'text';
+  type: 'text' | 'image';
   value: string;
+  file?: File;
+  previewUrl?: string;
 }
 
 interface FinalPoseResult {
@@ -37,7 +42,7 @@ const GenerateModels = () => {
   const [setDescription, setSetDescription] = useState("");
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [autoApprove, setAutoApprove] = useState(true);
-  const [poses, setPoses] = useState<Pose[]>([{ type: 'text', value: '' }]);
+  const [poses, setPoses] = useState<Pose[]>([{ type: 'text', value: '', file: undefined, previewUrl: undefined }]);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
 
   const { data: activeJob, isLoading: isLoadingJob } = useQuery({
@@ -91,7 +96,16 @@ const GenerateModels = () => {
     setSetDescription(job.set_description || "");
     setSelectedModelId(job.context?.selectedModelId || null);
     setAutoApprove(job.auto_approve ?? true);
-    setPoses(job.pose_prompts || [{ type: 'text', value: '' }]);
+    const loadedPoses = (job.pose_prompts || [{ type: 'text', value: '' }]).map((p: any) => {
+      const isImageUrl = typeof p.value === 'string' && (p.value.startsWith('http') || p.value.includes('supabase.co'));
+      return {
+        type: isImageUrl ? 'image' : 'text',
+        value: p.value,
+        file: undefined,
+        previewUrl: isImageUrl ? p.value : undefined
+      };
+    });
+    setPoses(loadedPoses);
   };
 
   const handleGenerate = async () => {
@@ -99,14 +113,29 @@ const GenerateModels = () => {
       showError("Please provide a model description and select a base model.");
       return;
     }
-    const validPoses = poses.filter(p => p.value.trim() !== '');
-    if (validPoses.length === 0) {
-      showError("Please define at least one pose.");
-      return;
-    }
-
-    const toastId = showLoading("Starting generation pipeline...");
+    
+    const toastId = showLoading("Preparing assets...");
     try {
+      const processedPoses = await Promise.all(poses.map(async (pose) => {
+        if (pose.type === 'image' && pose.file) {
+          const optimizedFile = await optimizeImage(pose.file);
+          const filePath = `${session.user.id}/pose-references/${Date.now()}-${optimizedFile.name}`;
+          const { error: uploadError } = await supabase.storage.from('mira-agent-user-uploads').upload(filePath, optimizedFile);
+          if (uploadError) throw new Error(`Failed to upload pose reference: ${uploadError.message}`);
+          const { data: { publicUrl } } = supabase.storage.from('mira-agent-user-uploads').getPublicUrl(filePath);
+          return { type: 'image', value: publicUrl };
+        }
+        return { type: pose.type, value: pose.value };
+      }));
+
+      const validPoses = processedPoses.filter(p => p.value.trim() !== '');
+      if (validPoses.length === 0) {
+        throw new Error("Please define at least one valid pose.");
+      }
+
+      dismissToast(toastId);
+      showLoading("Starting generation pipeline...");
+
       const { data, error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-generate-poses', {
         body: {
           model_description: modelDescription,
@@ -151,14 +180,27 @@ const GenerateModels = () => {
     }
   };
 
-  const handlePoseChange = (index: number, value: string) => {
+  const handlePoseChange = (index: number, newPose: Partial<Pose>) => {
     const newPoses = [...poses];
-    newPoses[index].value = value;
+    const oldPose = newPoses[index];
+    
+    // Revoke old URL if a new file is being set
+    if (newPose.file && oldPose.previewUrl && oldPose.previewUrl.startsWith('blob:')) {
+      URL.revokeObjectURL(oldPose.previewUrl);
+    }
+
+    newPoses[index] = { ...oldPose, ...newPose };
     setPoses(newPoses);
   };
 
-  const addPose = () => setPoses([...poses, { type: 'text', value: '' }]);
-  const removePose = (index: number) => setPoses(poses.filter((_, i) => i !== index));
+  const addPose = () => setPoses([...poses, { type: 'text', value: '', file: undefined, previewUrl: undefined }]);
+  const removePose = (index: number) => {
+    const poseToRemove = poses[index];
+    if (poseToRemove.previewUrl && poseToRemove.previewUrl.startsWith('blob:')) {
+      URL.revokeObjectURL(poseToRemove.previewUrl);
+    }
+    setPoses(poses.filter((_, i) => i !== index));
+  };
 
   const isJobActive = activeJob && !['complete', 'failed'].includes(activeJob.status);
 
@@ -190,17 +232,54 @@ const GenerateModels = () => {
             </CardHeader>
             <CardContent className="space-y-4">
               {poses.map((pose, index) => (
-                <div key={index} className="flex items-center gap-2">
-                  <Input
-                    value={pose.value}
-                    onChange={(e) => handlePoseChange(index, e.target.value)}
-                    placeholder={t('posePlaceholder')}
-                    disabled={isJobActive}
-                  />
-                  <Button variant="ghost" size="icon" onClick={() => removePose(index)} disabled={poses.length <= 1 || isJobActive}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
+                <Card key={index} className="p-2">
+                  <div className="flex justify-end">
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => removePose(index)} disabled={poses.length <= 1 || isJobActive}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <Tabs value={pose.type} onValueChange={(type) => handlePoseChange(index, { type: type as 'text' | 'image' })}>
+                    <TabsList className="grid w-full grid-cols-2">
+                      <TabsTrigger value="text">Text</TabsTrigger>
+                      <TabsTrigger value="image">Image</TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="text" className="pt-2">
+                      <Input
+                        value={pose.value}
+                        onChange={(e) => handlePoseChange(index, { value: e.target.value })}
+                        placeholder={t('posePlaceholder')}
+                        disabled={isJobActive}
+                      />
+                    </TabsContent>
+                    <TabsContent value="image" className="pt-2">
+                      <Input
+                        type="file"
+                        id={`pose-upload-${index}`}
+                        className="hidden"
+                        accept="image/*"
+                        onChange={(e) => {
+                          if (e.target.files && e.target.files[0]) {
+                            const file = e.target.files[0];
+                            handlePoseChange(index, { file, previewUrl: URL.createObjectURL(file), value: file.name });
+                          }
+                        }}
+                        disabled={isJobActive}
+                      />
+                      <label htmlFor={`pose-upload-${index}`} className="cursor-pointer">
+                        <div className="p-4 border-2 border-dashed rounded-lg text-center hover:border-primary transition-colors">
+                          {pose.previewUrl ? (
+                            <img src={pose.previewUrl} alt="Pose preview" className="h-24 mx-auto rounded-md" />
+                          ) : (
+                            <>
+                              <UploadCloud className="mx-auto h-8 w-8 text-muted-foreground" />
+                              <p className="mt-2 text-xs font-medium">Click or drag image</p>
+                            </>
+                          )}
+                        </div>
+                      </label>
+                    </TabsContent>
+                  </Tabs>
+                </Card>
               ))}
               <Button variant="outline" className="w-full" onClick={addPose} disabled={isJobActive}>
                 <Plus className="mr-2 h-4 w-4" />
