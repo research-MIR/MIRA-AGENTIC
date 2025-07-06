@@ -31,7 +31,7 @@ const ImageUploader = ({ onFileSelect, title, imageUrl, onClear }: { onFileSelec
   
     if (imageUrl) {
       return (
-        <div className="relative aspect-square">
+        <div className="relative h-full w-full">
           <img src={imageUrl} alt={title} className="w-full h-full object-cover rounded-md" />
           <Button variant="destructive" size="icon" className="absolute top-2 right-2 h-6 w-6 z-10" onClick={onClear}><X className="h-4 w-4" /></Button>
         </div>
@@ -39,7 +39,7 @@ const ImageUploader = ({ onFileSelect, title, imageUrl, onClear }: { onFileSelec
     }
   
     return (
-      <div {...dropzoneProps} className={cn("flex flex-col aspect-square justify-center items-center rounded-lg border border-dashed p-4 text-center transition-colors cursor-pointer", isDraggingOver && "border-primary bg-primary/10")} onClick={() => inputRef.current?.click()}>
+      <div {...dropzoneProps} className={cn("flex h-full w-full justify-center items-center rounded-lg border border-dashed p-4 text-center transition-colors cursor-pointer", isDraggingOver && "border-primary bg-primary/10")} onClick={() => inputRef.current?.click()}>
         <div className="text-center pointer-events-none"><PlusCircle className="mx-auto h-8 w-8 text-muted-foreground" /><p className="mt-2 text-sm font-semibold">{title}</p></div>
         <Input ref={inputRef} type="file" className="hidden" accept="image/*" onChange={(e) => e.target.files && onFileSelect(e.target.files[0])} />
       </div>
@@ -156,9 +156,11 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
             </Button>
             <ModelPoseSelector mode="get-all" onUseEntirePack={handleUseEntirePack} />
           </div>
-          <div className="space-y-2">
+          <div className="space-y-2 flex flex-col">
             <Label>{t('uploadGarment')}</Label>
-            <ImageUploader onFileSelect={setGarmentFile} title={t('garmentImage')} imageUrl={garmentFileUrl} onClear={() => setGarmentFile(null)} />
+            <div className="flex-1">
+              <ImageUploader onFileSelect={setGarmentFile} title={t('garmentImage')} imageUrl={garmentFileUrl} onClear={() => setGarmentFile(null)} />
+            </div>
           </div>
         </div>
         <div>
@@ -184,9 +186,11 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
             </Button>
             <ModelPoseSelector mode="get-all" onUseEntirePack={handleUseEntirePack} />
           </div>
-          <div className="space-y-2">
+          <div className="space-y-2 flex flex-col">
             <Label>{t('uploadGarments')}</Label>
-            <MultiImageUploader onFilesSelect={setRandomGarmentFiles} title={t('uploadGarments')} icon={<Shirt />} description={t('selectMultipleGarmentImages')} />
+            <div className="flex-1">
+              <MultiImageUploader onFilesSelect={setRandomGarmentFiles} title={t('uploadGarments')} icon={<Shirt />} description={t('selectMultipleGarmentImages')} />
+            </div>
             {randomGarmentFiles.length > 0 && (
               <ScrollArea className="h-24 mt-2 border rounded-md p-2">
                 <div className="grid grid-cols-5 gap-2">
