@@ -546,10 +546,15 @@ serve(async (req) => {
     }
 
     const queueUrl = `${sanitizedAddress}/prompt`;
+    const payload = { prompt: finalWorkflow };
+    
+    // Log the entire payload before sending
+    console.log(`[PoseGenerator][${requestId}] Sending final payload to ComfyUI:`, JSON.stringify(payload, null, 2));
+
     const response = await fetch(queueUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: finalWorkflow })
+      body: JSON.stringify(payload)
     });
     if (!response.ok) throw new Error(`ComfyUI server error: ${await response.text()}`);
     
