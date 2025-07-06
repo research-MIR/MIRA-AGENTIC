@@ -22,6 +22,7 @@ export interface QueueItem {
 interface VtoInputProviderProps {
   mode: 'one-to-many' | 'precise-pairs';
   onQueueReady: (queue: QueueItem[]) => void;
+  onGoBack: () => void;
 }
 
 const ImageUploader = ({ onFileSelect, title, imageUrl, onClear }: { onFileSelect: (file: File) => void, title: string, imageUrl: string | null, onClear: () => void }) => {
@@ -45,7 +46,7 @@ const ImageUploader = ({ onFileSelect, title, imageUrl, onClear }: { onFileSelec
     );
 };
 
-export const VtoInputProvider = ({ mode, onQueueReady }: VtoInputProviderProps) => {
+export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProviderProps) => {
   const { t } = useLanguage();
   const [isModelModalOpen, setIsModelModalOpen] = useState(false);
   
@@ -106,8 +107,15 @@ export const VtoInputProvider = ({ mode, onQueueReady }: VtoInputProviderProps) 
     ? (selectedModelUrls.size === 0 || !garmentFile)
     : precisePairs.length === 0;
 
+  const title = mode === 'one-to-many' ? t('oneToManyInputTitle') : t('precisePairsInputTitle');
+  const description = mode === 'one-to-many' ? t('oneToManyInputDescription') : t('precisePairsInputDescription');
+
   return (
     <div className="max-w-4xl mx-auto">
+      <div className="text-center mb-8">
+        <h2 className="text-2xl font-bold">{title}</h2>
+        <p className="text-muted-foreground">{description}</p>
+      </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         {mode === 'one-to-many' ? (
           <>
@@ -182,7 +190,8 @@ export const VtoInputProvider = ({ mode, onQueueReady }: VtoInputProviderProps) 
           </>
         )}
       </div>
-      <div className="mt-8 text-center">
+      <div className="mt-8 flex justify-between items-center">
+        <Button variant="outline" onClick={onGoBack}>{t('goBack')}</Button>
         <Button size="lg" onClick={handleProceed} disabled={isProceedDisabled}>{t('reviewQueue', { count: mode === 'one-to-many' ? selectedModelUrls.size : precisePairs.length })}</Button>
       </div>
       <Dialog open={isModelModalOpen} onOpenChange={setIsModelModalOpen}>

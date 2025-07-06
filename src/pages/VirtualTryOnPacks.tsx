@@ -8,7 +8,8 @@ import { VtoReviewQueue } from "@/components/VTO/VtoReviewQueue";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { useQueryClient } from "@tanstack/react-query";
 import { optimizeImage, sanitizeFilename } from "@/lib/utils";
-import { Wand2, Loader2 } from "lucide-react";
+import { Wand2, Loader2, Info } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 type WizardStep = 'select-mode' | 'provide-inputs' | 'review-queue';
 type VtoMode = 'one-to-many' | 'precise-pairs';
@@ -34,7 +35,11 @@ const VirtualTryOnPacks = () => {
   };
 
   const handleGoBack = () => {
-    setStep('provide-inputs');
+    if (step === 'provide-inputs') {
+      setStep('select-mode');
+    } else if (step === 'review-queue') {
+      setStep('provide-inputs');
+    }
   };
 
   const uploadFile = async (fileUrl: string, type: 'person' | 'garment') => {
@@ -105,9 +110,18 @@ const VirtualTryOnPacks = () => {
   const renderStep = () => {
     switch (step) {
       case 'select-mode':
-        return <VtoModeSelector onSelectMode={handleSelectMode} />;
+        return (
+          <div className="flex flex-col items-center justify-center h-full">
+            <Alert className="max-w-2xl mb-8">
+              <Info className="h-4 w-4" />
+              <AlertTitle>{t('vtoPacksIntroTitle')}</AlertTitle>
+              <AlertDescription>{t('vtoPacksIntroDescription')}</AlertDescription>
+            </Alert>
+            <VtoModeSelector onSelectMode={handleSelectMode} />
+          </div>
+        );
       case 'provide-inputs':
-        return <VtoInputProvider mode={mode!} onQueueReady={handleQueueReady} />;
+        return <VtoInputProvider mode={mode!} onQueueReady={handleQueueReady} onGoBack={handleGoBack} />;
       case 'review-queue':
         return (
           <div className="max-w-2xl mx-auto space-y-6">
@@ -137,11 +151,11 @@ const VirtualTryOnPacks = () => {
 
   return (
     <div className="p-4 md:p-8 h-screen flex flex-col">
-      <header className="pb-4 mb-8 border-b shrink-0">
+      <header className="pb-4 mb-4 border-b shrink-0">
         <h1 className="text-3xl font-bold">{t('virtualTryOnPacks')}</h1>
         <p className="text-muted-foreground">{getStepTitle()}</p>
       </header>
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1">
         {renderStep()}
       </div>
     </div>
