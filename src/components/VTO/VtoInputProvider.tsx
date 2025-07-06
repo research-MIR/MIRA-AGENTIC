@@ -67,10 +67,11 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
   const { supabase, session } = useSession();
   const [isModelModalOpen, setIsModelModalOpen] = useState(false);
   
-  // State for one-to-many mode
+  // State for one-to-many and random-pairs modes
   const [selectedModelUrls, setSelectedModelUrls] = useState<Set<string>>(new Set());
   const [garmentFile, setGarmentFile] = useState<File | null>(null);
   const [generalAppendix, setGeneralAppendix] = useState("");
+  const [randomGarmentFiles, setRandomGarmentFiles] = useState<File[]>([]);
 
   // State for precise-pairs mode
   const [precisePairs, setPrecisePairs] = useState<QueueItem[]>([]);
@@ -78,19 +79,26 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
   const [tempPairGarmentFile, setTempPairGarmentFile] = useState<File | null>(null);
   const [tempPairAppendix, setTempPairAppendix] = useState("");
 
-  // State for random-pairs mode
-  const [randomGarmentFiles, setRandomGarmentFiles] = useState<File[]>([]);
-
   const garmentFileUrl = useMemo(() => garmentFile ? URL.createObjectURL(garmentFile) : null, [garmentFile]);
   const tempPairGarmentUrl = useMemo(() => tempPairGarmentFile ? URL.createObjectURL(tempPairGarmentFile) : null, [tempPairGarmentFile]);
 
-  const handleModelSelect = (url: string) => {
+  const handleMultiModelSelect = (url: string) => {
     setSelectedModelUrls(prev => {
       const newSet = new Set(prev);
       if (newSet.has(url)) newSet.delete(url);
       else newSet.add(url);
       return newSet;
     });
+  };
+
+  const handleSingleModelSelect = (url: string) => {
+    setTempPairPersonUrl(url);
+    setIsModelModalOpen(false);
+  };
+
+  const handleUseEntirePack = (poses: any[]) => {
+    const urls = poses.map(p => p.final_url);
+    setSelectedModelUrls(new Set(urls));
   };
 
   const addPrecisePair = () => {
@@ -153,7 +161,15 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
             <Card>
               <CardHeader><CardTitle>1. {t('selectModels')}</CardTitle></CardHeader>
               <CardContent>
-                <ModelPoseSelector mode="multiple" selectedUrls={selectedModelUrls} onSelect={handleModelSelect} />
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" className="flex-1" onClick={() => setIsModelModalOpen(true)}>
+                    {t('selectModels')} ({selectedModelUrls.size})
+                  </Button>
+                  <ModelPoseSelector
+                    mode="get-all"
+                    onUseEntirePack={handleUseEntirePack}
+                  />
+                </div>
               </CardContent>
             </Card>
             <Card>
@@ -173,7 +189,15 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
             <Card>
               <CardHeader><CardTitle>1. {t('selectModels')}</CardTitle></CardHeader>
               <CardContent>
-                <ModelPoseSelector mode="multiple" selectedUrls={selectedModelUrls} onSelect={handleModelSelect} />
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" className="flex-1" onClick={() => setIsModelModalOpen(true)}>
+                    {t('selectModels')} ({selectedModelUrls.size})
+                  </Button>
+                  <ModelPoseSelector
+                    mode="get-all"
+                    onUseEntirePack={handleUseEntirePack}
+                  />
+                </div>
               </CardContent>
             </Card>
             <Card>
@@ -246,7 +270,11 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
       <Dialog open={isModelModalOpen} onOpenChange={setIsModelModalOpen}>
         <DialogContent className="max-w-3xl">
           <DialogHeader><DialogTitle>Select a Model</DialogTitle></DialogHeader>
-          <ModelPoseSelector mode={mode === 'one-to-many' || mode === 'random-pairs' ? 'multiple' : 'single'} selectedUrls={selectedModelUrls} onSelect={handleModelSelect} />
+          <ModelPoseSelector 
+            mode={mode === 'precise-pairs' ? 'single' : 'multiple'} 
+            selectedUrls={selectedModelUrls} 
+            onSelect={mode === 'precise-pairs' ? handleSingleModelSelect : handleMultiModelSelect}
+          />
           <DialogFooter>
             <Button onClick={() => setIsModelModalOpen(false)}>Done</Button>
           </DialogFooter>

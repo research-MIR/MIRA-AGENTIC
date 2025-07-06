@@ -10,6 +10,7 @@ import { SecureImageDisplay } from './SecureImageDisplay';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { useLanguage } from '@/context/LanguageContext';
+import { Button } from '../ui/button';
 
 interface Pose {
   final_url: string;
@@ -22,12 +23,13 @@ interface ModelPack {
 }
 
 interface ModelPoseSelectorProps {
-  mode: 'single' | 'multiple';
-  selectedUrls: Set<string>;
-  onSelect: (url: string) => void;
+  mode: 'single' | 'multiple' | 'get-all';
+  selectedUrls?: Set<string>;
+  onSelect?: (url: string) => void;
+  onUseEntirePack?: (poses: Pose[]) => void;
 }
 
-export const ModelPoseSelector = ({ mode, selectedUrls, onSelect }: ModelPoseSelectorProps) => {
+export const ModelPoseSelector = ({ mode, selectedUrls, onSelect, onUseEntirePack }: ModelPoseSelectorProps) => {
   const { supabase, session } = useSession();
   const { t } = useLanguage();
   const [selectedPackId, setSelectedPackId] = useState<string>('all');
@@ -73,8 +75,31 @@ export const ModelPoseSelector = ({ mode, selectedUrls, onSelect }: ModelPoseSel
   });
 
   const handleSelect = (url: string) => {
-    onSelect(url);
+    if (onSelect) {
+      onSelect(url);
+    }
   };
+
+  if (mode === 'get-all') {
+    return (
+      <div className="flex items-center gap-2">
+        <Select value={selectedPackId} onValueChange={setSelectedPackId} disabled={isLoadingPacks}>
+          <SelectTrigger className="w-[180px]">
+            <SelectValue placeholder="Select a pack..." />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">{t('allPacks')}</SelectItem>
+            {packs?.map(pack => (
+              <SelectItem key={pack.id} value={pack.id}>{pack.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button onClick={() => onUseEntirePack?.(poses || [])} disabled={isLoading || !poses || poses.length === 0}>
+          {t('useEntirePack')}
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -102,7 +127,7 @@ export const ModelPoseSelector = ({ mode, selectedUrls, onSelect }: ModelPoseSel
         <ScrollArea className="h-96">
           <div className="grid grid-cols-3 md:grid-cols-4 gap-2 pr-4">
             {poses.map((pose, index) => {
-              const isSelected = selectedUrls.has(pose.final_url);
+              const isSelected = selectedUrls?.has(pose.final_url);
               return (
                 <button key={index} onClick={() => handleSelect(pose.final_url)} className="relative aspect-square block w-full h-full group">
                   <SecureImageDisplay imageUrl={pose.final_url} alt={`Model pose ${index + 1}`} />

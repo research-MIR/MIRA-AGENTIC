@@ -256,7 +256,7 @@ This tool processes one garment at a time. If you need to create a full outfit w
 Before trying again, please check if your job shows up in the "Recent Jobs" list.
 
 - **If the result is not good**, try turning the "AI Prompt Helper" switch off and try again.
-- **If after another 2-3 tries it still does not work**, please stop and ask for assistance.
+- **If after other 2-3 tries it still does not work**, please stop and ask for assistance.
 
 **Note:** The job may appear in the "Recent Jobs" list after a minute. Please wait before trying again. If it doesn't appear, ask for assistance.
     `,
