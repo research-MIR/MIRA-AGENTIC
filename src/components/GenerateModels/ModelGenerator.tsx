@@ -8,7 +8,7 @@ import { Model } from "@/hooks/useChatManager";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Plus } from "lucide-react";
+import { Plus, Sparkles, Loader2 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { PoseInput } from "./PoseInput";
@@ -136,8 +136,7 @@ export const ModelGenerator = ({ packId, selectedJob }: ModelGeneratorProps) => 
         setSelectedModelId={setSelectedModelId}
         autoApprove={autoApprove}
         setAutoApprove={setAutoApprove}
-        onGenerate={handleGenerate}
-        isLoading={isJobActive}
+        isJobActive={isJobActive}
       />
       <Card>
         <CardHeader><CardTitle>{t('step3')}</CardTitle></CardHeader>
@@ -159,6 +158,12 @@ export const ModelGenerator = ({ packId, selectedJob }: ModelGeneratorProps) => 
           </Button>
         </CardContent>
       </Card>
+
+      <Button size="lg" className="w-full" onClick={handleGenerate} disabled={isJobActive || !modelDescription.trim()}>
+        {isJobActive ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+        {t('generateButton')}
+      </Button>
+
       {selectedJob && (
         <Accordion type="multiple" defaultValue={['item-1', 'item-2']} className="w-full space-y-4">
           <AccordionItem value="item-1" className="border rounded-md bg-card">
