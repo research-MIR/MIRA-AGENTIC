@@ -13,7 +13,7 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
 
   try {
-    const { model_description, set_description, selected_model_id, user_id } = await req.json();
+    const { model_description, set_description, selected_model_id, user_id, auto_approve } = await req.json();
     if (!model_description || !selected_model_id || !user_id) {
       throw new Error("model_description, selected_model_id, and user_id are required.");
     }
@@ -59,13 +59,34 @@ serve(async (req) => {
     });
     if (generationError) throw new Error(`Image generation failed: ${generationError.message}`);
 
-    const imageUrls = generationResult.images.map((img: any) => ({ id: img.storagePath, url: img.publicUrl }));
-    console.log("Generated image URLs:", imageUrls);
+    const allImages = generationResult.images.map((img: any) => ({ id: img.storagePath, url: img.publicUrl }));
+    console.log("Generated 4 base images.");
 
-    return new Response(JSON.stringify({ images: imageUrls }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 200,
-    });
+    if (auto_approve) {
+        console.log("Step 3: Auto-approving best image...");
+        const { data: qaData, error: qaError } = await supabase.functions.invoke('MIRA-AGENT-tool-quality-assurance-model', {
+            body: { image_urls: allImages.map((img: any) => img.url) }
+        });
+        if (qaError) {
+            console.error("Quality assurance step failed, returning all images as a fallback.", qaError);
+            return new Response(JSON.stringify({ images: allImages }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            });
+        }
+        const bestImage = allImages[qaData.best_image_index];
+        console.log(`AI selected image at index ${qaData.best_image_index}.`);
+        return new Response(JSON.stringify({ images: [bestImage] }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            status: 200,
+        });
+    } else {
+        console.log("Step 3: Manual approval required. Returning all images.");
+        return new Response(JSON.stringify({ images: allImages }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            status: 200,
+        });
+    }
 
   } catch (error) {
     console.error("[GenerateModelOrchestrator] Error:", error);

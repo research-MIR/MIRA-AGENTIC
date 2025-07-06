@@ -52,6 +52,7 @@ const GenerateModels = () => {
           set_description: setDescription,
           selected_model_id: selectedModelId,
           user_id: session.user.id,
+          auto_approve: autoApprove
         }
       });
 
@@ -59,13 +60,9 @@ const GenerateModels = () => {
       
       dismissToast(toastId);
 
-      if (autoApprove) {
-        // Simulate AI selecting the best image for now
-        const selected = data.images[Math.floor(Math.random() * data.images.length)];
-        setGeneratedImages([selected]);
-        setSelectedImageId(selected.id);
-      } else {
-        setGeneratedImages(data.images);
+      setGeneratedImages(data.images);
+      if (autoApprove && data.images.length > 0) {
+        setSelectedImageId(data.images[0].id);
       }
 
     } catch (err: any) {
