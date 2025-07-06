@@ -145,6 +145,7 @@ Prima di tentare di nuovo, controlla se il tuo lavoro appare nella lista dei "Jo
     randomPairsInputTitle: "Input per 'Coppie Casuali'",
     randomPairsInputDescription: "Carica una selezione di modelli e una selezione di indumenti. Il sistema li abbinerà casualmente.",
     useEntirePack: "Usa Intero Pack",
+    provideInputs: "1. Fornisci gli Input",
   },
   en: {
     proMode: "Pro Mode",
@@ -286,5 +287,6 @@ Before trying again, please check if your job shows up in the "Recent Jobs" list
     randomPairsInputTitle: "Inputs for 'Random Pairs'",
     randomPairsInputDescription: "Upload a selection of models and a selection of garments. The system will randomly pair them.",
     useEntirePack: "Use Entire Pack",
+    provideInputs: "1. Provide Inputs",
   },
 };

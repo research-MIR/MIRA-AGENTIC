@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -12,8 +12,6 @@ import { useLanguage } from '@/context/LanguageContext';
 import { PlusCircle, Shirt, Users, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useDropzone } from '@/hooks/useDropzone';
-import { useQuery } from '@tanstack/react-query';
-import { useSession } from '../Auth/SessionContextProvider';
 
 export interface QueueItem {
   person_url: string;
@@ -64,16 +62,13 @@ const MultiImageUploader = ({ onFilesSelect, title, icon, description }: { onFil
 
 export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProviderProps) => {
   const { t } = useLanguage();
-  const { supabase, session } = useSession();
   const [isModelModalOpen, setIsModelModalOpen] = useState(false);
   
-  // State for one-to-many and random-pairs modes
   const [selectedModelUrls, setSelectedModelUrls] = useState<Set<string>>(new Set());
   const [garmentFile, setGarmentFile] = useState<File | null>(null);
   const [generalAppendix, setGeneralAppendix] = useState("");
   const [randomGarmentFiles, setRandomGarmentFiles] = useState<File[]>([]);
 
-  // State for precise-pairs mode
   const [precisePairs, setPrecisePairs] = useState<QueueItem[]>([]);
   const [tempPairPersonUrl, setTempPairPersonUrl] = useState<string | null>(null);
   const [tempPairGarmentFile, setTempPairGarmentFile] = useState<File | null>(null);
@@ -146,124 +141,121 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
     ? (selectedModelUrls.size === 0 || randomGarmentFiles.length === 0)
     : precisePairs.length === 0;
 
-  const title = mode === 'one-to-many' ? t('oneToManyInputTitle') : mode === 'random-pairs' ? t('randomPairsInputTitle') : t('precisePairsInputTitle');
-  const description = mode === 'one-to-many' ? t('oneToManyInputDescription') : mode === 'random-pairs' ? t('randomPairsInputDescription') : t('precisePairsInputDescription');
+  const renderOneToMany = () => (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t('oneToManyInputTitle')}</CardTitle>
+        <CardDescription>{t('oneToManyInputDescription')}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="space-y-2">
+            <Label>{t('selectModels')}</Label>
+            <Button variant="outline" className="w-full" onClick={() => setIsModelModalOpen(true)}>
+              {t('selectModels')} ({selectedModelUrls.size})
+            </Button>
+            <ModelPoseSelector mode="get-all" onUseEntirePack={handleUseEntirePack} />
+          </div>
+          <div className="space-y-2">
+            <Label>{t('uploadGarment')}</Label>
+            <ImageUploader onFileSelect={setGarmentFile} title={t('garmentImage')} imageUrl={garmentFileUrl} onClear={() => setGarmentFile(null)} />
+          </div>
+        </div>
+        <div>
+          <Label htmlFor="general-appendix">{t('promptAppendix')}</Label>
+          <Textarea id="general-appendix" value={generalAppendix} onChange={(e) => setGeneralAppendix(e.target.value)} placeholder={t('promptAppendixPlaceholder')} rows={2} />
+        </div>
+      </CardContent>
+    </Card>
+  );
+
+  const renderRandomPairs = () => (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t('randomPairsInputTitle')}</CardTitle>
+        <CardDescription>{t('randomPairsInputDescription')}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="space-y-2">
+            <Label>{t('selectModels')}</Label>
+            <Button variant="outline" className="w-full" onClick={() => setIsModelModalOpen(true)}>
+              {t('selectModels')} ({selectedModelUrls.size})
+            </Button>
+            <ModelPoseSelector mode="get-all" onUseEntirePack={handleUseEntirePack} />
+          </div>
+          <div className="space-y-2">
+            <Label>{t('uploadGarments')}</Label>
+            <MultiImageUploader onFilesSelect={setRandomGarmentFiles} title={t('uploadGarments')} icon={<Shirt />} description={t('selectMultipleGarmentImages')} />
+            {randomGarmentFiles.length > 0 && (
+              <ScrollArea className="h-24 mt-2 border rounded-md p-2">
+                <div className="grid grid-cols-5 gap-2">
+                  {randomGarmentFiles.map((file, i) => <img key={i} src={URL.createObjectURL(file)} className="w-full h-full object-cover rounded-md aspect-square" />)}
+                </div>
+              </ScrollArea>
+            )}
+          </div>
+        </div>
+        <div>
+          <Label htmlFor="general-appendix-random">{t('promptAppendix')}</Label>
+          <Textarea id="general-appendix-random" value={generalAppendix} onChange={(e) => setGeneralAppendix(e.target.value)} placeholder={t('promptAppendixPlaceholder')} rows={2} />
+        </div>
+      </CardContent>
+    </Card>
+  );
+
+  const renderPrecisePairs = () => (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+      <Card>
+        <CardHeader><CardTitle>{t('addPair')}</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>{t('person')}</Label>
+              <div className="aspect-square bg-muted rounded-md flex items-center justify-center">
+                {tempPairPersonUrl ? <SecureImageDisplay imageUrl={tempPairPersonUrl} alt="Selected Model" /> : <Users className="h-12 w-12 text-muted-foreground" />}
+              </div>
+              <Button variant="outline" className="w-full" onClick={() => setIsModelModalOpen(true)}>Select Model</Button>
+            </div>
+            <div className="space-y-2">
+              <Label>{t('garment')}</Label>
+              <ImageUploader onFileSelect={setTempPairGarmentFile} title={t('garmentImage')} imageUrl={tempPairGarmentUrl} onClear={() => setTempPairGarmentFile(null)} />
+            </div>
+          </div>
+          <div>
+            <Label htmlFor="pair-appendix">{t('promptAppendixPair')}</Label>
+            <Input id="pair-appendix" value={tempPairAppendix} onChange={(e) => setTempPairAppendix(e.target.value)} placeholder={t('promptAppendixPairPlaceholder')} />
+          </div>
+          <Button className="w-full" onClick={addPrecisePair} disabled={!tempPairPersonUrl || !tempPairGarmentFile}>{t('addPairToQueue')}</Button>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader><CardTitle>{t('batchQueue')}</CardTitle></CardHeader>
+        <CardContent>
+          <ScrollArea className="h-96">
+            <div className="space-y-2 pr-4">
+              {precisePairs.map((pair, i) => (
+                <div key={i} className="flex gap-2 items-center bg-muted p-2 rounded-md">
+                  <div className="w-16 h-16 rounded-md overflow-hidden flex-shrink-0"><SecureImageDisplay imageUrl={pair.person_url} alt="Person" /></div>
+                  <PlusCircle className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+                  <div className="w-16 h-16 rounded-md overflow-hidden flex-shrink-0"><img src={pair.garment_url} alt="Garment" className="w-full h-full object-cover" /></div>
+                  <p className="text-xs text-muted-foreground flex-1 truncate italic">"{pair.appendix}"</p>
+                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setPrecisePairs(p => p.filter((_, idx) => idx !== i))}><X className="h-4 w-4" /></Button>
+                </div>
+              ))}
+            </div>
+          </ScrollArea>
+        </CardContent>
+      </Card>
+    </div>
+  );
 
   return (
-    <div className="max-w-4xl mx-auto">
-      <div className="text-center mb-8">
-        <h2 className="text-2xl font-bold">{title}</h2>
-        <p className="text-muted-foreground">{description}</p>
-      </div>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {mode === 'one-to-many' && (
-          <>
-            <Card>
-              <CardHeader><CardTitle>1. {t('selectModels')}</CardTitle></CardHeader>
-              <CardContent>
-                <div className="flex items-center gap-2">
-                  <Button variant="outline" className="flex-1" onClick={() => setIsModelModalOpen(true)}>
-                    {t('selectModels')} ({selectedModelUrls.size})
-                  </Button>
-                  <ModelPoseSelector
-                    mode="get-all"
-                    onUseEntirePack={handleUseEntirePack}
-                  />
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader><CardTitle>2. {t('uploadGarment')}</CardTitle></CardHeader>
-              <CardContent>
-                <ImageUploader onFileSelect={setGarmentFile} title={t('garmentImage')} imageUrl={garmentFileUrl} onClear={() => setGarmentFile(null)} />
-                <div className="mt-4">
-                  <Label htmlFor="general-appendix">{t('promptAppendix')}</Label>
-                  <Textarea id="general-appendix" value={generalAppendix} onChange={(e) => setGeneralAppendix(e.target.value)} placeholder={t('promptAppendixPlaceholder')} rows={2} />
-                </div>
-              </CardContent>
-            </Card>
-          </>
-        )}
-        {mode === 'random-pairs' && (
-          <>
-            <Card>
-              <CardHeader><CardTitle>1. {t('selectModels')}</CardTitle></CardHeader>
-              <CardContent>
-                <div className="flex items-center gap-2">
-                  <Button variant="outline" className="flex-1" onClick={() => setIsModelModalOpen(true)}>
-                    {t('selectModels')} ({selectedModelUrls.size})
-                  </Button>
-                  <ModelPoseSelector
-                    mode="get-all"
-                    onUseEntirePack={handleUseEntirePack}
-                  />
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader><CardTitle>2. {t('uploadGarments')}</CardTitle></CardHeader>
-              <CardContent className="flex flex-col h-full">
-                <MultiImageUploader onFilesSelect={setRandomGarmentFiles} title={t('uploadGarments')} icon={<Shirt />} description={t('selectMultipleGarmentImages')} />
-                <ScrollArea className="h-48 mt-4 border rounded-md p-2">
-                  <div className="grid grid-cols-4 gap-2">
-                    {randomGarmentFiles.map((file, i) => <img key={i} src={URL.createObjectURL(file)} className="w-full h-full object-cover rounded-md aspect-square" />)}
-                  </div>
-                </ScrollArea>
-                <div className="mt-4">
-                  <Label htmlFor="general-appendix-random">{t('promptAppendix')}</Label>
-                  <Textarea id="general-appendix-random" value={generalAppendix} onChange={(e) => setGeneralAppendix(e.target.value)} placeholder={t('promptAppendixPlaceholder')} rows={2} />
-                </div>
-              </CardContent>
-            </Card>
-          </>
-        )}
-        {mode === 'precise-pairs' && (
-          <>
-            <Card>
-              <CardHeader><CardTitle>{t('addPair')}</CardTitle></CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>{t('person')}</Label>
-                    <div className="aspect-square bg-muted rounded-md flex items-center justify-center">
-                      {tempPairPersonUrl ? <SecureImageDisplay imageUrl={tempPairPersonUrl} alt="Selected Model" /> : <Users className="h-12 w-12 text-muted-foreground" />}
-                    </div>
-                    <Button variant="outline" className="w-full" onClick={() => setIsModelModalOpen(true)}>Select Model</Button>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>{t('garment')}</Label>
-                    <ImageUploader onFileSelect={setTempPairGarmentFile} title={t('garmentImage')} imageUrl={tempPairGarmentUrl} onClear={() => setTempPairGarmentFile(null)} />
-                  </div>
-                </div>
-                <div>
-                  <Label htmlFor="pair-appendix">{t('promptAppendixPair')}</Label>
-                  <Input id="pair-appendix" value={tempPairAppendix} onChange={(e) => setTempPairAppendix(e.target.value)} placeholder={t('promptAppendixPairPlaceholder')} />
-                </div>
-                <Button className="w-full" onClick={addPrecisePair} disabled={!tempPairPersonUrl || !tempPairGarmentFile}>{t('addPairToQueue')}</Button>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader><CardTitle>{t('batchQueue')}</CardTitle></CardHeader>
-              <CardContent>
-                <ScrollArea className="h-96">
-                  <div className="space-y-2 pr-4">
-                    {precisePairs.map((pair, i) => (
-                      <div key={i} className="flex gap-2 items-center bg-muted p-2 rounded-md">
-                        <div className="w-16 h-16 rounded-md overflow-hidden flex-shrink-0"><SecureImageDisplay imageUrl={pair.person_url} alt="Person" /></div>
-                        <PlusCircle className="h-5 w-5 text-muted-foreground flex-shrink-0" />
-                        <div className="w-16 h-16 rounded-md overflow-hidden flex-shrink-0"><img src={pair.garment_url} alt="Garment" className="w-full h-full object-cover" /></div>
-                        <p className="text-xs text-muted-foreground flex-1 truncate italic">"{pair.appendix}"</p>
-                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setPrecisePairs(p => p.filter((_, idx) => idx !== i))}><X className="h-4 w-4" /></Button>
-                      </div>
-                    ))}
-                  </div>
-                </ScrollArea>
-              </CardContent>
-            </Card>
-          </>
-        )}
-      </div>
-      <div className="mt-8 flex justify-between items-center">
+    <div className="space-y-8">
+      {mode === 'one-to-many' && renderOneToMany()}
+      {mode === 'random-pairs' && renderRandomPairs()}
+      {mode === 'precise-pairs' && renderPrecisePairs()}
+      <div className="flex justify-between items-center">
         <Button variant="outline" onClick={onGoBack}>{t('goBack')}</Button>
         <Button size="lg" onClick={handleProceed} disabled={isProceedDisabled}>{t('reviewQueue', { count: mode === 'one-to-many' || mode === 'random-pairs' ? selectedModelUrls.size : precisePairs.length })}</Button>
       </div>
