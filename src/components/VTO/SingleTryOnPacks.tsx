@@ -215,8 +215,8 @@ export const SingleTryOnPacks = () => {
                     <RecentJobsList 
                         jobs={recentJobs}
                         isLoading={isLoadingRecent}
-                        selectedJobId={selectedJobId}
-                        onSelectJob={(job) => setSelectedJobId(job.id)}
+                        selectedJobId={selectedJob?.id || null}
+                        onSelectJob={setSelectedJob}
                         mode="base"
                     />
                 </div>

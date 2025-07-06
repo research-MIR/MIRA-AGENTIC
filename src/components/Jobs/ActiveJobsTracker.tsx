@@ -123,11 +123,11 @@ export const ActiveJobsTracker = () => {
       }
     };
 
-    const comfyChannel = supabase.channel(`comfyui-jobs-tracker-${session.user.id}`)
+    const comfyChannel = supabase.channel('comfyui-jobs-tracker')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'mira-agent-comfyui-jobs', filter: `user_id=eq.${session.user.id}` }, handleComfyUpdate)
       .subscribe();
 
-    const vtoChannel = supabase.channel(`bitstudio-jobs-tracker-${session.user.id}`)
+    const vtoChannel = supabase.channel('bitstudio-jobs-tracker')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'mira-agent-bitstudio-jobs', filter: `user_id=eq.${session.user.id}` }, handleVtoUpdate)
       .subscribe();
 

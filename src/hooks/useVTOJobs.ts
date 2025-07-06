@@ -1,11 +1,13 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSession } from '@/components/Auth/SessionContextProvider';
 import { BitStudioJob } from '@/types/vto';
+import { RealtimeChannel } from '@supabase/supabase-js';
 
 export const useVTOJobs = () => {
   const { supabase, session } = useSession();
   const queryClient = useQueryClient();
+  const channelRef = useRef<RealtimeChannel | null>(null);
 
   const { data: jobs, isLoading, error } = useQuery<BitStudioJob[]>({
     queryKey: ['bitstudioJobs', session?.user?.id],
@@ -72,18 +74,18 @@ export const useVTOJobs = () => {
 
   useEffect(() => {
     if (!session?.user?.id) return;
-
-    const channelName = `vto-jobs-tracker-${session.user.id}`;
-    const channel = supabase.channel(channelName);
+    if (channelRef.current) {
+      supabase.removeChannel(channelRef.current);
+      channelRef.current = null;
+    }
 
     const handleUpdate = () => {
       console.log('[useVTOJobs] Realtime event received, invalidating queries.');
       queryClient.invalidateQueries({ queryKey: ['bitstudioJobs', session.user.id] });
     };
 
-    // Remove any old listeners to be safe, then add the new ones.
-    channel.off('postgres_changes');
-    channel
+    const channel = supabase
+      .channel(`vto-jobs-tracker-${session.user.id}`)
       .on<BitStudioJob>(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'mira-agent-bitstudio-jobs', filter: `user_id=eq.${session.user.id}` },
@@ -93,21 +95,14 @@ export const useVTOJobs = () => {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'mira-agent-batch-inpaint-pair-jobs', filter: `user_id=eq.${session.user.id}` },
         handleUpdate
-      );
-
-    // Only call subscribe() if the channel is not already trying to connect or connected.
-    if (channel.state !== 'joined' && channel.state !== 'joining') {
-      channel.subscribe((status, err) => {
-        if (err) {
-          console.error(`[useVTOJobs] Subscription error on ${channelName}:`, err);
-        }
-      });
-    }
+      )
+      .subscribe();
+    channelRef.current = channel;
 
     return () => {
-      // The cleanup function will be called for every render.
-      // removeChannel handles unsubscribing internally.
-      supabase.removeChannel(channel);
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+      }
     };
   }, [session?.user?.id, supabase, queryClient]);
 
