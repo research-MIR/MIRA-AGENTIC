@@ -98,7 +98,6 @@ export const useChatManager = () => {
     const location = useLocation();
     const { t, language } = useLanguage();
     const queryClient = useQueryClient();
-    const channelRef = useRef<RealtimeChannel | null>(null);
 
     const [messages, setMessages] = useState<Message[]>([]);
     const [chatTitle, setChatTitle] = useState<string>(t('newChat'));
@@ -207,26 +206,23 @@ export const useChatManager = () => {
     }, [jobId, jobData, processJobData, t]);
 
     useEffect(() => {
-        if (channelRef.current) {
-            supabase.removeChannel(channelRef.current);
-            channelRef.current = null;
-        }
         if (!jobId) return;
-
+    
         const channel = supabase.channel(`job-updates-${jobId}`)
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'mira-agent-jobs' },
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'mira-agent-jobs', filter: `id=eq.${jobId}` },
                 (payload) => {
-                    if (payload.new.id === jobId) {
-                        queryClient.invalidateQueries({ queryKey: ['chatJob', jobId] });
-                    }
+                    console.log(`[ChatManager] Realtime update for job ${jobId}`, payload);
+                    queryClient.invalidateQueries({ queryKey: ['chatJob', jobId] });
                 }
-            ).subscribe();
-        channelRef.current = channel;
-
+            ).subscribe((status, err) => {
+                if (err) {
+                    console.error(`[ChatManager] Subscription error for job ${jobId}:`, err);
+                }
+            });
+    
         return () => {
-            if (channelRef.current) {
-                supabase.removeChannel(channelRef.current);
-            }
+            console.log(`[ChatManager] Cleaning up subscription for job ${jobId}`);
+            supabase.removeChannel(channel);
         };
     }, [jobId, supabase, queryClient]);
 

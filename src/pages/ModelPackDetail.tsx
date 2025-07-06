@@ -32,7 +32,6 @@ const ModelPackDetail = () => {
   const { t } = useLanguage();
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [isUpscaleModalOpen, setIsUpscaleModalOpen] = useState(false);
-  const channelRef = useRef<RealtimeChannel | null>(null);
 
   const { data: pack, isLoading: isLoadingPack, error: packError } = useQuery({
     queryKey: ['modelPack', packId],
@@ -132,12 +131,8 @@ const ModelPackDetail = () => {
       )
       .subscribe();
 
-    channelRef.current = channel;
-
     return () => {
-      if (channelRef.current) {
-        supabase.removeChannel(channelRef.current);
-      }
+      supabase.removeChannel(channel);
     };
   }, [packId, session?.user?.id, supabase, queryClient]);
 

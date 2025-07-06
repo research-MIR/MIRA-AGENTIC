@@ -7,7 +7,6 @@ import { RealtimeChannel } from '@supabase/supabase-js';
 export const useVTOJobs = () => {
   const { supabase, session } = useSession();
   const queryClient = useQueryClient();
-  const channelRef = useRef<RealtimeChannel | null>(null);
 
   const { data: jobs, isLoading, error } = useQuery<BitStudioJob[]>({
     queryKey: ['bitstudioJobs', session?.user?.id],
@@ -74,10 +73,6 @@ export const useVTOJobs = () => {
 
   useEffect(() => {
     if (!session?.user?.id) return;
-    if (channelRef.current) {
-      supabase.removeChannel(channelRef.current);
-      channelRef.current = null;
-    }
 
     const handleUpdate = () => {
       console.log('[useVTOJobs] Realtime event received, invalidating queries.');
@@ -97,12 +92,9 @@ export const useVTOJobs = () => {
         handleUpdate
       )
       .subscribe();
-    channelRef.current = channel;
 
     return () => {
-      if (channelRef.current) {
-        supabase.removeChannel(channelRef.current);
-      }
+      supabase.removeChannel(channel);
     };
   }, [session?.user?.id, supabase, queryClient]);
 
