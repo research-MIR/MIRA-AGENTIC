@@ -65,7 +65,11 @@ serve(async (req) => {
     if (auto_approve) {
         console.log("Step 3: Auto-approving best image...");
         const { data: qaData, error: qaError } = await supabase.functions.invoke('MIRA-AGENT-tool-quality-assurance-model', {
-            body: { image_urls: allImages.map((img: any) => img.url) }
+            body: { 
+                image_urls: allImages.map((img: any) => img.url),
+                model_description: model_description,
+                set_description: set_description
+            }
         });
         if (qaError) {
             console.error("Quality assurance step failed, returning all images as a fallback.", qaError);

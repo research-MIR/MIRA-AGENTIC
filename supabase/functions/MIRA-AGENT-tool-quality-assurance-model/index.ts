@@ -13,12 +13,16 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const systemPrompt = `You are a "Quality Assurance AI" for a photorealistic model generation pipeline. You will be given four images of the same human model, labeled "Image 0", "Image 1", "Image 2", and "Image 3". Your sole task is to evaluate them and choose the single best one.
+const systemPrompt = `You are a "Quality Assurance AI" for a photorealistic model generation pipeline. You will be given a user's creative brief and four images of the same human model, labeled "Image 0", "Image 1", "Image 2", and "Image 3". Your sole task is to evaluate them and choose the single best one that matches the brief.
 
 ### Evaluation Criteria (in order of importance):
-1.  **Anatomical Correctness:** The model must have realistic human anatomy. Check for common AI errors like incorrect hands, distorted limbs, or unnatural facial features. Reject any image with clear anatomical flaws.
-2.  **Photorealism:** The image should look like a real photograph. Assess the skin texture, lighting, and overall quality.
-3.  **Aesthetic Appeal:** The model's pose and expression should be neutral, professional, and suitable for an e-commerce catalog.
+1.  **Prompt Coherence:** This is the most important factor. Does the model in the image accurately reflect the user's 'Model Description'? (e.g., if the user asked for "long blonde hair," does the model have it?).
+2.  **Anatomical Correctness:** The model must have realistic human anatomy. Check for common AI errors like incorrect hands, distorted limbs, or unnatural facial features. Reject any image with clear anatomical flaws.
+3.  **Photorealism:** The image should look like a real photograph. Assess the skin texture, lighting, and overall quality.
+4.  **Aesthetic Appeal:** The model's pose and expression should be neutral, professional, and suitable for an e-commerce catalog.
+
+### Your Input:
+You will receive the user's descriptions and the images to evaluate.
 
 ### Your Output:
 Your entire response MUST be a single, valid JSON object with ONE key, "best_image_index". The value must be the integer index (0, 1, 2, or 3) of the image you have selected.
@@ -63,15 +67,22 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
 
   try {
-    const { image_urls } = await req.json();
+    const { image_urls, model_description, set_description } = await req.json();
     if (!image_urls || !Array.isArray(image_urls) || image_urls.length === 0) {
       throw new Error("image_urls array is required.");
     }
+    if (!model_description) {
+      throw new Error("model_description is required for coherence check.");
+    }
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+    
+    const userBriefText = `--- USER'S CREATIVE BRIEF ---\nModel Description: "${model_description}"\nSet Description: "${set_description || 'a minimal studio with a neutral background'}"\n--- END BRIEF ---`;
+    const parts: Part[] = [{ text: userBriefText }];
+
     const imagePartsPromises = image_urls.map((url, index) => downloadImageAsPart(url, `Image ${index}`));
     const imagePartsArrays = await Promise.all(imagePartsPromises);
-    const parts: Part[] = imagePartsArrays.flat();
+    parts.push(...imagePartsArrays.flat());
 
     const result = await ai.models.generateContent({
         model: MODEL_NAME,
