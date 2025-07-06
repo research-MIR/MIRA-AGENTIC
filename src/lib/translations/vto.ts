@@ -24,7 +24,7 @@ export const vtoTranslations = {
     randomPairsDescription: "Carica elenchi di persone e indumenti. Il sistema li abbinerà casualmente per creare combinazioni diverse.",
     uploadGarments: "Carica Indumenti",
     selectMultipleGarmentImages: "Seleziona più immagini di indumenti.",
-    precisePairsDescription: "Crea coppie specifiche persona-indumento una per una per un controllo totale sull'output.",
+    precisePairsDescription: "Crea coppie specifiche di modelli e indumenti uno per uno per un controllo totale sull'output.",
     person: "Persona",
     garment: "Indumento",
     addPair: "Aggiungi Coppia",
@@ -100,9 +100,15 @@ Per i migliori risultati, usa questo strumento per scambiare tipi di abbigliamen
 È meno efficace nel posizionare un indumento su una persona che indossa qualcosa di completamente diverso (es. mettere una t-shirt a un modello che indossa un ingombrante cappotto invernale).
 
 #### 4. Un Capo alla Volta
-Questo strumento elabora un indumento alla volta. Se hai bisogno di creare un outfit completo con più pezzi (es. una t-shirt e dei jeans), devi eseguire due operazioni separate:
+Questo strumento elabora un indumento alla volta. Se hai bisogno di creare un outfit completo con più pezzi (es. una t-shirt e dei jeans), devi eseguire un processo iterativo (a più passaggi).
 1.  Prima, esegui il processo con la persona e il riferimento della t-shirt.
 2.  Poi, usa l'immagine risultante come nuova immagine sorgente ed esegui nuovamente il processo con il riferimento dei jeans.
+
+#### 5. Impostazioni PRO Spiegate
+- **Numero di Tentativi:** Genera più variazioni della stessa richiesta di inpainting. Utile per ottenere diverse interpretazioni dall'IA.
+- **Alta Risoluzione:** Aumenta la risoluzione dell'output. Richiede più tempo ma produce risultati di qualità superiore.
+- **Intensità Denoise:** Controlla la libertà creativa dell'IA. Un valore basso (es. 0.5) preserva la struttura originale, ideale per texture changes. Un valore alto (es. 0.9) permette all'IA di essere più creativa, utile per cambiare la forma di un indumento.
+- **Espansione Maschera:** Ammorbidisce i bordi della maschera, creando una fusione più naturale tra l'area generata e l'immagine originale. Aumenta questo valore se noti bordi netti nel risultato.
 `,
     vtoProGuidanceTitle: "Consiglio Rapido per Risultati Migliori",
     vtoProGuidanceContent: `
@@ -114,6 +120,20 @@ Prima di tentare di nuovo, controlla se il tuo lavoro appare nella lista dei "Jo
 **Nota:** Il job potrebbe apparire nella lista dei "Job Recenti" anche dopo un minuto. Attendi prima di riprovare. Se non appare, chiedi assistenza.
     `,
     vtoProGuidanceButton: "Ho Capito!",
+    oneGarmentManyModels: "Un Indumento, Molti Modelli",
+    oneGarmentManyModelsDesc: "Applica un singolo indumento a una selezione dei tuoi modelli generati.",
+    precisePairsDesc: "Crea coppie specifiche di modelli e indumenti uno per uno per un controllo totale.",
+    step1Title: "Passo 1: Scegli il Metodo",
+    step2Title: "Passo 2: Fornisci gli Input",
+    step3Title: "Passo 3: Rivedi e Genera",
+    selectModels: "Seleziona Modelli",
+    selectedModelsCount: "{count} Modelli Selezionati",
+    addPairToQueue: "Aggiungi Coppia alla Coda",
+    reviewQueue: "Rivedi Coda ({count})",
+    generationQueue: "Coda di Generazione",
+    queueEmpty: "La tua coda è vuota. Aggiungi alcune coppie per iniziare.",
+    goBack: "Indietro",
+    generateNImages: "Genera {count} Immagini",
   },
   en: {
     proMode: "Pro Mode",
@@ -140,7 +160,7 @@ Prima di tentare di nuovo, controlla se il tuo lavoro appare nella lista dei "Jo
     randomPairsDescription: "Upload lists of people and garments. The system will randomly pair them up to create diverse combinations.",
     uploadGarments: "Upload Garments",
     selectMultipleGarmentImages: "Select multiple garment images.",
-    precisePairsDescription: "Create specific person-garment pairs one by one for full control over the output.",
+    precisePairsDescription: "Create specific model-garment pairs one by one for full control over the output.",
     person: "Person",
     garment: "Garment",
     addPair: "Add Pair",
@@ -209,16 +229,16 @@ The **Reference Image** is the key. The AI analyzes the garment in your referenc
 -   A **shoe** reference will replace the shoes.
 -   A **shirt** reference will replace the shirt.
 
-#### 3. Ideale per Indumenti Simili
-Per i migliori risultati, usa questo strumento per scambiare tipi di abbigliamento simili. Per esempio:
--   Sostituire una t-shirt su un modello con un'altra t-shirt.
--   Cambiare la texture o il colore di una giacca esistente.
-È meno efficace nel posizionare un indumento su una persona che indossa qualcosa di completamente diverso (es. mettere una t-shirt a un modello che indossa un ingombrante cappotto invernale).
+#### 3. Ideal for Similar Garments
+For best results, use this tool to swap similar types of clothing. For example:
+-   Replacing a t-shirt on a model with another t-shirt.
+-   Changing the texture or color of an existing jacket.
+It is less effective at placing a garment on a person wearing something completely different (e.g., putting a t-shirt on a model wearing a bulky winter coat).
 
-#### 4. Un Capo alla Volta
-Questo strumento elabora un indumento alla volta. Se hai bisogno di creare un outfit completo con più pezzi (es. una t-shirt e dei jeans), devi eseguire due operazioni separate:
-1.  Prima, esegui il processo con la persona e il riferimento della t-shirt.
-2.  Poi, usa l'immagine risultante come nuova immagine sorgente ed esegui nuovamente il processo con il riferimento dei jeans.
+#### 4. One Garment at a Time
+This tool processes one garment at a time. If you need to create a full outfit with multiple pieces (e.g., a t-shirt and jeans), you must perform two separate operations:
+1.  First, run the process with the person and the t-shirt reference.
+2.  Then, use the resulting image as your new source image and run the process again with the jeans reference.
 `,
     vtoProGuidanceTitle: "A Quick Tip for Best Results",
     vtoProGuidanceContent: `
@@ -230,5 +250,18 @@ Before trying again, please check if your job shows up in the "Recent Jobs" list
 **Note:** The job may appear in the "Recent Jobs" list after a minute. Please wait before trying again. If it doesn't appear, ask for assistance.
     `,
     vtoProGuidanceButton: "Got It!",
+    oneGarmentManyModels: "One Garment, Many Models",
+    oneGarmentManyModelsDesc: "Apply a single garment to a selection of your generated models.",
+    step1Title: "Step 1: Choose Your Method",
+    step2Title: "Step 2: Provide Your Inputs",
+    step3Title: "Step 3: Review & Generate",
+    selectModels: "Select Models",
+    selectedModelsCount: "{count} Models Selected",
+    addPairToQueue: "Add Pair to Queue",
+    reviewQueue: "Review Queue ({count})",
+    generationQueue: "Generation Queue",
+    queueEmpty: "Your queue is empty. Add some pairs to get started.",
+    goBack: "Go Back",
+    generateNImages: "Generate {count} Images",
   },
 };

@@ -1,153 +1,150 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { useLanguage } from "@/context/LanguageContext";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { SingleTryOnPacks } from "@/components/VTO/SingleTryOnPacks";
-import { BatchTryOnPacks } from "@/components/VTO/BatchTryOnPacks";
-import VirtualTryOnPro from "@/components/VTO/VirtualTryOnPro";
-import { Switch } from "@/components/ui/switch";
-import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import ReactMarkdown from "react-markdown";
-import { useImageTransferStore } from "@/store/imageTransferStore";
-import { BitStudioJob } from "@/types/vto";
-import { useVTOJobs } from "@/hooks/useVTOJobs";
-import { RecentJobsList } from "@/components/VTO/RecentJobsList";
-import { Star, HelpCircle } from "lucide-react";
+import { VtoModeSelector } from "@/components/VTO/VtoModeSelector";
+import { VtoInputProvider, QueueItem } from "@/components/VTO/VtoInputProvider";
+import { VtoReviewQueue } from "@/components/VTO/VtoReviewQueue";
+import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
+import { useQueryClient } from "@tanstack/react-query";
+import { optimizeImage, sanitizeFilename } from "@/lib/utils";
+import { Wand2, Loader2 } from "lucide-react";
+
+type WizardStep = 'select-mode' | 'provide-inputs' | 'review-queue';
+type VtoMode = 'one-to-many' | 'precise-pairs';
 
 const VirtualTryOnPacks = () => {
-  const { isProMode, toggleProMode } = useSession();
+  const { supabase, session } = useSession();
   const { t } = useLanguage();
-  
-  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
-  const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
-  
-  const { consumeImageUrl, imageUrlToTransfer, vtoTarget } = useImageTransferStore();
-  const { jobs, isLoading: isLoadingRecentJobs } = useVTOJobs();
+  const queryClient = useQueryClient();
 
-  useEffect(() => {
-    if (imageUrlToTransfer && vtoTarget) {
-      if (vtoTarget === 'pro-source' && !isProMode) {
-        toggleProMode();
+  const [step, setStep] = useState<WizardStep>('select-mode');
+  const [mode, setMode] = useState<VtoMode | null>(null);
+  const [queue, setQueue] = useState<QueueItem[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleSelectMode = (selectedMode: VtoMode) => {
+    setMode(selectedMode);
+    setStep('provide-inputs');
+  };
+
+  const handleQueueReady = (newQueue: QueueItem[]) => {
+    setQueue(newQueue);
+    setStep('review-queue');
+  };
+
+  const handleGoBack = () => {
+    setStep('provide-inputs');
+  };
+
+  const uploadFile = async (fileUrl: string, type: 'person' | 'garment') => {
+    if (!session?.user) throw new Error("User session not found.");
+    
+    const response = await fetch(fileUrl);
+    const blob = await response.blob();
+    const file = new File([blob], "upload.png", { type: blob.type });
+
+    const optimizedFile = await optimizeImage(file);
+    const sanitizedName = sanitizeFilename(optimizedFile.name);
+    const filePath = `${session.user.id}/vto-source/${type}-${Date.now()}-${sanitizedName}`;
+    
+    const { error } = await supabase.storage
+      .from('mira-agent-user-uploads')
+      .upload(filePath, optimizedFile);
+    
+    if (error) throw new Error(`Failed to upload ${type} image: ${error.message}`);
+    
+    const { data: { publicUrl } } = supabase.storage
+      .from('mira-agent-user-uploads')
+      .getPublicUrl(filePath);
+      
+    return publicUrl;
+  };
+
+  const handleGenerate = async () => {
+    if (queue.length === 0) return;
+    setIsLoading(true);
+    const toastId = showLoading(`Queuing ${queue.length} jobs...`);
+
+    const jobPromises = queue.map(async (item) => {
+      try {
+        const garment_image_url = await uploadFile(item.garment_url, 'garment');
+        
+        const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-prompt-helper', {
+            body: { person_image_url: item.person_url, garment_image_url, prompt_appendix: item.appendix }
+        });
+        if (promptError) throw promptError;
+        const autoPrompt = promptData.final_prompt;
+
+        const { error } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
+            body: { 
+                person_image_url: item.person_url, 
+                garment_image_url, 
+                user_id: session?.user?.id, 
+                mode: 'base',
+                prompt: autoPrompt
+            }
+        });
+        if (error) throw error;
+      } catch (err) {
+        console.error(`Failed to queue job for person ${item.person_url}:`, err);
       }
-      if (vtoTarget === 'base' && isProMode) {
-        toggleProMode();
-      }
+    });
+
+    await Promise.all(jobPromises);
+    
+    dismissToast(toastId);
+    showSuccess(`${queue.length} jobs started successfully!`);
+    queryClient.invalidateQueries({ queryKey: ['bitstudioJobs', session?.user?.id] });
+    setStep('select-mode');
+    setQueue([]);
+    setMode(null);
+    setIsLoading(false);
+  };
+
+  const renderStep = () => {
+    switch (step) {
+      case 'select-mode':
+        return <VtoModeSelector onSelectMode={handleSelectMode} />;
+      case 'provide-inputs':
+        return <VtoInputProvider mode={mode!} onQueueReady={handleQueueReady} />;
+      case 'review-queue':
+        return (
+          <div className="max-w-2xl mx-auto space-y-6">
+            <VtoReviewQueue queue={queue} />
+            <div className="flex justify-between items-center">
+              <Button variant="outline" onClick={handleGoBack}>{t('goBack')}</Button>
+              <Button size="lg" onClick={handleGenerate} disabled={isLoading}>
+                {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+                {t('generateNImages', { count: queue.length })}
+              </Button>
+            </div>
+          </div>
+        );
+      default:
+        return null;
     }
-  }, [imageUrlToTransfer, vtoTarget, isProMode, toggleProMode]);
+  };
 
-  const selectedJob = useMemo(() => jobs?.find(job => job.id === selectedJobId), [jobs, selectedJobId]);
-
-  const resetForm = useCallback(() => {
-    setSelectedJobId(null);
-    consumeImageUrl();
-  }, [consumeImageUrl]);
-
-  useEffect(() => {
-    resetForm();
-  }, [isProMode, resetForm]);
-
-  const handleSelectJob = (job: BitStudioJob) => {
-    setSelectedJobId(job.id);
+  const getStepTitle = () => {
+    switch (step) {
+      case 'select-mode': return t('step1Title');
+      case 'provide-inputs': return t('step2Title');
+      case 'review-queue': return t('step3Title');
+      default: return '';
+    }
   };
 
   return (
-    <>
-      <div className="p-4 md:p-8 h-screen flex flex-col">
-        <header className="pb-4 mb-4 border-b shrink-0 flex justify-between items-center">
-          <div>
-            <h1 className="text-3xl font-bold">{t('virtualTryOnPacks')}</h1>
-            <p className="text-muted-foreground">{t('vtoDescription')}</p>
-          </div>
-          <div className="flex items-center space-x-2">
-            <Button variant="ghost" size="icon" onClick={() => setIsHelpModalOpen(true)}>
-              <HelpCircle className="h-6 w-6" />
-            </Button>
-            <Label htmlFor="pro-mode-switch" className="flex items-center gap-2">
-              <Star className="text-yellow-500" />
-              {t('proMode')}
-            </Label>
-            <Switch id="pro-mode-switch" checked={isProMode} onCheckedChange={toggleProMode} />
-          </div>
-        </header>
-        
-        <div className="flex-1 overflow-y-auto">
-          {isProMode ? (
-            <VirtualTryOnPro 
-              recentJobs={jobs}
-              isLoadingRecentJobs={isLoadingRecentJobs}
-              selectedJob={selectedJob}
-              handleSelectJob={handleSelectJob}
-              resetForm={resetForm}
-              transferredImageUrl={vtoTarget === 'pro-source' ? imageUrlToTransfer : null}
-              onTransferConsumed={consumeImageUrl}
-            />
-          ) : (
-            <div className="h-full">
-              <Tabs defaultValue="single" className="w-full">
-                <TabsList className="grid w-full grid-cols-2">
-                  <TabsTrigger value="single">{t('singleTryOn')}</TabsTrigger>
-                  <TabsTrigger value="batch">{t('batchProcess')}</TabsTrigger>
-                </TabsList>
-                <TabsContent value="single" className="pt-6">
-                  <p className="text-sm text-muted-foreground mb-6">{t('singleVtoDescription')}</p>
-                  <SingleTryOnPacks />
-                </TabsContent>
-                <TabsContent value="batch" className="pt-6">
-                  <p className="text-sm text-muted-foreground mb-6">{t('batchVtoDescription')}</p>
-                  <BatchTryOnPacks />
-                </TabsContent>
-              </Tabs>
-              <div className="mt-8">
-                <RecentJobsList 
-                    jobs={jobs}
-                    isLoading={isLoadingRecentJobs}
-                    selectedJobId={selectedJobId}
-                    onSelectJob={handleSelectJob}
-                    mode="base"
-                />
-              </div>
-            </div>
-          )}
-        </div>
+    <div className="p-4 md:p-8 h-screen flex flex-col">
+      <header className="pb-4 mb-8 border-b shrink-0">
+        <h1 className="text-3xl font-bold">{t('virtualTryOnPacks')}</h1>
+        <p className="text-muted-foreground">{getStepTitle()}</p>
+      </header>
+      <div className="flex-1 overflow-y-auto">
+        {renderStep()}
       </div>
-
-      <Dialog open={isHelpModalOpen} onOpenChange={setIsHelpModalOpen}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>{t('vtoHelpTitle')}</DialogTitle>
-            <DialogDescription>{t('vtoHelpIntro')}</DialogDescription>
-          </DialogHeader>
-          <ScrollArea className="max-h-[70vh] pr-4">
-            <div className="space-y-4 markdown-content">
-              <h3>{t('vtoHelpSingleTitle')}</h3>
-              <p>{t('vtoHelpSingleDesc')}</p>
-              
-              <h3>{t('vtoHelpBatchTitle')}</h3>
-              <p>{t('vtoHelpBatchDesc')}</p>
-              <ul>
-                <li><ReactMarkdown>{t('vtoHelpBatchOneGarment')}</ReactMarkdown></li>
-                <li><ReactMarkdown>{t('vtoHelpBatchRandom')}</ReactMarkdown></li>
-                <li><ReactMarkdown>{t('vtoHelpBatchPrecise')}</ReactMarkdown></li>
-              </ul>
-
-              <h3>{t('vtoHelpProTitle')}</h3>
-              <p>{t('vtoHelpProDesc')}</p>
-              <ul>
-                <li><ReactMarkdown>{t('vtoHelpProMasking')}</ReactMarkdown></li>
-                <li><ReactMarkdown>{t('vtoHelpProReference')}</ReactMarkdown></li>
-                <li><ReactMarkdown>{t('vtoHelpProSettings')}</ReactMarkdown></li>
-              </ul>
-            </div>
-          </ScrollArea>
-          <DialogFooter>
-            <Button onClick={() => setIsHelpModalOpen(false)}>{t('done')}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
+    </div>
   );
 };
 
