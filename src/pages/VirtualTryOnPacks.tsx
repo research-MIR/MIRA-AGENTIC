@@ -3,6 +3,7 @@ import { useSession } from "@/components/Auth/SessionContextProvider";
 import { useLanguage } from "@/context/LanguageContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SingleTryOnPacks } from "@/components/VTO/SingleTryOnPacks";
+import { BatchTryOnPacks } from "@/components/VTO/BatchTryOnPacks";
 import VirtualTryOnPro from "@/components/VTO/VirtualTryOnPro";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -15,7 +16,6 @@ import { BitStudioJob } from "@/types/vto";
 import { useVTOJobs } from "@/hooks/useVTOJobs";
 import { RecentJobsList } from "@/components/VTO/RecentJobsList";
 import { Star, HelpCircle } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
 
 const VirtualTryOnPacks = () => {
   const { isProMode, toggleProMode } = useSession();
@@ -96,11 +96,8 @@ const VirtualTryOnPacks = () => {
                   <SingleTryOnPacks />
                 </TabsContent>
                 <TabsContent value="batch" className="pt-6">
-                  <Card>
-                    <CardContent className="p-8 text-center text-muted-foreground">
-                      {t('comingSoon')}
-                    </CardContent>
-                  </Card>
+                  <p className="text-sm text-muted-foreground mb-6">{t('batchVtoDescription')}</p>
+                  <BatchTryOnPacks />
                 </TabsContent>
               </Tabs>
               <div className="mt-8">

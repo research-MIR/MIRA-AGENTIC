@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
-import { UploadCloud, Wand2, Loader2, X } from "lucide-react";
+import { UploadCloud, Wand2, Loader2, X, Users } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
 import { cn } from "@/lib/utils";
 import { useDropzone } from "@/hooks/useDropzone";
@@ -15,6 +15,8 @@ import { Textarea } from "../ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { SingleTryOnSettings } from "./SingleTryOnSettings";
 import { ModelPoseSelector } from "./ModelPoseSelector";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { SecureImageDisplay } from "./SecureImageDisplay";
 
 const ImageUploader = ({ onFileSelect, title, imageUrl, onClear }: { onFileSelect: (file: File) => void, title: string, imageUrl: string | null, onClear: () => void }) => {
     const inputRef = useRef<HTMLInputElement>(null);
@@ -50,6 +52,7 @@ export const SingleTryOnPacks = () => {
     const [isLoading, setIsLoading] = useState(false);
     const [resolution, setResolution] = useState<'standard' | 'high'>('standard');
     const [numImages, setNumImages] = useState(1);
+    const [isModelModalOpen, setIsModelModalOpen] = useState(false);
 
     const garmentImageUrl = useMemo(() => garmentImageFile ? URL.createObjectURL(garmentImageFile) : null, [garmentImageFile]);
 
@@ -64,6 +67,11 @@ export const SingleTryOnPacks = () => {
         
         const { data: { publicUrl } } = supabase.storage.from('mira-agent-user-uploads').getPublicUrl(filePath);
         return publicUrl;
+    };
+
+    const handleModelSelect = (url: string) => {
+        setSelectedPersonUrl(url);
+        setIsModelModalOpen(false);
     };
 
     const handleTryOn = async () => {
@@ -114,50 +122,70 @@ export const SingleTryOnPacks = () => {
     const isTryOnDisabled = isLoading || !selectedPersonUrl || !garmentImageFile;
 
     return (
-        <div className="space-y-4">
-            <Card>
-                <CardHeader><CardTitle>1. Select Model & Garment</CardTitle></CardHeader>
-                <CardContent className="space-y-4">
-                    <div>
-                        <Label>Select Model from Pack</Label>
-                        <ModelPoseSelector selectedUrl={selectedPersonUrl} onSelect={setSelectedPersonUrl} />
-                    </div>
-                    <div>
-                        <Label>Upload Garment</Label>
-                        <ImageUploader onFileSelect={setGarmentImageFile} title={t('garmentImage')} imageUrl={garmentImageUrl} onClear={() => setGarmentImageFile(null)} />
-                    </div>
-                </CardContent>
-            </Card>
-            <Card>
-                <CardHeader><CardTitle>{t('promptSectionTitle')}</CardTitle></CardHeader>
-                <CardContent className="space-y-4">
-                    <div className="flex items-center space-x-2">
-                        <Switch id="auto-prompt" checked={isAutoPromptEnabled} onCheckedChange={setIsAutoPromptEnabled} />
-                        <Label htmlFor="auto-prompt" className="text-sm">{t('autoGenerate')}</Label>
-                    </div>
-                    <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t('promptPlaceholderVTO')} rows={4} disabled={isAutoPromptEnabled} />
-                    <div>
-                        <Label htmlFor="prompt-appendix">{t('promptAppendix')}</Label>
-                        <Textarea id="prompt-appendix" value={promptAppendix} onChange={(e) => setPromptAppendix(e.target.value)} placeholder={t('promptAppendixPlaceholder')} rows={2} />
-                    </div>
-                </CardContent>
-            </Card>
-            <Card>
-                <CardHeader><CardTitle>{t('settingsSectionTitle')}</CardTitle></CardHeader>
-                <CardContent>
-                    <SingleTryOnSettings
-                        resolution={resolution}
-                        setResolution={setResolution}
-                        numImages={numImages}
-                        setNumImages={setNumImages}
-                        disabled={false}
-                    />
-                </CardContent>
-            </Card>
-            <Button onClick={handleTryOn} disabled={isTryOnDisabled} className="w-full">
-                {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
-                {t('startVirtualTryOn')}
-            </Button>
-        </div>
+        <>
+            <div className="space-y-4">
+                <Card>
+                    <CardHeader><CardTitle>1. Select Model & Garment</CardTitle></CardHeader>
+                    <CardContent className="space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                                <Label>Selected Model</Label>
+                                <div className="aspect-square bg-muted rounded-md flex items-center justify-center">
+                                    {selectedPersonUrl ? (
+                                        <SecureImageDisplay imageUrl={selectedPersonUrl} alt="Selected Model" />
+                                    ) : (
+                                        <Users className="h-12 w-12 text-muted-foreground" />
+                                    )}
+                                </div>
+                                <Button variant="outline" className="w-full" onClick={() => setIsModelModalOpen(true)}>Select Model</Button>
+                            </div>
+                            <div className="space-y-2">
+                                <Label>Upload Garment</Label>
+                                <ImageUploader onFileSelect={setGarmentImageFile} title={t('garmentImage')} imageUrl={garmentImageUrl} onClear={() => setGarmentImageFile(null)} />
+                            </div>
+                        </div>
+                    </CardContent>
+                </Card>
+                <Card>
+                    <CardHeader><CardTitle>{t('promptSectionTitle')}</CardTitle></CardHeader>
+                    <CardContent className="space-y-4">
+                        <div className="flex items-center space-x-2">
+                            <Switch id="auto-prompt" checked={isAutoPromptEnabled} onCheckedChange={setIsAutoPromptEnabled} />
+                            <Label htmlFor="auto-prompt" className="text-sm">{t('autoGenerate')}</Label>
+                        </div>
+                        <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t('promptPlaceholderVTO')} rows={4} disabled={isAutoPromptEnabled} />
+                        <div>
+                            <Label htmlFor="prompt-appendix">{t('promptAppendix')}</Label>
+                            <Textarea id="prompt-appendix" value={promptAppendix} onChange={(e) => setPromptAppendix(e.target.value)} placeholder={t('promptAppendixPlaceholder')} rows={2} />
+                        </div>
+                    </CardContent>
+                </Card>
+                <Card>
+                    <CardHeader><CardTitle>{t('settingsSectionTitle')}</CardTitle></CardHeader>
+                    <CardContent>
+                        <SingleTryOnSettings
+                            resolution={resolution}
+                            setResolution={setResolution}
+                            numImages={numImages}
+                            setNumImages={setNumImages}
+                            disabled={false}
+                        />
+                    </CardContent>
+                </Card>
+                <Button onClick={handleTryOn} disabled={isTryOnDisabled} className="w-full">
+                    {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+                    {t('startVirtualTryOn')}
+                </Button>
+            </div>
+            <Dialog open={isModelModalOpen} onOpenChange={setIsModelModalOpen}>
+                <DialogContent className="max-w-3xl">
+                    <DialogHeader><DialogTitle>Select a Model</DialogTitle></DialogHeader>
+                    <ModelPoseSelector mode="single" selectedUrls={selectedPersonUrl ? new Set([selectedPersonUrl]) : new Set()} onSelect={handleModelSelect} />
+                    <DialogFooter>
+                        <Button variant="secondary" onClick={() => setIsModelModalOpen(false)}>Close</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+        </>
     );
 };

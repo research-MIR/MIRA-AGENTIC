@@ -13,11 +13,12 @@ interface Pose {
 }
 
 interface ModelPoseSelectorProps {
-  selectedUrl: string | null;
+  mode: 'single' | 'multiple';
+  selectedUrls: Set<string>; // Use a Set for efficient multi-select
   onSelect: (url: string) => void;
 }
 
-export const ModelPoseSelector = ({ selectedUrl, onSelect }: ModelPoseSelectorProps) => {
+export const ModelPoseSelector = ({ mode, selectedUrls, onSelect }: ModelPoseSelectorProps) => {
   const { supabase, session } = useSession();
 
   const { data: poses, isLoading, error } = useQuery<Pose[]>({
@@ -43,6 +44,10 @@ export const ModelPoseSelector = ({ selectedUrl, onSelect }: ModelPoseSelectorPr
     enabled: !!session?.user,
   });
 
+  const handleSelect = (url: string) => {
+    onSelect(url);
+  };
+
   if (isLoading) {
     return <div className="grid grid-cols-3 gap-2"><Skeleton className="h-32 w-full" /><Skeleton className="h-32 w-full" /><Skeleton className="h-32 w-full" /></div>;
   }
@@ -56,12 +61,12 @@ export const ModelPoseSelector = ({ selectedUrl, onSelect }: ModelPoseSelectorPr
   }
 
   return (
-    <ScrollArea className="h-64">
-      <div className="grid grid-cols-3 gap-2 pr-4">
+    <ScrollArea className="h-96">
+      <div className="grid grid-cols-3 md:grid-cols-4 gap-2 pr-4">
         {poses.map((pose, index) => {
-          const isSelected = selectedUrl === pose.final_url;
+          const isSelected = selectedUrls.has(pose.final_url);
           return (
-            <button key={index} onClick={() => onSelect(pose.final_url)} className="relative aspect-square block w-full h-full group">
+            <button key={index} onClick={() => handleSelect(pose.final_url)} className="relative aspect-square block w-full h-full group">
               <SecureImageDisplay imageUrl={pose.final_url} alt={`Model pose ${index + 1}`} />
               {isSelected && (
                 <div className="absolute inset-0 bg-primary/70 flex items-center justify-center rounded-md">
