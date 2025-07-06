@@ -20,7 +20,7 @@ interface Pose {
 
 interface FinalPoseResult {
   pose_prompt: string;
-  generated_url: string;
+  final_url: string;
 }
 
 const GenerateModels = () => {
@@ -194,7 +194,7 @@ const GenerateModels = () => {
                 <CardTitle>{t('finalPosesTitle')}</CardTitle>
               </CardHeader>
               <CardContent>
-                {activeJob.status === 'generating_poses' ? (
+                {activeJob.status === 'generating_poses' || activeJob.status === 'polling_poses' && !activeJob.final_posed_images ? (
                   <div className="flex items-center justify-center p-8">
                     <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
                     <p className="ml-4">{t('generatingPoses')}</p>
@@ -203,7 +203,7 @@ const GenerateModels = () => {
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                     {(activeJob.final_posed_images as FinalPoseResult[])?.map((result, index) => (
                       <div key={index} className="space-y-2">
-                        <img src={result.generated_url} alt={result.pose_prompt} className="w-full aspect-square object-cover rounded-md" />
+                        <img src={result.final_url} alt={result.pose_prompt} className="w-full aspect-square object-cover rounded-md" />
                         <p className="text-xs text-muted-foreground truncate">{result.pose_prompt}</p>
                       </div>
                     ))}
