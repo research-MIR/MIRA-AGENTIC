@@ -12,6 +12,13 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS"
 };
 
+// --- CONFIGURABLE PROMPTS ---
+// This prompt is used when the user provides an IMAGE as a pose reference.
+const EDITING_TASK_WITH_IMAGE_REFERENCE = "change their pose to match my reference, keep everything else the same";
+// This prompt is used when the user provides only TEXT as a pose reference.
+const EDITING_TASK_WITH_TEXT_REFERENCE = "change their pose to match my reference, IGNORE EVERYTHING ELSE OUTSIDE OF THE POSE, keep everything else the same";
+// -----------------------------
+
 const unifiedWorkflowTemplate = `{
   "6": {
     "inputs": {
@@ -180,7 +187,7 @@ const unifiedWorkflowTemplate = `{
   },
   "193": {
     "inputs": {
-      "String": "change their pose to match my reference, keep everything else the same"
+      "String": "placeholder_for_image_ref_task"
     },
     "class_type": "String",
     "_meta": {
@@ -367,7 +374,7 @@ const unifiedWorkflowTemplate = `{
   },
   "217": {
     "inputs": {
-      "String": "change their pose to match my reference, IGNORE EVERYTHING ELSE OUTSIDE OF THE POSE, keep everything else the same"
+      "String": "placeholder_for_text_ref_task"
     },
     "class_type": "String",
     "_meta": {
@@ -470,8 +477,12 @@ serve(async (req) => {
 
     // Set the base image and the text prompt
     finalWorkflow['214'].inputs.image = baseModelFilename;
+    finalWorkflow['193'].inputs.String = EDITING_TASK_WITH_IMAGE_REFERENCE;
+    finalWorkflow['217'].inputs.String = EDITING_TASK_WITH_TEXT_REFERENCE;
+    
+    // This is the prompt that Gemini will use to generate the final, detailed prompt
     finalWorkflow['193'].inputs.String = pose_prompt;
-    finalWorkflow['217'].inputs.String = pose_prompt; // Also update the no-ref prompt
+    finalWorkflow['217'].inputs.String = pose_prompt;
 
     if (pose_image_url) {
       console.log(`[PoseGenerator][${requestId}] Pose reference image provided. Downloading from: ${pose_image_url}`);
