@@ -3,20 +3,14 @@ import { useLanguage } from "@/context/LanguageContext";
 import { SettingsPanel } from "@/components/GenerateModels/SettingsPanel";
 import { ResultsDisplay } from "@/components/GenerateModels/ResultsDisplay";
 import { useGeneratorStore } from "@/store/generatorStore";
-import { showError } from "@/utils/toast";
+import { showError, showLoading, dismissToast } from "@/utils/toast";
 import { Model } from "@/hooks/useChatManager";
-
-// Mock data for demonstration
-const mockImages = [
-  { id: '1', url: 'https://placehold.co/512x512/EFEFEF/7F7F7F?text=Model+1' },
-  { id: '2', url: 'https://placehold.co/512x512/EFEFEF/7F7F7F?text=Model+2' },
-  { id: '3', url: 'https://placehold.co/512x512/EFEFEF/7F7F7F?text=Model+3' },
-  { id: '4', url: 'https://placehold.co/512x512/EFEFEF/7F7F7F?text=Model+4' },
-];
+import { useSession } from "@/components/Auth/SessionContextProvider";
 
 const GenerateModels = () => {
   const { t } = useLanguage();
   const { models, fetchModels } = useGeneratorStore();
+  const { supabase, session } = useSession();
 
   const [modelDescription, setModelDescription] = useState("");
   const [setDescription, setSetDescription] = useState("");
@@ -41,23 +35,45 @@ const GenerateModels = () => {
   }, [models, selectedModelId]);
 
   const handleGenerate = async () => {
+    if (!modelDescription.trim() || !selectedModelId || !session?.user) {
+      showError("Please provide a model description and select a base model.");
+      return;
+    }
+
     setIsLoading(true);
     setGeneratedImages([]);
     setSelectedImageId(null);
+    const toastId = showLoading(t('generating'));
 
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    try {
+      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-generate-model', {
+        body: {
+          model_description: modelDescription,
+          set_description: setDescription,
+          selected_model_id: selectedModelId,
+          user_id: session.user.id,
+        }
+      });
 
-    if (autoApprove) {
-      // Simulate AI selecting the best image
-      const selected = mockImages[Math.floor(Math.random() * mockImages.length)];
-      setGeneratedImages([selected]);
-      setSelectedImageId(selected.id);
-    } else {
-      setGeneratedImages(mockImages);
+      if (error) throw error;
+      
+      dismissToast(toastId);
+
+      if (autoApprove) {
+        // Simulate AI selecting the best image for now
+        const selected = data.images[Math.floor(Math.random() * data.images.length)];
+        setGeneratedImages([selected]);
+        setSelectedImageId(selected.id);
+      } else {
+        setGeneratedImages(data.images);
+      }
+
+    } catch (err: any) {
+      dismissToast(toastId);
+      showError(err.message);
+    } finally {
+      setIsLoading(false);
     }
-
-    setIsLoading(false);
   };
 
   const handleSelectImage = (id: string) => {
