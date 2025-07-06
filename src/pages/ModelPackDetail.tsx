@@ -51,7 +51,7 @@ const JobStatusIndicator = ({ job }: { job: any }) => {
       return <Badge variant="secondary" className="bg-yellow-500 text-black hover:bg-yellow-600"><AlertTriangle className="mr-2 h-4 w-4" />Almost Ready ({upscaledPoses}/{totalPoses})</Badge>;
     }
 
-    return <Badge variant="default"><Wand2 className="mr-2 h-4 w-4" />Upscale to Use ({upscaledPoses}/{totalPoses})</Badge>;
+    return <Badge variant="default"><Wand2 className="mr-2 h-4 w-4" />Ready for Upscaling ({upscaledPoses}/{totalPoses})</Badge>;
   }
 
   return null;

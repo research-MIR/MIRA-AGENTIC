@@ -1,6 +1,6 @@
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
-import { AlertTriangle, Loader2, CheckCircle, XCircle } from 'lucide-react';
+import { AlertTriangle, Loader2, CheckCircle, XCircle, Wand2 } from 'lucide-react';
 import { useSecureImage } from '@/hooks/useSecureImage';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -38,7 +38,7 @@ export const RecentJobThumbnail = ({ job, onClick, isSelected }: Props) => {
       if (upscaledPoses > 0) {
         return { icon: <AlertTriangle className="h-6 w-6 text-white" />, color: 'bg-yellow-500/70', tooltip: `${upscaledPoses}/${totalPoses} Poses Upscaled` };
       }
-      return { icon: <XCircle className="h-6 w-6 text-white" />, color: 'bg-red-500/70', tooltip: 'Ready for Upscaling' };
+      return { icon: <Wand2 className="h-6 w-6 text-white" />, color: 'bg-blue-500/70', tooltip: 'Ready for Upscaling' };
     }
     return null;
   };
