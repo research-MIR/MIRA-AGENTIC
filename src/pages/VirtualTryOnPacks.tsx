@@ -155,7 +155,7 @@ const VirtualTryOnPacks = () => {
         <h1 className="text-3xl font-bold">{t('virtualTryOnPacks')}</h1>
         <p className="text-muted-foreground">{getStepTitle()}</p>
       </header>
-      <div className="flex-1">
+      <div className="flex-1 overflow-y-auto">
         {renderStep()}
       </div>
     </div>

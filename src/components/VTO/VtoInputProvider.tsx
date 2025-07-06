@@ -156,7 +156,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
             </Button>
             <ModelPoseSelector mode="get-all" onUseEntirePack={handleUseEntirePack} />
           </div>
-          <div className="space-y-2 flex flex-col">
+          <div className="space-y-2">
             <Label>{t('uploadGarment')}</Label>
             <div className="aspect-square">
               <ImageUploader onFileSelect={setGarmentFile} title={t('garmentImage')} imageUrl={garmentFileUrl} onClear={() => setGarmentFile(null)} />
@@ -186,7 +186,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
             </Button>
             <ModelPoseSelector mode="get-all" onUseEntirePack={handleUseEntirePack} />
           </div>
-          <div className="space-y-2 flex flex-col">
+          <div className="space-y-2">
             <Label>{t('uploadGarments')}</Label>
             <div className="h-32">
               <MultiImageUploader onFilesSelect={setRandomGarmentFiles} title={t('uploadGarments')} icon={<Shirt />} description={t('selectMultipleGarmentImages')} />
@@ -226,7 +226,9 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
             </div>
             <div className="space-y-2">
               <Label>{t('garment')}</Label>
-              <ImageUploader onFileSelect={setTempPairGarmentFile} title={t('garmentImage')} imageUrl={tempPairGarmentUrl} onClear={() => setTempPairGarmentFile(null)} />
+              <div className="aspect-square">
+                <ImageUploader onFileSelect={setTempPairGarmentFile} title={t('garmentImage')} imageUrl={tempPairGarmentUrl} onClear={() => setTempPairGarmentFile(null)} />
+              </div>
             </div>
           </div>
           <div>
