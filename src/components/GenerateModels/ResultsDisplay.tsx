@@ -28,58 +28,42 @@ export const ResultsDisplay = ({
 
   if (isLoading) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle>{t('resultsTitle')}</CardTitle>
-          <CardDescription>{t('generating')}</CardDescription>
-        </CardHeader>
-        <CardContent className="flex items-center justify-center p-12">
-          <Loader2 className="h-12 w-12 animate-spin text-primary" />
-        </CardContent>
-      </Card>
+      <div className="flex items-center justify-center p-12">
+        <Loader2 className="h-12 w-12 animate-spin text-primary" />
+      </div>
     );
   }
 
   if (images.length === 0) {
-    return null; // Don't show anything if there are no images and not loading
+    return null;
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{t('resultsTitle')}</CardTitle>
-        <CardDescription>
-          {autoApprove ? t('resultsDescriptionAuto') : t('resultsDescriptionManual')}
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className={cn("grid gap-4", autoApprove ? "grid-cols-1 max-w-sm mx-auto" : "grid-cols-2 md:grid-cols-4")}>
-          {images.map((image) => {
-            const isSelected = selectedImageId === image.id;
-            return (
-              <div key={image.id} className="space-y-2">
-                <div className="relative group aspect-square">
-                  <img src={image.url} alt={`Generated model ${image.id}`} className="w-full h-full object-cover rounded-md" />
-                  {isSelected && (
-                    <div className="absolute inset-0 bg-black/50 flex items-center justify-center rounded-md">
-                      <CheckCircle className="h-12 w-12 text-white" />
-                    </div>
-                  )}
+    <div className={cn("grid gap-4", autoApprove ? "grid-cols-1 max-w-sm mx-auto" : "grid-cols-2 md:grid-cols-4")}>
+      {images.map((image) => {
+        const isSelected = selectedImageId === image.id;
+        return (
+          <div key={image.id} className="space-y-2">
+            <div className="relative group aspect-square">
+              <img src={image.url} alt={`Generated model ${image.id}`} className="w-full h-full object-cover rounded-md" />
+              {isSelected && (
+                <div className="absolute inset-0 bg-black/50 flex items-center justify-center rounded-md">
+                  <CheckCircle className="h-12 w-12 text-white" />
                 </div>
-                {!autoApprove && (
-                  <Button
-                    className="w-full"
-                    variant={isSelected ? "secondary" : "default"}
-                    onClick={() => onSelectImage(image.id)}
-                  >
-                    {isSelected ? t('selected') : t('selectImage')}
-                  </Button>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </CardContent>
-    </Card>
+              )}
+            </div>
+            {!autoApprove && (
+              <Button
+                className="w-full"
+                variant={isSelected ? "secondary" : "default"}
+                onClick={() => onSelectImage(image.id)}
+              >
+                {isSelected ? t('selected') : t('selectImage')}
+              </Button>
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
 };

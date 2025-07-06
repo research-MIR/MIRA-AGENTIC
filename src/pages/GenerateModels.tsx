@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Plus, Trash2, Sparkles, Loader2 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 
 interface Pose {
   type: 'text';
@@ -180,37 +181,54 @@ const GenerateModels = () => {
             </CardContent>
           </Card>
         </div>
-        <div className="lg:col-span-2 space-y-4">
-          <ResultsDisplay
-            images={activeJob?.base_generation_results || []}
-            isLoading={isLoadingJob && (!activeJob || activeJob?.status === 'pending')}
-            autoApprove={activeJob?.auto_approve}
-            selectedImageId={activeJob?.base_model_image_url ? activeJob.base_generation_results.find((i:any) => i.url === activeJob.base_model_image_url)?.id : null}
-            onSelectImage={handleSelectImage}
-          />
+        <div className="lg:col-span-2">
           {activeJob && (
-            <Card>
-              <CardHeader>
-                <CardTitle>{t('finalPosesTitle')}</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {activeJob.status === 'generating_poses' || activeJob.status === 'polling_poses' && !activeJob.final_posed_images ? (
-                  <div className="flex items-center justify-center p-8">
-                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                    <p className="ml-4">{t('generatingPoses')}</p>
+            <Accordion type="multiple" defaultValue={['item-1', 'item-2']} className="w-full space-y-4">
+              <AccordionItem value="item-1" className="border rounded-md bg-card">
+                <AccordionTrigger className="p-4 hover:no-underline">
+                  <div className="flex-1 text-left">
+                    <h3 className="text-lg font-semibold">{t('resultsTitle')}</h3>
+                    <p className="text-sm text-muted-foreground">
+                      {activeJob.auto_approve ? t('resultsDescriptionAuto') : t('resultsDescriptionManual')}
+                    </p>
                   </div>
-                ) : activeJob.status === 'complete' && activeJob.final_posed_images ? (
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                    {(activeJob.final_posed_images as FinalPoseResult[])?.map((result, index) => (
-                      <div key={index} className="space-y-2">
-                        <img src={result.final_url} alt={result.pose_prompt} className="w-full aspect-square object-cover rounded-md" />
-                        <p className="text-xs text-muted-foreground truncate">{result.pose_prompt}</p>
+                </AccordionTrigger>
+                <AccordionContent className="p-4 pt-0">
+                  <ResultsDisplay
+                    images={activeJob.base_generation_results || []}
+                    isLoading={isLoadingJob && (!activeJob || activeJob?.status === 'pending')}
+                    autoApprove={activeJob.auto_approve}
+                    selectedImageId={activeJob.base_model_image_url ? activeJob.base_generation_results.find((i:any) => i.url === activeJob.base_model_image_url)?.id : null}
+                    onSelectImage={handleSelectImage}
+                  />
+                </AccordionContent>
+              </AccordionItem>
+
+              {activeJob.status !== 'pending' && activeJob.status !== 'base_generation_complete' && activeJob.status !== 'awaiting_approval' && (
+                <AccordionItem value="item-2" className="border rounded-md bg-card">
+                  <AccordionTrigger className="p-4 hover:no-underline">
+                    <h3 className="text-lg font-semibold">{t('finalPosesTitle')}</h3>
+                  </AccordionTrigger>
+                  <AccordionContent className="p-4 pt-0">
+                    {activeJob.status === 'generating_poses' || (activeJob.status === 'polling_poses' && !activeJob.final_posed_images) ? (
+                      <div className="flex items-center justify-center p-8">
+                        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                        <p className="ml-4">{t('generatingPoses')}</p>
                       </div>
-                    ))}
-                  </div>
-                ) : null}
-              </CardContent>
-            </Card>
+                    ) : activeJob.status === 'complete' && activeJob.final_posed_images ? (
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                        {(activeJob.final_posed_images as FinalPoseResult[])?.map((result, index) => (
+                          <div key={index} className="space-y-2">
+                            <img src={result.final_url} alt={result.pose_prompt} className="w-full aspect-square object-cover rounded-md" />
+                            <p className="text-xs text-muted-foreground truncate">{result.pose_prompt}</p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </AccordionContent>
+                </AccordionItem>
+              )}
+            </Accordion>
           )}
         </div>
       </div>
