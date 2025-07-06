@@ -92,12 +92,23 @@ const VirtualTryOnPacks = () => {
                   <TabsTrigger value="batch">{t('batchProcess')}</TabsTrigger>
                 </TabsList>
                 <TabsContent value="single" className="pt-6">
+                  <p className="text-sm text-muted-foreground mb-6">{t('singleVtoDescription')}</p>
                   <SingleTryOnPacks />
                 </TabsContent>
                 <TabsContent value="batch" className="pt-6">
+                  <p className="text-sm text-muted-foreground mb-6">{t('batchVtoDescription')}</p>
                   <BatchTryOnPacks />
                 </TabsContent>
               </Tabs>
+              <div className="mt-8">
+                <RecentJobsList 
+                    jobs={jobs}
+                    isLoading={isLoadingRecentJobs}
+                    selectedJobId={selectedJobId}
+                    onSelectJob={handleSelectJob}
+                    mode="base"
+                />
+              </div>
             </div>
           )}
         </div>
