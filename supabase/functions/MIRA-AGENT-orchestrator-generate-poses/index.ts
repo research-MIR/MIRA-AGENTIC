@@ -24,11 +24,12 @@ serve(async (req) => {
         selected_model_id, 
         auto_approve, 
         pose_prompts, 
-        user_id 
+        user_id,
+        pack_id
     } = await req.json();
 
-    if (!model_description || !selected_model_id || !pose_prompts || !Array.isArray(pose_prompts) || !user_id) {
-      throw new Error("model_description, selected_model_id, pose_prompts array, and user_id are required.");
+    if (!model_description || !selected_model_id || !pose_prompts || !Array.isArray(pose_prompts) || !user_id || !pack_id) {
+      throw new Error("model_description, selected_model_id, pose_prompts array, user_id, and pack_id are required.");
     }
     console.log(`[Orchestrator-Poses][${requestId}] Received ${pose_prompts.length} poses for user ${user_id}. Auto-approve: ${auto_approve}`);
 
@@ -39,6 +40,7 @@ serve(async (req) => {
       .from('mira-agent-model-generation-jobs')
       .insert({
         user_id,
+        pack_id, // <-- ADDED THIS
         model_description,
         set_description,
         auto_approve,

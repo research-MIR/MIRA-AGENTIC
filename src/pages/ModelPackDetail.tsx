@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
@@ -13,6 +13,7 @@ import { ResultsDisplay } from "@/components/GenerateModels/ResultsDisplay";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { useLanguage } from "@/context/LanguageContext";
 import { Loader2 } from "lucide-react";
+import { RealtimeChannel } from "@supabase/supabase-js";
 
 interface FinalPoseResult {
   pose_prompt: string;
@@ -21,10 +22,11 @@ interface FinalPoseResult {
 
 const ModelPackDetail = () => {
   const { packId } = useParams();
-  const { supabase } = useSession();
+  const { supabase, session } = useSession();
   const queryClient = useQueryClient();
   const { t } = useLanguage();
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const channelRef = useRef<RealtimeChannel | null>(null);
 
   const { data: pack, isLoading: isLoadingPack, error: packError } = useQuery({
     queryKey: ['modelPack', packId],
@@ -46,8 +48,36 @@ const ModelPackDetail = () => {
       return data;
     },
     enabled: !!packId,
-    refetchInterval: 5000, // Poll for updates every 5 seconds
   });
+
+  useEffect(() => {
+    if (!packId || !session?.user?.id) return;
+
+    const channel = supabase
+      .channel(`model-pack-jobs-${packId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'mira-agent-model-generation-jobs',
+          filter: `pack_id=eq.${packId}`,
+        },
+        (payload) => {
+          console.log('Realtime update received for model pack jobs:', payload);
+          queryClient.invalidateQueries({ queryKey: ['modelsForPack', packId] });
+        }
+      )
+      .subscribe();
+
+    channelRef.current = channel;
+
+    return () => {
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+      }
+    };
+  }, [packId, session?.user?.id, supabase, queryClient]);
 
   const selectedJob = jobs?.find(job => job.id === selectedJobId);
 
@@ -164,7 +194,7 @@ const ModelPackDetail = () => {
             )}
           </div>
           <div className="lg:col-span-1 overflow-y-auto no-scrollbar">
-            <ModelGenerator packId={packId!} />
+            <ModelGenerator packId={packId!} selectedJob={selectedJob} />
           </div>
         </div>
       </div>
