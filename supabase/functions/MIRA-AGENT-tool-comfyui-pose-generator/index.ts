@@ -312,7 +312,7 @@ const workflowWithoutRef = `{
   },
   "212": {
     "inputs": {
-      "lora_name": "42lux-UltimateAtHome-flux-highresfix (1).safetensors",
+      "lora_name": "42lux-UltimateAtHome-flux-highresfix.safetensors",
       "strength_model": 0.5000000000000001,
       "strength_clip": 0.5000000000000001,
       "model": [
@@ -656,7 +656,7 @@ const workflowWithRef = `{
   },
   "212": {
     "inputs": {
-      "lora_name": "42lux-UltimateAtHome-flux-highresfix (1).safetensors",
+      "lora_name": "42lux-UltimateAtHome-flux-highresfix.safetensors",
       "strength_model": 0.5000000000000001,
       "strength_clip": 0.5000000000000001,
       "model": [
