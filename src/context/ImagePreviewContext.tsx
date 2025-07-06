@@ -1,12 +1,11 @@
 import { createContext, useContext, useState, ReactNode } from 'react';
-import { ImagePreviewModal } from '@/components/ImagePreviewModal';
 
 export interface PreviewImage {
   url: string;
   jobId?: string;
 }
 
-interface PreviewData {
+export interface PreviewData {
   images: PreviewImage[];
   currentIndex: number;
 }
@@ -14,6 +13,7 @@ interface PreviewData {
 interface ImagePreviewContextType {
   showImage: (data: PreviewData) => void;
   hideImage: () => void;
+  previewData: PreviewData | null;
 }
 
 const ImagePreviewContext = createContext<ImagePreviewContextType | undefined>(undefined);
@@ -36,12 +36,11 @@ export const ImagePreviewProvider = ({ children }: ImagePreviewProviderProps) =>
   const showImage = (data: PreviewData) => setPreviewData(data);
   const hideImage = () => setPreviewData(null);
 
-  const value = { showImage, hideImage };
+  const value = { showImage, hideImage, previewData };
 
   return (
     <ImagePreviewContext.Provider value={value}>
       {children}
-      <ImagePreviewModal data={previewData} onClose={hideImage} />
     </ImagePreviewContext.Provider>
   );
 };
