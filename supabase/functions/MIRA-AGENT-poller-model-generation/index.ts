@@ -89,7 +89,7 @@ async function handleGeneratingPosesState(supabase: any, job: any) {
             comfyui_prompt_id: result.comfyui_prompt_id,
             status: 'processing',
             final_url: null,
-            is_upscaled: false, // Initialize the new flag
+            is_upscaled: false,
         });
     }
     await supabase.from('mira-agent-model-generation-jobs').update({ 
@@ -124,7 +124,7 @@ async function handlePollingPosesState(supabase: any, job: any) {
                 const imageUrl = `${comfyUiAddress}/view?filename=${encodeURIComponent(image.filename)}&subfolder=${encodeURIComponent(image.subfolder)}&type=${image.type}`;
                 updatedPoseJobs[index].status = 'complete';
                 updatedPoseJobs[index].final_url = imageUrl;
-                updatedPoseJobs[index].is_upscaled = false; // Add the new flag
+                updatedPoseJobs[index].is_upscaled = false;
                 console.log(`[ModelGenPoller][${job.id}] Pose job ${poseJob.comfyui_prompt_id} is complete. URL: ${imageUrl}`);
             }
         }
@@ -144,6 +144,66 @@ async function handlePollingPosesState(supabase: any, job: any) {
         setTimeout(() => {
             supabase.functions.invoke('MIRA-AGENT-poller-model-generation', { body: { job_id: job.id } }).catch(console.error);
         }, POLLING_INTERVAL_MS);
+    }
+}
+
+async function handleUpscalingPosesState(supabase: any, job: any) {
+    console.log(`[ModelGenPoller][${job.id}] State: UPSCALING_POSES.`);
+    const updatedPoseJobs = [...job.final_posed_images];
+    let hasPending = false;
+
+    for (const [index, poseJob] of updatedPoseJobs.entries()) {
+        if (poseJob.upscale_status === 'pending') {
+            hasPending = true;
+            try {
+                console.log(`[ModelGenPoller][${job.id}] Upscaling pose: ${poseJob.pose_prompt}`);
+                const { data: upscaleData, error: upscaleError } = await supabase.functions.invoke('MIRA-AGENT-tool-upscale-image-clarity', {
+                    body: {
+                        image_url: poseJob.final_url,
+                        job_id: job.id,
+                        upscale_factor: 1.5
+                    }
+                });
+
+                if (upscaleError) throw upscaleError;
+
+                const newUrl = upscaleData.upscaled_image.url;
+                updatedPoseJobs[index].final_url = newUrl;
+                updatedPoseJobs[index].is_upscaled = true;
+                updatedPoseJobs[index].upscale_status = 'complete';
+                console.log(`[ModelGenPoller][${job.id}] Pose successfully upscaled. New URL: ${newUrl}`);
+                
+                // Update DB immediately after one success
+                await supabase.from('mira-agent-model-generation-jobs').update({ 
+                    final_posed_images: updatedPoseJobs 
+                }).eq('id', job.id);
+
+                // Break to process one at a time
+                break;
+
+            } catch (error) {
+                console.error(`[ModelGenPoller][${job.id}] Failed to upscale pose ${poseJob.pose_prompt}:`, error.message);
+                updatedPoseJobs[index].upscale_status = 'failed';
+                updatedPoseJobs[index].error_message = error.message;
+                await supabase.from('mira-agent-model-generation-jobs').update({ 
+                    final_posed_images: updatedPoseJobs 
+                }).eq('id', job.id);
+            }
+        }
+    }
+
+    const stillHasPending = updatedPoseJobs.some(p => p.upscale_status === 'pending');
+
+    if (stillHasPending) {
+        console.log(`[ModelGenPoller][${job.id}] More poses to upscale. Re-invoking poller.`);
+        setTimeout(() => {
+            supabase.functions.invoke('MIRA-AGENT-poller-model-generation', { body: { job_id: job.id } }).catch(console.error);
+        }, 1000);
+    } else {
+        console.log(`[ModelGenPoller][${job.id}] All upscaling tasks processed. Setting status to complete.`);
+        await supabase.from('mira-agent-model-generation-jobs').update({ 
+            status: 'complete'
+        }).eq('id', job.id);
     }
 }
 
@@ -172,6 +232,9 @@ serve(async (req) => {
             break;
         case 'polling_poses':
             await handlePollingPosesState(supabase, job);
+            break;
+        case 'upscaling_poses':
+            await handleUpscalingPosesState(supabase, job);
             break;
         case 'awaiting_approval':
         case 'complete':

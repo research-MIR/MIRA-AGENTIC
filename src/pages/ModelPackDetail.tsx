@@ -16,6 +16,8 @@ import { Loader2, Wand2, CheckCircle, XCircle, AlertTriangle } from "lucide-reac
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { PackStatusIndicator } from "@/components/GenerateModels/PackStatusIndicator";
 import { JobProgressBar } from "@/components/GenerateModels/JobProgressBar";
+import { Button } from "@/components/ui/button";
+import { UpscalePosesModal } from "@/components/GenerateModels/UpscalePosesModal";
 
 interface FinalPoseResult {
   pose_prompt: string;
@@ -29,6 +31,7 @@ const ModelPackDetail = () => {
   const queryClient = useQueryClient();
   const { t } = useLanguage();
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [isUpscaleModalOpen, setIsUpscaleModalOpen] = useState(false);
   const channelRef = useRef<RealtimeChannel | null>(null);
 
   const { data: pack, isLoading: isLoadingPack, error: packError } = useQuery({
@@ -103,6 +106,12 @@ const ModelPackDetail = () => {
     return { status: aggregateStatus, completedPoses, totalPoses, upscaledPoses };
   }, [jobs]);
 
+  const posesReadyForUpscaleCount = useMemo(() => {
+    if (!jobs) return 0;
+    return jobs.flatMap(job => job.final_posed_images || [])
+               .filter((pose: any) => pose.status === 'complete' && !pose.is_upscaled).length;
+  }, [jobs]);
+
   useEffect(() => {
     if (!packId || !session?.user?.id) return;
 
@@ -170,105 +179,117 @@ const ModelPackDetail = () => {
   }
 
   return (
-    <div className="p-4 md:p-8 h-screen flex flex-col">
-      <header className="pb-4 mb-4 border-b shrink-0">
-        <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-                <h1 className="text-3xl font-bold">{pack.name}</h1>
-                <PackStatusIndicator status={packStatus.status} totalPoses={packStatus.totalPoses} upscaledPoses={packStatus.upscaledPoses} />
-            </div>
-        </div>
-        <div className="mt-2">
-            <JobProgressBar completedPoses={packStatus.completedPoses} totalPoses={packStatus.totalPoses} />
-        </div>
-        <p className="text-muted-foreground mt-1">{pack.description || "No description provided."}</p>
-      </header>
-      <div className="flex-1 flex flex-col gap-4 overflow-hidden">
-        <Card>
-          <CardHeader><CardTitle>Pack Jobs</CardTitle></CardHeader>
-          <CardContent>
-            {isLoadingJobs ? <Skeleton className="h-28 w-full" /> : jobsError ? (
-              <Alert variant="destructive"><AlertTitle>Error</AlertTitle><AlertDescription>{jobsError.message}</AlertDescription></Alert>
-            ) : jobs && jobs.length > 0 ? (
-              <ScrollArea className="h-32">
-                <div className="flex gap-4 pb-4">
-                  {jobs.map(job => (
-                    <RecentJobThumbnail
-                      key={job.id}
-                      job={job}
-                      onClick={() => setSelectedJobId(job.id)}
-                      isSelected={selectedJobId === job.id}
-                    />
-                  ))}
-                </div>
-              </ScrollArea>
-            ) : (
-              <p className="text-muted-foreground text-sm">No models have been generated for this pack yet.</p>
-            )}
-          </CardContent>
-        </Card>
+    <>
+      <div className="p-4 md:p-8 h-screen flex flex-col">
+        <header className="pb-4 mb-4 border-b shrink-0">
+          <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                  <h1 className="text-3xl font-bold">{pack.name}</h1>
+                  <PackStatusIndicator status={packStatus.status} totalPoses={packStatus.totalPoses} upscaledPoses={packStatus.upscaledPoses} />
+              </div>
+              <Button onClick={() => setIsUpscaleModalOpen(true)} disabled={posesReadyForUpscaleCount === 0}>
+                <Wand2 className="mr-2 h-4 w-4" />
+                Upscale & Prepare for VTO ({posesReadyForUpscaleCount})
+              </Button>
+          </div>
+          <div className="mt-2">
+              <JobProgressBar completedPoses={packStatus.completedPoses} totalPoses={packStatus.totalPoses} />
+          </div>
+          <p className="text-muted-foreground mt-1">{pack.description || "No description provided."}</p>
+        </header>
+        <div className="flex-1 flex flex-col gap-4 overflow-hidden">
+          <Card>
+            <CardHeader><CardTitle>Pack Jobs</CardTitle></CardHeader>
+            <CardContent>
+              {isLoadingJobs ? <Skeleton className="h-28 w-full" /> : jobsError ? (
+                <Alert variant="destructive"><AlertTitle>Error</AlertTitle><AlertDescription>{jobsError.message}</AlertDescription></Alert>
+              ) : jobs && jobs.length > 0 ? (
+                <ScrollArea className="h-32">
+                  <div className="flex gap-4 pb-4">
+                    {jobs.map(job => (
+                      <RecentJobThumbnail
+                        key={job.id}
+                        job={job}
+                        onClick={() => setSelectedJobId(job.id)}
+                        isSelected={selectedJobId === job.id}
+                      />
+                    ))}
+                  </div>
+                </ScrollArea>
+              ) : (
+                <p className="text-muted-foreground text-sm">No models have been generated for this pack yet.</p>
+              )}
+            </CardContent>
+          </Card>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 flex-1 overflow-hidden">
-          <div className="lg:col-span-2 overflow-y-auto no-scrollbar pr-4">
-            {selectedJob ? (
-              <Accordion type="multiple" defaultValue={['item-1', 'item-2']} className="w-full space-y-4">
-                <AccordionItem value="item-1" className="border rounded-md bg-card">
-                  <AccordionTrigger className="p-4 hover:no-underline">
-                    <h3 className="text-lg font-semibold">{t('resultsTitle')}</h3>
-                  </AccordionTrigger>
-                  <AccordionContent className="p-4 pt-0">
-                    <ResultsDisplay
-                      images={selectedJob.base_generation_results || []}
-                      isLoading={!selectedJob || selectedJob?.status === 'pending'}
-                      autoApprove={selectedJob.auto_approve}
-                      selectedImageId={selectedJob.base_model_image_url ? selectedJob.base_generation_results.find((i:any) => i.url === selectedJob.base_model_image_url)?.id : null}
-                      onSelectImage={handleSelectImage}
-                    />
-                  </AccordionContent>
-                </AccordionItem>
-                {selectedJob.status !== 'pending' && selectedJob.status !== 'base_generation_complete' && selectedJob.status !== 'awaiting_approval' && (
-                  <AccordionItem value="item-2" className="border rounded-md bg-card">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 flex-1 overflow-hidden">
+            <div className="lg:col-span-2 overflow-y-auto no-scrollbar pr-4">
+              {selectedJob ? (
+                <Accordion type="multiple" defaultValue={['item-1', 'item-2']} className="w-full space-y-4">
+                  <AccordionItem value="item-1" className="border rounded-md bg-card">
                     <AccordionTrigger className="p-4 hover:no-underline">
-                      <h3 className="text-lg font-semibold">{t('finalPosesTitle')}</h3>
+                      <h3 className="text-lg font-semibold">{t('resultsTitle')}</h3>
                     </AccordionTrigger>
                     <AccordionContent className="p-4 pt-0">
-                      {selectedJob.status === 'generating_poses' || (selectedJob.status === 'polling_poses' && !selectedJob.final_posed_images) ? (
-                        <div className="flex items-center justify-center p-8"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /><p className="ml-4">{t('generatingPoses')}</p></div>
-                      ) : selectedJob.final_posed_images ? (
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                          {(selectedJob.final_posed_images as FinalPoseResult[])?.map((result, index) => (
-                            <div key={index} className="space-y-2">
-                              <div className="relative group aspect-square">
-                                <img src={result.final_url} alt={result.pose_prompt} className="w-full h-full object-cover rounded-md" />
-                                <div className="absolute top-1 right-1">
-                                  {result.is_upscaled ? (
-                                    <CheckCircle className="h-5 w-5 text-white bg-green-600 rounded-full p-0.5" />
-                                  ) : (
-                                    <Wand2 className="h-5 w-5 text-white bg-blue-500 rounded-full p-0.5" />
-                                  )}
-                                </div>
-                              </div>
-                              <p className="text-xs text-muted-foreground truncate">{result.pose_prompt}</p>
-                            </div>
-                          ))}
-                        </div>
-                      ) : null}
+                      <ResultsDisplay
+                        images={selectedJob.base_generation_results || []}
+                        isLoading={!selectedJob || selectedJob?.status === 'pending'}
+                        autoApprove={selectedJob.auto_approve}
+                        selectedImageId={selectedJob.base_model_image_url ? selectedJob.base_generation_results.find((i:any) => i.url === selectedJob.base_model_image_url)?.id : null}
+                        onSelectImage={handleSelectImage}
+                      />
                     </AccordionContent>
                   </AccordionItem>
-                )}
-              </Accordion>
-            ) : (
-              <Card className="h-full flex items-center justify-center">
-                <p className="text-muted-foreground">Select a job from the bar above to see its results.</p>
-              </Card>
-            )}
-          </div>
-          <div className="lg:col-span-1 overflow-y-auto no-scrollbar">
-            <ModelGenerator packId={packId!} />
+                  {selectedJob.status !== 'pending' && selectedJob.status !== 'base_generation_complete' && selectedJob.status !== 'awaiting_approval' && (
+                    <AccordionItem value="item-2" className="border rounded-md bg-card">
+                      <AccordionTrigger className="p-4 hover:no-underline">
+                        <h3 className="text-lg font-semibold">{t('finalPosesTitle')}</h3>
+                      </AccordionTrigger>
+                      <AccordionContent className="p-4 pt-0">
+                        {selectedJob.status === 'generating_poses' || (selectedJob.status === 'polling_poses' && !selectedJob.final_posed_images) ? (
+                          <div className="flex items-center justify-center p-8"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /><p className="ml-4">{t('generatingPoses')}</p></div>
+                        ) : selectedJob.final_posed_images ? (
+                          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                            {(selectedJob.final_posed_images as FinalPoseResult[])?.map((result, index) => (
+                              <div key={index} className="space-y-2">
+                                <div className="relative group aspect-square">
+                                  <img src={result.final_url} alt={result.pose_prompt} className="w-full h-full object-cover rounded-md" />
+                                  <div className="absolute top-1 right-1">
+                                    {result.is_upscaled ? (
+                                      <CheckCircle className="h-5 w-5 text-white bg-green-600 rounded-full p-0.5" />
+                                    ) : (
+                                      <Wand2 className="h-5 w-5 text-white bg-blue-500 rounded-full p-0.5" />
+                                    )}
+                                  </div>
+                                </div>
+                                <p className="text-xs text-muted-foreground truncate">{result.pose_prompt}</p>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                      </AccordionContent>
+                    </AccordionItem>
+                  )}
+                </Accordion>
+              ) : (
+                <Card className="h-full flex items-center justify-center">
+                  <p className="text-muted-foreground">Select a job from the bar above to see its results.</p>
+                </Card>
+              )}
+            </div>
+            <div className="lg:col-span-1 overflow-y-auto no-scrollbar">
+              <ModelGenerator packId={packId!} />
+            </div>
           </div>
         </div>
       </div>
-    </div>
+      <UpscalePosesModal
+        isOpen={isUpscaleModalOpen}
+        onClose={() => setIsUpscaleModalOpen(false)}
+        jobs={jobs || []}
+        packId={packId!}
+      />
+    </>
   );
 };
 
