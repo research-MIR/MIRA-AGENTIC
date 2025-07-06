@@ -158,7 +158,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
           </div>
           <div className="space-y-2 flex flex-col">
             <Label>{t('uploadGarment')}</Label>
-            <div className="flex-1">
+            <div className="aspect-square">
               <ImageUploader onFileSelect={setGarmentFile} title={t('garmentImage')} imageUrl={garmentFileUrl} onClear={() => setGarmentFile(null)} />
             </div>
           </div>
@@ -188,7 +188,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
           </div>
           <div className="space-y-2 flex flex-col">
             <Label>{t('uploadGarments')}</Label>
-            <div className="flex-1">
+            <div className="h-32">
               <MultiImageUploader onFilesSelect={setRandomGarmentFiles} title={t('uploadGarments')} icon={<Shirt />} description={t('selectMultipleGarmentImages')} />
             </div>
             {randomGarmentFiles.length > 0 && (
