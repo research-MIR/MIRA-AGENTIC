@@ -43,7 +43,12 @@ const ModelPackDetail = () => {
     queryKey: ['modelsForPack', packId],
     queryFn: async () => {
       if (!packId) return [];
-      const { data, error } = await supabase.rpc('get_models_for_pack', { p_pack_id: packId });
+      // Direct query instead of RPC call
+      const { data, error } = await supabase
+        .from('mira-agent-model-generation-jobs')
+        .select('*')
+        .eq('pack_id', packId)
+        .order('created_at', { ascending: false });
       if (error) throw error;
       return data;
     },
@@ -194,7 +199,7 @@ const ModelPackDetail = () => {
             )}
           </div>
           <div className="lg:col-span-1 overflow-y-auto no-scrollbar">
-            <ModelGenerator packId={packId!} selectedJob={selectedJob} />
+            <ModelGenerator packId={packId!} />
           </div>
         </div>
       </div>
