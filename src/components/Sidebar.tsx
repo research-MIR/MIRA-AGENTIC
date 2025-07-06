@@ -159,6 +159,10 @@ export const Sidebar = () => {
             <Shirt size={20} />
             {t('virtualTryOn')}
           </NavLink>
+          <NavLink id="virtual-try-on-packs-nav-link" to="/virtual-try-on-packs" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
+            <Shirt size={20} />
+            {t('virtualTryOnPacks')}
+          </NavLink>
           <NavLink id="model-packs-nav-link" to="/model-packs" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
             <Users size={20} />
             {t('modelPacks')}

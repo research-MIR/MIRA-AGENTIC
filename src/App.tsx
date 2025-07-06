@@ -22,6 +22,7 @@ import { TourProvider as ReactourProvider, StepType } from '@reactour/tour';
 import SegmentationTool from "./pages/Developer/Segmentation.tsx";
 import ModelPacks from "./pages/ModelPacks.tsx";
 import ModelPackDetail from "./pages/ModelPackDetail.tsx";
+import VirtualTryOnPacks from "./pages/VirtualTryOnPacks.tsx";
 
 const App = () => {
   const { isTourOpen, closeTour, isTourPending, openTour, startTour } = useOnboardingTour();
@@ -98,6 +99,7 @@ const App = () => {
             <Route path="/projects/:projectId" element={<ProjectDetail />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/virtual-try-on" element={<VirtualTryOn />} />
+            <Route path="/virtual-try-on-packs" element={<VirtualTryOnPacks />} />
             <Route path="/developer" element={<Developer />} />
             <Route path="/developer/segmentation" element={<SegmentationTool />} />
             <Route path="/model-packs" element={<ModelPacks />} />

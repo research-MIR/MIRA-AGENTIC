@@ -47,6 +47,7 @@ export const commonTranslations = {
     upscaleAndDownload: "Migliora e Scarica",
     upscaleAndDownloadSkin: "Upscale (Pelle/Costumi)",
     generateModels: "Genera Modelli",
+    virtualTryOnPacks: "Camerino Virtuale (PACKS)",
   },
   en: {
     greeting: "Hi! How can I help you today?",
@@ -96,5 +97,6 @@ export const commonTranslations = {
     upscaleAndDownload: "Upscale & Download",
     upscaleAndDownloadSkin: "Upscale (Skin/Swimwear)",
     generateModels: "Generate Models",
+    virtualTryOnPacks: "Virtual Try-On (PACKS)",
   },
 };

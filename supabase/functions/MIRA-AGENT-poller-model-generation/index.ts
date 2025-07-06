@@ -673,7 +673,7 @@ const tiledUpscalerWorkflow = `{
   },
   "317": {
     "inputs": {
-      "value": 0.4
+      "value": 0.45
     },
     "class_type": "PrimitiveFloat",
     "_meta": {
