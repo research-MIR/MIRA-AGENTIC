@@ -2,8 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { useLanguage } from "@/context/LanguageContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { SingleTryOn } from "@/components/VTO/SingleTryOn";
-import { BatchTryOn } from "@/components/VTO/BatchTryOn";
+import { SingleTryOnPacks } from "@/components/VTO/SingleTryOnPacks";
 import VirtualTryOnPro from "@/components/VTO/VirtualTryOnPro";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -16,6 +15,7 @@ import { BitStudioJob } from "@/types/vto";
 import { useVTOJobs } from "@/hooks/useVTOJobs";
 import { RecentJobsList } from "@/components/VTO/RecentJobsList";
 import { Star, HelpCircle } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
 
 const VirtualTryOnPacks = () => {
   const { isProMode, toggleProMode } = useSession();
@@ -93,16 +93,14 @@ const VirtualTryOnPacks = () => {
                 </TabsList>
                 <TabsContent value="single" className="pt-6">
                   <p className="text-sm text-muted-foreground mb-6">{t('singleVtoDescription')}</p>
-                  <SingleTryOn 
-                    selectedJob={selectedJob} 
-                    resetForm={resetForm} 
-                    transferredImageUrl={vtoTarget === 'base' ? imageUrlToTransfer : null}
-                    onTransferConsumed={consumeImageUrl}
-                  />
+                  <SingleTryOnPacks />
                 </TabsContent>
                 <TabsContent value="batch" className="pt-6">
-                  <p className="text-sm text-muted-foreground mb-6">{t('batchVtoDescription')}</p>
-                  <BatchTryOn />
+                  <Card>
+                    <CardContent className="p-8 text-center text-muted-foreground">
+                      {t('comingSoon')}
+                    </CardContent>
+                  </Card>
                 </TabsContent>
               </Tabs>
               <div className="mt-8">
