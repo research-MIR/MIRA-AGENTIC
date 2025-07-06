@@ -15,7 +15,7 @@ serve(async (req) => {
   }
 
   try {
-    const { p_job_id, p_pose_urls } = await req.json();
+    const { p_job_id, p_pose_urls, p_upscale_factor } = await req.json();
     if (!p_job_id || !p_pose_urls || !Array.isArray(p_pose_urls)) {
       throw new Error("job_id and an array of pose_urls are required.");
     }
@@ -33,7 +33,7 @@ serve(async (req) => {
 
     const updatedPoses = (job.final_posed_images || []).map((pose: any) => {
       if (p_pose_urls.includes(pose.final_url)) {
-        return { ...pose, upscale_status: 'pending' };
+        return { ...pose, upscale_status: 'pending', upscale_factor: p_upscale_factor || 1.5 };
       }
       return pose;
     });

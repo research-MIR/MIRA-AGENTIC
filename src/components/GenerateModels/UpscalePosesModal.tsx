@@ -8,6 +8,7 @@ import { showError, showSuccess, showLoading, dismissToast } from '@/utils/toast
 import { useQueryClient } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
 import { useLanguage } from '@/context/LanguageContext';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuPortal, DropdownMenuSubContent } from "@/components/ui/dropdown-menu";
 
 interface Pose {
   final_url: string;
@@ -55,23 +56,24 @@ export const UpscalePosesModal = ({ isOpen, onClose, jobs, packId }: UpscalePose
     });
   };
 
-  const handleUpscale = async (urlsToProcess: string[]) => {
+  const handleUpscale = async (urlsToProcess: string[], factor: number) => {
     if (urlsToProcess.length === 0) return;
     setIsLoading(true);
     const toastId = showLoading(`Starting upscale for ${urlsToProcess.length} poses...`);
 
     try {
-      // We only need to update the first job in the list that contains one of the poses.
-      // The poller will handle all poses within that job.
       const jobToUpdate = jobs.find(job => 
         job.final_posed_images?.some(pose => urlsToProcess.includes(pose.final_url))
       );
 
       if (!jobToUpdate) throw new Error("Could not find the parent job for the selected poses.");
 
-      const { error } = await supabase.rpc('start_poses_upscaling', {
-        p_job_id: jobToUpdate.id,
-        p_pose_urls: urlsToProcess
+      const { error } = await supabase.functions.invoke('start_poses_upscaling', {
+        body: {
+          p_job_id: jobToUpdate.id,
+          p_pose_urls: urlsToProcess,
+          p_upscale_factor: factor
+        }
       });
 
       if (error) throw error;
@@ -116,14 +118,32 @@ export const UpscalePosesModal = ({ isOpen, onClose, jobs, packId }: UpscalePose
           )}
         </ScrollArea>
         <DialogFooter className="gap-2 sm:justify-between">
-          <Button variant="secondary" onClick={() => handleUpscale(posesReadyForUpscale.map(p => p.final_url))} disabled={isLoading || posesReadyForUpscale.length === 0}>
-            {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
-            Upscale All ({posesReadyForUpscale.length})
-          </Button>
-          <Button onClick={() => handleUpscale(Array.from(selectedPoseUrls))} disabled={isLoading || selectedPoseUrls.size === 0}>
-            {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
-            Upscale Selected ({selectedPoseUrls.size})
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="secondary" disabled={isLoading || posesReadyForUpscale.length === 0}>
+                {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+                Upscale All ({posesReadyForUpscale.length})
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+              <DropdownMenuItem onSelect={() => handleUpscale(posesReadyForUpscale.map(p => p.final_url), 1.5)}>Upscale x1.5</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => handleUpscale(posesReadyForUpscale.map(p => p.final_url), 2.0)}>Upscale x2.0</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => handleUpscale(posesReadyForUpscale.map(p => p.final_url), 2.5)}>Upscale x2.5</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button disabled={isLoading || selectedPoseUrls.size === 0}>
+                {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+                Upscale Selected ({selectedPoseUrls.size})
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+              <DropdownMenuItem onSelect={() => handleUpscale(Array.from(selectedPoseUrls), 1.5)}>Upscale x1.5</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => handleUpscale(Array.from(selectedPoseUrls), 2.0)}>Upscale x2.0</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => handleUpscale(Array.from(selectedPoseUrls), 2.5)}>Upscale x2.5</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -11,36 +11,717 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const tiledUpscalerWorkflow = `
-{
-  "9": { "inputs": { "clip_name1": "clip_l.safetensors", "clip_name2": "t5xxl_fp16.safetensors", "type": "flux", "device": "default" }, "class_type": "DualCLIPLoader" },
-  "10": { "inputs": { "vae_name": "ae.safetensors" }, "class_type": "VAELoader" },
-  "307": { "inputs": { "String": "masterpiece, best quality, highres" }, "class_type": "String" },
-  "349": { "inputs": { "clip_l": ["307", 0], "t5xxl": ["307", 0], "guidance": 2.2, "clip": ["9", 0] }, "class_type": "CLIPTextEncodeFlux" },
-  "361": { "inputs": { "clip_l": "over exposed,ugly, depth of field ", "t5xxl": "over exposed,ugly, depth of field", "guidance": 2.5, "clip": ["9", 0] }, "class_type": "CLIPTextEncodeFlux" },
-  "404": { "inputs": { "image": "placeholder.png" }, "class_type": "LoadImage" },
-  "407": { "inputs": { "upscale_by": ["437", 1], "seed": 82060634998716, "steps": 20, "cfg": 1, "sampler_name": "euler", "scheduler": "normal", "denoise": 0.14, "mode_type": "Linear", "tile_width": 1024, "tile_height": 1024, "mask_blur": 64, "tile_padding": 512, "seam_fix_mode": "None", "seam_fix_denoise": 0.4, "seam_fix_width": 0, "seam_fix_mask_blur": 8, "seam_fix_padding": 16, "force_uniform_tiles": true, "tiled_decode": false, "image": ["421", 0], "model": ["418", 0], "positive": ["349", 0], "negative": ["361", 0], "vae": ["10", 0], "upscale_model": ["408", 0], "custom_sampler": ["423", 0], "custom_sigmas": ["424", 0] }, "class_type": "UltimateSDUpscaleCustomSample" },
-  "408": { "inputs": { "model_name": "4xNomosWebPhoto_esrgan.safetensors" }, "class_type": "UpscaleModelLoader" },
-  "410": { "inputs": { "value": 1.5 }, "class_type": "FloatConstant" },
-  "412": { "inputs": { "double_layers": "10", "single_layers": "3,4", "scale": 3, "start_percent": 0.01, "end_percent": 0.15, "rescaling_scale": 0, "model": ["413", 0] }, "class_type": "SkipLayerGuidanceDiT" },
-  "413": { "inputs": { "unet_name": "flux1-dev.safetensors", "weight_dtype": "fp8_e4m3fn_fast" }, "class_type": "UNETLoader" },
-  "414": { "inputs": { "lora_name": "Samsung_UltraReal.safetensors", "strength_model": 0.6, "model": ["416", 0] }, "class_type": "LoraLoaderModelOnly" },
-  "415": { "inputs": { "lora_name": "IDunnohowtonameLora.safetensors", "strength_model": 0.5, "model": ["414", 0] }, "class_type": "LoraLoaderModelOnly" },
-  "416": { "inputs": { "lora_name": "42lux-UltimateAtHome-flux-highresfix.safetensors", "strength_model": 0.98, "model": ["412", 0] }, "class_type": "LoraLoaderModelOnly" },
-  "417": { "inputs": { "model": ["415", 0] }, "class_type": "ConfigureModifiedFlux" },
-  "418": { "inputs": { "scale": 1.75, "rescale": 0, "model": ["417", 0] }, "class_type": "PAGAttention" },
-  "420": { "inputs": { "pixels": ["404", 0], "vae": ["10", 0] }, "class_type": "VAEEncode" },
-  "421": { "inputs": { "samples": ["420", 0], "vae": ["10", 0] }, "class_type": "VAEDecode" },
-  "422": { "inputs": { "sampler_name": "dpmpp_2m" }, "class_type": "KSamplerSelect" },
-  "423": { "inputs": { "dishonesty_factor": -0.01, "start_percent": 0.46, "end_percent": 0.95, "sampler": ["422", 0] }, "class_type": "LyingSigmaSampler" },
-  "424": { "inputs": { "scheduler": "sgm_uniform", "steps": 10, "denoise": 0.14, "model": ["418", 0] }, "class_type": "BasicScheduler" },
-  "431": { "inputs": { "filename_prefix": "UpscaledPose", "images": ["445", 0] }, "class_type": "SaveImage" },
-  "432": { "inputs": { "upscale_by": ["437", 1], "seed": 839614371047984, "steps": 20, "cfg": 1, "sampler_name": "euler", "scheduler": "normal", "denoise": 0.17, "mode_type": "Linear", "tile_width": 1024, "tile_height": 1024, "mask_blur": 64, "tile_padding": 512, "seam_fix_mode": "None", "seam_fix_denoise": 0.4, "seam_fix_width": 64, "seam_fix_mask_blur": 8, "seam_fix_padding": 16, "force_uniform_tiles": true, "tiled_decode": false, "image": ["407", 0], "model": ["418", 0], "positive": ["349", 0], "negative": ["361", 0], "vae": ["10", 0], "upscale_model": ["408", 0], "custom_sampler": ["423", 0], "custom_sigmas": ["444", 0] }, "class_type": "UltimateSDUpscaleCustomSample" },
-  "437": { "inputs": { "expression": "a**0.5", "a": ["410", 0] }, "class_type": "MathExpression|pysssss" },
-  "444": { "inputs": { "scheduler": "sgm_uniform", "steps": 10, "denoise": 0.25, "model": ["418", 0] }, "class_type": "BasicScheduler" },
-  "445": { "inputs": { "method": "hm-mvgd-hm", "strength": 1.0, "image_ref": ["404", 0], "image_target": ["432", 0] }, "class_type": "ColorMatch" }
-}
-`;
+const tiledUpscalerWorkflow = `{
+  "10": {
+    "inputs": {
+      "vae_name": "ae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "48": {
+    "inputs": {
+      "clip_l": "",
+      "t5xxl": "",
+      "guidance": 2,
+      "clip": [
+        "298",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncodeFlux",
+    "_meta": {
+      "title": "CLIPTextEncodeFlux"
+    }
+  },
+  "49": {
+    "inputs": {
+      "conditioning": [
+        "48",
+        0
+      ]
+    },
+    "class_type": "ConditioningZeroOut",
+    "_meta": {
+      "title": "ConditioningZeroOut"
+    }
+  },
+  "87": {
+    "inputs": {
+      "text": [
+        "171",
+        2
+      ],
+      "clip": [
+        "298",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Prompt)"
+    }
+  },
+  "88": {
+    "inputs": {
+      "guidance": 3.5,
+      "conditioning": [
+        "87",
+        0
+      ]
+    },
+    "class_type": "FluxGuidance",
+    "_meta": {
+      "title": "FluxGuidance"
+    }
+  },
+  "89": {
+    "inputs": {
+      "max_shift": 1.15,
+      "base_shift": 0.5,
+      "width": 1024,
+      "height": 1024,
+      "model": [
+        "304",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingFlux",
+    "_meta": {
+      "title": "ModelSamplingFlux"
+    }
+  },
+  "91": {
+    "inputs": {
+      "strength": 0.8500000000000002,
+      "start_percent": 0,
+      "end_percent": 0.8500000000000002,
+      "positive": [
+        "88",
+        0
+      ],
+      "negative": [
+        "49",
+        0
+      ],
+      "control_net": [
+        "93",
+        0
+      ],
+      "image": [
+        "152",
+        0
+      ],
+      "vae": [
+        "10",
+        0
+      ]
+    },
+    "class_type": "ControlNetApplyAdvanced",
+    "_meta": {
+      "title": "Apply ControlNet"
+    }
+  },
+  "93": {
+    "inputs": {
+      "control_net_name": "fluxcontrolnetupscale.safetensors"
+    },
+    "class_type": "ControlNetLoader",
+    "_meta": {
+      "title": "Load ControlNet Model"
+    }
+  },
+  "96": {
+    "inputs": {
+      "upscale_method": "bicubic",
+      "scale_by": [
+        "316",
+        0
+      ],
+      "image": [
+        "148",
+        0
+      ]
+    },
+    "class_type": "ImageScaleBy",
+    "_meta": {
+      "title": "Upscale Image By"
+    }
+  },
+  "115": {
+    "inputs": {
+      "seed": 622487950833006,
+      "steps": 20,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": [
+        "317",
+        0
+      ],
+      "model": [
+        "259",
+        0
+      ],
+      "positive": [
+        "91",
+        0
+      ],
+      "negative": [
+        "91",
+        1
+      ],
+      "latent_image": [
+        "118",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "116": {
+    "inputs": {
+      "pixels": [
+        "152",
+        0
+      ],
+      "vae": [
+        "10",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE Encode"
+    }
+  },
+  "118": {
+    "inputs": {
+      "samples": [
+        "116",
+        0
+      ],
+      "mask": [
+        "152",
+        1
+      ]
+    },
+    "class_type": "SetLatentNoiseMask",
+    "_meta": {
+      "title": "Set Latent Noise Mask"
+    }
+  },
+  "140": {
+    "inputs": {
+      "blend": 128,
+      "images": [
+        "158",
+        0
+      ],
+      "tile_calc": [
+        "150",
+        1
+      ]
+    },
+    "class_type": "DynamicTileMerge",
+    "_meta": {
+      "title": "TileMerge (Dynamic)"
+    }
+  },
+  "142": {
+    "inputs": {
+      "samples": [
+        "115",
+        0
+      ],
+      "vae": [
+        "10",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "148": {
+    "inputs": {
+      "image": [
+        "160",
+        0
+      ],
+      "alpha": [
+        "178",
+        0
+      ]
+    },
+    "class_type": "JoinImageWithAlpha",
+    "_meta": {
+      "title": "Join Image with Alpha"
+    }
+  },
+  "149": {
+    "inputs": {
+      "image": "ComfyUI_00139_.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "INPUT_IMAGE_TOUPSCALE"
+    }
+  },
+  "150": {
+    "inputs": {
+      "tile_width": 1024,
+      "tile_height": 1024,
+      "overlap": 264,
+      "offset": 0,
+      "image": [
+        "275",
+        0
+      ]
+    },
+    "class_type": "DynamicTileSplit",
+    "_meta": {
+      "title": "TileSplit (Dynamic)"
+    }
+  },
+  "151": {
+    "inputs": {
+      "image": [
+        "150",
+        0
+      ]
+    },
+    "class_type": "ImpactImageBatchToImageList",
+    "_meta": {
+      "title": "Image Batch to Image List"
+    }
+  },
+  "152": {
+    "inputs": {
+      "image": [
+        "151",
+        0
+      ]
+    },
+    "class_type": "SplitImageWithAlpha",
+    "_meta": {
+      "title": "Split Image with Alpha"
+    }
+  },
+  "158": {
+    "inputs": {
+      "images": [
+        "142",
+        0
+      ]
+    },
+    "class_type": "ImageListToImageBatch",
+    "_meta": {
+      "title": "Image List to Image Batch"
+    }
+  },
+  "160": {
+    "inputs": {
+      "upscale_model": [
+        "161",
+        0
+      ],
+      "image": [
+        "204",
+        0
+      ]
+    },
+    "class_type": "ImageUpscaleWithModel",
+    "_meta": {
+      "title": "Upscale Image (using Model)"
+    }
+  },
+  "161": {
+    "inputs": {
+      "model_name": "4x-UltraSharpV2.safetensors"
+    },
+    "class_type": "UpscaleModelLoader",
+    "_meta": {
+      "title": "Load Upscale Model"
+    }
+  },
+  "171": {
+    "inputs": {
+      "text_input": "",
+      "task": "prompt_gen_mixed_caption_plus",
+      "fill_mask": true,
+      "keep_model_loaded": true,
+      "max_new_tokens": 1024,
+      "num_beams": 3,
+      "do_sample": true,
+      "output_mask_select": "",
+      "seed": 1116563907150578,
+      "image": [
+        "152",
+        0
+      ],
+      "florence2_model": [
+        "290",
+        0
+      ]
+    },
+    "class_type": "Florence2Run",
+    "_meta": {
+      "title": "Florence2Run"
+    }
+  },
+  "178": {
+    "inputs": {
+      "channel": "red",
+      "image": [
+        "179",
+        0
+      ]
+    },
+    "class_type": "ImageToMask",
+    "_meta": {
+      "title": "Convert Image to Mask"
+    }
+  },
+  "179": {
+    "inputs": {
+      "upscale_method": "nearest-exact",
+      "scale_by": 4.000000000000001,
+      "image": [
+        "236",
+        0
+      ]
+    },
+    "class_type": "ImageScaleBy",
+    "_meta": {
+      "title": "Match the upscale model !!!"
+    }
+  },
+  "190": {
+    "inputs": {
+      "padding": 16,
+      "constraints": "ignore",
+      "constraint_x": [
+        "219",
+        0
+      ],
+      "constraint_y": [
+        "219",
+        1
+      ],
+      "min_width": 0,
+      "min_height": 0,
+      "batch_behavior": "match_ratio",
+      "mask": [
+        "322",
+        0
+      ]
+    },
+    "class_type": "Mask To Region",
+    "_meta": {
+      "title": "Mask To Region"
+    }
+  },
+  "192": {
+    "inputs": {
+      "force_resize_width": 0,
+      "force_resize_height": 0,
+      "image": [
+        "149",
+        0
+      ],
+      "mask": [
+        "190",
+        0
+      ]
+    },
+    "class_type": "Cut By Mask",
+    "_meta": {
+      "title": "Cut By Mask"
+    }
+  },
+  "204": {
+    "inputs": {
+      "kind": "RGB",
+      "image": [
+        "192",
+        0
+      ]
+    },
+    "class_type": "Change Channel Count",
+    "_meta": {
+      "title": "Change Channel Count"
+    }
+  },
+  "219": {
+    "inputs": {
+      "image": [
+        "322",
+        0
+      ]
+    },
+    "class_type": "Get Image Size",
+    "_meta": {
+      "title": "Get Image Size"
+    }
+  },
+  "234": {
+    "inputs": {
+      "method": "intensity",
+      "image": [
+        "236",
+        0
+      ]
+    },
+    "class_type": "Image To Mask",
+    "_meta": {
+      "title": "Image To Mask"
+    }
+  },
+  "236": {
+    "inputs": {
+      "force_resize_width": 0,
+      "force_resize_height": 0,
+      "image": [
+        "322",
+        0
+      ],
+      "mask": [
+        "190",
+        0
+      ]
+    },
+    "class_type": "Cut By Mask",
+    "_meta": {
+      "title": "Cut By Mask"
+    }
+  },
+  "259": {
+    "inputs": {
+      "use_zero_init": true,
+      "zero_init_steps": 0,
+      "model": [
+        "89",
+        0
+      ]
+    },
+    "class_type": "CFGZeroStarAndInit",
+    "_meta": {
+      "title": "CFG Zero Star/Init"
+    }
+  },
+  "275": {
+    "inputs": {
+      "select": 1,
+      "sel_mode": false,
+      "input1": [
+        "96",
+        0
+      ]
+    },
+    "class_type": "ImpactSwitch",
+    "_meta": {
+      "title": "Choose upscale method"
+    }
+  },
+  "283": {
+    "inputs": {
+      "filename_prefix": "upscaled",
+      "images": [
+        "140",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "290": {
+    "inputs": {
+      "model": "MiaoshouAI/Florence-2-large-PromptGen-v2.0",
+      "precision": "fp16",
+      "attention": "flash_attention_2",
+      "convert_to_safetensors": false
+    },
+    "class_type": "DownloadAndLoadFlorence2Model",
+    "_meta": {
+      "title": "DownloadAndLoadFlorence2Model"
+    }
+  },
+  "297": {
+    "inputs": {
+      "unet_name": "flux1-dev.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Load Diffusion Model"
+    }
+  },
+  "298": {
+    "inputs": {
+      "clip_name1": "clip_l.safetensors",
+      "clip_name2": "t5xxl_fp16.safetensors",
+      "type": "flux",
+      "device": "default"
+    },
+    "class_type": "DualCLIPLoader",
+    "_meta": {
+      "title": "DualCLIPLoader"
+    }
+  },
+  "299": {
+    "inputs": {
+      "double_layers": "10",
+      "single_layers": "3,4",
+      "scale": 3,
+      "start_percent": 0.010000000000000002,
+      "end_percent": 0.15000000000000002,
+      "rescaling_scale": 0,
+      "model": [
+        "297",
+        0
+      ]
+    },
+    "class_type": "SkipLayerGuidanceDiT",
+    "_meta": {
+      "title": "SkipLayerGuidanceDiT"
+    }
+  },
+  "300": {
+    "inputs": {
+      "lora_name": "42lux-UltimateAtHome-flux-highresfix.safetensors",
+      "strength_model": 0.9800000000000002,
+      "model": [
+        "299",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "LoraLoaderModelOnly"
+    }
+  },
+  "301": {
+    "inputs": {
+      "lora_name": "Samsung_UltraReal.safetensors",
+      "strength_model": 0.6000000000000001,
+      "model": [
+        "300",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "LoraLoaderModelOnly"
+    }
+  },
+  "302": {
+    "inputs": {
+      "lora_name": "IDunnohowtonameLora.safetensors",
+      "strength_model": 0.5000000000000001,
+      "model": [
+        "301",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "LoraLoaderModelOnly"
+    }
+  },
+  "303": {
+    "inputs": {
+      "model": [
+        "302",
+        0
+      ]
+    },
+    "class_type": "ConfigureModifiedFlux",
+    "_meta": {
+      "title": "Configure Modified Flux"
+    }
+  },
+  "304": {
+    "inputs": {
+      "scale": 1.75,
+      "rescale": 0,
+      "model": [
+        "303",
+        0
+      ]
+    },
+    "class_type": "PAGAttention",
+    "_meta": {
+      "title": "Apply Flux PAG Attention"
+    }
+  },
+  "316": {
+    "inputs": {
+      "value": 0.5
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "UPSCALER RATIO - ( CONSSIDER THE IMAGE AT THIS PIOINT IS ALREADY X4)"
+    }
+  },
+  "317": {
+    "inputs": {
+      "value": 0.4
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "denoise_value (for now let's use this fixed value of 0.4 - but let's expose it in the edge function - so we can change it as a variable)"
+    }
+  },
+  "318": {
+    "inputs": {
+      "value": 1,
+      "width": [
+        "319",
+        0
+      ],
+      "height": [
+        "319",
+        1
+      ]
+    },
+    "class_type": "SolidMask",
+    "_meta": {
+      "title": "SolidMask"
+    }
+  },
+  "319": {
+    "inputs": {
+      "image": [
+        "149",
+        0
+      ]
+    },
+    "class_type": "Get Image Size",
+    "_meta": {
+      "title": "Get Image Size"
+    }
+  },
+  "322": {
+    "inputs": {
+      "mask": [
+        "318",
+        0
+      ]
+    },
+    "class_type": "MaskToImage",
+    "_meta": {
+      "title": "Convert Mask to Image"
+    }
+  }
+}`;
 
 async function handlePendingState(supabase: any, job: any) {
     console.log(`[ModelGenPoller][${job.id}] State: PENDING. Generating base prompt...`);
@@ -219,10 +900,17 @@ async function handleUpscalingPosesState(supabase: any, job: any) {
         const uploadedFilename = uploadData.name;
 
         const workflow = JSON.parse(tiledUpscalerWorkflow);
-        workflow['404'].inputs.image = uploadedFilename;
-        workflow['410'].inputs.value = 1.5; // Default upscale factor
-        workflow['407'].inputs.seed = Math.floor(Math.random() * 1e15);
-        workflow['432'].inputs.seed = Math.floor(Math.random() * 1e15);
+        
+        // Set the input image for the new workflow
+        workflow['149'].inputs.image = uploadedFilename;
+        
+        // Calculate and set the secondary scale factor
+        const upscaleFactor = poseToProcess.upscale_factor || 1.5; // Use stored factor or default
+        const secondaryScaleFactor = upscaleFactor / 4.0;
+        workflow['316'].inputs.value = secondaryScaleFactor;
+        
+        // Set a random seed for the KSampler
+        workflow['115'].inputs.seed = Math.floor(Math.random() * 1e15);
 
         const queueResponse = await fetch(`${comfyUiAddress}/prompt`, {
             method: 'POST',
@@ -262,7 +950,8 @@ async function pollUpscalingPoses(supabase: any, job: any) {
         if (historyResponse.ok) {
             const historyData = await historyResponse.json();
             const promptHistory = historyData[poseJob.upscale_prompt_id];
-            const outputNode = promptHistory?.outputs['431']; // Save Image node
+            // The final output node in the new workflow is '283'
+            const outputNode = promptHistory?.outputs['283'];
             if (outputNode?.images && outputNode.images.length > 0) {
                 const image = outputNode.images[0];
                 const imageUrl = `${comfyUiAddress}/view?filename=${encodeURIComponent(image.filename)}&subfolder=${encodeURIComponent(image.subfolder)}&type=${image.type}`;
@@ -323,7 +1012,7 @@ serve(async (req) => {
     return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
 
   } catch (error) {
-    console.error(`[ModelGenPoller][${job_id}] Error:`, error);
+    console.error(`[ModelGenPoller][${job.id}] Error:`, error);
     await supabase.from('mira-agent-model-generation-jobs').update({ status: 'failed', error_message: error.message }).eq('id', job_id);
     return new Response(JSON.stringify({ error: error.message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
   }
