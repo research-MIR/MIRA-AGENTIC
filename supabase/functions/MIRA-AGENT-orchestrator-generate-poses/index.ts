@@ -45,6 +45,9 @@ serve(async (req) => {
         pose_prompts,
         status: 'pending', // Start the state machine
         last_polled_at: new Date().toISOString(),
+        context: {
+          selectedModelId: selected_model_id
+        }
       })
       .select('id')
       .single();
