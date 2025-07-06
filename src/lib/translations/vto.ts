@@ -44,7 +44,6 @@ export const vtoTranslations = {
     recentJobs: "Job Recenti",
     oneGarment: "Un Indumento",
     randomPairs: "Coppie Casuali",
-    precisePairs: "Coppie Precise",
     uploadImages: "1. Carica Immagini",
     batchProcess: "Processo Multiplo",
     highResolution: "Alta Risoluzione",
@@ -168,8 +167,6 @@ Prima di tentare di nuovo, controlla se il tuo lavoro appare nella lista dei "Jo
     uploadPeople: "Upload People",
     selectMultiplePersonImages: "Select multiple person images.",
     randomPairsDescription: "Upload lists of people and garments. The system will randomly pair them up to create diverse combinations.",
-    uploadGarments: "Upload Garments",
-    selectMultipleGarmentImages: "Select multiple garment images.",
     precisePairsDescription: "Create specific model-garment pairs one by one for full control over the output.",
     person: "Person",
     garment: "Garment",
@@ -249,6 +246,12 @@ It is less effective at placing a garment on a person wearing something complete
 This tool processes one garment at a time. If you need to create a full outfit with multiple pieces (e.g., a t-shirt and jeans), you must perform two separate operations:
 1.  First, run the process with the person and the t-shirt reference.
 2.  Then, use the resulting image as your new source image and run the process again with the jeans reference.
+
+#### 5. Impostazioni PRO Spiegate
+- **Numero di Tentativi:** Genera più variazioni della stessa richiesta di inpainting. Utile per ottenere diverse interpretazioni dall'IA.
+- **Alta Risoluzione:** Aumenta la risoluzione dell'output. Richiede più tempo ma produce risultati di qualità superiore.
+- **Intensità Denoise:** Controlla la libertà creativa dell'IA. Un valore basso (es. 0.5) preserva la struttura originale, ideale per texture changes. Un valore alto (es. 0.9) permette all'IA di essere più creativa, utile per cambiare la forma di un indumento.
+- **Espansione Maschera:** Ammorbidisce i bordi della maschera, creando una fusione più naturale tra l'area generata e l'immagine originale. Aumenta questo valore se noti bordi netti nel risultato.
 `,
     vtoProGuidanceTitle: "A Quick Tip for Best Results",
     vtoProGuidanceContent: `

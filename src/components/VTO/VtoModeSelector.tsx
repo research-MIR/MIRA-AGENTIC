@@ -41,7 +41,7 @@ export const VtoModeSelector = ({ onSelectMode }: VtoModeSelectorProps) => {
         <CardContent className="p-6 text-center">
           <Shuffle className="h-10 w-10 text-primary mx-auto mb-4" />
           <h3 className="text-lg font-semibold">{t('randomPairs')}</h3>
-          <p className="text-sm text-muted-foreground mt-1">{t('randomPairsDesc')}</p>
+          <p className="text-sm text-muted-foreground mt-1">{t('randomPairsDescription')}</p>
         </CardContent>
       </Card>
     </div>

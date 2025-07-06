@@ -207,7 +207,10 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
   const renderPrecisePairs = () => (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
       <Card>
-        <CardHeader><CardTitle>{t('addPair')}</CardTitle></CardHeader>
+        <CardHeader>
+            <CardTitle>{t('precisePairsInputTitle')}</CardTitle>
+            <CardDescription>{t('precisePairsInputDescription')}</CardDescription>
+        </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
