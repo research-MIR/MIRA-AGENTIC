@@ -12,6 +12,8 @@ import { useLanguage } from '@/context/LanguageContext';
 import { PlusCircle, Shirt, Users, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useDropzone } from '@/hooks/useDropzone';
+import { useQuery } from '@tanstack/react-query';
+import { useSession } from '../Auth/SessionContextProvider';
 
 export interface QueueItem {
   person_url: string;
@@ -20,7 +22,7 @@ export interface QueueItem {
 }
 
 interface VtoInputProviderProps {
-  mode: 'one-to-many' | 'precise-pairs';
+  mode: 'one-to-many' | 'precise-pairs' | 'random-pairs';
   onQueueReady: (queue: QueueItem[]) => void;
   onGoBack: () => void;
 }
@@ -39,15 +41,30 @@ const ImageUploader = ({ onFileSelect, title, imageUrl, onClear }: { onFileSelec
     }
   
     return (
-      <div {...dropzoneProps} className={cn("flex aspect-square justify-center items-center rounded-lg border border-dashed p-4 text-center transition-colors cursor-pointer", isDraggingOver && "border-primary bg-primary/10")} onClick={() => inputRef.current?.click()}>
+      <div {...dropzoneProps} className={cn("flex flex-col aspect-square justify-center items-center rounded-lg border border-dashed p-4 text-center transition-colors cursor-pointer", isDraggingOver && "border-primary bg-primary/10")} onClick={() => inputRef.current?.click()}>
         <div className="text-center pointer-events-none"><PlusCircle className="mx-auto h-8 w-8 text-muted-foreground" /><p className="mt-2 text-sm font-semibold">{title}</p></div>
         <Input ref={inputRef} type="file" className="hidden" accept="image/*" onChange={(e) => e.target.files && onFileSelect(e.target.files[0])} />
       </div>
     );
 };
 
+const MultiImageUploader = ({ onFilesSelect, title, icon, description }: { onFilesSelect: (files: File[]) => void, title: string, icon: React.ReactNode, description: string }) => {
+    const inputRef = useRef<HTMLInputElement>(null);
+    const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: (e) => e.dataTransfer.files && onFilesSelect(Array.from(e.dataTransfer.files)) });
+  
+    return (
+      <div {...dropzoneProps} className={cn("flex flex-col h-full justify-center items-center rounded-lg border border-dashed p-2 text-center transition-colors cursor-pointer", isDraggingOver && "border-primary bg-primary/10")} onClick={() => inputRef.current?.click()}>
+        {React.cloneElement(icon as React.ReactElement, { className: "h-6 w-6 text-muted-foreground" })}
+        <p className="mt-1 text-xs font-semibold">{title}</p>
+        <p className="text-xs text-muted-foreground">{description}</p>
+        <Input ref={inputRef} type="file" multiple className="hidden" accept="image/*" onChange={(e) => e.target.files && onFilesSelect(Array.from(e.target.files))} />
+      </div>
+    );
+};
+
 export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProviderProps) => {
   const { t } = useLanguage();
+  const { supabase, session } = useSession();
   const [isModelModalOpen, setIsModelModalOpen] = useState(false);
   
   // State for one-to-many mode
@@ -61,21 +78,19 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
   const [tempPairGarmentFile, setTempPairGarmentFile] = useState<File | null>(null);
   const [tempPairAppendix, setTempPairAppendix] = useState("");
 
+  // State for random-pairs mode
+  const [randomGarmentFiles, setRandomGarmentFiles] = useState<File[]>([]);
+
   const garmentFileUrl = useMemo(() => garmentFile ? URL.createObjectURL(garmentFile) : null, [garmentFile]);
   const tempPairGarmentUrl = useMemo(() => tempPairGarmentFile ? URL.createObjectURL(tempPairGarmentFile) : null, [tempPairGarmentFile]);
 
   const handleModelSelect = (url: string) => {
-    if (mode === 'one-to-many') {
-      setSelectedModelUrls(prev => {
-        const newSet = new Set(prev);
-        if (newSet.has(url)) newSet.delete(url);
-        else newSet.add(url);
-        return newSet;
-      });
-    } else { // precise-pairs
-      setTempPairPersonUrl(url);
-      setIsModelModalOpen(false);
-    }
+    setSelectedModelUrls(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(url)) newSet.delete(url);
+      else newSet.add(url);
+      return newSet;
+    });
   };
 
   const addPrecisePair = () => {
@@ -97,6 +112,20 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
         garment_url: garmentUrl,
         appendix: generalAppendix,
       }));
+    } else if (mode === 'random-pairs') {
+        if (selectedModelUrls.size > 0 && randomGarmentFiles.length > 0) {
+            const models = Array.from(selectedModelUrls);
+            const garments = randomGarmentFiles.map(f => ({ file: f, url: URL.createObjectURL(f) }));
+            const numPairs = Math.min(models.length, garments.length);
+            const shuffledGarments = [...garments].sort(() => 0.5 - Math.random());
+            for (let i = 0; i < numPairs; i++) {
+                queue.push({
+                    person_url: models[i],
+                    garment_url: shuffledGarments[i].url,
+                    appendix: generalAppendix,
+                });
+            }
+        }
     } else if (mode === 'precise-pairs') {
       queue = precisePairs;
     }
@@ -105,10 +134,12 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
 
   const isProceedDisabled = mode === 'one-to-many' 
     ? (selectedModelUrls.size === 0 || !garmentFile)
+    : mode === 'random-pairs'
+    ? (selectedModelUrls.size === 0 || randomGarmentFiles.length === 0)
     : precisePairs.length === 0;
 
-  const title = mode === 'one-to-many' ? t('oneToManyInputTitle') : t('precisePairsInputTitle');
-  const description = mode === 'one-to-many' ? t('oneToManyInputDescription') : t('precisePairsInputDescription');
+  const title = mode === 'one-to-many' ? t('oneToManyInputTitle') : mode === 'random-pairs' ? t('randomPairsInputTitle') : t('precisePairsInputTitle');
+  const description = mode === 'one-to-many' ? t('oneToManyInputDescription') : mode === 'random-pairs' ? t('randomPairsInputDescription') : t('precisePairsInputDescription');
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -117,20 +148,12 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
         <p className="text-muted-foreground">{description}</p>
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {mode === 'one-to-many' ? (
+        {mode === 'one-to-many' && (
           <>
             <Card>
               <CardHeader><CardTitle>1. {t('selectModels')}</CardTitle></CardHeader>
               <CardContent>
-                <Button variant="outline" className="w-full" onClick={() => setIsModelModalOpen(true)}>
-                  <Users className="mr-2 h-4 w-4" />
-                  {t('selectModels')} ({selectedModelUrls.size})
-                </Button>
-                <ScrollArea className="h-48 mt-4 border rounded-md p-2">
-                  <div className="grid grid-cols-4 gap-2">
-                    {Array.from(selectedModelUrls).map(url => <SecureImageDisplay key={url} imageUrl={url} alt="Selected Model" />)}
-                  </div>
-                </ScrollArea>
+                <ModelPoseSelector mode="multiple" selectedUrls={selectedModelUrls} onSelect={handleModelSelect} />
               </CardContent>
             </Card>
             <Card>
@@ -144,7 +167,33 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
               </CardContent>
             </Card>
           </>
-        ) : (
+        )}
+        {mode === 'random-pairs' && (
+          <>
+            <Card>
+              <CardHeader><CardTitle>1. {t('selectModels')}</CardTitle></CardHeader>
+              <CardContent>
+                <ModelPoseSelector mode="multiple" selectedUrls={selectedModelUrls} onSelect={handleModelSelect} />
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader><CardTitle>2. {t('uploadGarments')}</CardTitle></CardHeader>
+              <CardContent className="flex flex-col h-full">
+                <MultiImageUploader onFilesSelect={setRandomGarmentFiles} title={t('uploadGarments')} icon={<Shirt />} description={t('selectMultipleGarmentImages')} />
+                <ScrollArea className="h-48 mt-4 border rounded-md p-2">
+                  <div className="grid grid-cols-4 gap-2">
+                    {randomGarmentFiles.map((file, i) => <img key={i} src={URL.createObjectURL(file)} className="w-full h-full object-cover rounded-md aspect-square" />)}
+                  </div>
+                </ScrollArea>
+                <div className="mt-4">
+                  <Label htmlFor="general-appendix-random">{t('promptAppendix')}</Label>
+                  <Textarea id="general-appendix-random" value={generalAppendix} onChange={(e) => setGeneralAppendix(e.target.value)} placeholder={t('promptAppendixPlaceholder')} rows={2} />
+                </div>
+              </CardContent>
+            </Card>
+          </>
+        )}
+        {mode === 'precise-pairs' && (
           <>
             <Card>
               <CardHeader><CardTitle>{t('addPair')}</CardTitle></CardHeader>
@@ -192,12 +241,12 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
       </div>
       <div className="mt-8 flex justify-between items-center">
         <Button variant="outline" onClick={onGoBack}>{t('goBack')}</Button>
-        <Button size="lg" onClick={handleProceed} disabled={isProceedDisabled}>{t('reviewQueue', { count: mode === 'one-to-many' ? selectedModelUrls.size : precisePairs.length })}</Button>
+        <Button size="lg" onClick={handleProceed} disabled={isProceedDisabled}>{t('reviewQueue', { count: mode === 'one-to-many' || mode === 'random-pairs' ? selectedModelUrls.size : precisePairs.length })}</Button>
       </div>
       <Dialog open={isModelModalOpen} onOpenChange={setIsModelModalOpen}>
         <DialogContent className="max-w-3xl">
           <DialogHeader><DialogTitle>Select a Model</DialogTitle></DialogHeader>
-          <ModelPoseSelector mode={mode === 'one-to-many' ? 'multiple' : 'single'} selectedUrls={selectedModelUrls} onSelect={handleModelSelect} />
+          <ModelPoseSelector mode={mode === 'one-to-many' || mode === 'random-pairs' ? 'multiple' : 'single'} selectedUrls={selectedModelUrls} onSelect={handleModelSelect} />
           <DialogFooter>
             <Button onClick={() => setIsModelModalOpen(false)}>Done</Button>
           </DialogFooter>

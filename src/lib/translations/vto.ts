@@ -142,6 +142,9 @@ Prima di tentare di nuovo, controlla se il tuo lavoro appare nella lista dei "Jo
     oneToManyInputDescription: "Carica l'indumento che vuoi provare e poi seleziona tutti i modelli su cui vuoi vederlo.",
     precisePairsInputTitle: "Input per 'Coppie Precise'",
     precisePairsInputDescription: "Crea la tua coda di generazione aggiungendo coppie specifiche di modello e indumento una per una.",
+    randomPairsInputTitle: "Input per 'Coppie Casuali'",
+    randomPairsInputDescription: "Carica una selezione di modelli e una selezione di indumenti. Il sistema li abbinerà casualmente.",
+    useEntirePack: "Usa Intero Pack",
   },
   en: {
     proMode: "Pro Mode",
@@ -260,6 +263,7 @@ Before trying again, please check if your job shows up in the "Recent Jobs" list
     vtoProGuidanceButton: "Got It!",
     oneGarmentManyModels: "One Garment, Many Models",
     oneGarmentManyModelsDesc: "Apply a single garment to a selection of your generated models.",
+    precisePairsDesc: "Create specific model-garment pairs one by one for full control over the output.",
     step1Title: "Step 1: Choose Your Method",
     step2Title: "Step 2: Provide Your Inputs",
     step3Title: "Step 3: Review & Generate",
@@ -279,5 +283,8 @@ Before trying again, please check if your job shows up in the "Recent Jobs" list
     oneToManyInputDescription: "Upload the one garment you want to try on, then select all the models you want to see wearing it.",
     precisePairsInputTitle: "Inputs for 'Precise Pairs'",
     precisePairsInputDescription: "Build your generation queue by adding specific model and garment pairs one by one.",
+    randomPairsInputTitle: "Inputs for 'Random Pairs'",
+    randomPairsInputDescription: "Upload a selection of models and a selection of garments. The system will randomly pair them.",
+    useEntirePack: "Use Entire Pack",
   },
 };

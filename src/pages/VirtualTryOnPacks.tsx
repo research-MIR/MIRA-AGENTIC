@@ -12,7 +12,7 @@ import { Wand2, Loader2, Info } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 type WizardStep = 'select-mode' | 'provide-inputs' | 'review-queue';
-type VtoMode = 'one-to-many' | 'precise-pairs';
+type VtoMode = 'one-to-many' | 'precise-pairs' | 'random-pairs';
 
 const VirtualTryOnPacks = () => {
   const { supabase, session } = useSession();
@@ -100,7 +100,7 @@ const VirtualTryOnPacks = () => {
     
     dismissToast(toastId);
     showSuccess(`${queue.length} jobs started successfully!`);
-    queryClient.invalidateQueries({ queryKey: ['bitstudioJobs', session?.user?.id] });
+    queryClient.invalidateQueries({ queryKey: ['bitstudioJobs', session.user.id] });
     setStep('select-mode');
     setQueue([]);
     setMode(null);
