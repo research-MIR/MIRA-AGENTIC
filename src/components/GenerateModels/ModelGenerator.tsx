@@ -1,22 +1,18 @@
 import { useState, useEffect } from "react";
 import { useLanguage } from "@/context/LanguageContext";
 import { SettingsPanel } from "@/components/GenerateModels/SettingsPanel";
-import { ResultsDisplay } from "@/components/GenerateModels/ResultsDisplay";
 import { useGeneratorStore } from "@/store/generatorStore";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { Model } from "@/hooks/useChatManager";
 import { useSession } from "@/components/Auth/SessionContextProvider";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Plus, Sparkles, Loader2 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { PoseInput } from "./PoseInput";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { ModelSelector } from "../ModelSelector";
-import { Switch } from "../ui/switch";
 
 interface Pose {
   type: 'text' | 'image';
@@ -25,17 +21,11 @@ interface Pose {
   previewUrl?: string;
 }
 
-interface FinalPoseResult {
-  pose_prompt: string;
-  final_url: string;
-}
-
 interface ModelGeneratorProps {
   packId: string;
-  selectedJob: any; // The job selected from the left panel
 }
 
-export const ModelGenerator = ({ packId, selectedJob }: ModelGeneratorProps) => {
+export const ModelGenerator = ({ packId }: ModelGeneratorProps) => {
   const { t } = useLanguage();
   const { models, fetchModels } = useGeneratorStore();
   const { supabase, session } = useSession();
@@ -172,111 +162,27 @@ export const ModelGenerator = ({ packId, selectedJob }: ModelGeneratorProps) => 
     }
   };
 
-  const handleSelectImage = async (imageId: string) => {
-    if (!selectedJob) return;
-    const toastId = showLoading("Confirming selection...");
-    try {
-        const selectedImageUrl = selectedJob?.base_generation_results.find((i: any) => i.id === imageId)?.url;
-        if (!selectedImageUrl) throw new Error("Could not find selected image URL.");
-
-        const { error } = await supabase.from('mira-agent-model-generation-jobs').update({
-            status: 'generating_poses',
-            base_model_image_url: selectedImageUrl
-        }).eq('id', selectedJob.id);
-        if (error) throw error;
-
-        supabase.functions.invoke('MIRA-AGENT-poller-model-generation', { body: { job_id: selectedJob.id } }).catch(console.error);
-        
-        dismissToast(toastId);
-        queryClient.invalidateQueries({ queryKey: ['modelsForPack', packId] });
-    } catch (err: any) {
-        dismissToast(toastId);
-        showError(err.message);
-    }
-  };
-
   const addPose = () => setPoses([...poses, { type: 'text', value: '', file: undefined, previewUrl: undefined }]);
   const removePose = (index: number) => setPoses(poses.filter((_, i) => i !== index));
 
-  const isJobActive = selectedJob && !['complete', 'failed'].includes(selectedJob.status);
-
   return (
     <div className="space-y-4">
-      <Card>
-        <CardHeader><CardTitle>{t('step1')}</CardTitle></CardHeader>
-        <CardContent>
-          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'single' | 'multi')}>
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="single">{t('singleModel')}</TabsTrigger>
-              <TabsTrigger value="multi">{t('multiModel')}</TabsTrigger>
-            </TabsList>
-            <TabsContent value="single" className="pt-4">
-              <Label htmlFor="model-description">{t('modelDescription')}</Label>
-              <Textarea
-                id="model-description"
-                value={modelDescription}
-                onChange={(e) => setModelDescription(e.target.value)}
-                placeholder={t('modelDescriptionPlaceholder')}
-                rows={3}
-                disabled={isJobActive}
-              />
-            </TabsContent>
-            <TabsContent value="multi" className="pt-4">
-              <Label htmlFor="multi-model-prompt">{t('multiModelDescription')}</Label>
-              <Textarea
-                id="multi-model-prompt"
-                value={multiModelPrompt}
-                onChange={(e) => setMultiModelPrompt(e.target.value)}
-                placeholder={t('multiModelPlaceholder')}
-                rows={5}
-                disabled={isJobActive}
-              />
-            </TabsContent>
-          </Tabs>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader><CardTitle>{t('step2')}</CardTitle></CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="set-description">{t('setDescription')}</Label>
-            <Textarea
-              id="set-description"
-              value={setDescription}
-              onChange={(e) => setSetDescription(e.target.value)}
-              placeholder={t('setDescriptionPlaceholder')}
-              rows={2}
-              disabled={isJobActive}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label>{t('baseModel')}</Label>
-            <ModelSelector
-              models={models as Model[]}
-              selectedModelId={selectedModelId}
-              onModelChange={setSelectedModelId}
-              disabled={isJobActive}
-            />
-          </div>
-          {activeTab === 'single' && (
-            <div>
-              <div className="flex items-center space-x-2 p-3 rounded-md bg-muted/50">
-                <Switch
-                  id="auto-approve"
-                  checked={autoApprove}
-                  onCheckedChange={setAutoApprove}
-                  disabled={isJobActive}
-                />
-                <div className="grid gap-1.5 leading-none">
-                    <Label htmlFor="auto-approve">{t('autoApprove')}</Label>
-                    <p className="text-xs text-muted-foreground">{t('autoApproveDescription')}</p>
-                </div>
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      <SettingsPanel
+        modelDescription={modelDescription}
+        setModelDescription={setModelDescription}
+        setDescription={setDescription}
+        setSetDescription={setSetDescription}
+        models={models as Model[]}
+        selectedModelId={selectedModelId}
+        setSelectedModelId={setSelectedModelId}
+        autoApprove={autoApprove}
+        setAutoApprove={setAutoApprove}
+        isJobActive={isLoading}
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        multiModelPrompt={multiModelPrompt}
+        setMultiModelPrompt={setMultiModelPrompt}
+      />
       
       <Card>
         <CardHeader><CardTitle>{t('step3')}</CardTitle></CardHeader>
@@ -288,61 +194,21 @@ export const ModelGenerator = ({ packId, selectedJob }: ModelGeneratorProps) => 
               index={index}
               onPoseChange={(idx, newPose) => setPoses(poses.map((p, i) => i === idx ? {...p, ...newPose} : p))}
               onRemovePose={removePose}
-              isJobActive={isJobActive}
+              isJobActive={isLoading}
               isOnlyPose={poses.length <= 1}
             />
           ))}
-          <Button variant="outline" className="w-full" onClick={addPose} disabled={isJobActive}>
+          <Button variant="outline" className="w-full" onClick={addPose} disabled={isLoading}>
             <Plus className="mr-2 h-4 w-4" />
             {t('addPose')}
           </Button>
         </CardContent>
       </Card>
 
-      <Button size="lg" className="w-full" onClick={handleGenerate} disabled={isJobActive || (activeTab === 'single' && !modelDescription.trim()) || (activeTab === 'multi' && !multiModelPrompt.trim())}>
+      <Button size="lg" className="w-full" onClick={handleGenerate} disabled={isLoading || (activeTab === 'single' && !modelDescription.trim()) || (activeTab === 'multi' && !multiModelPrompt.trim())}>
         {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
         {t('generateModelsButton')}
       </Button>
-
-      {selectedJob && (
-        <Accordion type="multiple" defaultValue={['item-1', 'item-2']} className="w-full space-y-4">
-          <AccordionItem value="item-1" className="border rounded-md bg-card">
-            <AccordionTrigger className="p-4 hover:no-underline">
-              <h3 className="text-lg font-semibold">{t('resultsTitle')}</h3>
-            </AccordionTrigger>
-            <AccordionContent className="p-4 pt-0">
-              <ResultsDisplay
-                images={selectedJob.base_generation_results || []}
-                isLoading={!selectedJob || selectedJob?.status === 'pending'}
-                autoApprove={selectedJob.auto_approve}
-                selectedImageId={selectedJob.base_model_image_url ? selectedJob.base_generation_results.find((i:any) => i.url === selectedJob.base_model_image_url)?.id : null}
-                onSelectImage={handleSelectImage}
-              />
-            </AccordionContent>
-          </AccordionItem>
-          {selectedJob.status !== 'pending' && selectedJob.status !== 'base_generation_complete' && selectedJob.status !== 'awaiting_approval' && (
-            <AccordionItem value="item-2" className="border rounded-md bg-card">
-              <AccordionTrigger className="p-4 hover:no-underline">
-                <h3 className="text-lg font-semibold">{t('finalPosesTitle')}</h3>
-              </AccordionTrigger>
-              <AccordionContent className="p-4 pt-0">
-                {selectedJob.status === 'generating_poses' || (selectedJob.status === 'polling_poses' && !selectedJob.final_posed_images) ? (
-                  <div className="flex items-center justify-center p-8"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /><p className="ml-4">{t('generatingPoses')}</p></div>
-                ) : selectedJob.status === 'complete' && selectedJob.final_posed_images ? (
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                    {(selectedJob.final_posed_images as FinalPoseResult[])?.map((result, index) => (
-                      <div key={index} className="space-y-2">
-                        <img src={result.final_url} alt={result.pose_prompt} className="w-full aspect-square object-cover rounded-md" />
-                        <p className="text-xs text-muted-foreground truncate">{result.pose_prompt}</p>
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-              </AccordionContent>
-            </AccordionItem>
-          )}
-        </Accordion>
-      )}
     </div>
   );
 };
