@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
@@ -14,7 +14,7 @@ import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast
 import { useLanguage } from "@/context/LanguageContext";
 import { Loader2, Wand2, CheckCircle, XCircle, AlertTriangle } from "lucide-react";
 import { RealtimeChannel } from "@supabase/supabase-js";
-import { Badge } from "@/components/ui/badge";
+import { PackStatusIndicator } from "@/components/GenerateModels/PackStatusIndicator";
 import { JobProgressBar } from "@/components/GenerateModels/JobProgressBar";
 
 interface FinalPoseResult {
@@ -22,45 +22,6 @@ interface FinalPoseResult {
   final_url: string;
   is_upscaled?: boolean;
 }
-
-const JobStatusIndicator = ({ job }: { job: any }) => {
-  if (!job) return null;
-
-  const { status, final_posed_images } = job;
-
-  if (['pending', 'base_generation_complete', 'awaiting_approval', 'generating_poses'].includes(status)) {
-    return <Badge variant="secondary"><Loader2 className="mr-2 h-4 w-4 animate-spin" />In Progress: {status.replace(/_/g, ' ')}</Badge>;
-  }
-
-  if (status === 'polling_poses') {
-    return <Badge variant="secondary"><Loader2 className="mr-2 h-4 w-4 animate-spin" />Generating Poses</Badge>;
-  }
-
-  if (status === 'failed') {
-    return <Badge variant="destructive"><XCircle className="mr-2 h-4 w-4" />Failed</Badge>;
-  }
-
-  if (status === 'complete') {
-    const totalPoses = final_posed_images?.length || 0;
-    const upscaledPoses = final_posed_images?.filter((p: any) => p.is_upscaled).length || 0;
-
-    if (totalPoses === 0) {
-      return <Badge variant="outline">Ready for Poses</Badge>;
-    }
-
-    if (upscaledPoses === totalPoses) {
-      return <Badge className="bg-green-600 hover:bg-green-700"><CheckCircle className="mr-2 h-4 w-4" />Ready for VTO ({upscaledPoses}/{totalPoses})</Badge>;
-    }
-
-    if (upscaledPoses > 0) {
-      return <Badge variant="secondary" className="bg-yellow-500 text-black hover:bg-yellow-600"><AlertTriangle className="mr-2 h-4 w-4" />Almost Ready ({upscaledPoses}/{totalPoses})</Badge>;
-    }
-
-    return <Badge variant="default"><Wand2 className="mr-2 h-4 w-4" />Ready for Upscaling ({upscaledPoses}/{totalPoses})</Badge>;
-  }
-
-  return null;
-};
 
 const ModelPackDetail = () => {
   const { packId } = useParams();
@@ -96,6 +57,51 @@ const ModelPackDetail = () => {
     },
     enabled: !!packId,
   });
+
+  const packStatus = useMemo(() => {
+    if (!jobs || jobs.length === 0) {
+        return { status: 'idle' as const, completedPoses: 0, totalPoses: 0, upscaledPoses: 0 };
+    }
+
+    let completedPoses = 0;
+    let totalPoses = 0;
+    let upscaledPoses = 0;
+    let hasFailed = false;
+    let hasInProgress = false;
+    let allJobsAreComplete = true;
+
+    for (const job of jobs) {
+        const jobTotalPoses = job.pose_prompts?.length || 0;
+        totalPoses += jobTotalPoses;
+        
+        const jobCompletedPoses = job.final_posed_images?.filter((p: any) => p.status === 'complete').length || 0;
+        completedPoses += jobCompletedPoses;
+
+        const jobUpscaledPoses = job.final_posed_images?.filter((p: any) => p.is_upscaled).length || 0;
+        upscaledPoses += jobUpscaledPoses;
+
+        if (job.status === 'failed') {
+            hasFailed = true;
+        }
+        if (job.status !== 'complete' && job.status !== 'failed') {
+            hasInProgress = true;
+        }
+        if (job.status !== 'complete') {
+            allJobsAreComplete = false;
+        }
+    }
+
+    let aggregateStatus: 'idle' | 'in_progress' | 'failed' | 'complete' = 'idle';
+    if (hasFailed) {
+        aggregateStatus = 'failed';
+    } else if (hasInProgress) {
+        aggregateStatus = 'in_progress';
+    } else if (allJobsAreComplete && jobs.length > 0) {
+        aggregateStatus = 'complete';
+    }
+
+    return { status: aggregateStatus, completedPoses, totalPoses, upscaledPoses };
+  }, [jobs]);
 
   useEffect(() => {
     if (!packId || !session?.user?.id) return;
@@ -169,11 +175,11 @@ const ModelPackDetail = () => {
         <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
                 <h1 className="text-3xl font-bold">{pack.name}</h1>
-                <JobStatusIndicator job={selectedJob} />
+                <PackStatusIndicator status={packStatus.status} totalPoses={packStatus.totalPoses} upscaledPoses={packStatus.upscaledPoses} />
             </div>
         </div>
         <div className="mt-2">
-            <JobProgressBar job={selectedJob} />
+            <JobProgressBar completedPoses={packStatus.completedPoses} totalPoses={packStatus.totalPoses} />
         </div>
         <p className="text-muted-foreground mt-1">{pack.description || "No description provided."}</p>
       </header>

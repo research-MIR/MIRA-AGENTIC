@@ -1,23 +1,11 @@
 import { Progress } from "@/components/ui/progress";
 
-interface Job {
-  status: string;
-  final_posed_images?: { status: string }[];
-  pose_prompts?: any[];
-}
-
 interface JobProgressBarProps {
-  job: Job | null | undefined;
+  completedPoses: number;
+  totalPoses: number;
 }
 
-export const JobProgressBar = ({ job }: JobProgressBarProps) => {
-  if (!job || !['polling_poses', 'complete'].includes(job.status)) {
-    return null;
-  }
-
-  const totalPoses = job.pose_prompts?.length || 0;
-  const completedPoses = job.final_posed_images?.filter((p: any) => p.status === 'complete').length || 0;
-
+export const JobProgressBar = ({ completedPoses, totalPoses }: JobProgressBarProps) => {
   if (totalPoses === 0) {
     return null;
   }
