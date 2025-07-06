@@ -6,7 +6,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 
 interface Job {
   id: string;
-  status: 'pending' | 'base_generation_complete' | 'awaiting_approval' | 'generating_poses' | 'polling_poses' | 'complete' | 'failed';
+  status: 'pending' | 'base_generation_complete' | 'awaiting_approval' | 'generating_poses' | 'polling_poses' | 'upscaling_poses' | 'complete' | 'failed';
   base_model_image_url?: string | null;
   final_posed_images?: { status: string; is_upscaled?: boolean }[];
   pose_prompts?: any[];
@@ -23,7 +23,7 @@ export const RecentJobThumbnail = ({ job, onClick, isSelected }: Props) => {
 
   const getAggregateStatus = () => {
     if (job.status === 'failed') return { icon: <XCircle className="h-5 w-5 text-white" />, color: 'bg-destructive', tooltip: 'Job Failed' };
-    if (['pending', 'base_generation_complete', 'awaiting_approval', 'generating_poses'].includes(job.status)) {
+    if (['pending', 'base_generation_complete', 'awaiting_approval', 'generating_poses', 'upscaling_poses'].includes(job.status)) {
       return { icon: <Loader2 className="h-5 w-5 text-white animate-spin" />, color: 'bg-blue-500', tooltip: `In Progress: ${job.status.replace(/_/g, ' ')}` };
     }
     if (job.status === 'polling_poses') {

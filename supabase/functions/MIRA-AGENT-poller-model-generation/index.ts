@@ -150,60 +150,52 @@ async function handlePollingPosesState(supabase: any, job: any) {
 async function handleUpscalingPosesState(supabase: any, job: any) {
     console.log(`[ModelGenPoller][${job.id}] State: UPSCALING_POSES.`);
     const updatedPoseJobs = [...job.final_posed_images];
-    let hasPending = false;
+    
+    const poseToProcess = updatedPoseJobs.find(p => p.upscale_status === 'pending');
 
-    for (const [index, poseJob] of updatedPoseJobs.entries()) {
-        if (poseJob.upscale_status === 'pending') {
-            hasPending = true;
-            try {
-                console.log(`[ModelGenPoller][${job.id}] Upscaling pose: ${poseJob.pose_prompt}`);
-                const { data: upscaleData, error: upscaleError } = await supabase.functions.invoke('MIRA-AGENT-tool-upscale-image-clarity', {
-                    body: {
-                        image_url: poseJob.final_url,
-                        job_id: job.id,
-                        upscale_factor: 1.5
-                    }
-                });
-
-                if (upscaleError) throw upscaleError;
-
-                const newUrl = upscaleData.upscaled_image.url;
-                updatedPoseJobs[index].final_url = newUrl;
-                updatedPoseJobs[index].is_upscaled = true;
-                updatedPoseJobs[index].upscale_status = 'complete';
-                console.log(`[ModelGenPoller][${job.id}] Pose successfully upscaled. New URL: ${newUrl}`);
-                
-                // Update DB immediately after one success
-                await supabase.from('mira-agent-model-generation-jobs').update({ 
-                    final_posed_images: updatedPoseJobs 
-                }).eq('id', job.id);
-
-                // Break to process one at a time
-                break;
-
-            } catch (error) {
-                console.error(`[ModelGenPoller][${job.id}] Failed to upscale pose ${poseJob.pose_prompt}:`, error.message);
-                updatedPoseJobs[index].upscale_status = 'failed';
-                updatedPoseJobs[index].error_message = error.message;
-                await supabase.from('mira-agent-model-generation-jobs').update({ 
-                    final_posed_images: updatedPoseJobs 
-                }).eq('id', job.id);
-            }
-        }
+    if (!poseToProcess) {
+        console.log(`[ModelGenPoller][${job.id}] No more poses to upscale. Setting status to complete.`);
+        await supabase.from('mira-agent-model-generation-jobs').update({ status: 'complete' }).eq('id', job.id);
+        return;
     }
 
-    const stillHasPending = updatedPoseJobs.some(p => p.upscale_status === 'pending');
+    try {
+        console.log(`[ModelGenPoller][${job.id}] Upscaling pose: ${poseToProcess.pose_prompt}`);
+        poseToProcess.upscale_status = 'processing';
+        await supabase.from('mira-agent-model-generation-jobs').update({ final_posed_images: updatedPoseJobs }).eq('id', job.id);
 
-    if (stillHasPending) {
-        console.log(`[ModelGenPoller][${job.id}] More poses to upscale. Re-invoking poller.`);
-        setTimeout(() => {
-            supabase.functions.invoke('MIRA-AGENT-poller-model-generation', { body: { job_id: job.id } }).catch(console.error);
-        }, 1000);
-    } else {
-        console.log(`[ModelGenPoller][${job.id}] All upscaling tasks processed. Setting status to complete.`);
+        const { data: upscaleData, error: upscaleError } = await supabase.functions.invoke('MIRA-AGENT-tool-upscale-image-clarity', {
+            body: {
+                image_url: poseToProcess.final_url,
+                job_id: job.id,
+                upscale_factor: 1.5
+            }
+        });
+
+        if (upscaleError) throw upscaleError;
+
+        const newUrl = upscaleData.upscaled_image.url;
+        poseToProcess.final_url = newUrl;
+        poseToProcess.is_upscaled = true;
+        poseToProcess.upscale_status = 'complete';
+        console.log(`[ModelGenPoller][${job.id}] Pose successfully upscaled. New URL: ${newUrl}`);
+        
         await supabase.from('mira-agent-model-generation-jobs').update({ 
-            status: 'complete'
+            final_posed_images: updatedPoseJobs 
         }).eq('id', job.id);
+
+        // Re-invoke immediately to check for the next one
+        supabase.functions.invoke('MIRA-AGENT-poller-model-generation', { body: { job_id: job.id } }).catch(console.error);
+
+    } catch (error) {
+        console.error(`[ModelGenPoller][${job.id}] Failed to upscale pose ${poseToProcess.pose_prompt}:`, error.message);
+        poseToProcess.upscale_status = 'failed';
+        poseToProcess.error_message = error.message;
+        await supabase.from('mira-agent-model-generation-jobs').update({ 
+            final_posed_images: updatedPoseJobs 
+        }).eq('id', job.id);
+        // Re-invoke to try the next one if any
+        supabase.functions.invoke('MIRA-AGENT-poller-model-generation', { body: { job_id: job.id } }).catch(console.error);
     }
 }
 
