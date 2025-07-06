@@ -526,23 +526,37 @@ serve(async (req) => {
     finalWorkflow['214'].inputs.image = baseModelFilename;
     finalWorkflow['195'].inputs.String = GEMINI_SYSTEM_PROMPT;
     
-    // ** FIX: Combine the system directive with the user's prompt **
-    const textRefTask = `${EDITING_TASK_WITH_TEXT_REFERENCE}. The user's specific instruction is: '${pose_prompt}'`;
-    const imageRefTask = `${EDITING_TASK_WITH_IMAGE_REFERENCE}. The user's specific instruction is: '${pose_prompt}'`;
-
-    finalWorkflow['217'].inputs.String = textRefTask;
-    finalWorkflow['193'].inputs.String = imageRefTask;
-
     if (pose_image_url) {
       console.log(`[PoseGenerator][${requestId}] Pose reference image provided. Downloading from: ${pose_image_url}`);
       const poseImageBlob = await downloadFromSupabase(supabase, pose_image_url);
       const poseImageFilename = await uploadToComfyUI(sanitizedAddress, poseImageBlob, 'pose_ref.png');
+      
+      // Set up the workflow for image reference
       finalWorkflow['215'].inputs.image = poseImageFilename;
-      finalWorkflow['230'].inputs.Number = "2"; // Set switch to use reference
+      finalWorkflow['230'].inputs.Number = "2"; // Switch to use image reference path
+
+      // **FIXED LOGIC**: The instruction is just the system directive.
+      // The user's prompt in this case is the image itself, which Gemini sees on the canvas.
+      // The `pose_prompt` variable contains the URL, which we don't want to send as text.
+      finalWorkflow['193'].inputs.String = EDITING_TASK_WITH_IMAGE_REFERENCE;
+      
+      // The text-only path is not used, clear it.
+      finalWorkflow['217'].inputs.String = ""; 
+
       console.log(`[PoseGenerator][${requestId}] Pose reference uploaded as: ${poseImageFilename}. Switch set to 2.`);
     } else {
-      console.log(`[PoseGenerator][${requestId}] No pose reference image provided. Switch set to 1.`);
-      finalWorkflow['230'].inputs.Number = "1"; // Set switch to NOT use reference
+      console.log(`[PoseGenerator][${requestId}] No pose reference image provided. Using text prompt. Switch set to 1.`);
+      
+      // Set up the workflow for text-only reference
+      finalWorkflow['230'].inputs.Number = "1"; // Switch to use text-only path
+
+      // **FIXED LOGIC**: Combine the directive with the user's text prompt.
+      const textRefTask = `${EDITING_TASK_WITH_TEXT_REFERENCE}. The user's specific instruction is: '${pose_prompt}'`;
+      finalWorkflow['217'].inputs.String = textRefTask;
+
+      // The image path is not used, clear it.
+      finalWorkflow['193'].inputs.String = "";
+      finalWorkflow['215'].inputs.image = ""; // Clear the image node as well
     }
 
     const queueUrl = `${sanitizedAddress}/prompt`;
