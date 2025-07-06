@@ -32,27 +32,6 @@ const MultiImageUploader = ({ onFilesSelect, title, icon, description }: { onFil
     );
 };
 
-const ImageUploader = ({ onFileSelect, title, imageUrl, onClear }: { onFileSelect: (file: File) => void, title: string, imageUrl: string | null, onClear: () => void }) => {
-    const inputRef = useRef<HTMLInputElement>(null);
-    const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: (e) => e.dataTransfer.files && onFileSelect(e.dataTransfer.files[0]) });
-  
-    if (imageUrl) {
-      return (
-        <div className="relative aspect-square">
-          <img src={imageUrl} alt={title} className="w-full h-full object-cover rounded-md" />
-          <Button variant="destructive" size="icon" className="absolute top-2 right-2 h-6 w-6 z-10" onClick={onClear}><X className="h-4 w-4" /></Button>
-        </div>
-      );
-    }
-  
-    return (
-      <div {...dropzoneProps} className={cn("flex aspect-square justify-center items-center rounded-lg border border-dashed p-4 text-center transition-colors cursor-pointer", isDraggingOver && "border-primary bg-primary/10")} onClick={() => inputRef.current?.click()}>
-        <div className="text-center pointer-events-none"><PlusCircle className="mx-auto h-8 w-8 text-muted-foreground" /><p className="mt-2 text-sm font-semibold">{title}</p></div>
-        <Input ref={inputRef} type="file" className="hidden" accept="image/*" onChange={(e) => e.target.files && onFileSelect(e.target.files[0])} />
-      </div>
-    );
-};
-
 export const BatchTryOnPacks = () => {
     const { supabase, session } = useSession();
     const { t } = useLanguage();
@@ -60,13 +39,7 @@ export const BatchTryOnPacks = () => {
 
     const [batchMode, setBatchMode] = useState('one-garment');
     const [batchGarmentFile, setBatchGarmentFile] = useState<File | null>(null);
-    const [batchPersonFiles, setBatchPersonFiles] = useState<File[]>([]);
     const [batchRandomGarmentFiles, setBatchRandomGarmentFiles] = useState<File[]>([]);
-    const [batchRandomPersonFiles, setBatchRandomPersonFiles] = useState<File[]>([]);
-    const [precisePairs, setPrecisePairs] = useState<{ person: File, garment: File, appendix: string }[]>([]);
-    const [tempPairPerson, setTempPairPerson] = useState<File | null>(null);
-    const [tempPairGarment, setTempPairGarment] = useState<File | null>(null);
-    const [tempPairAppendix, setTempPairAppendix] = useState("");
     const [isLoading, setIsLoading] = useState(false);
     const [generalAppendix, setGeneralAppendix] = useState("");
     const [isModelModalOpen, setIsModelModalOpen] = useState(false);
@@ -93,11 +66,9 @@ export const BatchTryOnPacks = () => {
 
     const resetBatchForm = () => {
         setBatchGarmentFile(null);
-        setBatchPersonFiles([]);
         setBatchRandomGarmentFiles([]);
-        setBatchRandomPersonFiles([]);
-        setPrecisePairs([]);
         setGeneralAppendix("");
+        setSelectedModelUrls(new Set());
     };
 
     const handleBatchSubmit = async () => {
@@ -113,10 +84,6 @@ export const BatchTryOnPacks = () => {
           for (let i = 0; i < numPairs; i++) {
             pairs.push({ person_url: shuffledPeople[i], garment_file: shuffledGarments[i], appendix: generalAppendix });
           }
-        } else if (batchMode === 'precise') {
-          if (precisePairs.length === 0) return showError("Please add at least one precise pair.");
-          // This mode doesn't use the model selector, it uses file uploads per pair
-          // This part needs to be handled differently if we want to use selected models
         }
     
         if (pairs.length === 0) return showError("No valid pairs to process.");
@@ -160,15 +127,6 @@ export const BatchTryOnPacks = () => {
         setIsLoading(false);
     };
 
-    const addPrecisePair = () => {
-        if (tempPairPerson && tempPairGarment) {
-          setPrecisePairs(prev => [...prev, { person: tempPairPerson, garment: tempPairGarment, appendix: tempPairAppendix }]);
-          setTempPairPerson(null);
-          setTempPairGarment(null);
-          setTempPairAppendix("");
-        }
-    };
-
     const handleModelSelect = (url: string) => {
         setSelectedModelUrls(prev => {
             const newSet = new Set(prev);
@@ -194,7 +152,7 @@ export const BatchTryOnPacks = () => {
                             </TabsList>
                             <TabsContent value="one-garment" className="pt-4 space-y-4">
                                 <Button variant="outline" className="w-full" onClick={() => setIsModelModalOpen(true)}>Select Models ({selectedModelUrls.size})</Button>
-                                <ImageUploader onFileSelect={setBatchGarmentFile} title={t('uploadGarment')} imageUrl={batchGarmentFile ? URL.createObjectURL(batchGarmentFile) : null} onClear={() => setBatchGarmentFile(null)} />
+                                <MultiImageUploader onFilesSelect={(files) => setBatchGarmentFile(files[0])} title={t('uploadGarment')} icon={<Shirt />} description="Upload one garment image" />
                             </TabsContent>
                             <TabsContent value="random" className="pt-4 space-y-4">
                                 <Button variant="outline" className="w-full" onClick={() => setIsModelModalOpen(true)}>Select Models ({selectedModelUrls.size})</Button>
