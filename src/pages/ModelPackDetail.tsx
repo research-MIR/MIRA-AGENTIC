@@ -12,7 +12,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { ResultsDisplay } from "@/components/GenerateModels/ResultsDisplay";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { useLanguage } from "@/context/LanguageContext";
-import { Loader2, Wand2, CheckCircle } from "lucide-react";
+import { Loader2, Wand2, CheckCircle, XCircle, AlertTriangle } from "lucide-react";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { Badge } from "@/components/ui/badge";
 
@@ -21,6 +21,41 @@ interface FinalPoseResult {
   final_url: string;
   is_upscaled?: boolean;
 }
+
+const JobStatusIndicator = ({ job }: { job: any }) => {
+  if (!job) return null;
+
+  const { status, final_posed_images } = job;
+
+  if (['pending', 'base_generation_complete', 'awaiting_approval', 'generating_poses', 'polling_poses'].includes(status)) {
+    return <Badge variant="secondary"><Loader2 className="mr-2 h-4 w-4 animate-spin" />In Progress: {status.replace(/_/g, ' ')}</Badge>;
+  }
+
+  if (status === 'failed') {
+    return <Badge variant="destructive"><XCircle className="mr-2 h-4 w-4" />Failed</Badge>;
+  }
+
+  if (status === 'complete') {
+    const totalPoses = final_posed_images?.length || 0;
+    const upscaledPoses = final_posed_images?.filter((p: any) => p.is_upscaled).length || 0;
+
+    if (totalPoses === 0) {
+      return <Badge variant="outline">Ready for Poses</Badge>;
+    }
+
+    if (upscaledPoses === totalPoses) {
+      return <Badge className="bg-green-600 hover:bg-green-700"><CheckCircle className="mr-2 h-4 w-4" />Ready for VTO ({upscaledPoses}/{totalPoses})</Badge>;
+    }
+
+    if (upscaledPoses > 0) {
+      return <Badge variant="secondary" className="bg-yellow-500 text-black hover:bg-yellow-600"><AlertTriangle className="mr-2 h-4 w-4" />Almost Ready ({upscaledPoses}/{totalPoses})</Badge>;
+    }
+
+    return <Badge variant="default"><Wand2 className="mr-2 h-4 w-4" />Upscale to Use ({upscaledPoses}/{totalPoses})</Badge>;
+  }
+
+  return null;
+};
 
 const ModelPackDetail = () => {
   const { packId } = useParams();
@@ -123,14 +158,14 @@ const ModelPackDetail = () => {
     return <div className="p-8"><Alert><AlertTitle>Not Found</AlertTitle><AlertDescription>This model pack could not be found.</AlertDescription></Alert></div>;
   }
 
-  const upscaledCount = selectedJob?.final_posed_images?.filter((p: any) => p.is_upscaled).length || 0;
-  const totalPoses = selectedJob?.final_posed_images?.length || 0;
-
   return (
     <div className="p-4 md:p-8 h-screen flex flex-col">
       <header className="pb-4 mb-4 border-b shrink-0">
-        <h1 className="text-3xl font-bold">{pack.name}</h1>
-        <p className="text-muted-foreground">{pack.description || "No description provided."}</p>
+        <div className="flex items-center gap-4">
+          <h1 className="text-3xl font-bold">{pack.name}</h1>
+          <JobStatusIndicator job={selectedJob} />
+        </div>
+        <p className="text-muted-foreground mt-1">{pack.description || "No description provided."}</p>
       </header>
       <div className="flex-1 flex flex-col gap-4 overflow-hidden">
         <Card>
@@ -178,14 +213,7 @@ const ModelPackDetail = () => {
                 {selectedJob.status !== 'pending' && selectedJob.status !== 'base_generation_complete' && selectedJob.status !== 'awaiting_approval' && (
                   <AccordionItem value="item-2" className="border rounded-md bg-card">
                     <AccordionTrigger className="p-4 hover:no-underline">
-                      <div className="flex justify-between w-full items-center">
-                        <h3 className="text-lg font-semibold">{t('finalPosesTitle')}</h3>
-                        {totalPoses > 0 && (
-                          <Badge variant={upscaledCount === totalPoses ? "default" : "secondary"} className={upscaledCount === totalPoses ? "bg-green-600" : ""}>
-                            {upscaledCount} / {totalPoses} Ready
-                          </Badge>
-                        )}
-                      </div>
+                      <h3 className="text-lg font-semibold">{t('finalPosesTitle')}</h3>
                     </AccordionTrigger>
                     <AccordionContent className="p-4 pt-0">
                       {selectedJob.status === 'generating_poses' || (selectedJob.status === 'polling_poses' && !selectedJob.final_posed_images) ? (
