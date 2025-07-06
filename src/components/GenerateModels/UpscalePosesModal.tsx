@@ -128,3 +128,4 @@ export const UpscalePosesModal = ({ isOpen, onClose, jobs, packId }: UpscalePose
       </DialogContent>
     </Dialog>
   );
+};
