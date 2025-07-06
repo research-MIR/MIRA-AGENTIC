@@ -19,6 +19,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { optimizeImage } from "@/lib/utils";
 import { cn } from "@/lib/utils";
+import { useDropzone } from "@/hooks/useDropzone";
 
 interface Pose {
   type: 'text' | 'image';
@@ -184,7 +185,6 @@ const GenerateModels = () => {
     const newPoses = [...poses];
     const oldPose = newPoses[index];
     
-    // Revoke old URL if a new file is being set
     if (newPose.file && oldPose.previewUrl && oldPose.previewUrl.startsWith('blob:')) {
       URL.revokeObjectURL(oldPose.previewUrl);
     }
@@ -231,42 +231,55 @@ const GenerateModels = () => {
               <CardDescription>{t('poseDescription')}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {poses.map((pose, index) => (
-                <Card key={index} className="p-2">
-                  <div className="flex justify-end">
-                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => removePose(index)} disabled={poses.length <= 1 || isJobActive}>
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                  <Tabs value={pose.type} onValueChange={(type) => handlePoseChange(index, { type: type as 'text' | 'image' })}>
-                    <TabsList className="grid w-full grid-cols-2">
-                      <TabsTrigger value="text">Text</TabsTrigger>
-                      <TabsTrigger value="image">Image</TabsTrigger>
-                    </TabsList>
-                    <TabsContent value="text" className="pt-2">
-                      <Input
-                        value={pose.value}
-                        onChange={(e) => handlePoseChange(index, { value: e.target.value })}
-                        placeholder={t('posePlaceholder')}
-                        disabled={isJobActive}
-                      />
-                    </TabsContent>
-                    <TabsContent value="image" className="pt-2">
-                      <Input
-                        type="file"
-                        id={`pose-upload-${index}`}
-                        className="hidden"
-                        accept="image/*"
-                        onChange={(e) => {
-                          if (e.target.files && e.target.files[0]) {
-                            const file = e.target.files[0];
-                            handlePoseChange(index, { file, previewUrl: URL.createObjectURL(file), value: file.name });
-                          }
-                        }}
-                        disabled={isJobActive}
-                      />
-                      <label htmlFor={`pose-upload-${index}`} className="cursor-pointer">
-                        <div className="p-4 border-2 border-dashed rounded-lg text-center hover:border-primary transition-colors">
+              {poses.map((pose, index) => {
+                const { dropzoneProps, isDraggingOver } = useDropzone({
+                  onDrop: (e) => {
+                    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                      const file = e.dataTransfer.files[0];
+                      handlePoseChange(index, { file, previewUrl: URL.createObjectURL(file), value: file.name, type: 'image' });
+                    }
+                  }
+                });
+
+                return (
+                  <Card key={index} className="p-2">
+                    <div className="flex justify-end">
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => removePose(index)} disabled={poses.length <= 1 || isJobActive}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <Tabs value={pose.type} onValueChange={(type) => handlePoseChange(index, { type: type as 'text' | 'image' })}>
+                      <TabsList className="grid w-full grid-cols-2">
+                        <TabsTrigger value="text">Text</TabsTrigger>
+                        <TabsTrigger value="image">Image</TabsTrigger>
+                      </TabsList>
+                      <TabsContent value="text" className="pt-2">
+                        <Input
+                          value={pose.type === 'text' ? pose.value : ''}
+                          onChange={(e) => handlePoseChange(index, { value: e.target.value })}
+                          placeholder={t('posePlaceholder')}
+                          disabled={isJobActive}
+                        />
+                      </TabsContent>
+                      <TabsContent value="image" className="pt-2">
+                        <Input
+                          type="file"
+                          id={`pose-upload-${index}`}
+                          className="hidden"
+                          accept="image/*"
+                          onChange={(e) => {
+                            if (e.target.files && e.target.files[0]) {
+                              const file = e.target.files[0];
+                              handlePoseChange(index, { file, previewUrl: URL.createObjectURL(file), value: file.name });
+                            }
+                          }}
+                          disabled={isJobActive}
+                        />
+                        <div 
+                          {...dropzoneProps} 
+                          className={cn("p-4 border-2 border-dashed rounded-lg text-center hover:border-primary transition-colors cursor-pointer", isDraggingOver && "border-primary bg-primary/10")}
+                          onClick={() => document.getElementById(`pose-upload-${index}`)?.click()}
+                        >
                           {pose.previewUrl ? (
                             <img src={pose.previewUrl} alt="Pose preview" className="h-24 mx-auto rounded-md" />
                           ) : (
@@ -276,11 +289,11 @@ const GenerateModels = () => {
                             </>
                           )}
                         </div>
-                      </label>
-                    </TabsContent>
-                  </Tabs>
-                </Card>
-              ))}
+                      </TabsContent>
+                    </Tabs>
+                  </Card>
+                )
+              })}
               <Button variant="outline" className="w-full" onClick={addPose} disabled={isJobActive}>
                 <Plus className="mr-2 h-4 w-4" />
                 {t('addPose')}
