@@ -556,7 +556,9 @@ serve(async (req) => {
 
       // The image path is not used, clear it.
       finalWorkflow['193'].inputs.String = "";
-      finalWorkflow['215'].inputs.image = ""; // Clear the image node as well
+      // **FIXED BUG**: Do NOT clear the image filename, as it causes a directory error.
+      // The switch will prevent this node from being used anyway.
+      // finalWorkflow['215'].inputs.image = ""; 
     }
 
     const queueUrl = `${sanitizedAddress}/prompt`;
