@@ -147,7 +147,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
         <CardTitle>{t('oneToManyInputTitle')}</CardTitle>
         <CardDescription>{t('oneToManyInputDescription')}</CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="space-y-2">
             <Label>{t('selectModels')}</Label>
@@ -175,7 +175,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
         <CardTitle>{t('randomPairsInputTitle')}</CardTitle>
         <CardDescription>{t('randomPairsInputDescription')}</CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="space-y-2">
             <Label>{t('selectModels')}</Label>

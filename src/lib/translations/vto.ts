@@ -22,8 +22,6 @@ export const vtoTranslations = {
     uploadPeople: "Carica Persone",
     selectMultiplePersonImages: "Seleziona più immagini di persone.",
     randomPairsDescription: "Carica elenchi di persone e indumenti. Il sistema li abbinerà casualmente per creare combinazioni diverse.",
-    uploadGarments: "Carica Indumenti",
-    selectMultipleGarmentImages: "Seleziona più immagini di indumenti.",
     precisePairsDescription: "Crea coppie specifiche di modelli e indumenti uno per uno per un controllo totale sull'output.",
     person: "Persona",
     garment: "Indumento",
