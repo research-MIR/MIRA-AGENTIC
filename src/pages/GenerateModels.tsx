@@ -13,6 +13,9 @@ import { Label } from "@/components/ui/label";
 import { Plus, Trash2, Sparkles, Loader2 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { RecentJobThumbnail } from "@/components/GenerateModels/RecentJobThumbnail";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface Pose {
   type: 'text';
@@ -35,22 +38,38 @@ const GenerateModels = () => {
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [autoApprove, setAutoApprove] = useState(true);
   const [poses, setPoses] = useState<Pose[]>([{ type: 'text', value: '' }]);
-  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
 
   const { data: activeJob, isLoading: isLoadingJob } = useQuery({
-    queryKey: ['modelGenerationJob', activeJobId],
+    queryKey: ['modelGenerationJob', selectedJobId],
     queryFn: async () => {
-      if (!activeJobId) return null;
+      if (!selectedJobId) return null;
       const { data, error } = await supabase
         .from('mira-agent-model-generation-jobs')
         .select('*')
-        .eq('id', activeJobId)
+        .eq('id', selectedJobId)
         .single();
       if (error) throw error;
       return data;
     },
-    enabled: !!activeJobId,
-    refetchInterval: (data) => (data?.status === 'complete' || data?.status === 'failed' ? false : 5000),
+    enabled: !!selectedJobId,
+    refetchInterval: (data: any) => (data?.status === 'complete' || data?.status === 'failed' ? false : 5000),
+  });
+
+  const { data: recentJobs, isLoading: isLoadingRecent } = useQuery({
+    queryKey: ['modelGenerationJobs', session?.user?.id],
+    queryFn: async () => {
+      if (!session?.user) return [];
+      const { data, error } = await supabase
+        .from('mira-agent-model-generation-jobs')
+        .select('id, status, base_model_image_url, model_description, set_description, context, auto_approve, pose_prompts')
+        .eq('user_id', session.user.id)
+        .order('created_at', { ascending: false })
+        .limit(10);
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!session?.user,
   });
 
   useEffect(() => {
@@ -65,6 +84,15 @@ const GenerateModels = () => {
       }
     }
   }, [models, selectedModelId]);
+
+  const handleSelectJob = (job: any) => {
+    setSelectedJobId(job.id);
+    setModelDescription(job.model_description || "");
+    setSetDescription(job.set_description || "");
+    setSelectedModelId(job.context?.selectedModelId || null);
+    setAutoApprove(job.auto_approve ?? true);
+    setPoses(job.pose_prompts || [{ type: 'text', value: '' }]);
+  };
 
   const handleGenerate = async () => {
     if (!modelDescription.trim() || !selectedModelId || !session?.user) {
@@ -92,7 +120,8 @@ const GenerateModels = () => {
       if (error) throw error;
       dismissToast(toastId);
       showSuccess("Generation pipeline started!");
-      setActiveJobId(data.jobId);
+      setSelectedJobId(data.jobId);
+      queryClient.invalidateQueries({ queryKey: ['modelGenerationJobs', session.user.id] });
     } catch (err: any) {
       dismissToast(toastId);
       showError(err.message);
@@ -100,7 +129,7 @@ const GenerateModels = () => {
   };
 
   const handleSelectImage = async (imageId: string) => {
-    if (!activeJobId) return;
+    if (!selectedJobId) return;
     const toastId = showLoading("Confirming selection...");
     try {
         const selectedImageUrl = activeJob?.base_generation_results.find((img: any) => img.id === imageId)?.url;
@@ -109,14 +138,13 @@ const GenerateModels = () => {
         const { error } = await supabase.from('mira-agent-model-generation-jobs').update({
             status: 'generating_poses',
             base_model_image_url: selectedImageUrl
-        }).eq('id', activeJobId);
+        }).eq('id', selectedJobId);
         if (error) throw error;
 
-        // Re-trigger poller immediately
-        supabase.functions.invoke('MIRA-AGENT-poller-model-generation', { body: { job_id: activeJobId } }).catch(console.error);
+        supabase.functions.invoke('MIRA-AGENT-poller-model-generation', { body: { job_id: selectedJobId } }).catch(console.error);
         
         dismissToast(toastId);
-        queryClient.invalidateQueries({ queryKey: ['modelGenerationJob', activeJobId] });
+        queryClient.invalidateQueries({ queryKey: ['modelGenerationJob', selectedJobId] });
     } catch (err: any) {
         dismissToast(toastId);
         showError(err.message);
@@ -181,7 +209,7 @@ const GenerateModels = () => {
             </CardContent>
           </Card>
         </div>
-        <div className="lg:col-span-2">
+        <div className="lg:col-span-2 space-y-4">
           {activeJob && (
             <Accordion type="multiple" defaultValue={['item-1', 'item-2']} className="w-full space-y-4">
               <AccordionItem value="item-1" className="border rounded-md bg-card">
@@ -230,6 +258,27 @@ const GenerateModels = () => {
               )}
             </Accordion>
           )}
+           <Card>
+            <CardHeader><CardTitle>Recent Jobs</CardTitle></CardHeader>
+            <CardContent>
+              {isLoadingRecent ? <Skeleton className="h-24 w-full" /> : recentJobs && recentJobs.length > 0 ? (
+                <ScrollArea className="h-32">
+                  <div className="flex gap-4 pb-2">
+                    {recentJobs.map(job => (
+                      <RecentJobThumbnail
+                        key={job.id}
+                        job={job}
+                        onClick={() => handleSelectJob(job)}
+                        isSelected={selectedJobId === job.id}
+                      />
+                    ))}
+                  </div>
+                </ScrollArea>
+              ) : (
+                <p className="text-sm text-muted-foreground">No recent jobs found.</p>
+              )}
+            </CardContent>
+          </Card>
         </div>
       </div>
     </div>
