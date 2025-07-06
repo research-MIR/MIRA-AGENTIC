@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Plus, Trash2, Sparkles, Loader2 } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 interface Pose {
   type: 'text';
@@ -27,31 +27,28 @@ const GenerateModels = () => {
   const { t } = useLanguage();
   const { models, fetchModels } = useGeneratorStore();
   const { supabase, session } = useSession();
+  const queryClient = useQueryClient();
 
   const [modelDescription, setModelDescription] = useState("");
   const [setDescription, setSetDescription] = useState("");
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [autoApprove, setAutoApprove] = useState(true);
-  
-  const [isLoading, setIsLoading] = useState(false);
-  const [generatedImages, setGeneratedImages] = useState<{id: string, url: string}[]>([]);
-  const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
   const [poses, setPoses] = useState<Pose[]>([{ type: 'text', value: '' }]);
-  const [poseGenerationJobId, setPoseGenerationJobId] = useState<string | null>(null);
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
 
-  const { data: poseJobResult, isLoading: isLoadingPoses } = useQuery({
-    queryKey: ['poseGenerationJob', poseGenerationJobId],
+  const { data: activeJob, isLoading: isLoadingJob } = useQuery({
+    queryKey: ['modelGenerationJob', activeJobId],
     queryFn: async () => {
-      if (!poseGenerationJobId) return null;
+      if (!activeJobId) return null;
       const { data, error } = await supabase
         .from('mira-agent-model-generation-jobs')
-        .select('status, final_posed_images')
-        .eq('id', poseGenerationJobId)
+        .select('*')
+        .eq('id', activeJobId)
         .single();
       if (error) throw error;
       return data;
     },
-    enabled: !!poseGenerationJobId,
+    enabled: !!activeJobId,
     refetchInterval: (data) => (data?.status === 'complete' || data?.status === 'failed' ? false : 5000),
   });
 
@@ -68,66 +65,9 @@ const GenerateModels = () => {
     }
   }, [models, selectedModelId]);
 
-  const handleGenerateBase = async () => {
+  const handleGenerate = async () => {
     if (!modelDescription.trim() || !selectedModelId || !session?.user) {
       showError("Please provide a model description and select a base model.");
-      return;
-    }
-
-    setIsLoading(true);
-    setGeneratedImages([]);
-    setSelectedImageId(null);
-    const toastId = showLoading(t('generating'));
-
-    try {
-      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-generate-model', {
-        body: {
-          model_description: modelDescription,
-          set_description: setDescription,
-          selected_model_id: selectedModelId,
-          user_id: session.user.id,
-          auto_approve: autoApprove
-        }
-      });
-
-      if (error) throw error;
-      
-      dismissToast(toastId);
-
-      setGeneratedImages(data.images);
-      if (autoApprove && data.images.length > 0) {
-        setSelectedImageId(data.images[0].id);
-      }
-
-    } catch (err: any) {
-      dismissToast(toastId);
-      showError(err.message);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleSelectImage = (id: string) => {
-    setSelectedImageId(id);
-  };
-
-  const handlePoseChange = (index: number, value: string) => {
-    const newPoses = [...poses];
-    newPoses[index].value = value;
-    setPoses(newPoses);
-  };
-
-  const addPose = () => {
-    setPoses([...poses, { type: 'text', value: '' }]);
-  };
-
-  const removePose = (index: number) => {
-    setPoses(poses.filter((_, i) => i !== index));
-  };
-
-  const handleGeneratePoses = async () => {
-    if (!selectedImageId) {
-      showError("Please select a base model image first.");
       return;
     }
     const validPoses = poses.filter(p => p.value.trim() !== '');
@@ -136,32 +76,62 @@ const GenerateModels = () => {
       return;
     }
 
-    setIsLoading(true);
-    const toastId = showLoading("Starting pose generation...");
-
+    const toastId = showLoading("Starting generation pipeline...");
     try {
-      const selectedImageUrl = generatedImages.find(img => img.id === selectedImageId)?.url;
-      if (!selectedImageUrl) throw new Error("Selected image URL not found.");
-
       const { data, error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-generate-poses', {
         body: {
-          base_model_image_url: selectedImageUrl,
+          model_description: modelDescription,
+          set_description: setDescription,
+          selected_model_id: selectedModelId,
+          user_id: session.user.id,
+          auto_approve: autoApprove,
           pose_prompts: validPoses,
-          user_id: session?.user.id
         }
       });
-
       if (error) throw error;
       dismissToast(toastId);
-      showSuccess("Pose generation job started!");
-      setPoseGenerationJobId(data.jobId);
+      showSuccess("Generation pipeline started!");
+      setActiveJobId(data.jobId);
     } catch (err: any) {
       dismissToast(toastId);
       showError(err.message);
-    } finally {
-      setIsLoading(false);
     }
   };
+
+  const handleSelectImage = async (imageId: string) => {
+    if (!activeJobId) return;
+    const toastId = showLoading("Confirming selection...");
+    try {
+        const selectedImageUrl = activeJob?.base_generation_results.find((img: any) => img.id === imageId)?.url;
+        if (!selectedImageUrl) throw new Error("Could not find selected image URL.");
+
+        const { error } = await supabase.from('mira-agent-model-generation-jobs').update({
+            status: 'generating_poses',
+            base_model_image_url: selectedImageUrl
+        }).eq('id', activeJobId);
+        if (error) throw error;
+
+        // Re-trigger poller immediately
+        supabase.functions.invoke('MIRA-AGENT-poller-model-generation', { body: { job_id: activeJobId } }).catch(console.error);
+        
+        dismissToast(toastId);
+        queryClient.invalidateQueries({ queryKey: ['modelGenerationJob', activeJobId] });
+    } catch (err: any) {
+        dismissToast(toastId);
+        showError(err.message);
+    }
+  };
+
+  const handlePoseChange = (index: number, value: string) => {
+    const newPoses = [...poses];
+    newPoses[index].value = value;
+    setPoses(newPoses);
+  };
+
+  const addPose = () => setPoses([...poses, { type: 'text', value: '' }]);
+  const removePose = (index: number) => setPoses(poses.filter((_, i) => i !== index));
+
+  const isJobActive = activeJob && !['complete', 'failed'].includes(activeJob.status);
 
   return (
     <div className="p-4 md:p-8 h-screen overflow-y-auto">
@@ -181,70 +151,64 @@ const GenerateModels = () => {
             setSelectedModelId={setSelectedModelId}
             autoApprove={autoApprove}
             setAutoApprove={setAutoApprove}
-            onGenerate={handleGenerateBase}
-            isLoading={isLoading}
+            onGenerate={handleGenerate}
+            isLoading={isJobActive}
           />
-          {selectedImageId && (
-            <Card>
-              <CardHeader>
-                <CardTitle>{t('step3')}</CardTitle>
-                <CardDescription>{t('poseDescription')}</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {poses.map((pose, index) => (
-                  <div key={index} className="flex items-center gap-2">
-                    <Input
-                      value={pose.value}
-                      onChange={(e) => handlePoseChange(index, e.target.value)}
-                      placeholder={t('posePlaceholder')}
-                      disabled={isLoadingPoses}
-                    />
-                    <Button variant="ghost" size="icon" onClick={() => removePose(index)} disabled={poses.length <= 1 || isLoadingPoses}>
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                ))}
-                <Button variant="outline" className="w-full" onClick={addPose} disabled={isLoadingPoses}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  {t('addPose')}
-                </Button>
-                <Button size="lg" className="w-full" onClick={handleGeneratePoses} disabled={isLoadingPoses}>
-                  {isLoadingPoses ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-                  {t('generateButton')} Poses
-                </Button>
-              </CardContent>
-            </Card>
-          )}
+          <Card>
+            <CardHeader>
+              <CardTitle>{t('step3')}</CardTitle>
+              <CardDescription>{t('poseDescription')}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {poses.map((pose, index) => (
+                <div key={index} className="flex items-center gap-2">
+                  <Input
+                    value={pose.value}
+                    onChange={(e) => handlePoseChange(index, e.target.value)}
+                    placeholder={t('posePlaceholder')}
+                    disabled={isJobActive}
+                  />
+                  <Button variant="ghost" size="icon" onClick={() => removePose(index)} disabled={poses.length <= 1 || isJobActive}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+              <Button variant="outline" className="w-full" onClick={addPose} disabled={isJobActive}>
+                <Plus className="mr-2 h-4 w-4" />
+                {t('addPose')}
+              </Button>
+            </CardContent>
+          </Card>
         </div>
         <div className="lg:col-span-2 space-y-4">
           <ResultsDisplay
-            images={generatedImages}
-            isLoading={isLoading}
-            autoApprove={autoApprove}
-            selectedImageId={selectedImageId}
+            images={activeJob?.base_generation_results || []}
+            isLoading={isLoadingJob && (!activeJob || activeJob?.status === 'pending')}
+            autoApprove={activeJob?.auto_approve}
+            selectedImageId={activeJob?.base_model_image_url ? activeJob.base_generation_results.find((i:any) => i.url === activeJob.base_model_image_url)?.id : null}
             onSelectImage={handleSelectImage}
           />
-          {poseJobResult && (
+          {activeJob && (
             <Card>
               <CardHeader>
                 <CardTitle>{t('finalPosesTitle')}</CardTitle>
               </CardHeader>
               <CardContent>
-                {poseJobResult.status !== 'complete' ? (
+                {activeJob.status === 'generating_poses' ? (
                   <div className="flex items-center justify-center p-8">
                     <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
                     <p className="ml-4">{t('generatingPoses')}</p>
                   </div>
-                ) : (
+                ) : activeJob.status === 'complete' && activeJob.final_posed_images ? (
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                    {(poseJobResult.final_posed_images as FinalPoseResult[])?.map((result, index) => (
+                    {(activeJob.final_posed_images as FinalPoseResult[])?.map((result, index) => (
                       <div key={index} className="space-y-2">
                         <img src={result.generated_url} alt={result.pose_prompt} className="w-full aspect-square object-cover rounded-md" />
                         <p className="text-xs text-muted-foreground truncate">{result.pose_prompt}</p>
                       </div>
                     ))}
                   </div>
-                )}
+                ) : null}
               </CardContent>
             </Card>
           )}

@@ -11,18 +11,26 @@ const corsHeaders = {
 
 serve(async (req) => {
   const requestId = `orchestrator-poses-${Date.now()}`;
-  console.log(`[Orchestrator-Poses][${requestId}] Function invoked.`);
+  console.log(`[Orchestrator-Poses][${requestId}] Function invoked for FULL pipeline.`);
 
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const { base_model_image_url, pose_prompts, user_id } = await req.json();
-    if (!base_model_image_url || !pose_prompts || !Array.isArray(pose_prompts) || !user_id) {
-      throw new Error("base_model_image_url, pose_prompts array, and user_id are required.");
+    const { 
+        model_description, 
+        set_description, 
+        selected_model_id, 
+        auto_approve, 
+        pose_prompts, 
+        user_id 
+    } = await req.json();
+
+    if (!model_description || !selected_model_id || !pose_prompts || !Array.isArray(pose_prompts) || !user_id) {
+      throw new Error("model_description, selected_model_id, pose_prompts array, and user_id are required.");
     }
-    console.log(`[Orchestrator-Poses][${requestId}] Received ${pose_prompts.length} poses for user ${user_id}.`);
+    console.log(`[Orchestrator-Poses][${requestId}] Received ${pose_prompts.length} poses for user ${user_id}. Auto-approve: ${auto_approve}`);
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
 
@@ -31,9 +39,11 @@ serve(async (req) => {
       .from('mira-agent-model-generation-jobs')
       .insert({
         user_id,
-        base_model_image_url,
+        model_description,
+        set_description,
+        auto_approve,
         pose_prompts,
-        status: 'pending',
+        status: 'pending', // Start the state machine
         last_polled_at: new Date().toISOString(),
       })
       .select('id')
