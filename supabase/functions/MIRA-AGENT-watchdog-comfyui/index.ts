@@ -9,7 +9,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const STALLED_THRESHOLD_SECONDS = 30; // Reduced from 1 minute
+const STALLED_THRESHOLD_SECONDS = 30;
 
 serve(async (req) => {
   console.log("ComfyUI Watchdog: Function invoked.");
@@ -23,7 +23,7 @@ serve(async (req) => {
     const threshold = new Date(Date.now() - STALLED_THRESHOLD_SECONDS * 1000).toISOString();
     console.log(`ComfyUI Watchdog: Checking for jobs stalled since ${threshold}`);
 
-    // Fetch stalled jobs from both tables
+    // Fetch stalled jobs from all three tables
     const { data: stalledRefinerJobs, error: refinerError } = await supabase
       .from('mira-agent-comfyui-jobs')
       .select('id')
@@ -36,12 +36,20 @@ serve(async (req) => {
       .in('status', ['queued', 'processing'])
       .lt('last_polled_at', threshold);
 
+    const { data: stalledModelGenJobs, error: modelGenError } = await supabase
+      .from('mira-agent-model-generation-jobs')
+      .select('id')
+      .in('status', ['pending', 'generating_poses'])
+      .lt('last_polled_at', threshold);
+
     if (refinerError) console.error("Error querying refiner jobs:", refinerError.message);
     if (inpaintingError) console.error("Error querying inpainting jobs:", inpaintingError.message);
+    if (modelGenError) console.error("Error querying model generation jobs:", modelGenError.message);
 
     const allStalledJobs = [
         ...(stalledRefinerJobs || []).map(job => ({ ...job, type: 'refiner' })),
-        ...(stalledInpaintingJobs || []).map(job => ({ ...job, type: 'inpainting' }))
+        ...(stalledInpaintingJobs || []).map(job => ({ ...job, type: 'inpainting' })),
+        ...(stalledModelGenJobs || []).map(job => ({ ...job, type: 'model-generation' }))
     ];
 
     if (allStalledJobs.length === 0) {
@@ -53,7 +61,13 @@ serve(async (req) => {
     console.log(`ComfyUI Watchdog: Found ${allStalledJobs.length} total stalled job(s). Re-triggering pollers...`);
 
     const triggerPromises = allStalledJobs.map(job => {
-      const pollerName = job.type === 'inpainting' ? 'MIRA-AGENT-poller-inpainting' : 'MIRA-AGENT-poller-comfyui';
+      let pollerName = '';
+      switch (job.type) {
+        case 'refiner': pollerName = 'MIRA-AGENT-poller-comfyui'; break;
+        case 'inpainting': pollerName = 'MIRA-AGENT-poller-inpainting'; break;
+        case 'model-generation': pollerName = 'MIRA-AGENT-poller-model-generation'; break;
+        default: return Promise.resolve();
+      }
       console.log(`ComfyUI Watchdog: Re-triggering ${pollerName} for stalled job ID: ${job.id}`);
       return supabase.functions.invoke(pollerName, { body: { job_id: job.id } });
     });
