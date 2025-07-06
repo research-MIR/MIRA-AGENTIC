@@ -12,12 +12,14 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { ResultsDisplay } from "@/components/GenerateModels/ResultsDisplay";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { useLanguage } from "@/context/LanguageContext";
-import { Loader2 } from "lucide-react";
+import { Loader2, Wand2, CheckCircle } from "lucide-react";
 import { RealtimeChannel } from "@supabase/supabase-js";
+import { Badge } from "@/components/ui/badge";
 
 interface FinalPoseResult {
   pose_prompt: string;
   final_url: string;
+  is_upscaled?: boolean;
 }
 
 const ModelPackDetail = () => {
@@ -121,6 +123,9 @@ const ModelPackDetail = () => {
     return <div className="p-8"><Alert><AlertTitle>Not Found</AlertTitle><AlertDescription>This model pack could not be found.</AlertDescription></Alert></div>;
   }
 
+  const upscaledCount = selectedJob?.final_posed_images?.filter((p: any) => p.is_upscaled).length || 0;
+  const totalPoses = selectedJob?.final_posed_images?.length || 0;
+
   return (
     <div className="p-4 md:p-8 h-screen flex flex-col">
       <header className="pb-4 mb-4 border-b shrink-0">
@@ -173,16 +178,32 @@ const ModelPackDetail = () => {
                 {selectedJob.status !== 'pending' && selectedJob.status !== 'base_generation_complete' && selectedJob.status !== 'awaiting_approval' && (
                   <AccordionItem value="item-2" className="border rounded-md bg-card">
                     <AccordionTrigger className="p-4 hover:no-underline">
-                      <h3 className="text-lg font-semibold">{t('finalPosesTitle')}</h3>
+                      <div className="flex justify-between w-full items-center">
+                        <h3 className="text-lg font-semibold">{t('finalPosesTitle')}</h3>
+                        {totalPoses > 0 && (
+                          <Badge variant={upscaledCount === totalPoses ? "default" : "secondary"} className={upscaledCount === totalPoses ? "bg-green-600" : ""}>
+                            {upscaledCount} / {totalPoses} Ready
+                          </Badge>
+                        )}
+                      </div>
                     </AccordionTrigger>
                     <AccordionContent className="p-4 pt-0">
                       {selectedJob.status === 'generating_poses' || (selectedJob.status === 'polling_poses' && !selectedJob.final_posed_images) ? (
                         <div className="flex items-center justify-center p-8"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /><p className="ml-4">{t('generatingPoses')}</p></div>
-                      ) : selectedJob.status === 'complete' && selectedJob.final_posed_images ? (
+                      ) : selectedJob.final_posed_images ? (
                         <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                           {(selectedJob.final_posed_images as FinalPoseResult[])?.map((result, index) => (
                             <div key={index} className="space-y-2">
-                              <img src={result.final_url} alt={result.pose_prompt} className="w-full aspect-square object-cover rounded-md" />
+                              <div className="relative group aspect-square">
+                                <img src={result.final_url} alt={result.pose_prompt} className="w-full h-full object-cover rounded-md" />
+                                <div className="absolute top-1 right-1">
+                                  {result.is_upscaled ? (
+                                    <CheckCircle className="h-5 w-5 text-white bg-green-600 rounded-full p-0.5" />
+                                  ) : (
+                                    <Wand2 className="h-5 w-5 text-white bg-blue-500 rounded-full p-0.5" />
+                                  )}
+                                </div>
+                              </div>
                               <p className="text-xs text-muted-foreground truncate">{result.pose_prompt}</p>
                             </div>
                           ))}

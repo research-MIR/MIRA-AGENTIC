@@ -1,12 +1,14 @@
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
-import { AlertTriangle, Loader2, CheckCircle } from 'lucide-react';
+import { AlertTriangle, Loader2, CheckCircle, XCircle } from 'lucide-react';
 import { useSecureImage } from '@/hooks/useSecureImage';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface Job {
   id: string;
   status: 'pending' | 'base_generation_complete' | 'awaiting_approval' | 'generating_poses' | 'polling_poses' | 'complete' | 'failed';
   base_model_image_url?: string | null;
+  final_posed_images?: { status: string; is_upscaled?: boolean }[];
 }
 
 interface Props {
@@ -18,21 +20,47 @@ interface Props {
 export const RecentJobThumbnail = ({ job, onClick, isSelected }: Props) => {
   const { displayUrl, isLoading, error } = useSecureImage(job.base_model_image_url);
 
-  const renderOverlay = () => {
-    switch (job.status) {
-      case 'pending':
-      case 'base_generation_complete':
-      case 'awaiting_approval':
-      case 'generating_poses':
-      case 'polling_poses':
-        return <div className="absolute inset-0 bg-black/50 flex items-center justify-center"><Loader2 className="h-6 w-6 text-white animate-spin" /></div>;
-      case 'complete':
-        return <div className="absolute inset-0 bg-green-800/50 flex items-center justify-center"><CheckCircle className="h-6 w-6 text-white" /></div>;
-      case 'failed':
-        return <div className="absolute inset-0 bg-destructive/50 flex items-center justify-center"><AlertTriangle className="h-6 w-6 text-white" /></div>;
-      default:
-        return null;
+  const getAggregateStatus = () => {
+    if (job.status === 'failed') return { icon: <XCircle className="h-6 w-6 text-white" />, color: 'bg-destructive/70', tooltip: 'Job Failed' };
+    if (['pending', 'base_generation_complete', 'awaiting_approval', 'generating_poses', 'polling_poses'].includes(job.status)) {
+      return { icon: <Loader2 className="h-6 w-6 text-white animate-spin" />, color: 'bg-blue-500/70', tooltip: `In Progress: ${job.status.replace(/_/g, ' ')}` };
     }
+    if (job.status === 'complete') {
+      if (!job.final_posed_images || job.final_posed_images.length === 0) {
+        return { icon: <AlertTriangle className="h-6 w-6 text-white" />, color: 'bg-yellow-500/70', tooltip: 'Complete, but no poses found' };
+      }
+      const totalPoses = job.final_posed_images.length;
+      const upscaledPoses = job.final_posed_images.filter(p => p.is_upscaled).length;
+
+      if (upscaledPoses === totalPoses) {
+        return { icon: <CheckCircle className="h-6 w-6 text-white" />, color: 'bg-green-600/70', tooltip: 'All Poses Upscaled' };
+      }
+      if (upscaledPoses > 0) {
+        return { icon: <AlertTriangle className="h-6 w-6 text-white" />, color: 'bg-yellow-500/70', tooltip: `${upscaledPoses}/${totalPoses} Poses Upscaled` };
+      }
+      return { icon: <XCircle className="h-6 w-6 text-white" />, color: 'bg-red-500/70', tooltip: 'Ready for Upscaling' };
+    }
+    return null;
+  };
+
+  const aggregateStatus = getAggregateStatus();
+
+  const renderOverlay = () => {
+    if (!aggregateStatus) return null;
+    return (
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div className={cn("absolute inset-0 flex items-center justify-center", aggregateStatus.color)}>
+              {aggregateStatus.icon}
+            </div>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p>{aggregateStatus.tooltip}</p>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
   };
 
   return (

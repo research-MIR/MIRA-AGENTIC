@@ -88,7 +88,8 @@ async function handleGeneratingPosesState(supabase: any, job: any) {
             pose_prompt: pose.value,
             comfyui_prompt_id: result.comfyui_prompt_id,
             status: 'processing',
-            final_url: null
+            final_url: null,
+            is_upscaled: false, // Initialize the new flag
         });
     }
     await supabase.from('mira-agent-model-generation-jobs').update({ 
@@ -123,6 +124,7 @@ async function handlePollingPosesState(supabase: any, job: any) {
                 const imageUrl = `${comfyUiAddress}/view?filename=${encodeURIComponent(image.filename)}&subfolder=${encodeURIComponent(image.subfolder)}&type=${image.type}`;
                 updatedPoseJobs[index].status = 'complete';
                 updatedPoseJobs[index].final_url = imageUrl;
+                updatedPoseJobs[index].is_upscaled = false; // Add the new flag
                 console.log(`[ModelGenPoller][${job.id}] Pose job ${poseJob.comfyui_prompt_id} is complete. URL: ${imageUrl}`);
             }
         }
