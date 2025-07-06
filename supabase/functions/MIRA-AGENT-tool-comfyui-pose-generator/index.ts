@@ -522,15 +522,16 @@ serve(async (req) => {
 
     const finalWorkflow = JSON.parse(unifiedWorkflowTemplate);
 
-    // Set the base image and the text prompt
+    // Set the base image and the main system prompt for Gemini
     finalWorkflow['214'].inputs.image = baseModelFilename;
-    finalWorkflow['193'].inputs.String = EDITING_TASK_WITH_IMAGE_REFERENCE;
-    finalWorkflow['217'].inputs.String = EDITING_TASK_WITH_TEXT_REFERENCE;
     finalWorkflow['195'].inputs.String = GEMINI_SYSTEM_PROMPT;
     
-    // This is the prompt that Gemini will use to generate the final, detailed prompt
-    finalWorkflow['193'].inputs.String = pose_prompt;
-    finalWorkflow['217'].inputs.String = pose_prompt;
+    // ** FIX: Combine the system directive with the user's prompt **
+    const textRefTask = `${EDITING_TASK_WITH_TEXT_REFERENCE}. The user's specific instruction is: '${pose_prompt}'`;
+    const imageRefTask = `${EDITING_TASK_WITH_IMAGE_REFERENCE}. The user's specific instruction is: '${pose_prompt}'`;
+
+    finalWorkflow['217'].inputs.String = textRefTask;
+    finalWorkflow['193'].inputs.String = imageRefTask;
 
     if (pose_image_url) {
       console.log(`[PoseGenerator][${requestId}] Pose reference image provided. Downloading from: ${pose_image_url}`);
