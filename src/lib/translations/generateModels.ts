@@ -35,6 +35,11 @@ export const generateModelsTranslations = {
     createPack: "Crea Pack",
     noModelPacksTitle: "Nessun Pack Modelli",
     noModelPacksDescription: "Crea il tuo primo pack per iniziare a generare modelli.",
+    singleModel: "Modello Singolo",
+    multiModel: "Multi-Modello",
+    multiModelDescription: "Descrivi più modelli in un unico prompt. L'IA li separerà e li genererà in batch.",
+    multiModelPlaceholder: "Es. tre modelle con i capelli rossi, una più robusta, una più magra, una media, e un modello uomo con i capelli neri...",
+    generateModelsButton: "Genera Modelli",
   },
   en: {
     generateModelsTitle: "Generate Models",
@@ -72,5 +77,10 @@ export const generateModelsTranslations = {
     createPack: "Create Pack",
     noModelPacksTitle: "No Model Packs Yet",
     noModelPacksDescription: "Create your first pack to start generating models.",
+    singleModel: "Single Model",
+    multiModel: "Multi-Model",
+    multiModelDescription: "Describe multiple models in one prompt. The AI will separate and generate them in a batch.",
+    multiModelPlaceholder: "E.g., three red-headed models, one fatter, one slimmer, one medium, and a male model with black hair...",
+    generateModelsButton: "Generate Models",
   },
 };

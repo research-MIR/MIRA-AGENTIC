@@ -6,12 +6,14 @@ import { useGeneratorStore } from "@/store/generatorStore";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { Model } from "@/hooks/useChatManager";
 import { useSession } from "@/components/Auth/SessionContextProvider";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Plus, Sparkles, Loader2 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { PoseInput } from "./PoseInput";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 
 interface Pose {
   type: 'text' | 'image';
@@ -36,11 +38,14 @@ export const ModelGenerator = ({ packId, selectedJob }: ModelGeneratorProps) => 
   const { supabase, session } = useSession();
   const queryClient = useQueryClient();
 
+  const [activeTab, setActiveTab] = useState<'single' | 'multi'>('single');
+  const [multiModelPrompt, setMultiModelPrompt] = useState("");
   const [modelDescription, setModelDescription] = useState("");
   const [setDescription, setSetDescription] = useState("");
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [autoApprove, setAutoApprove] = useState(true);
   const [poses, setPoses] = useState<Pose[]>([{ type: 'text', value: '', file: undefined, previewUrl: undefined }]);
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     fetchModels();
@@ -54,6 +59,16 @@ export const ModelGenerator = ({ packId, selectedJob }: ModelGeneratorProps) => 
   }, [models, selectedModelId]);
 
   const handleGenerate = async () => {
+    setIsLoading(true);
+    if (activeTab === 'single') {
+      await handleSingleModelGenerate();
+    } else {
+      await handleMultiModelGenerate();
+    }
+    setIsLoading(false);
+  };
+
+  const handleSingleModelGenerate = async () => {
     if (!modelDescription.trim() || !selectedModelId || !session?.user) {
       showError("Please provide a model description and select a base model.");
       return;
@@ -83,13 +98,71 @@ export const ModelGenerator = ({ packId, selectedJob }: ModelGeneratorProps) => 
           user_id: session.user.id,
           auto_approve: autoApprove,
           pose_prompts: validPoses,
-          pack_id: packId, // Pass the packId
+          pack_id: packId,
         }
       });
       if (error) throw error;
       dismissToast(toastId);
       showSuccess("Generation pipeline started!");
       queryClient.invalidateQueries({ queryKey: ['modelsForPack', packId] });
+    } catch (err: any) {
+      dismissToast(toastId);
+      showError(err.message);
+    }
+  };
+
+  const handleMultiModelGenerate = async () => {
+    if (!multiModelPrompt.trim() || !selectedModelId || !session?.user) {
+      showError("Please provide a multi-model description and select a base model.");
+      return;
+    }
+    
+    const toastId = showLoading("Parsing multi-model prompt...");
+    try {
+      const { data: parseData, error: parseError } = await supabase.functions.invoke('MIRA-AGENT-tool-parse-multi-model-prompt', {
+        body: { high_level_prompt: multiModelPrompt }
+      });
+      if (parseError) throw parseError;
+      const modelDescriptions = parseData.model_descriptions;
+      if (!modelDescriptions || modelDescriptions.length === 0) {
+        throw new Error("The AI could not parse any models from your description.");
+      }
+
+      dismissToast(toastId);
+      showSuccess(`Parsed ${modelDescriptions.length} models. Queuing generation jobs...`);
+
+      const jobPromises = modelDescriptions.map(async (desc: string) => {
+        try {
+          const processedPoses = await Promise.all(poses.map(async (pose) => {
+            if (pose.type === 'image' && pose.file) {
+              const { data: { publicUrl } } = await supabase.storage.from('mira-agent-user-uploads').upload(`${session.user.id}/pose-references/${Date.now()}-${pose.file.name}`, pose.file);
+              return { type: 'image', value: publicUrl };
+            }
+            return { type: pose.type, value: pose.value };
+          }));
+          const validPoses = processedPoses.filter(p => p.value.trim() !== '');
+
+          const { error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-generate-poses', {
+            body: {
+              model_description: desc,
+              set_description: setDescription,
+              selected_model_id: selectedModelId,
+              user_id: session.user.id,
+              auto_approve: autoApprove,
+              pose_prompts: validPoses,
+              pack_id: packId,
+            }
+          });
+          if (error) throw error;
+        } catch (err) {
+          console.error(`Failed to queue job for description "${desc}":`, err);
+        }
+      });
+
+      await Promise.all(jobPromises);
+      showSuccess("All generation jobs have been queued.");
+      queryClient.invalidateQueries({ queryKey: ['modelsForPack', packId] });
+
     } catch (err: any) {
       dismissToast(toastId);
       showError(err.message);
@@ -126,18 +199,44 @@ export const ModelGenerator = ({ packId, selectedJob }: ModelGeneratorProps) => 
 
   return (
     <div className="space-y-4">
-      <SettingsPanel
-        modelDescription={modelDescription}
-        setModelDescription={setModelDescription}
-        setDescription={setDescription}
-        setSetDescription={setSetDescription}
-        models={models as Model[]}
-        selectedModelId={selectedModelId}
-        setSelectedModelId={setSelectedModelId}
-        autoApprove={autoApprove}
-        setAutoApprove={setAutoApprove}
-        isJobActive={isJobActive}
-      />
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'single' | 'multi')}>
+        <TabsList className="grid w-full grid-cols-2">
+          <TabsTrigger value="single">{t('singleModel')}</TabsTrigger>
+          <TabsTrigger value="multi">{t('multiModel')}</TabsTrigger>
+        </TabsList>
+        <TabsContent value="single" className="pt-4">
+          <SettingsPanel
+            modelDescription={modelDescription}
+            setModelDescription={setModelDescription}
+            setDescription={setDescription}
+            setSetDescription={setSetDescription}
+            models={models as Model[]}
+            selectedModelId={selectedModelId}
+            setSelectedModelId={setSelectedModelId}
+            autoApprove={autoApprove}
+            setAutoApprove={setAutoApprove}
+            isJobActive={isJobActive}
+          />
+        </TabsContent>
+        <TabsContent value="multi" className="pt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>{t('multiModel')}</CardTitle>
+              <CardDescription>{t('multiModelDescription')}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Textarea
+                value={multiModelPrompt}
+                onChange={(e) => setMultiModelPrompt(e.target.value)}
+                placeholder={t('multiModelPlaceholder')}
+                rows={5}
+                disabled={isJobActive}
+              />
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+      
       <Card>
         <CardHeader><CardTitle>{t('step3')}</CardTitle></CardHeader>
         <CardContent className="space-y-4">
@@ -159,9 +258,9 @@ export const ModelGenerator = ({ packId, selectedJob }: ModelGeneratorProps) => 
         </CardContent>
       </Card>
 
-      <Button size="lg" className="w-full" onClick={handleGenerate} disabled={isJobActive || !modelDescription.trim()}>
-        {isJobActive ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-        {t('generateButton')}
+      <Button size="lg" className="w-full" onClick={handleGenerate} disabled={isJobActive || (activeTab === 'single' && !modelDescription.trim()) || (activeTab === 'multi' && !multiModelPrompt.trim())}>
+        {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+        {t('generateModelsButton')}
       </Button>
 
       {selectedJob && (
