@@ -9,6 +9,7 @@ interface Job {
   status: 'pending' | 'base_generation_complete' | 'awaiting_approval' | 'generating_poses' | 'polling_poses' | 'complete' | 'failed';
   base_model_image_url?: string | null;
   final_posed_images?: { status: string; is_upscaled?: boolean }[];
+  pose_prompts?: any[];
 }
 
 interface Props {
@@ -22,8 +23,13 @@ export const RecentJobThumbnail = ({ job, onClick, isSelected }: Props) => {
 
   const getAggregateStatus = () => {
     if (job.status === 'failed') return { icon: <XCircle className="h-5 w-5 text-white" />, color: 'bg-destructive', tooltip: 'Job Failed' };
-    if (['pending', 'base_generation_complete', 'awaiting_approval', 'generating_poses', 'polling_poses'].includes(job.status)) {
+    if (['pending', 'base_generation_complete', 'awaiting_approval', 'generating_poses'].includes(job.status)) {
       return { icon: <Loader2 className="h-5 w-5 text-white animate-spin" />, color: 'bg-blue-500', tooltip: `In Progress: ${job.status.replace(/_/g, ' ')}` };
+    }
+    if (job.status === 'polling_poses') {
+        const totalPoses = job.pose_prompts?.length || 0;
+        const completedPoses = job.final_posed_images?.filter((p: any) => p.status === 'complete').length || 0;
+        return { icon: <Loader2 className="h-5 w-5 text-white animate-spin" />, color: 'bg-blue-500', tooltip: `Generating Poses (${completedPoses}/${totalPoses})` };
     }
     if (job.status === 'complete') {
       if (!job.final_posed_images || job.final_posed_images.length === 0) {

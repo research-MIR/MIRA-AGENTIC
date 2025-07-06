@@ -25,10 +25,16 @@ interface FinalPoseResult {
 const JobStatusIndicator = ({ job }: { job: any }) => {
   if (!job) return null;
 
-  const { status, final_posed_images } = job;
+  const { status, final_posed_images, pose_prompts } = job;
 
-  if (['pending', 'base_generation_complete', 'awaiting_approval', 'generating_poses', 'polling_poses'].includes(status)) {
+  if (['pending', 'base_generation_complete', 'awaiting_approval', 'generating_poses'].includes(status)) {
     return <Badge variant="secondary"><Loader2 className="mr-2 h-4 w-4 animate-spin" />In Progress: {status.replace(/_/g, ' ')}</Badge>;
+  }
+
+  if (status === 'polling_poses') {
+    const totalPoses = pose_prompts?.length || 0;
+    const completedPoses = final_posed_images?.filter((p: any) => p.status === 'complete').length || 0;
+    return <Badge variant="secondary"><Loader2 className="mr-2 h-4 w-4 animate-spin" />Generating Poses ({completedPoses}/{totalPoses})</Badge>;
   }
 
   if (status === 'failed') {
