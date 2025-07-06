@@ -15,6 +15,7 @@ import { useLanguage } from "@/context/LanguageContext";
 import { Loader2, Wand2, CheckCircle, XCircle, AlertTriangle } from "lucide-react";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { Badge } from "@/components/ui/badge";
+import { JobProgressBar } from "@/components/GenerateModels/JobProgressBar";
 
 interface FinalPoseResult {
   pose_prompt: string;
@@ -25,16 +26,14 @@ interface FinalPoseResult {
 const JobStatusIndicator = ({ job }: { job: any }) => {
   if (!job) return null;
 
-  const { status, final_posed_images, pose_prompts } = job;
+  const { status, final_posed_images } = job;
 
   if (['pending', 'base_generation_complete', 'awaiting_approval', 'generating_poses'].includes(status)) {
     return <Badge variant="secondary"><Loader2 className="mr-2 h-4 w-4 animate-spin" />In Progress: {status.replace(/_/g, ' ')}</Badge>;
   }
 
   if (status === 'polling_poses') {
-    const totalPoses = pose_prompts?.length || 0;
-    const completedPoses = final_posed_images?.filter((p: any) => p.status === 'complete').length || 0;
-    return <Badge variant="secondary"><Loader2 className="mr-2 h-4 w-4 animate-spin" />Generating Poses ({completedPoses}/{totalPoses})</Badge>;
+    return <Badge variant="secondary"><Loader2 className="mr-2 h-4 w-4 animate-spin" />Generating Poses</Badge>;
   }
 
   if (status === 'failed') {
@@ -167,9 +166,14 @@ const ModelPackDetail = () => {
   return (
     <div className="p-4 md:p-8 h-screen flex flex-col">
       <header className="pb-4 mb-4 border-b shrink-0">
-        <div className="flex items-center gap-4">
-          <h1 className="text-3xl font-bold">{pack.name}</h1>
-          <JobStatusIndicator job={selectedJob} />
+        <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+                <h1 className="text-3xl font-bold">{pack.name}</h1>
+                <JobStatusIndicator job={selectedJob} />
+            </div>
+        </div>
+        <div className="mt-2">
+            <JobProgressBar job={selectedJob} />
         </div>
         <p className="text-muted-foreground mt-1">{pack.description || "No description provided."}</p>
       </header>
