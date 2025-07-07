@@ -675,7 +675,7 @@ const tiledUpscalerWorkflow = `{
   },
   "317": {
     "inputs": {
-      "value": 0.45
+      "value": 0.4
     },
     "class_type": "PrimitiveFloat",
     "_meta": {
@@ -724,6 +724,9 @@ const tiledUpscalerWorkflow = `{
     }
   }
 }`;
+
+const FINAL_OUTPUT_NODE_ID = "283";
+const FALLBACK_NODE_IDS = ["213", "9", "4"];
 
 // NOTE: This is the new, correct skin-specific workflow using LDSR.
 const workflowTemplateSkin = `
@@ -830,6 +833,101 @@ async function uploadImageToComfyUI(comfyUiUrl: string, imageBlob: Blob, filenam
   const data = await response.json();
   return data.name;
 }
+
+async function findOutputImage(historyOutputs: any): Promise<any | null> {
+    if (!historyOutputs) return null;
+    const nodesToCheck = [FINAL_OUTPUT_NODE_ID, ...FALLBACK_NODE_IDS];
+    for (const nodeId of nodesToCheck) {
+        const nodeOutput = historyOutputs[nodeId];
+        if (nodeOutput?.images && Array.isArray(nodeOutput.images) && nodeOutput.images.length > 0) {
+            return nodeOutput.images[0];
+        }
+    }
+    for (const nodeId in historyOutputs) {
+        const outputData = historyOutputs[nodeId];
+        if (outputData.images && Array.isArray(outputData.images) && outputData.images.length > 0) {
+            return outputData.images[0];
+        }
+    }
+    return null;
+}
+
+async function createGalleryEntry(supabase: any, job: any, finalResult: any) {
+    if (!job.metadata?.invoker_user_id || !job.metadata?.original_prompt_for_gallery) return;
+    const jobPayload = {
+        user_id: job.metadata.invoker_user_id,
+        original_prompt: job.metadata.original_prompt_for_gallery,
+        status: 'complete',
+        final_result: { isImageGeneration: true, images: [finalResult] },
+        context: { source: 'refiner' }
+    };
+    await supabase.from('mira-agent-jobs').insert(jobPayload);
+}
+
+async function wakeUpMainAgent(supabase: any, comfyJob: any, finalResult: any) {
+    if (!comfyJob.main_agent_job_id) return;
+    const { data: mainJob, error: fetchError } = await supabase.from('mira-agent-jobs').select('context').eq('id', comfyJob.main_agent_job_id).single();
+    if (fetchError) { console.error(`[Poller] Could not fetch parent agent job:`, fetchError); return; }
+    const newHistory = [
+        ...(mainJob.context?.history || []),
+        { role: 'function', parts: [{ functionResponse: { name: 'dispatch_to_refinement_agent', response: { isImageGeneration: true, images: [finalResult] } } }] }
+    ];
+    await supabase.from('mira-agent-jobs').update({
+        status: 'processing',
+        final_result: null,
+        context: { ...mainJob.context, history: newHistory }
+    }).eq('id', comfyJob.main_agent_job_id);
+    supabase.functions.invoke('MIRA-AGENT-master-worker', { body: { job_id: comfyJob.main_agent_job_id } }).catch(console.error);
+}
+
+serve(async (req) => {
+  if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
+
+  const { job_id } = await req.json();
+  if (!job_id) { throw new Error("job_id is required."); }
+
+  const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
+  console.log(`[ModelGenPoller][${job_id}] Poller invoked.`);
+
+  try {
+    await supabase.from('mira-agent-model-generation-jobs').update({ last_polled_at: new Date().toISOString() }).eq('id', job_id);
+
+    const { data: job, error: fetchError } = await supabase.from('mira-agent-model-generation-jobs').select('*').eq('id', job_id).single();
+    if (fetchError) throw fetchError;
+
+    switch (job.status) {
+        case 'pending':
+            await handlePendingState(supabase, job);
+            break;
+        case 'base_generation_complete':
+            await handleBaseGenerationCompleteState(supabase, job);
+            break;
+        case 'generating_poses':
+            await handleGeneratingPosesState(supabase, job);
+            break;
+        case 'polling_poses':
+            await handlePollingPosesState(supabase, job);
+            break;
+        case 'upscaling_poses':
+            await handleUpscalingPosesState(supabase, job);
+            break;
+        case 'awaiting_approval':
+        case 'complete':
+        case 'failed':
+            console.log(`[ModelGenPoller][${job.id}] Job in terminal or waiting state ('${job.status}'). Halting.`);
+            break;
+        default:
+            console.warn(`[ModelGenPoller][${job.id}] Unknown job status: ${job.status}`);
+    }
+
+    return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
+
+  } catch (error) {
+    console.error(`[ModelGenPoller][${job.id}] Error:`, error);
+    await supabase.from('mira-agent-model-generation-jobs').update({ status: 'failed', error_message: error.message }).eq('id', job_id);
+    return new Response(JSON.stringify({ error: error.message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
+  }
+});
 
 async function handlePendingState(supabase: any, job: any) {
     console.log(`[ModelGenPoller][${job.id}] State: PENDING. Generating base prompt...`);
@@ -1032,9 +1130,9 @@ async function pollUpscalingPoses(supabase: any, job: any) {
         if (historyResponse.ok) {
             const historyData = await historyResponse.json();
             const promptHistory = historyData[poseJob.upscale_prompt_id];
-            const outputNode = promptHistory?.outputs['283'];
-            if (outputNode?.images && outputNode.images.length > 0) {
-                const image = outputNode.images[0];
+            const outputNode = await findOutputImage(promptHistory?.outputs);
+            if (outputNode) {
+                const image = outputNode;
                 const tempImageUrl = `${comfyUiAddress}/view?filename=${encodeURIComponent(image.filename)}&subfolder=${encodeURIComponent(image.subfolder)}&type=${image.type}`;
                 
                 console.log(`[ModelGenPoller][${job.id}] Pose successfully upscaled. Downloading from ComfyUI...`);
@@ -1147,50 +1245,3 @@ async function handleUpscalingPosesState(supabase: any, job: any) {
         }, POLLING_INTERVAL_MS);
     }
 }
-
-serve(async (req) => {
-  const { job_id } = await req.json();
-  if (!job_id) throw new Error("job_id is required.");
-
-  const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-  console.log(`[ModelGenPoller][${job_id}] Poller invoked.`);
-
-  try {
-    await supabase.from('mira-agent-model-generation-jobs').update({ last_polled_at: new Date().toISOString() }).eq('id', job_id);
-
-    const { data: job, error: fetchError } = await supabase.from('mira-agent-model-generation-jobs').select('*').eq('id', job_id).single();
-    if (fetchError) throw fetchError;
-
-    switch (job.status) {
-        case 'pending':
-            await handlePendingState(supabase, job);
-            break;
-        case 'base_generation_complete':
-            await handleBaseGenerationCompleteState(supabase, job);
-            break;
-        case 'generating_poses':
-            await handleGeneratingPosesState(supabase, job);
-            break;
-        case 'polling_poses':
-            await handlePollingPosesState(supabase, job);
-            break;
-        case 'upscaling_poses':
-            await handleUpscalingPosesState(supabase, job);
-            break;
-        case 'awaiting_approval':
-        case 'complete':
-        case 'failed':
-            console.log(`[ModelGenPoller][${job.id}] Job in terminal or waiting state ('${job.status}'). Halting.`);
-            break;
-        default:
-            console.warn(`[ModelGenPoller][${job.id}] Unknown job status: ${job.status}`);
-    }
-
-    return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
-
-  } catch (error) {
-    console.error(`[ModelGenPoller][${job_id}] Error:`, error);
-    await supabase.from('mira-agent-model-generation-jobs').update({ status: 'failed', error_message: error.message }).eq('id', job_id);
-    return new Response(JSON.stringify({ error: error.message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
-  }
-});
