@@ -733,13 +733,15 @@ serve(async (req)=>{
       comfyui_prompt_id: data.prompt_id,
       status: 'queued',
       main_agent_job_id: main_agent_job_id,
+      retry_count: 0, // Initialize retry count
       metadata: {
         source: source || 'refiner',
         prompt: prompt_text,
         original_prompt_for_gallery: original_prompt_for_gallery || `Refined: ${prompt_text?.slice(0, 40) || 'image'}...`,
         invoker_user_id: invoker_user_id,
         source_image_url: sourceImageUrl, // <-- CRITICAL FIX: Use the public Supabase URL
-        workflow_type: workflow_type || 'standard'
+        workflow_type: workflow_type || 'standard',
+        workflow_payload: payload // Save the workflow for retries
       }
     }).select('id').single();
     if (insertError) throw insertError;

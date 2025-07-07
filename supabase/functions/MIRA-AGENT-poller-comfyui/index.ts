@@ -13,6 +13,7 @@ const GENERATED_IMAGES_BUCKET = 'mira-generations';
 const POLLING_INTERVAL_MS = 5000;
 const FINAL_OUTPUT_NODE_ID = "445";
 const FALLBACK_NODE_IDS = ["431", "430", "9", "4"];
+const MAX_RETRIES = 2;
 
 async function findOutputImage(historyOutputs: any): Promise<any | null> {
     if (!historyOutputs) return null;
@@ -78,7 +79,6 @@ serve(async (req) => {
         return new Response(JSON.stringify({ success: true, message: "Job already resolved." }), { headers: corsHeaders });
     }
 
-    // --- NEW LOGIC: Check /queue endpoint first ---
     const queueUrl = `${job.comfyui_address}/queue`;
     const queueResponse = await fetch(queueUrl);
     if (!queueResponse.ok) throw new Error(`Failed to fetch ComfyUI queue status: ${queueResponse.statusText}`);
@@ -88,19 +88,16 @@ serve(async (req) => {
                          queueData.queue_pending.some((item: any) => item[1] === job.comfyui_prompt_id);
 
     if (isJobInQueue) {
-        console.log(`[Poller][${job_id}] Job is still running or pending in the ComfyUI queue. Re-polling.`);
+        console.log(`[Poller][${job_id}] Job is still running or pending. Re-polling.`);
         await supabase.from('mira-agent-comfyui-jobs').update({ status: 'processing' }).eq('id', job_id);
         setTimeout(() => { supabase.functions.invoke('MIRA-AGENT-poller-comfyui', { body: { job_id } }).catch(console.error); }, POLLING_INTERVAL_MS);
         return new Response(JSON.stringify({ success: true, status: 'processing' }), { headers: corsHeaders });
     }
 
-    // --- If not in queue, check history for success ---
     const historyUrl = `${job.comfyui_address}/history/${job.comfyui_prompt_id}`;
     const historyResponse = await fetch(historyUrl);
     if (!historyResponse.ok) {
-        // CRITICAL: Job is not in queue AND not in history. It has failed or been cancelled.
-        console.error(`[Poller][${job_id}] Job not found in queue or history. Marking as failed.`);
-        throw new Error("Job disappeared from the queue without completing successfully. It may have been cancelled or failed on the ComfyUI server.");
+        throw new Error("Job not found in queue or history. Marking as failed.");
     }
     
     const historyData = await historyResponse.json();
@@ -129,9 +126,36 @@ serve(async (req) => {
         console.log(`[Poller][${job.id}] All steps complete. Polling finished.`);
         return new Response(JSON.stringify({ success: true, status: 'complete', publicUrl }), { headers: corsHeaders });
     } else {
-        // This case is now less likely but kept as a safeguard.
-        console.error(`[Poller][${job.id}] Job not in queue, but history exists without a valid output image. Marking as failed.`);
-        throw new Error("Job finished with an incomplete or invalid output in its history.");
+        // Job is not in queue and has no output. It has failed.
+        console.warn(`[Poller][${job.id}] Job finished with no output. Attempting retry #${(job.retry_count || 0) + 1}...`);
+        if ((job.retry_count || 0) < MAX_RETRIES) {
+            const originalWorkflow = job.metadata?.workflow_payload;
+            if (!originalWorkflow) {
+                throw new Error("Cannot retry job: original workflow payload is missing from metadata.");
+            }
+            
+            const queueUrl = `${job.comfyui_address}/prompt`;
+            const response = await fetch(queueUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+                body: JSON.stringify(originalWorkflow)
+            });
+            if (!response.ok) throw new Error(`ComfyUI retry request failed: ${await response.text()}`);
+            const data = await response.json();
+            if (!data.prompt_id) throw new Error("ComfyUI did not return a new prompt_id on retry.");
+
+            await supabase.from('mira-agent-comfyui-jobs').update({
+                comfyui_prompt_id: data.prompt_id,
+                status: 'queued',
+                retry_count: (job.retry_count || 0) + 1
+            }).eq('id', job.id);
+
+            console.log(`[Poller][${job.id}] Job re-queued with new prompt_id: ${data.prompt_id}. Re-invoking poller.`);
+            setTimeout(() => { supabase.functions.invoke('MIRA-AGENT-poller-comfyui', { body: { job_id } }).catch(console.error); }, POLLING_INTERVAL_MS);
+            return new Response(JSON.stringify({ success: true, status: 'retrying' }), { headers: corsHeaders });
+        } else {
+            throw new Error(`Job failed after ${MAX_RETRIES} retries.`);
+        }
     }
 
   } catch (error) {
