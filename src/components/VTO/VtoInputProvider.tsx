@@ -9,9 +9,10 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { ModelPoseSelector } from './ModelPoseSelector';
 import { SecureImageDisplay } from './SecureImageDisplay';
 import { useLanguage } from '@/context/LanguageContext';
-import { PlusCircle, Shirt, Users, X } from 'lucide-react';
+import { PlusCircle, Shirt, Users, X, Link2, Shuffle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useDropzone } from '@/hooks/useDropzone';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export interface QueueItem {
   person_url: string;
@@ -31,7 +32,7 @@ const ImageUploader = ({ onFileSelect, title, imageUrl, onClear }: { onFileSelec
   
     if (imageUrl) {
       return (
-        <div className="relative h-full w-full">
+        <div className="relative aspect-square">
           <img src={imageUrl} alt={title} className="w-full h-full object-cover rounded-md" />
           <Button variant="destructive" size="icon" className="absolute top-2 right-2 h-6 w-6 z-10" onClick={onClear}><X className="h-4 w-4" /></Button>
         </div>
@@ -39,7 +40,7 @@ const ImageUploader = ({ onFileSelect, title, imageUrl, onClear }: { onFileSelec
     }
   
     return (
-      <div {...dropzoneProps} className={cn("flex h-full w-full justify-center items-center rounded-lg border border-dashed p-4 text-center transition-colors cursor-pointer", isDraggingOver && "border-primary bg-primary/10")} onClick={() => inputRef.current?.click()}>
+      <div {...dropzoneProps} className={cn("flex aspect-square justify-center items-center rounded-lg border border-dashed p-4 text-center transition-colors cursor-pointer", isDraggingOver && "border-primary bg-primary/10")} onClick={() => inputRef.current?.click()}>
         <div className="text-center pointer-events-none"><PlusCircle className="mx-auto h-8 w-8 text-muted-foreground" /><p className="mt-2 text-sm font-semibold">{title}</p></div>
         <Input ref={inputRef} type="file" className="hidden" accept="image/*" onChange={(e) => e.target.files && onFileSelect(e.target.files[0])} />
       </div>
@@ -216,20 +217,9 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
             <CardDescription>{t('precisePairsInputDescription')}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>{t('person')}</Label>
-              <div className="aspect-square bg-muted rounded-md flex items-center justify-center">
-                {tempPairPersonUrl ? <SecureImageDisplay imageUrl={tempPairPersonUrl} alt="Selected Model" /> : <Users className="h-12 w-12 text-muted-foreground" />}
-              </div>
-              <Button variant="outline" className="w-full" onClick={() => setIsModelModalOpen(true)}>Select Model</Button>
-            </div>
-            <div className="space-y-2">
-              <Label>{t('garment')}</Label>
-              <div className="aspect-square">
-                <ImageUploader onFileSelect={setTempPairGarmentFile} title={t('garmentImage')} imageUrl={tempPairGarmentUrl} onClear={() => setTempPairGarmentFile(null)} />
-              </div>
-            </div>
+          <div className="grid grid-cols-2 gap-2">
+            <ImageUploader onFileSelect={setTempPairPerson} title={t('person')} imageUrl={tempPairPerson ? URL.createObjectURL(tempPairPerson) : null} onClear={() => setTempPairPerson(null)} />
+            <ImageUploader onFileSelect={setTempPairGarmentFile} title={t('garment')} imageUrl={tempPairGarmentUrl} onClear={() => setTempPairGarmentFile(null)} />
           </div>
           <div>
             <Label htmlFor="pair-appendix">{t('promptAppendixPair')}</Label>
