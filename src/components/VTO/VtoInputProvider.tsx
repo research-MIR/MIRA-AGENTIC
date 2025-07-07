@@ -1,11 +1,11 @@
 import React, { useState, useMemo, useRef } from 'react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { ModelPoseSelector } from './ModelPoseSelector';
 import { SecureImageDisplay } from './SecureImageDisplay';
 import { useLanguage } from '@/context/LanguageContext';
@@ -71,11 +71,13 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
   const [randomGarmentFiles, setRandomGarmentFiles] = useState<File[]>([]);
 
   const [precisePairs, setPrecisePairs] = useState<QueueItem[]>([]);
+  const [tempPairPersonFile, setTempPairPersonFile] = useState<File | null>(null);
   const [tempPairPersonUrl, setTempPairPersonUrl] = useState<string | null>(null);
   const [tempPairGarmentFile, setTempPairGarmentFile] = useState<File | null>(null);
   const [tempPairAppendix, setTempPairAppendix] = useState("");
 
   const garmentFileUrl = useMemo(() => garmentFile ? URL.createObjectURL(garmentFile) : null, [garmentFile]);
+  const tempPairPersonPreviewUrl = useMemo(() => tempPairPersonFile ? URL.createObjectURL(tempPairPersonFile) : tempPairPersonUrl, [tempPairPersonFile, tempPairPersonUrl]);
   const tempPairGarmentUrl = useMemo(() => tempPairGarmentFile ? URL.createObjectURL(tempPairGarmentFile) : null, [tempPairGarmentFile]);
 
   const handleMultiModelSelect = (url: string) => {
@@ -98,10 +100,12 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
   };
 
   const addPrecisePair = () => {
-    if (tempPairPersonUrl && tempPairGarmentFile) {
+    const personUrl = tempPairPersonUrl || (tempPairPersonFile ? URL.createObjectURL(tempPairPersonFile) : null);
+    if (personUrl && tempPairGarmentFile) {
       const garmentUrl = URL.createObjectURL(tempPairGarmentFile);
-      setPrecisePairs(prev => [...prev, { person_url: tempPairPersonUrl, garment_url: garmentUrl, appendix: tempPairAppendix }]);
+      setPrecisePairs(prev => [...prev, { person_url: personUrl, garment_url: garmentUrl, appendix: tempPairAppendix }]);
       setTempPairPersonUrl(null);
+      setTempPairPersonFile(null);
       setTempPairGarmentFile(null);
       setTempPairAppendix("");
     }
@@ -218,14 +222,14 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-2 gap-2">
-            <ImageUploader onFileSelect={setTempPairPerson} title={t('person')} imageUrl={tempPairPerson ? URL.createObjectURL(tempPairPerson) : null} onClear={() => setTempPairPerson(null)} />
+            <ImageUploader onFileSelect={setTempPairPersonFile} title={t('person')} imageUrl={tempPairPersonPreviewUrl} onClear={() => { setTempPairPersonFile(null); setTempPairPersonUrl(null); }} />
             <ImageUploader onFileSelect={setTempPairGarmentFile} title={t('garment')} imageUrl={tempPairGarmentUrl} onClear={() => setTempPairGarmentFile(null)} />
           </div>
           <div>
             <Label htmlFor="pair-appendix">{t('promptAppendixPair')}</Label>
             <Input id="pair-appendix" value={tempPairAppendix} onChange={(e) => setTempPairAppendix(e.target.value)} placeholder={t('promptAppendixPairPlaceholder')} />
           </div>
-          <Button className="w-full" onClick={addPrecisePair} disabled={!tempPairPersonUrl || !tempPairGarmentFile}>{t('addPairToQueue')}</Button>
+          <Button className="w-full" onClick={addPrecisePair} disabled={(!tempPairPersonUrl && !tempPairPersonFile) || !tempPairGarmentFile}>{t('addPairToQueue')}</Button>
         </CardContent>
       </Card>
       <Card>
