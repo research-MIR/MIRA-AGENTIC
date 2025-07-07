@@ -820,6 +820,17 @@ const workflowTemplateSkin = `
 }
 `;
 
+async function uploadImageToComfyUI(comfyUiUrl: string, imageBlob: Blob, filename: string) {
+  const formData = new FormData();
+  formData.append('image', imageBlob, filename);
+  formData.append('overwrite', 'true');
+  const uploadUrl = `${comfyUiUrl}/upload/image`;
+  const response = await fetch(uploadUrl, { method: 'POST', body: formData });
+  if (!response.ok) throw new Error(`ComfyUI upload failed: ${await response.text()}`);
+  const data = await response.json();
+  return data.name;
+}
+
 async function handlePendingState(supabase: any, job: any) {
     console.log(`[ModelGenPoller][${job.id}] State: PENDING. Generating base prompt...`);
     const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-generate-model-prompt', {
