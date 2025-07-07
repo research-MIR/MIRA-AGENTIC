@@ -41,6 +41,10 @@ export const generateModelsTranslations = {
     multiModelPlaceholder: "Es. tre modelle con i capelli rossi, una più robusta, una più magra, una media, e un modello uomo con i capelli neri...",
     generateModelsButton: "Genera Modelli",
     noPosesGenerated: "Nessuna posa è stata ancora generata per questo pack.",
+    generationJobs: "Job di Generazione",
+    upscaledPoses: "Pose Migliorate",
+    selectJobToViewPoses: "Seleziona un job per visualizzare le sue pose generate.",
+    noUpscaledPoses: "Nessuna posa migliorata ancora. Usa il pulsante 'Upscale' per preparare le immagini per il VTO.",
   },
   en: {
     generateModelsTitle: "Generate Models",
@@ -84,5 +88,9 @@ export const generateModelsTranslations = {
     multiModelPlaceholder: "E.g., three red-headed models, one fatter, one slimmer, one medium, and a male model with black hair...",
     generateModelsButton: "Generate Models",
     noPosesGenerated: "No poses have been generated for this pack yet.",
+    generationJobs: "Generation Jobs",
+    upscaledPoses: "Upscaled Poses",
+    selectJobToViewPoses: "Select a job to view its generated poses.",
+    noUpscaledPoses: "No upscaled poses yet. Use the 'Upscale' button to prepare images for VTO.",
   },
 };

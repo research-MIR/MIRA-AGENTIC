@@ -12,7 +12,11 @@ import { PackStatusIndicator } from "@/components/GenerateModels/PackStatusIndic
 import { JobProgressBar } from "@/components/GenerateModels/JobProgressBar";
 import { Button } from "@/components/ui/button";
 import { UpscalePosesModal } from "@/components/GenerateModels/UpscalePosesModal";
-import { PackPosesGallery } from "@/components/GenerateModels/PackPosesGallery";
+import { RecentJobThumbnail } from "@/components/GenerateModels/RecentJobThumbnail";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { JobPoseDisplay } from "@/components/GenerateModels/JobPoseDisplay";
+import { UpscaledPosesGallery } from "@/components/GenerateModels/UpscaledPosesGallery";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 interface Pose {
   final_url: string;
@@ -37,6 +41,7 @@ const ModelPackDetail = () => {
   const queryClient = useQueryClient();
   const { t } = useLanguage();
   const [isUpscaleModalOpen, setIsUpscaleModalOpen] = useState(false);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
 
   const { data: pack, isLoading: isLoadingPack, error: packError } = useQuery({
@@ -65,145 +70,106 @@ const ModelPackDetail = () => {
     enabled: !!packId,
   });
 
-  const allPoses = useMemo(() => {
-    if (!jobs) return [];
-    return jobs.flatMap(job => 
-      (job.final_posed_images || []).map(pose => ({ ...pose, jobId: job.id }))
-    );
-  }, [jobs]);
+  const selectedJob = useMemo(() => jobs?.find(j => j.id === selectedJobId), [jobs, selectedJobId]);
 
   const packStatus = useMemo(() => {
     if (!jobs || jobs.length === 0) {
         return { status: 'idle' as const, completedPoses: 0, totalPoses: 0, upscaledPoses: 0 };
     }
-
-    let completedPoses = 0;
-    let totalPoses = 0;
-    let upscaledPoses = 0;
-    let hasFailed = false;
-    let hasInProgress = false;
-    let allJobsAreComplete = true;
-
+    let completedPoses = 0, totalPoses = 0, upscaledPoses = 0, hasFailed = false, hasInProgress = false, allJobsAreComplete = true;
     for (const job of jobs) {
-        const jobTotalPoses = job.pose_prompts?.length || 0;
-        totalPoses += jobTotalPoses;
-        
-        const jobCompletedPoses = job.final_posed_images?.filter((p: any) => p.status === 'complete').length || 0;
-        completedPoses += jobCompletedPoses;
-
-        const jobUpscaledPoses = job.final_posed_images?.filter((p: any) => p.is_upscaled).length || 0;
-        upscaledPoses += jobUpscaledPoses;
-
-        if (job.status === 'failed') {
-            hasFailed = true;
-        }
-        if (job.status !== 'complete' && job.status !== 'failed') {
-            hasInProgress = true;
-        }
-        if (job.status !== 'complete') {
-            allJobsAreComplete = false;
-        }
+        totalPoses += job.pose_prompts?.length || 0;
+        completedPoses += job.final_posed_images?.filter((p: any) => p.status === 'complete').length || 0;
+        upscaledPoses += job.final_posed_images?.filter((p: any) => p.is_upscaled).length || 0;
+        if (job.status === 'failed') hasFailed = true;
+        if (job.status !== 'complete' && job.status !== 'failed') hasInProgress = true;
+        if (job.status !== 'complete') allJobsAreComplete = false;
     }
-
     let aggregateStatus: 'idle' | 'in_progress' | 'failed' | 'complete' = 'idle';
-    if (hasFailed) {
-        aggregateStatus = 'failed';
-    } else if (hasInProgress) {
-        aggregateStatus = 'in_progress';
-    } else if (allJobsAreComplete && jobs.length > 0) {
-        aggregateStatus = 'complete';
-    }
-
+    if (hasFailed) aggregateStatus = 'failed';
+    else if (hasInProgress) aggregateStatus = 'in_progress';
+    else if (allJobsAreComplete && jobs.length > 0) aggregateStatus = 'complete';
     return { status: aggregateStatus, completedPoses, totalPoses, upscaledPoses };
   }, [jobs]);
 
   const posesReadyForUpscaleCount = useMemo(() => {
-    return allPoses.filter(pose => pose.status === 'complete' && !pose.is_upscaled).length;
-  }, [allPoses]);
+    if (!jobs) return 0;
+    return jobs.flatMap(job => job.final_posed_images || []).filter(pose => pose.status === 'complete' && !pose.is_upscaled).length;
+  }, [jobs]);
 
   useEffect(() => {
     if (!packId || !session?.user?.id) return;
-
-    const channel = supabase
-      .channel(`model-pack-jobs-${packId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'mira-agent-model-generation-jobs',
-          filter: `pack_id=eq.${packId}`,
-        },
+    const channel = supabase.channel(`model-pack-jobs-${packId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mira-agent-model-generation-jobs', filter: `pack_id=eq.${packId}` },
         (payload) => {
           console.log('Realtime update received for model pack jobs:', payload);
           queryClient.invalidateQueries({ queryKey: ['modelsForPack', packId] });
         }
-      )
-      .subscribe();
-
+      ).subscribe();
     channelRef.current = channel;
-
-    return () => {
-      if (channelRef.current) {
-        supabase.removeChannel(channelRef.current);
-      }
-    };
+    return () => { if (channelRef.current) supabase.removeChannel(channelRef.current); };
   }, [packId, session?.user?.id, supabase, queryClient]);
 
-  if (isLoadingPack) {
-    return <div className="p-8"><Skeleton className="h-12 w-1/3" /><Skeleton className="mt-4 h-64 w-full" /></div>;
-  }
-
-  if (packError) {
-    return <div className="p-8"><Alert variant="destructive"><AlertTitle>Error</AlertTitle><AlertDescription>{packError.message}</AlertDescription></Alert></div>;
-  }
-
-  if (!pack) {
-    return <div className="p-8"><Alert><AlertTitle>Not Found</AlertTitle><AlertDescription>This model pack could not be found.</AlertDescription></Alert></div>;
-  }
+  if (isLoadingPack) return <div className="p-8"><Skeleton className="h-12 w-1/3" /><Skeleton className="mt-4 h-64 w-full" /></div>;
+  if (packError) return <div className="p-8"><Alert variant="destructive"><AlertTitle>Error</AlertTitle><AlertDescription>{packError.message}</AlertDescription></Alert></div>;
+  if (!pack) return <div className="p-8"><Alert><AlertTitle>Not Found</AlertTitle><AlertDescription>This model pack could not be found.</AlertDescription></Alert></div>;
 
   return (
     <>
       <div className="p-4 md:p-8 h-screen flex flex-col">
         <header className="pb-4 mb-4 border-b shrink-0">
           <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                  <h1 className="text-3xl font-bold">{pack.name}</h1>
-                  <PackStatusIndicator status={packStatus.status} totalPoses={packStatus.totalPoses} upscaledPoses={packStatus.upscaledPoses} />
-              </div>
-              <Button onClick={() => setIsUpscaleModalOpen(true)} disabled={posesReadyForUpscaleCount === 0}>
-                <Wand2 className="mr-2 h-4 w-4" />
-                Upscale & Prepare for VTO ({posesReadyForUpscaleCount})
-              </Button>
+            <div className="flex items-center gap-4">
+              <h1 className="text-3xl font-bold">{pack.name}</h1>
+              <PackStatusIndicator status={packStatus.status} totalPoses={packStatus.totalPoses} upscaledPoses={packStatus.upscaledPoses} />
+            </div>
+            <Button onClick={() => setIsUpscaleModalOpen(true)} disabled={posesReadyForUpscaleCount === 0}>
+              <Wand2 className="mr-2 h-4 w-4" />
+              Upscale & Prepare for VTO ({posesReadyForUpscaleCount})
+            </Button>
           </div>
           <div className="mt-2">
-              <JobProgressBar completedPoses={packStatus.completedPoses} totalPoses={packStatus.totalPoses} />
+            <JobProgressBar completedPoses={packStatus.completedPoses} totalPoses={packStatus.totalPoses} />
           </div>
           <p className="text-muted-foreground mt-1">{pack.description || "No description provided."}</p>
         </header>
         <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-8 overflow-hidden">
           <div className="lg:col-span-2 overflow-y-auto no-scrollbar pr-4">
-            {isLoadingJobs ? (
-              <div className="flex items-center justify-center h-full">
-                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-              </div>
-            ) : jobsError ? (
-              <Alert variant="destructive"><AlertTitle>Error</AlertTitle><AlertDescription>{jobsError.message}</AlertDescription></Alert>
-            ) : (
-              <PackPosesGallery poses={allPoses} />
-            )}
+            <Tabs defaultValue="jobs" className="w-full">
+              <TabsList>
+                <TabsTrigger value="jobs">{t('generationJobs')}</TabsTrigger>
+                <TabsTrigger value="upscaled">{t('upscaledPoses')}</TabsTrigger>
+              </TabsList>
+              <TabsContent value="jobs" className="mt-4">
+                <div className="space-y-4">
+                  <Card>
+                    <CardHeader><CardTitle>Generation Jobs</CardTitle></CardHeader>
+                    <CardContent>
+                      {isLoadingJobs ? <Skeleton className="h-24 w-full" /> : jobsError ? <Alert variant="destructive"><AlertTitle>Error</AlertTitle><AlertDescription>{jobsError.message}</AlertDescription></Alert> : (
+                        <ScrollArea className="h-32">
+                          <div className="flex gap-4 pb-2">
+                            {jobs?.map(job => (
+                              <RecentJobThumbnail key={job.id} job={job} onClick={() => setSelectedJobId(job.id)} isSelected={selectedJobId === job.id} />
+                            ))}
+                          </div>
+                        </ScrollArea>
+                      )}
+                    </CardContent>
+                  </Card>
+                  <JobPoseDisplay job={selectedJob} />
+                </div>
+              </TabsContent>
+              <TabsContent value="upscaled" className="mt-4">
+                <UpscaledPosesGallery jobs={jobs || []} />
+              </TabsContent>
+            </Tabs>
           </div>
           <div className="lg:col-span-1 overflow-y-auto no-scrollbar">
             <ModelGenerator packId={packId!} />
           </div>
         </div>
       </div>
-      <UpscalePosesModal
-        isOpen={isUpscaleModalOpen}
-        onClose={() => setIsUpscaleModalOpen(false)}
-        jobs={jobs || []}
-        packId={packId!}
-      />
+      <UpscalePosesModal isOpen={isUpscaleModalOpen} onClose={() => setIsUpscaleModalOpen(false)} jobs={jobs || []} packId={packId!} />
     </>
   );
 };

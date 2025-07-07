@@ -14,8 +14,13 @@ interface Pose {
   jobId: string;
 }
 
-interface PackPosesGalleryProps {
-  poses: Pose[];
+interface Job {
+    id: string;
+    final_posed_images?: Pose[];
+}
+
+interface JobPoseDisplayProps {
+  job: Job | null;
 }
 
 const PoseStatusIcon = ({ pose }: { pose: Pose }) => {
@@ -60,34 +65,42 @@ const PoseStatusIcon = ({ pose }: { pose: Pose }) => {
   );
 };
 
-export const PackPosesGallery = ({ poses }: PackPosesGalleryProps) => {
+export const JobPoseDisplay = ({ job }: JobPoseDisplayProps) => {
   const { t } = useLanguage();
   const { showImage } = useImagePreview();
+  const poses = job?.final_posed_images || [];
 
-  if (poses.length === 0) {
+  if (!job) {
     return (
       <Card className="h-full flex items-center justify-center">
         <div className="text-center text-muted-foreground">
-          <p>{t('noPosesGenerated')}</p>
+          <p>{t('selectJobToViewPoses')}</p>
         </div>
       </Card>
     );
   }
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-      {poses.map((pose, index) => (
-        <div key={`${pose.jobId}-${index}`} className="space-y-2">
-          <div 
-            className="relative group aspect-square cursor-pointer"
-            onClick={() => showImage({ images: poses.map(p => ({ url: p.final_url, jobId: p.jobId })), currentIndex: index })}
-          >
-            <SecureImageDisplay imageUrl={pose.final_url} alt={pose.pose_prompt} />
-            <PoseStatusIcon pose={pose} />
-          </div>
-          <p className="text-xs text-muted-foreground truncate">{pose.pose_prompt}</p>
-        </div>
-      ))}
-    </div>
+    <Card>
+        <CardHeader>
+            <CardTitle>Generated Poses for Job</CardTitle>
+        </CardHeader>
+        <CardContent>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            {poses.map((pose, index) => (
+                <div key={`${job.id}-${index}`} className="space-y-2">
+                <div 
+                    className="relative group aspect-square cursor-pointer"
+                    onClick={() => showImage({ images: poses.map(p => ({ url: p.final_url, jobId: job.id })), currentIndex: index })}
+                >
+                    <SecureImageDisplay imageUrl={pose.final_url} alt={pose.pose_prompt} />
+                    <PoseStatusIcon pose={pose} />
+                </div>
+                <p className="text-xs text-muted-foreground truncate">{pose.pose_prompt}</p>
+                </div>
+            ))}
+            </div>
+        </CardContent>
+    </Card>
   );
 };
