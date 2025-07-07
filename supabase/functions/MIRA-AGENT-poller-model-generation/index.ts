@@ -1052,10 +1052,8 @@ async function pollUpscalingPoses(supabase: any, job: any) {
 async function handleUpscalingPosesState(supabase: any, job: any) {
     console.log(`[ModelGenPoller][${job.id}] State: UPSCALING_POSES.`);
     
-    // First, poll for any already processing jobs to see if they've finished
     await pollUpscalingPoses(supabase, job);
 
-    // Refetch the job to get the latest state after polling
     const { data: updatedJob, error: refetchError } = await supabase.from('mira-agent-model-generation-jobs').select('*').eq('id', job.id).single();
     if (refetchError) throw refetchError;
 
@@ -1075,19 +1073,14 @@ async function handleUpscalingPosesState(supabase: any, job: any) {
         await supabase.from('mira-agent-model-generation-jobs').update({ final_posed_images: posesToUpdate }).eq('id', job.id);
 
         const comfyUiAddress = COMFYUI_ENDPOINT_URL!.replace(/\/+$/, "");
-        const upscalePromises = posesToProcess.map(async (poseToProcess: any) => {
+        const upscalePromises = posesToProcess.map(async (poseToProcess: any, index: number) => {
             try {
                 const imageResponse = await fetch(poseToProcess.final_url);
                 if (!imageResponse.ok) throw new Error(`Failed to download image for upscaling: ${imageResponse.statusText}`);
                 const imageBlob = await imageResponse.blob();
 
-                const formData = new FormData();
-                formData.append('image', imageBlob, 'image_to_upscale.png');
-                formData.append('overwrite', 'true');
-                const uploadResponse = await fetch(`${comfyUiAddress}/upload/image`, { method: 'POST', body: formData });
-                if (!uploadResponse.ok) throw new Error(`ComfyUI upload failed: ${await uploadResponse.text()}`);
-                const uploadData = await uploadResponse.json();
-                const uploadedFilename = uploadData.name;
+                const uniqueFilename = `pose_to_upscale_${job.id}_${index}.png`;
+                const uploadedFilename = await uploadImageToComfyUI(comfyUiAddress, imageBlob, uniqueFilename);
 
                 const workflow = JSON.parse(tiledUpscalerWorkflow);
                 workflow['149'].inputs.image = uploadedFilename;
