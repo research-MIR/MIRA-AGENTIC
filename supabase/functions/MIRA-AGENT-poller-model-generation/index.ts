@@ -725,6 +725,101 @@ const tiledUpscalerWorkflow = `{
   }
 }`;
 
+// NOTE: This is the new, correct skin-specific workflow using LDSR.
+const workflowTemplateSkin = `
+{
+  "3": {
+    "inputs": {
+      "image": "d0928d10-18cf-451f-8f4a-2c57936c1e59 (1).jpeg"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "4": {
+    "inputs": {
+      "images": [
+        "7",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "5": {
+    "inputs": {
+      "model": "last.ckpt"
+    },
+    "class_type": "LDSRModelLoader",
+    "_meta": {
+      "title": "Load LDSR Model"
+    }
+  },
+  "6": {
+    "inputs": {
+      "steps": "50",
+      "pre_downscale": "None",
+      "post_downscale": "None",
+      "downsample_method": "Lanczos",
+      "upscale_model": [
+        "5",
+        0
+      ],
+      "images": [
+        "3",
+        0
+      ]
+    },
+    "class_type": "LDSRUpscale",
+    "_meta": {
+      "title": "LDSR Upscale"
+    }
+  },
+  "7": {
+    "inputs": {
+      "upscale_method": "nearest-exact",
+      "scale_by": [
+        "8",
+        0
+      ],
+      "image": [
+        "6",
+        0
+      ]
+    },
+    "class_type": "ImageScaleBy",
+    "_meta": {
+      "title": "Upscale Image By"
+    }
+  },
+  "8": {
+    "inputs": {
+      "Number": "1"
+    },
+    "class_type": "Float",
+    "_meta": {
+      "title": "SCALE - CONSIDER THAT LDSR UPSCALE OUTPUTS A X4 OF THE ORIGINAL IMAGE"
+    }
+  },
+  "9": {
+    "inputs": {
+      "filename_prefix": "ComfyUI",
+      "images": [
+        "7",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  }
+}
+`;
+
 async function handlePendingState(supabase: any, job: any) {
     console.log(`[ModelGenPoller][${job.id}] State: PENDING. Generating base prompt...`);
     const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-generate-model-prompt', {
@@ -914,73 +1009,87 @@ async function handlePollingPosesState(supabase: any, job: any) {
 
 async function handleUpscalingPosesState(supabase: any, job: any) {
     console.log(`[ModelGenPoller][${job.id}] State: UPSCALING_POSES.`);
-    const updatedPoseJobs = [...job.final_posed_images];
     const comfyUiAddress = COMFYUI_ENDPOINT_URL!.replace(/\/+$/, "");
-    
-    const poseToProcessIndex = updatedPoseJobs.findIndex(p => p.upscale_status === 'pending');
 
-    if (poseToProcessIndex === -1) {
-        const isStillProcessing = updatedPoseJobs.some(p => p.upscale_status === 'processing');
-        if (!isStillProcessing) {
-            console.log(`[ModelGenPoller][${job.id}] No more poses to upscale. Setting status to complete.`);
-            await supabase.from('mira-agent-model-generation-jobs').update({ status: 'complete' }).eq('id', job.id);
-        } else {
-            console.log(`[ModelGenPoller][${job.id}] Waiting for processing poses to complete. Re-polling.`);
-            setTimeout(() => {
-                supabase.functions.invoke('MIRA-AGENT-poller-model-generation', { body: { job_id: job.id } }).catch(console.error);
-            }, POLLING_INTERVAL_MS);
-        }
-        return;
+    const posesToProcess = (job.final_posed_images || []).filter((p: any) => p.upscale_status === 'pending');
+
+    if (posesToProcess.length > 0) {
+        console.log(`[ModelGenPoller][${job.id}] Found ${posesToProcess.length} poses pending upscale. Dispatching all.`);
+
+        const originalPoses = [...job.final_posed_images];
+        const posesToUpdate = originalPoses.map(p => {
+            if (posesToProcess.some((ptp: any) => ptp.final_url === p.final_url)) {
+                return { ...p, upscale_status: 'processing' };
+            }
+            return p;
+        });
+
+        await supabase.from('mira-agent-model-generation-jobs').update({ final_posed_images: posesToUpdate }).eq('id', job.id);
+
+        const upscalePromises = posesToProcess.map(async (poseToProcess: any) => {
+            try {
+                const imageResponse = await fetch(poseToProcess.final_url);
+                if (!imageResponse.ok) throw new Error(`Failed to download image for upscaling: ${imageResponse.statusText}`);
+                const imageBlob = await imageResponse.blob();
+
+                const formData = new FormData();
+                formData.append('image', imageBlob, 'image_to_upscale.png');
+                formData.append('overwrite', 'true');
+                const uploadResponse = await fetch(`${comfyUiAddress}/upload/image`, { method: 'POST', body: formData });
+                if (!uploadResponse.ok) throw new Error(`ComfyUI upload failed: ${await uploadResponse.text()}`);
+                const uploadData = await uploadResponse.json();
+                const uploadedFilename = uploadData.name;
+
+                const workflow = JSON.parse(tiledUpscalerWorkflow);
+                workflow['149'].inputs.image = uploadedFilename;
+                const upscaleFactor = poseToProcess.upscale_factor || 1.5;
+                const secondaryScaleFactor = upscaleFactor / 4.0;
+                workflow['316'].inputs.value = secondaryScaleFactor;
+                workflow['115'].inputs.seed = Math.floor(Math.random() * 1e15);
+
+                const queueResponse = await fetch(`${comfyUiAddress}/prompt`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt: workflow })
+                });
+                if (!queueResponse.ok) throw new Error(`ComfyUI queue request failed: ${await queueResponse.text()}`);
+                const queueData = await queueResponse.json();
+                
+                return { final_url: poseToProcess.final_url, upscale_prompt_id: queueData.prompt_id, success: true };
+            } catch (error) {
+                console.error(`[ModelGenPoller][${job.id}] Failed to start upscale for pose ${poseToProcess.pose_prompt}:`, error.message);
+                return { final_url: poseToProcess.final_url, error_message: error.message, success: false };
+            }
+        });
+
+        const results = await Promise.allSettled(upscalePromises);
+
+        const finalPoseData = [...posesToUpdate];
+        results.forEach(result => {
+            if (result.status === 'fulfilled' && result.value) {
+                const poseIndex = finalPoseData.findIndex(p => p.final_url === result.value.final_url);
+                if (poseIndex !== -1) {
+                    if (result.value.success) {
+                        finalPoseData[poseIndex].upscale_prompt_id = result.value.upscale_prompt_id;
+                    } else {
+                        finalPoseData[poseIndex].upscale_status = 'failed';
+                        finalPoseData[poseIndex].error_message = result.value.error_message;
+                    }
+                }
+            }
+        });
+        await supabase.from('mira-agent-model-generation-jobs').update({ final_posed_images: finalPoseData }).eq('id', job.id);
     }
 
-    const poseToProcess = updatedPoseJobs[poseToProcessIndex];
-
-    try {
-        console.log(`[ModelGenPoller][${job.id}] Upscaling pose: ${poseToProcess.pose_prompt}`);
-        updatedPoseJobs[poseToProcessIndex].upscale_status = 'processing';
-        await supabase.from('mira-agent-model-generation-jobs').update({ final_posed_images: updatedPoseJobs }).eq('id', job.id);
-
-        const imageResponse = await fetch(poseToProcess.final_url);
-        if (!imageResponse.ok) throw new Error(`Failed to download image for upscaling: ${imageResponse.statusText}`);
-        const imageBlob = await imageResponse.blob();
-
-        const formData = new FormData();
-        formData.append('image', imageBlob, 'image_to_upscale.png');
-        formData.append('overwrite', 'true');
-        const uploadResponse = await fetch(`${comfyUiAddress}/upload/image`, { method: 'POST', body: formData });
-        if (!uploadResponse.ok) throw new Error(`ComfyUI upload failed: ${await uploadResponse.text()}`);
-        const uploadData = await uploadResponse.json();
-        const uploadedFilename = uploadData.name;
-
-        const workflow = JSON.parse(tiledUpscalerWorkflow);
-        
-        workflow['149'].inputs.image = uploadedFilename;
-        
-        const upscaleFactor = poseToProcess.upscale_factor || 1.5;
-        const secondaryScaleFactor = upscaleFactor / 4.0;
-        workflow['316'].inputs.value = secondaryScaleFactor;
-        
-        workflow['115'].inputs.seed = Math.floor(Math.random() * 1e15);
-
-        const queueResponse = await fetch(`${comfyUiAddress}/prompt`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prompt: workflow })
-        });
-        if (!queueResponse.ok) throw new Error(`ComfyUI queue request failed: ${await queueResponse.text()}`);
-        const queueData = await queueResponse.json();
-        
-        updatedPoseJobs[poseToProcessIndex].upscale_prompt_id = queueData.prompt_id;
-        await supabase.from('mira-agent-model-generation-jobs').update({ final_posed_images: updatedPoseJobs }).eq('id', job.id);
-
-        supabase.functions.invoke('MIRA-AGENT-poller-model-generation', { body: { job_id: job.id } }).catch(console.error);
-
-    } catch (error) {
-        console.error(`[ModelGenPoller][${job.id}] Failed to start upscale for pose ${poseToProcess.pose_prompt}:`, error.message);
-        updatedPoseJobs[poseToProcessIndex].upscale_status = 'failed';
-        updatedPoseJobs[poseToProcessIndex].error_message = error.message;
-        await supabase.from('mira-agent-model-generation-jobs').update({ final_posed_images: updatedPoseJobs }).eq('id', job.id);
-        supabase.functions.invoke('MIRA-AGENT-poller-model-generation', { body: { job_id: job.id } }).catch(console.error);
+    const isStillProcessing = (job.final_posed_images || []).some((p: any) => p.upscale_status === 'processing');
+    if (!isStillProcessing && posesToProcess.length === 0) {
+        console.log(`[ModelGenPoller][${job.id}] No more poses to upscale or process. Setting status to complete.`);
+        await supabase.from('mira-agent-model-generation-jobs').update({ status: 'complete' }).eq('id', job.id);
+    } else {
+        console.log(`[ModelGenPoller][${job.id}] Waiting for processing poses to complete. Re-polling.`);
+        setTimeout(() => {
+            supabase.functions.invoke('MIRA-AGENT-poller-model-generation', { body: { job_id: job.id } }).catch(console.error);
+        }, POLLING_INTERVAL_MS);
     }
 }
 
