@@ -7,9 +7,10 @@ import { VtoInputProvider, QueueItem } from "@/components/VTO/VtoInputProvider";
 import { VtoReviewQueue } from "@/components/VTO/VtoReviewQueue";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { useQueryClient } from "@tanstack/react-query";
-import { optimizeImage, sanitizeFilename } from "@/lib/utils";
-import { Wand2, Loader2, Info } from "lucide-react";
+import { Wand2, Loader2, Info, History } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { RecentVtoPacks } from "@/components/VTO/RecentVtoPacks";
 
 type WizardStep = 'select-mode' | 'provide-inputs' | 'review-queue';
 type VtoMode = 'one-to-many' | 'precise-pairs' | 'random-pairs';
@@ -42,72 +43,36 @@ const VirtualTryOnPacks = () => {
     }
   };
 
-  const uploadFile = async (fileUrl: string, type: 'person' | 'garment') => {
-    if (!session?.user) throw new Error("User session not found.");
-    
-    const response = await fetch(fileUrl);
-    const blob = await response.blob();
-    const file = new File([blob], "upload.png", { type: blob.type });
-
-    const optimizedFile = await optimizeImage(file);
-    const sanitizedName = sanitizeFilename(optimizedFile.name);
-    const filePath = `${session.user.id}/vto-source/${type}-${Date.now()}-${sanitizedName}`;
-    
-    const { error } = await supabase.storage
-      .from('mira-agent-user-uploads')
-      .upload(filePath, optimizedFile);
-    
-    if (error) throw new Error(`Failed to upload ${type} image: ${error.message}`);
-    
-    const { data: { publicUrl } } = supabase.storage
-      .from('mira-agent-user-uploads')
-      .getPublicUrl(filePath);
-      
-    return publicUrl;
-  };
-
   const handleGenerate = async () => {
     if (queue.length === 0) return;
     setIsLoading(true);
     const toastId = showLoading(`Queuing ${queue.length} jobs...`);
 
-    const jobPromises = queue.map(async (item) => {
-      try {
-        const garment_image_url = await uploadFile(item.garment_url, 'garment');
-        
-        const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-prompt-helper', {
-            body: { person_image_url: item.person_url, garment_image_url, prompt_appendix: item.appendix }
-        });
-        if (promptError) throw promptError;
-        const autoPrompt = promptData.final_prompt;
+    try {
+      const { error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-vto-packs', {
+        body: {
+          pairs: queue,
+          user_id: session?.user?.id
+        }
+      });
 
-        const { error } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
-            body: { 
-                person_image_url: item.person_url, 
-                garment_image_url, 
-                user_id: session?.user?.id, 
-                mode: 'base',
-                prompt: autoPrompt
-            }
-        });
-        if (error) throw error;
-      } catch (err) {
-        console.error(`Failed to queue job for person ${item.person_url}:`, err);
-      }
-    });
+      if (error) throw error;
 
-    await Promise.all(jobPromises);
-    
-    dismissToast(toastId);
-    showSuccess(`${queue.length} jobs started successfully!`);
-    queryClient.invalidateQueries({ queryKey: ['bitstudioJobs', session.user.id] });
-    setStep('select-mode');
-    setQueue([]);
-    setMode(null);
-    setIsLoading(false);
+      dismissToast(toastId);
+      showSuccess(`${queue.length} jobs have been queued for processing.`);
+      queryClient.invalidateQueries({ queryKey: ['recentVtoPacks'] });
+      setStep('select-mode');
+      setQueue([]);
+      setMode(null);
+    } catch (err: any) {
+      dismissToast(toastId);
+      showError(`Failed to queue batch job: ${err.message}`);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const renderStep = () => {
+  const renderCreateStep = () => {
     switch (step) {
       case 'select-mode':
         return (
@@ -156,7 +121,18 @@ const VirtualTryOnPacks = () => {
         <p className="text-muted-foreground">{getStepTitle()}</p>
       </header>
       <div className="flex-1 overflow-y-auto">
-        {renderStep()}
+        <Tabs defaultValue="create" className="w-full">
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="create">{t('createBatch')}</TabsTrigger>
+            <TabsTrigger value="recent">{t('recentJobs')}</TabsTrigger>
+          </TabsList>
+          <TabsContent value="create" className="pt-6">
+            {renderCreateStep()}
+          </TabsContent>
+          <TabsContent value="recent" className="pt-6">
+            <RecentVtoPacks />
+          </TabsContent>
+        </Tabs>
       </div>
     </div>
   );
