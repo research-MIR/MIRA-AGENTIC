@@ -5,6 +5,7 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const COMFYUI_ENDPOINT_URL = Deno.env.get('COMFYUI_ENDPOINT_URL');
 const POLLING_INTERVAL_MS = 5000;
+const GENERATED_IMAGES_BUCKET = 'mira-generations';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -833,11 +834,21 @@ async function handlePollingPosesState(supabase: any, job: any) {
             const outputNode = promptHistory?.outputs['213'] || promptHistory?.outputs['9'];
             if (outputNode?.images && outputNode.images.length > 0) {
                 const image = outputNode.images[0];
-                const imageUrl = `${comfyUiAddress}/view?filename=${encodeURIComponent(image.filename)}&subfolder=${encodeURIComponent(image.subfolder)}&type=${image.type}`;
+                const tempImageUrl = `${comfyUiAddress}/view?filename=${encodeURIComponent(image.filename)}&subfolder=${encodeURIComponent(image.subfolder)}&type=${image.type}`;
+                
+                console.log(`[ModelGenPoller][${job.id}] Pose job ${poseJob.comfyui_prompt_id} is complete. Downloading from ComfyUI...`);
+                const imageResponse = await fetch(tempImageUrl);
+                if (!imageResponse.ok) throw new Error(`Failed to download final pose image from ComfyUI: ${imageResponse.statusText}`);
+                const imageBuffer = await imageResponse.arrayBuffer();
+
+                const filePath = `${job.user_id}/model-poses/${Date.now()}_${image.filename}`;
+                await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(filePath, imageBuffer, { contentType: 'image/png', upsert: true });
+                const { data: { publicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
+
                 updatedPoseJobs[index].status = 'complete';
-                updatedPoseJobs[index].final_url = imageUrl;
+                updatedPoseJobs[index].final_url = publicUrl;
                 updatedPoseJobs[index].is_upscaled = false;
-                console.log(`[ModelGenPoller][${job.id}] Pose job ${poseJob.comfyui_prompt_id} is complete. URL: ${imageUrl}`);
+                console.log(`[ModelGenPoller][${job.id}] Pose job complete. Stored at Supabase URL: ${publicUrl}`);
             }
         }
     }
@@ -901,15 +912,12 @@ async function handleUpscalingPosesState(supabase: any, job: any) {
 
         const workflow = JSON.parse(tiledUpscalerWorkflow);
         
-        // Set the input image for the new workflow
         workflow['149'].inputs.image = uploadedFilename;
         
-        // Calculate and set the secondary scale factor
-        const upscaleFactor = poseToProcess.upscale_factor || 1.5; // Use stored factor or default
+        const upscaleFactor = poseToProcess.upscale_factor || 1.5;
         const secondaryScaleFactor = upscaleFactor / 4.0;
         workflow['316'].inputs.value = secondaryScaleFactor;
         
-        // Set a random seed for the KSampler
         workflow['115'].inputs.seed = Math.floor(Math.random() * 1e15);
 
         const queueResponse = await fetch(`${comfyUiAddress}/prompt`, {
@@ -923,7 +931,6 @@ async function handleUpscalingPosesState(supabase: any, job: any) {
         updatedPoseJobs[poseToProcessIndex].upscale_prompt_id = queueData.prompt_id;
         await supabase.from('mira-agent-model-generation-jobs').update({ final_posed_images: updatedPoseJobs }).eq('id', job.id);
 
-        // Re-invoke immediately to check for the next one
         supabase.functions.invoke('MIRA-AGENT-poller-model-generation', { body: { job_id: job.id } }).catch(console.error);
 
     } catch (error) {
@@ -931,7 +938,6 @@ async function handleUpscalingPosesState(supabase: any, job: any) {
         updatedPoseJobs[poseToProcessIndex].upscale_status = 'failed';
         updatedPoseJobs[poseToProcessIndex].error_message = error.message;
         await supabase.from('mira-agent-model-generation-jobs').update({ final_posed_images: updatedPoseJobs }).eq('id', job.id);
-        // Re-invoke to try the next one if any
         supabase.functions.invoke('MIRA-AGENT-poller-model-generation', { body: { job_id: job.id } }).catch(console.error);
     }
 }
@@ -950,17 +956,25 @@ async function pollUpscalingPoses(supabase: any, job: any) {
         if (historyResponse.ok) {
             const historyData = await historyResponse.json();
             const promptHistory = historyData[poseJob.upscale_prompt_id];
-            // The final output node in the new workflow is '283'
             const outputNode = promptHistory?.outputs['283'];
             if (outputNode?.images && outputNode.images.length > 0) {
                 const image = outputNode.images[0];
-                const imageUrl = `${comfyUiAddress}/view?filename=${encodeURIComponent(image.filename)}&subfolder=${encodeURIComponent(image.subfolder)}&type=${image.type}`;
+                const tempImageUrl = `${comfyUiAddress}/view?filename=${encodeURIComponent(image.filename)}&subfolder=${encodeURIComponent(image.subfolder)}&type=${image.type}`;
                 
-                updatedPoseJobs[index].final_url = imageUrl;
+                console.log(`[ModelGenPoller][${job.id}] Pose successfully upscaled. Downloading from ComfyUI...`);
+                const imageResponse = await fetch(tempImageUrl);
+                if (!imageResponse.ok) throw new Error(`Failed to download upscaled image from ComfyUI: ${imageResponse.statusText}`);
+                const imageBuffer = await imageResponse.arrayBuffer();
+
+                const filePath = `${job.user_id}/model-poses-upscaled/${Date.now()}_${image.filename}`;
+                await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(filePath, imageBuffer, { contentType: 'image/png', upsert: true });
+                const { data: { publicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
+
+                updatedPoseJobs[index].final_url = publicUrl;
                 updatedPoseJobs[index].is_upscaled = true;
                 updatedPoseJobs[index].upscale_status = 'complete';
                 hasChanged = true;
-                console.log(`[ModelGenPoller][${job.id}] Pose successfully upscaled. New URL: ${imageUrl}`);
+                console.log(`[ModelGenPoller][${job.id}] Pose successfully upscaled. Stored at Supabase URL: ${publicUrl}`);
             }
         }
     }
@@ -997,8 +1011,8 @@ serve(async (req) => {
             await handlePollingPosesState(supabase, job);
             break;
         case 'upscaling_poses':
-            await pollUpscalingPoses(supabase, job); // Poll existing processing jobs first
-            await handleUpscalingPosesState(supabase, job); // Then try to start a new one
+            await pollUpscalingPoses(supabase, job);
+            await handleUpscalingPosesState(supabase, job);
             break;
         case 'awaiting_approval':
         case 'complete':
