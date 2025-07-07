@@ -59,34 +59,58 @@ export const UpscalePosesModal = ({ isOpen, onClose, jobs, packId }: UpscalePose
   const handleUpscale = async (urlsToProcess: string[], factor: number) => {
     if (urlsToProcess.length === 0) return;
     setIsLoading(true);
-    const toastId = showLoading(`Starting upscale for ${urlsToProcess.length} poses...`);
+    const toastId = showLoading(`Preparing ${urlsToProcess.length} poses for upscaling...`);
 
     try {
-      const jobToUpdate = jobs.find(job => 
-        job.final_posed_images?.some(pose => urlsToProcess.includes(pose.final_url))
-      );
-
-      if (!jobToUpdate) throw new Error("Could not find the parent job for the selected poses.");
-
-      const { error } = await supabase.functions.invoke('start_poses_upscaling', {
-        body: {
-          p_job_id: jobToUpdate.id,
-          p_pose_urls: urlsToProcess,
-          p_upscale_factor: factor
+      // Group selected poses by their parent job ID
+      const jobsToUpdate = new Map<string, string[]>();
+      urlsToProcess.forEach(url => {
+        const jobForPose = jobs.find(j => j.final_posed_images?.some(p => p.final_url === url));
+        if (jobForPose) {
+          if (!jobsToUpdate.has(jobForPose.id)) {
+            jobsToUpdate.set(jobForPose.id, []);
+          }
+          jobsToUpdate.get(jobForPose.id)!.push(url);
         }
       });
 
-      if (error) throw error;
+      console.log(`[UpscaleModal] Grouping poses for upscale:`, Object.fromEntries(jobsToUpdate));
+
+      const upscalePromises = Array.from(jobsToUpdate.entries()).map(([jobId, poseUrls]) => {
+        return supabase.functions.invoke('start_poses_upscaling', {
+          body: {
+            p_job_id: jobId,
+            p_pose_urls: poseUrls,
+            p_upscale_factor: factor
+          }
+        });
+      });
+
+      const results = await Promise.allSettled(upscalePromises);
+      
+      const successfulJobs = results.filter(r => r.status === 'fulfilled').length;
+      const failedJobs = results.length - successfulJobs;
 
       dismissToast(toastId);
-      showSuccess(`${urlsToProcess.length} poses have been queued for upscaling.`);
-      queryClient.invalidateQueries({ queryKey: ['modelsForPack', packId] });
+
+      if (successfulJobs > 0) {
+        showSuccess(`Successfully queued ${urlsToProcess.length} poses across ${successfulJobs} jobs for upscaling.`);
+        queryClient.invalidateQueries({ queryKey: ['modelsForPack', packId] });
+      }
+      if (failedJobs > 0) {
+        showError(`${failedJobs} batch(es) failed to start. Please check the console for details.`);
+        results.forEach(r => {
+          if (r.status === 'rejected') console.error("Upscale request failed:", r.reason);
+        });
+      }
+
       onClose();
     } catch (err: any) {
       dismissToast(toastId);
       showError(`Failed to start upscaling: ${err.message}`);
     } finally {
       setIsLoading(false);
+      setSelectedPoseUrls(new Set());
     }
   };
 
