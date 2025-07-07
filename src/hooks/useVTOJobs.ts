@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSession } from '@/components/Auth/SessionContextProvider';
 import { BitStudioJob } from '@/types/vto';
@@ -7,7 +7,6 @@ import { RealtimeChannel } from '@supabase/supabase-js';
 export const useVTOJobs = () => {
   const { supabase, session } = useSession();
   const queryClient = useQueryClient();
-  const channelRef = useRef<RealtimeChannel | null>(null);
 
   const { data: jobs, isLoading, error } = useQuery<BitStudioJob[]>({
     queryKey: ['bitstudioJobs', session?.user?.id],
@@ -74,17 +73,13 @@ export const useVTOJobs = () => {
 
   useEffect(() => {
     if (!session?.user?.id) return;
-    if (channelRef.current) {
-      supabase.removeChannel(channelRef.current);
-      channelRef.current = null;
-    }
 
     const handleUpdate = () => {
       console.log('[useVTOJobs] Realtime event received, invalidating queries.');
       queryClient.invalidateQueries({ queryKey: ['bitstudioJobs', session.user.id] });
     };
 
-    const channel = supabase
+    const channel: RealtimeChannel = supabase
       .channel(`vto-jobs-tracker-${session.user.id}`)
       .on<BitStudioJob>(
         'postgres_changes',
@@ -97,12 +92,9 @@ export const useVTOJobs = () => {
         handleUpdate
       )
       .subscribe();
-    channelRef.current = channel;
 
     return () => {
-      if (channelRef.current) {
-        supabase.removeChannel(channelRef.current);
-      }
+      supabase.removeChannel(channel);
     };
   }, [session?.user?.id, supabase, queryClient]);
 
