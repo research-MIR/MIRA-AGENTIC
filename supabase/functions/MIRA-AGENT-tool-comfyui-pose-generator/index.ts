@@ -502,7 +502,7 @@ async function uploadToComfyUI(comfyUiUrl: string, imageBlob: Blob, filename: st
 }
 
 serve(async (req) => {
-  const requestId = `pose-generator-${Date.now()}`;
+  const requestId = `pose-generator-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
   if (!COMFYUI_ENDPOINT_URL) throw new Error("COMFYUI_ENDPOINT_URL is not set.");
 
@@ -517,7 +517,8 @@ serve(async (req) => {
 
     console.log(`[PoseGenerator][${requestId}] Downloading base model from: ${base_model_url}`);
     const baseModelBlob = await downloadFromSupabase(supabase, base_model_url);
-    const baseModelFilename = await uploadToComfyUI(sanitizedAddress, baseModelBlob, 'base_model.png');
+    const uniqueBaseModelFilename = `base_model_${requestId}.png`;
+    const baseModelFilename = await uploadToComfyUI(sanitizedAddress, baseModelBlob, uniqueBaseModelFilename);
     console.log(`[PoseGenerator][${requestId}] Base model uploaded to ComfyUI as: ${baseModelFilename}`);
 
     const finalWorkflow = JSON.parse(unifiedWorkflowTemplate);
@@ -529,43 +530,32 @@ serve(async (req) => {
     if (pose_image_url) {
       console.log(`[PoseGenerator][${requestId}] Pose reference image provided. Downloading from: ${pose_image_url}`);
       const poseImageBlob = await downloadFromSupabase(supabase, pose_image_url);
-      const poseImageFilename = await uploadToComfyUI(sanitizedAddress, poseImageBlob, 'pose_ref.png');
+      const uniquePoseRefFilename = `pose_ref_${requestId}.png`;
+      const poseImageFilename = await uploadToComfyUI(sanitizedAddress, poseImageBlob, uniquePoseRefFilename);
       
       // Set up the workflow for image reference
       finalWorkflow['215'].inputs.image = poseImageFilename;
       finalWorkflow['230'].inputs.Number = "2"; // Switch to use image reference path
 
-      // **FIXED LOGIC**: The instruction is just the system directive.
-      // The user's prompt in this case is the image itself, which Gemini sees on the canvas.
-      // The `pose_prompt` variable contains the URL, which we don't want to send as text.
       finalWorkflow['193'].inputs.String = EDITING_TASK_WITH_IMAGE_REFERENCE;
-      
-      // The text-only path is not used, clear it.
       finalWorkflow['217'].inputs.String = ""; 
 
       console.log(`[PoseGenerator][${requestId}] Pose reference uploaded as: ${poseImageFilename}. Switch set to 2.`);
     } else {
       console.log(`[PoseGenerator][${requestId}] No pose reference image provided. Using text prompt. Switch set to 1.`);
       
-      // Set up the workflow for text-only reference
       finalWorkflow['230'].inputs.Number = "1"; // Switch to use text-only path
 
-      // **FIXED LOGIC**: Combine the directive with the user's text prompt.
       const textRefTask = `${EDITING_TASK_WITH_TEXT_REFERENCE}. The user's specific instruction is: '${pose_prompt}'`;
       finalWorkflow['217'].inputs.String = textRefTask;
 
-      // The image path is not used, clear it.
       finalWorkflow['193'].inputs.String = "";
-      // **FIXED BUG**: Do NOT clear the image filename, as it causes a directory error.
-      // The switch will prevent this node from being used anyway.
-      // finalWorkflow['215'].inputs.image = ""; 
     }
 
     const queueUrl = `${sanitizedAddress}/prompt`;
     const payload = { prompt: finalWorkflow };
     
-    // Log the entire payload before sending
-    console.log(`[PoseGenerator][${requestId}] Sending final payload to ComfyUI:`, JSON.stringify(payload, null, 2));
+    console.log(`[PoseGenerator][${requestId}] Sending final payload to ComfyUI...`);
 
     const response = await fetch(queueUrl, {
       method: 'POST',
