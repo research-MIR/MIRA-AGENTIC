@@ -159,7 +159,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
           </div>
           <div className="space-y-2">
             <Label>{t('uploadGarment')}</Label>
-            <div className="aspect-square">
+            <div className="aspect-square max-w-xs mx-auto">
               <ImageUploader onFileSelect={setGarmentFile} title={t('garmentImage')} imageUrl={garmentFileUrl} onClear={() => setGarmentFile(null)} />
             </div>
           </div>
