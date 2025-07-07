@@ -1083,33 +1083,31 @@ async function pollUpscalingPoses(supabase: any, job: any) {
         }
     }
 
-    if (hasChanged) {
-        await supabase.from('mira-agent-model-generation-jobs').update({ final_posed_images: updatedPoseJobs }).eq('id', job.id);
-    }
+    return { hasChanged, updatedPoseJobs };
 }
 
 async function handleUpscalingPosesState(supabase: any, job: any) {
     console.log(`[ModelGenPoller][${job.id}] State: UPSCALING_POSES.`);
     
-    await pollUpscalingPoses(supabase, job);
+    // 1. Poll for completed jobs and get the potential new state
+    const { hasChanged: pollHasChanged, updatedPoseJobs: polledPoseData } = await pollUpscalingPoses(supabase, job);
+    let currentPoseData = polledPoseData;
+    let hasChanged = pollHasChanged;
 
-    const { data: updatedJob, error: refetchError } = await supabase.from('mira-agent-model-generation-jobs').select('*').eq('id', job.id).single();
-    if (refetchError) throw refetchError;
-
-    const posesToProcess = (updatedJob.final_posed_images || []).filter((p: any) => p.upscale_status === 'pending');
+    // 2. Find any new pending jobs in the potentially updated data
+    const posesToProcess = currentPoseData.filter((p: any) => p.upscale_status === 'pending');
 
     if (posesToProcess.length > 0) {
         console.log(`[ModelGenPoller][${job.id}] Found ${posesToProcess.length} poses pending upscale. Dispatching all.`);
 
-        const originalPoses = [...updatedJob.final_posed_images];
-        const posesToUpdateInDB = originalPoses.map(p => {
+        // Mark them as processing in our local copy
+        currentPoseData = currentPoseData.map(p => {
             if (posesToProcess.some((ptp: any) => ptp.final_url === p.final_url)) {
                 return { ...p, upscale_status: 'processing' };
             }
             return p;
         });
-
-        await supabase.from('mira-agent-model-generation-jobs').update({ final_posed_images: posesToUpdateInDB }).eq('id', job.id);
+        hasChanged = true;
 
         const comfyUiAddress = COMFYUI_ENDPOINT_URL!.replace(/\/+$/, "");
         const upscalePromises = posesToProcess.map(async (poseToProcess: any) => {
@@ -1147,30 +1145,41 @@ async function handleUpscalingPosesState(supabase: any, job: any) {
 
         const results = await Promise.allSettled(upscalePromises);
 
-        const finalPoseData = [...posesToUpdateInDB];
+        // Update our local copy with the results of the dispatch
         results.forEach(result => {
             if (result.status === 'fulfilled' && result.value) {
-                const poseIndex = finalPoseData.findIndex(p => p.final_url === result.value.final_url);
+                const poseIndex = currentPoseData.findIndex(p => p.final_url === result.value.final_url);
                 if (poseIndex !== -1) {
                     if (result.value.success) {
-                        finalPoseData[poseIndex].upscale_prompt_id = result.value.upscale_prompt_id;
+                        currentPoseData[poseIndex].upscale_prompt_id = result.value.upscale_prompt_id;
                     } else {
-                        finalPoseData[poseIndex].upscale_status = 'failed';
-                        finalPoseData[poseIndex].error_message = result.value.error_message;
+                        currentPoseData[poseIndex].upscale_status = 'failed';
+                        currentPoseData[poseIndex].error_message = result.value.error_message;
                     }
                 }
             }
         });
-        await supabase.from('mira-agent-model-generation-jobs').update({ final_posed_images: finalPoseData }).eq('id', job.id);
     }
 
-    const { data: finalJobState } = await supabase.from('mira-agent-model-generation-jobs').select('final_posed_images').eq('id', job.id).single();
-    const isStillWorking = (finalJobState?.final_posed_images || []).some((p: any) => p.upscale_status === 'processing' || p.upscale_status === 'pending');
+    // 3. Check if the overall job is done
+    const isStillWorking = currentPoseData.some((p: any) => p.upscale_status === 'processing' || p.upscale_status === 'pending');
     
+    let finalStatus = job.status;
     if (!isStillWorking) {
+        finalStatus = 'complete';
         console.log(`[ModelGenPoller][${job.id}] All upscaling jobs are complete or failed. Setting main job status to complete.`);
-        await supabase.from('mira-agent-model-generation-jobs').update({ status: 'complete' }).eq('id', job.id);
-    } else {
+    }
+
+    // 4. Perform a single update to the database if anything changed
+    if (hasChanged || finalStatus !== job.status) {
+        await supabase.from('mira-agent-model-generation-jobs').update({ 
+            final_posed_images: currentPoseData,
+            status: finalStatus 
+        }).eq('id', job.id);
+    }
+    
+    // 5. Re-poll if necessary
+    if (isStillWorking) {
         console.log(`[ModelGenPoller][${job.id}] Still waiting for upscaling jobs to complete. Re-polling.`);
         setTimeout(() => {
             supabase.functions.invoke('MIRA-AGENT-poller-model-generation', { body: { job_id: job.id } }).catch(console.error);
