@@ -6,6 +6,7 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const COMFYUI_ENDPOINT_URL = Deno.env.get('COMFYUI_ENDPOINT_URL');
 const POLLING_INTERVAL_MS = 5000;
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
+const MAX_RETRIES = 2;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -817,13 +818,25 @@ async function handleGeneratingPosesState(supabase: any, job: any) {
 async function handlePollingPosesState(supabase: any, job: any) {
     console.log(`[ModelGenPoller][${job.id}] State: POLLING_POSES.`);
     let allComplete = true;
+    let hasChanged = false;
     const updatedPoseJobs = [...job.final_posed_images];
     const comfyUiAddress = COMFYUI_ENDPOINT_URL!.replace(/\/+$/, "");
+    const queueUrl = `${comfyUiAddress}/queue`;
+    const queueResponse = await fetch(queueUrl);
+    const queueData = await queueResponse.json();
 
     for (const [index, poseJob] of updatedPoseJobs.entries()) {
-        if (poseJob.status === 'complete') continue;
+        if (poseJob.status === 'complete' || poseJob.status === 'failed') continue;
 
         allComplete = false;
+
+        const isJobInQueue = queueData.queue_running.some((item: any) => item[1] === poseJob.comfyui_prompt_id) || 
+                             queueData.queue_pending.some((item: any) => item[1] === poseJob.comfyui_prompt_id);
+
+        if (isJobInQueue) {
+            console.log(`[ModelGenPoller][${job.id}] Pose job ${poseJob.comfyui_prompt_id} is still in queue. Continuing to poll.`);
+            continue;
+        }
 
         const historyUrl = `${comfyUiAddress}/history/${poseJob.comfyui_prompt_id}`;
         const historyResponse = await fetch(historyUrl);
@@ -848,22 +861,51 @@ async function handlePollingPosesState(supabase: any, job: any) {
                 updatedPoseJobs[index].status = 'complete';
                 updatedPoseJobs[index].final_url = publicUrl;
                 updatedPoseJobs[index].is_upscaled = false;
+                hasChanged = true;
                 console.log(`[ModelGenPoller][${job.id}] Pose job complete. Stored at Supabase URL: ${publicUrl}`);
+            } else {
+                // Finished but no output -> failed
+                console.warn(`[ModelGenPoller][${job.id}] Pose job ${poseJob.comfyui_prompt_id} finished with no output. Attempting retry.`);
+                const currentRetries = poseJob.retry_count || 0;
+                if (currentRetries < MAX_RETRIES) {
+                    const pose = job.pose_prompts[index];
+                    const { data: result, error } = await supabase.functions.invoke('MIRA-AGENT-tool-comfyui-pose-generator', { body: { base_model_url: job.base_model_image_url, pose_prompt: pose.value, pose_image_url: pose.type === 'image' ? pose.value : null } });
+                    if (error) {
+                        updatedPoseJobs[index].status = 'failed';
+                        updatedPoseJobs[index].error_message = `Retry failed: ${error.message}`;
+                    } else {
+                        updatedPoseJobs[index].comfyui_prompt_id = result.comfyui_prompt_id;
+                        updatedPoseJobs[index].status = 'processing';
+                        updatedPoseJobs[index].retry_count = currentRetries + 1;
+                    }
+                } else {
+                    updatedPoseJobs[index].status = 'failed';
+                    updatedPoseJobs[index].error_message = 'Job failed after max retries.';
+                }
+                hasChanged = true;
             }
+        } else {
+            console.error(`[ModelGenPoller][${job.id}] Pose job ${poseJob.comfyui_prompt_id} not found in queue or history. Marking as failed.`);
+            updatedPoseJobs[index].status = 'failed';
+            updatedPoseJobs[index].error_message = 'Job not found in ComfyUI history.';
+            hasChanged = true;
         }
+    }
+
+    if (updatedPoseJobs.some(p => p.status === 'failed')) {
+        console.error(`[ModelGenPoller][${job.id}] At least one pose failed permanently. Failing the entire job.`);
+        await supabase.from('mira-agent-model-generation-jobs').update({ status: 'failed', error_message: 'One or more poses failed to generate.', final_posed_images: updatedPoseJobs }).eq('id', job.id);
+        return;
     }
 
     if (allComplete) {
         console.log(`[ModelGenPoller][${job.id}] All pose jobs are complete. Finalizing main job.`);
-        await supabase.from('mira-agent-model-generation-jobs').update({ 
-            status: 'complete', 
-            final_posed_images: updatedPoseJobs 
-        }).eq('id', job.id);
+        await supabase.from('mira-agent-model-generation-jobs').update({ status: 'complete', final_posed_images: updatedPoseJobs }).eq('id', job.id);
     } else {
-        console.log(`[ModelGenPoller][${job.id}] Not all pose jobs are complete. Updating progress and re-polling.`);
-        await supabase.from('mira-agent-model-generation-jobs').update({ 
-            final_posed_images: updatedPoseJobs 
-        }).eq('id', job.id);
+        if (hasChanged) {
+            await supabase.from('mira-agent-model-generation-jobs').update({ final_posed_images: updatedPoseJobs }).eq('id', job.id);
+        }
+        console.log(`[ModelGenPoller][${job.id}] Not all pose jobs are complete. Re-polling.`);
         setTimeout(() => {
             supabase.functions.invoke('MIRA-AGENT-poller-model-generation', { body: { job_id: job.id } }).catch(console.error);
         }, POLLING_INTERVAL_MS);
