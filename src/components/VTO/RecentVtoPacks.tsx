@@ -17,7 +17,7 @@ interface VtoPackJob {
   };
 }
 
-const RecentVtoPacks = () => {
+export const RecentVtoPacks = () => {
   const { supabase, session } = useSession();
   const { showImage } = useImagePreview();
 
