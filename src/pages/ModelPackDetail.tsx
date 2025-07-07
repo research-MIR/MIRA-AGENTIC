@@ -17,6 +17,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { JobPoseDisplay } from "@/components/GenerateModels/JobPoseDisplay";
 import { UpscaledPosesGallery } from "@/components/GenerateModels/UpscaledPosesGallery";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 interface Pose {
   final_url: string;
@@ -76,19 +77,44 @@ const ModelPackDetail = () => {
     if (!jobs || jobs.length === 0) {
         return { status: 'idle' as const, completedPoses: 0, totalPoses: 0, upscaledPoses: 0 };
     }
-    let completedPoses = 0, totalPoses = 0, upscaledPoses = 0, hasFailed = false, hasInProgress = false, allJobsAreComplete = true;
+
+    let completedPoses = 0;
+    let totalPoses = 0;
+    let upscaledPoses = 0;
+    let hasFailed = false;
+    let hasInProgress = false;
+    let allJobsAreComplete = true;
+
     for (const job of jobs) {
-        totalPoses += job.pose_prompts?.length || 0;
-        completedPoses += job.final_posed_images?.filter((p: any) => p.status === 'complete').length || 0;
-        upscaledPoses += job.final_posed_images?.filter((p: any) => p.is_upscaled).length || 0;
-        if (job.status === 'failed') hasFailed = true;
-        if (job.status !== 'complete' && job.status !== 'failed') hasInProgress = true;
-        if (job.status !== 'complete') allJobsAreComplete = false;
+        const jobTotalPoses = job.pose_prompts?.length || 0;
+        totalPoses += jobTotalPoses;
+        
+        const jobCompletedPoses = job.final_posed_images?.filter((p: any) => p.status === 'complete').length || 0;
+        completedPoses += jobCompletedPoses;
+
+        const jobUpscaledPoses = job.final_posed_images?.filter((p: any) => p.is_upscaled).length || 0;
+        upscaledPoses += jobUpscaledPoses;
+
+        if (job.status === 'failed') {
+            hasFailed = true;
+        }
+        if (job.status !== 'complete' && job.status !== 'failed') {
+            hasInProgress = true;
+        }
+        if (job.status !== 'complete') {
+            allJobsAreComplete = false;
+        }
     }
+
     let aggregateStatus: 'idle' | 'in_progress' | 'failed' | 'complete' = 'idle';
-    if (hasFailed) aggregateStatus = 'failed';
-    else if (hasInProgress) aggregateStatus = 'in_progress';
-    else if (allJobsAreComplete && jobs.length > 0) aggregateStatus = 'complete';
+    if (hasFailed) {
+        aggregateStatus = 'failed';
+    } else if (hasInProgress) {
+        aggregateStatus = 'in_progress';
+    } else if (allJobsAreComplete && jobs.length > 0) {
+        aggregateStatus = 'complete';
+    }
+
     return { status: aggregateStatus, completedPoses, totalPoses, upscaledPoses };
   }, [jobs]);
 
@@ -119,17 +145,17 @@ const ModelPackDetail = () => {
       <div className="p-4 md:p-8 h-screen flex flex-col">
         <header className="pb-4 mb-4 border-b shrink-0">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <h1 className="text-3xl font-bold">{pack.name}</h1>
-              <PackStatusIndicator status={packStatus.status} totalPoses={packStatus.totalPoses} upscaledPoses={packStatus.upscaledPoses} />
-            </div>
-            <Button onClick={() => setIsUpscaleModalOpen(true)} disabled={posesReadyForUpscaleCount === 0}>
-              <Wand2 className="mr-2 h-4 w-4" />
-              Upscale & Prepare for VTO ({posesReadyForUpscaleCount})
-            </Button>
+              <div className="flex items-center gap-4">
+                  <h1 className="text-3xl font-bold">{pack.name}</h1>
+                  <PackStatusIndicator status={packStatus.status} totalPoses={packStatus.totalPoses} upscaledPoses={packStatus.upscaledPoses} />
+              </div>
+              <Button onClick={() => setIsUpscaleModalOpen(true)} disabled={posesReadyForUpscaleCount === 0}>
+                <Wand2 className="mr-2 h-4 w-4" />
+                Upscale & Prepare for VTO ({posesReadyForUpscaleCount})
+              </Button>
           </div>
           <div className="mt-2">
-            <JobProgressBar completedPoses={packStatus.completedPoses} totalPoses={packStatus.totalPoses} />
+              <JobProgressBar completedPoses={packStatus.completedPoses} totalPoses={packStatus.totalPoses} />
           </div>
           <p className="text-muted-foreground mt-1">{pack.description || "No description provided."}</p>
         </header>
