@@ -725,103 +725,11 @@ const tiledUpscalerWorkflow = `{
   }
 }`;
 
-const FINAL_OUTPUT_NODE_ID = "283";
-const FALLBACK_NODE_IDS = ["213", "9", "4"];
+const FINAL_OUTPUT_NODE_ID_UPSCALE = "283";
+const FALLBACK_NODE_IDS_UPSCALE = ["431", "430", "9", "4"];
 
-// NOTE: This is the new, correct skin-specific workflow using LDSR.
-const workflowTemplateSkin = `
-{
-  "3": {
-    "inputs": {
-      "image": "d0928d10-18cf-451f-8f4a-2c57936c1e59 (1).jpeg"
-    },
-    "class_type": "LoadImage",
-    "_meta": {
-      "title": "Load Image"
-    }
-  },
-  "4": {
-    "inputs": {
-      "images": [
-        "7",
-        0
-      ]
-    },
-    "class_type": "PreviewImage",
-    "_meta": {
-      "title": "Preview Image"
-    }
-  },
-  "5": {
-    "inputs": {
-      "model": "last.ckpt"
-    },
-    "class_type": "LDSRModelLoader",
-    "_meta": {
-      "title": "Load LDSR Model"
-    }
-  },
-  "6": {
-    "inputs": {
-      "steps": "50",
-      "pre_downscale": "None",
-      "post_downscale": "None",
-      "downsample_method": "Lanczos",
-      "upscale_model": [
-        "5",
-        0
-      ],
-      "images": [
-        "3",
-        0
-      ]
-    },
-    "class_type": "LDSRUpscale",
-    "_meta": {
-      "title": "LDSR Upscale"
-    }
-  },
-  "7": {
-    "inputs": {
-      "upscale_method": "nearest-exact",
-      "scale_by": [
-        "8",
-        0
-      ],
-      "image": [
-        "6",
-        0
-      ]
-    },
-    "class_type": "ImageScaleBy",
-    "_meta": {
-      "title": "Upscale Image By"
-    }
-  },
-  "8": {
-    "inputs": {
-      "Number": "1"
-    },
-    "class_type": "Float",
-    "_meta": {
-      "title": "SCALE - CONSIDER THAT LDSR UPSCALE OUTPUTS A X4 OF THE ORIGINAL IMAGE"
-    }
-  },
-  "9": {
-    "inputs": {
-      "filename_prefix": "ComfyUI",
-      "images": [
-        "7",
-        0
-      ]
-    },
-    "class_type": "SaveImage",
-    "_meta": {
-      "title": "Save Image"
-    }
-  }
-}
-`;
+const FINAL_OUTPUT_NODE_ID_POSE = "213";
+const FALLBACK_NODE_IDS_POSE = ["9", "4"];
 
 async function uploadImageToComfyUI(comfyUiUrl: string, imageBlob: Blob, filename: string) {
   const formData = new FormData();
@@ -834,15 +742,16 @@ async function uploadImageToComfyUI(comfyUiUrl: string, imageBlob: Blob, filenam
   return data.name;
 }
 
-async function findOutputImage(historyOutputs: any): Promise<any | null> {
+async function findOutputImage(historyOutputs: any, primaryNodeId: string, fallbackNodeIds: string[]): Promise<any | null> {
     if (!historyOutputs) return null;
-    const nodesToCheck = [FINAL_OUTPUT_NODE_ID, ...FALLBACK_NODE_IDS];
+    const nodesToCheck = [primaryNodeId, ...fallbackNodeIds];
     for (const nodeId of nodesToCheck) {
         const nodeOutput = historyOutputs[nodeId];
         if (nodeOutput?.images && Array.isArray(nodeOutput.images) && nodeOutput.images.length > 0) {
             return nodeOutput.images[0];
         }
     }
+    // Final fallback: check all nodes
     for (const nodeId in historyOutputs) {
         const outputData = historyOutputs[nodeId];
         if (outputData.images && Array.isArray(outputData.images) && outputData.images.length > 0) {
@@ -1048,9 +957,9 @@ async function handlePollingPosesState(supabase: any, job: any) {
         if (historyResponse.ok) {
             const historyData = await historyResponse.json();
             const promptHistory = historyData[poseJob.comfyui_prompt_id];
-            const outputNode = promptHistory?.outputs['213'] || promptHistory?.outputs['9'];
-            if (outputNode?.images && outputNode.images.length > 0) {
-                const image = outputNode.images[0];
+            const outputNode = await findOutputImage(promptHistory?.outputs, FINAL_OUTPUT_NODE_ID_POSE, FALLBACK_NODE_IDS_POSE);
+            if (outputNode) {
+                const image = outputNode;
                 const tempImageUrl = `${comfyUiAddress}/view?filename=${encodeURIComponent(image.filename)}&subfolder=${encodeURIComponent(image.subfolder)}&type=${image.type}`;
                 
                 console.log(`[ModelGenPoller][${job.id}] Pose job ${poseJob.comfyui_prompt_id} is complete. Downloading from ComfyUI...`);
@@ -1130,7 +1039,7 @@ async function pollUpscalingPoses(supabase: any, job: any) {
         if (historyResponse.ok) {
             const historyData = await historyResponse.json();
             const promptHistory = historyData[poseJob.upscale_prompt_id];
-            const outputNode = await findOutputImage(promptHistory?.outputs);
+            const outputNode = await findOutputImage(promptHistory?.outputs, FINAL_OUTPUT_NODE_ID_UPSCALE, FALLBACK_NODE_IDS_UPSCALE);
             if (outputNode) {
                 const image = outputNode;
                 const tempImageUrl = `${comfyUiAddress}/view?filename=${encodeURIComponent(image.filename)}&subfolder=${encodeURIComponent(image.subfolder)}&type=${image.type}`;
@@ -1182,13 +1091,15 @@ async function handleUpscalingPosesState(supabase: any, job: any) {
         await supabase.from('mira-agent-model-generation-jobs').update({ final_posed_images: posesToUpdate }).eq('id', job.id);
 
         const comfyUiAddress = COMFYUI_ENDPOINT_URL!.replace(/\/+$/, "");
-        const upscalePromises = posesToProcess.map(async (poseToProcess: any, index: number) => {
+        const upscalePromises = posesToProcess.map(async (poseToProcess: any) => {
             try {
                 const imageResponse = await fetch(poseToProcess.final_url);
                 if (!imageResponse.ok) throw new Error(`Failed to download image for upscaling: ${imageResponse.statusText}`);
                 const imageBlob = await imageResponse.blob();
 
-                const uniqueFilename = `pose_to_upscale_${job.id}_${index}.png`;
+                const urlParts = poseToProcess.final_url.split('/');
+                const originalFilename = urlParts[urlParts.length - 1];
+                const uniqueFilename = `upscale_input_${job.id}_${originalFilename}`;
                 const uploadedFilename = await uploadImageToComfyUI(comfyUiAddress, imageBlob, uniqueFilename);
 
                 const workflow = JSON.parse(tiledUpscalerWorkflow);
