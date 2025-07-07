@@ -11,6 +11,7 @@ import { Wand2, Loader2, Info, History } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RecentVtoPacks } from "@/components/VTO/RecentVtoPacks";
+import { optimizeImage, sanitizeFilename } from "@/lib/utils";
 
 type WizardStep = 'select-mode' | 'provide-inputs' | 'review-queue';
 type VtoMode = 'one-to-many' | 'precise-pairs' | 'random-pairs';
@@ -46,12 +47,42 @@ const VirtualTryOnPacks = () => {
   const handleGenerate = async () => {
     if (queue.length === 0) return;
     setIsLoading(true);
-    const toastId = showLoading(`Queuing ${queue.length} jobs...`);
+    const toastId = showLoading(`Uploading assets and queuing ${queue.length} jobs...`);
 
     try {
+      const uploadFile = async (file: File, type: 'person' | 'garment') => {
+        if (!session?.user) throw new Error("User session not found.");
+        const optimizedFile = await optimizeImage(file);
+        const sanitizedName = sanitizeFilename(optimizedFile.name);
+        const filePath = `${session.user.id}/vto-source/${type}-${Date.now()}-${sanitizedName}`;
+        
+        const { error } = await supabase.storage
+          .from('mira-agent-user-uploads')
+          .upload(filePath, optimizedFile);
+        
+        if (error) throw new Error(`Failed to upload ${type} image: ${error.message}`);
+        
+        const { data: { publicUrl } } = supabase.storage
+          .from('mira-agent-user-uploads')
+          .getPublicUrl(filePath);
+          
+        return publicUrl;
+      };
+
+      const pairsForBackend = await Promise.all(queue.map(async (item) => {
+        const person_url = item.person.file ? await uploadFile(item.person.file, 'person') : item.person.url;
+        const garment_url = await uploadFile(item.garment.file, 'garment');
+        
+        return {
+          person_url,
+          garment_url,
+          appendix: item.appendix
+        };
+      }));
+
       const { error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-vto-packs', {
         body: {
-          pairs: queue,
+          pairs: pairsForBackend,
           user_id: session?.user?.id
         }
       });

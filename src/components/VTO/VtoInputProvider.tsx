@@ -15,8 +15,8 @@ import { useDropzone } from '@/hooks/useDropzone';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export interface QueueItem {
-  person_url: string;
-  garment_url: string;
+  person: { url: string; file?: File };
+  garment: { url: string; file: File };
   appendix?: string;
 }
 
@@ -103,7 +103,12 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
     const personUrl = tempPairPersonUrl || (tempPairPersonFile ? URL.createObjectURL(tempPairPersonFile) : null);
     if (personUrl && tempPairGarmentFile) {
       const garmentUrl = URL.createObjectURL(tempPairGarmentFile);
-      setPrecisePairs(prev => [...prev, { person_url: personUrl, garment_url: garmentUrl, appendix: tempPairAppendix }]);
+      const newPair: QueueItem = {
+        person: { url: personUrl, file: tempPairPersonFile || undefined },
+        garment: { url: garmentUrl, file: tempPairGarmentFile },
+        appendix: tempPairAppendix
+      };
+      setPrecisePairs(prev => [...prev, newPair]);
       setTempPairPersonUrl(null);
       setTempPairPersonFile(null);
       setTempPairGarmentFile(null);
@@ -114,10 +119,9 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
   const handleProceed = () => {
     let queue: QueueItem[] = [];
     if (mode === 'one-to-many' && garmentFile) {
-      const garmentUrl = URL.createObjectURL(garmentFile);
       queue = Array.from(selectedModelUrls).map(personUrl => ({
-        person_url: personUrl,
-        garment_url: garmentUrl,
+        person: { url: personUrl }, // No file for selected models
+        garment: { url: URL.createObjectURL(garmentFile), file: garmentFile },
         appendix: generalAppendix,
       }));
     } else if (mode === 'random-pairs') {
@@ -128,8 +132,8 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
             const shuffledGarments = [...garments].sort(() => 0.5 - Math.random());
             for (let i = 0; i < numPairs; i++) {
                 queue.push({
-                    person_url: models[i],
-                    garment_url: shuffledGarments[i].url,
+                    person: { url: models[i] },
+                    garment: { url: shuffledGarments[i].url, file: shuffledGarments[i].file },
                     appendix: generalAppendix,
                 });
             }
@@ -239,9 +243,9 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
             <div className="space-y-2 pr-4">
               {precisePairs.map((pair, i) => (
                 <div key={i} className="flex gap-2 items-center bg-muted p-2 rounded-md">
-                  <div className="w-16 h-16 rounded-md overflow-hidden flex-shrink-0"><SecureImageDisplay imageUrl={pair.person_url} alt="Person" /></div>
+                  <div className="w-16 h-16 rounded-md overflow-hidden flex-shrink-0"><SecureImageDisplay imageUrl={pair.person.url} alt="Person" /></div>
                   <PlusCircle className="h-5 w-5 text-muted-foreground flex-shrink-0" />
-                  <div className="w-16 h-16 rounded-md overflow-hidden flex-shrink-0"><img src={pair.garment_url} alt="Garment" className="w-full h-full object-cover" /></div>
+                  <div className="w-16 h-16 rounded-md overflow-hidden flex-shrink-0"><img src={pair.garment.url} alt="Garment" className="w-full h-full object-cover" /></div>
                   <p className="text-xs text-muted-foreground flex-1 truncate italic">"{pair.appendix}"</p>
                   <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setPrecisePairs(p => p.filter((_, idx) => idx !== i))}><X className="h-4 w-4" /></Button>
                 </div>
