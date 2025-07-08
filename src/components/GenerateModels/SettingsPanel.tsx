@@ -6,6 +6,8 @@ import { ModelSelector } from "@/components/ModelSelector";
 import { Model } from "@/hooks/useChatManager";
 import { useLanguage } from "@/context/LanguageContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface SettingsPanelProps {
   modelDescription: string;
@@ -78,7 +80,19 @@ export const SettingsPanel = ({
         </Tabs>
 
         <div className="space-y-2">
-          <Label htmlFor="set-description">{t('setDescription')}</Label>
+          <div className="flex items-center gap-2">
+            <Label htmlFor="set-description">{t('setDescription')}</Label>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger>
+                  <Badge variant="outline">{t('default')}</Badge>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>{t('defaultDescription')}</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
           <Textarea
             id="set-description"
             value={setDescription}

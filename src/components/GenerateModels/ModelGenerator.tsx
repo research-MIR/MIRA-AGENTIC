@@ -14,6 +14,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { PosePresetModal } from "./PosePresetModal";
+import { Badge } from "@/components/ui/badge";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface Pose {
   type: 'text' | 'image';
@@ -35,7 +37,7 @@ export const ModelGenerator = ({ packId }: ModelGeneratorProps) => {
   const [activeTab, setActiveTab] = useState<'single' | 'multi'>('single');
   const [multiModelPrompt, setMultiModelPrompt] = useState("");
   const [modelDescription, setModelDescription] = useState("");
-  const [setDescription, setSetDescription] = useState("");
+  const [setDescription, setSetDescription] = useState("grey ecommerce background");
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [autoApprove, setAutoApprove] = useState(true);
   const [poses, setPoses] = useState<Pose[]>([{ type: 'text', value: '', file: undefined, previewUrl: undefined }]);

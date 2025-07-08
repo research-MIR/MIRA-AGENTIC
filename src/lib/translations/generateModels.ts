@@ -55,6 +55,8 @@ export const generateModelsTranslations = {
     posePackName: "Nome del Pack di Pose",
     posePackDescription: "Descrizione (Opzionale)",
     addPoseToPack: "Aggiungi Posa al Pack",
+    default: "Predefinito",
+    defaultDescription: "Puoi modificare questo valore!",
   },
   en: {
     generateModelsTitle: "Generate Models",
@@ -112,5 +114,7 @@ export const generateModelsTranslations = {
     posePackName: "Pose Pack Name",
     posePackDescription: "Description (Optional)",
     addPoseToPack: "Add Pose to Pack",
+    default: "Default",
+    defaultDescription: "You can change this!",
   },
 };
