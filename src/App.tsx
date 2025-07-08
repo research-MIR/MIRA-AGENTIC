@@ -23,6 +23,7 @@ import SegmentationTool from "./pages/Developer/Segmentation.tsx";
 import ModelPacks from "./pages/ModelPacks.tsx";
 import ModelPackDetail from "./pages/ModelPackDetail.tsx";
 import VirtualTryOnPacks from "./pages/VirtualTryOnPacks.tsx";
+import { GlobalModals } from "./components/GlobalModals.tsx";
 
 const App = () => {
   const { isTourOpen, closeTour, isTourPending, openTour, startTour } = useOnboardingTour();
@@ -108,6 +109,7 @@ const App = () => {
         </Route>
         <Route path="*" element={<NotFound />} />
       </Routes>
+      <GlobalModals />
     </ReactourProvider>
   );
 };
