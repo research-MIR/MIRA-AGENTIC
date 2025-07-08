@@ -13,6 +13,7 @@ import { PoseInput } from "./PoseInput";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { PosePresetModal } from "./PosePresetModal";
 
 interface Pose {
   type: 'text' | 'image';
@@ -39,6 +40,7 @@ export const ModelGenerator = ({ packId }: ModelGeneratorProps) => {
   const [autoApprove, setAutoApprove] = useState(true);
   const [poses, setPoses] = useState<Pose[]>([{ type: 'text', value: '', file: undefined, previewUrl: undefined }]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isPoseModalOpen, setIsPoseModalOpen] = useState(false);
 
   useEffect(() => {
     fetchModels();
@@ -165,50 +167,67 @@ export const ModelGenerator = ({ packId }: ModelGeneratorProps) => {
   const addPose = () => setPoses([...poses, { type: 'text', value: '', file: undefined, previewUrl: undefined }]);
   const removePose = (index: number) => setPoses(poses.filter((_, i) => i !== index));
 
-  return (
-    <div className="space-y-4">
-      <SettingsPanel
-        modelDescription={modelDescription}
-        setModelDescription={setModelDescription}
-        setDescription={setDescription}
-        setSetDescription={setSetDescription}
-        models={models as Model[]}
-        selectedModelId={selectedModelId}
-        setSelectedModelId={setSelectedModelId}
-        autoApprove={autoApprove}
-        setAutoApprove={setAutoApprove}
-        isJobActive={isLoading}
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        multiModelPrompt={multiModelPrompt}
-        setMultiModelPrompt={setMultiModelPrompt}
-      />
-      
-      <Card>
-        <CardHeader><CardTitle>{t('step3')}</CardTitle></CardHeader>
-        <CardContent className="space-y-4">
-          {poses.map((pose, index) => (
-            <PoseInput
-              key={index}
-              pose={pose}
-              index={index}
-              onPoseChange={(idx, newPose) => setPoses(poses.map((p, i) => i === idx ? {...p, ...newPose} : p))}
-              onRemovePose={removePose}
-              isJobActive={isLoading}
-              isOnlyPose={poses.length <= 1}
-            />
-          ))}
-          <Button variant="outline" className="w-full" onClick={addPose} disabled={isLoading}>
-            <Plus className="mr-2 h-4 w-4" />
-            {t('addPose')}
-          </Button>
-        </CardContent>
-      </Card>
+  const handleApplyPoses = (newPoses: Pose[]) => {
+    setPoses(newPoses.map(p => ({ ...p, file: undefined, previewUrl: undefined })));
+    setIsPoseModalOpen(false);
+  };
 
-      <Button size="lg" className="w-full" onClick={handleGenerate} disabled={isLoading || (activeTab === 'single' && !modelDescription.trim()) || (activeTab === 'multi' && !multiModelPrompt.trim())}>
-        {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-        {t('generateModelsButton')}
-      </Button>
-    </div>
+  return (
+    <>
+      <div className="space-y-4">
+        <SettingsPanel
+          modelDescription={modelDescription}
+          setModelDescription={setModelDescription}
+          setDescription={setDescription}
+          setSetDescription={setSetDescription}
+          models={models as Model[]}
+          selectedModelId={selectedModelId}
+          setSelectedModelId={setSelectedModelId}
+          autoApprove={autoApprove}
+          setAutoApprove={setAutoApprove}
+          isJobActive={isLoading}
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          multiModelPrompt={multiModelPrompt}
+          setMultiModelPrompt={setMultiModelPrompt}
+        />
+        
+        <Card>
+          <CardHeader>
+            <div className="flex justify-between items-center">
+              <CardTitle>{t('step3')}</CardTitle>
+              <Button variant="outline" size="sm" onClick={() => setIsPoseModalOpen(true)}>{t('usePosePresets')}</Button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {poses.map((pose, index) => (
+              <PoseInput
+                key={index}
+                pose={pose}
+                index={index}
+                onPoseChange={(idx, newPose) => setPoses(poses.map((p, i) => i === idx ? {...p, ...newPose} : p))}
+                onRemovePose={removePose}
+                isJobActive={isLoading}
+                isOnlyPose={poses.length <= 1}
+              />
+            ))}
+            <Button variant="outline" className="w-full" onClick={addPose} disabled={isLoading}>
+              <Plus className="mr-2 h-4 w-4" />
+              {t('addPose')}
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Button size="lg" className="w-full" onClick={handleGenerate} disabled={isLoading || (activeTab === 'single' && !modelDescription.trim()) || (activeTab === 'multi' && !multiModelPrompt.trim())}>
+          {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+          {t('generateModelsButton')}
+        </Button>
+      </div>
+      <PosePresetModal 
+        isOpen={isPoseModalOpen}
+        onClose={() => setIsPoseModalOpen(false)}
+        onApplyPoses={handleApplyPoses}
+      />
+    </>
   );
 };
