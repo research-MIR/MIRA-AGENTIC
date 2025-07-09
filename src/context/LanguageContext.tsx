@@ -11,6 +11,7 @@ import { errorTranslations } from '@/lib/translations/errors';
 import { onboardingTranslations } from '@/lib/translations/onboarding';
 import { inpaintingTranslations } from '@/lib/translations/inpainting';
 import { generateModelsTranslations } from '@/lib/translations/generateModels';
+import { editWithWordsTranslations } from '@/lib/translations/editWithWords';
 
 // Aggregate translations directly in this file
 const modules = [
@@ -26,6 +27,7 @@ const modules = [
   onboardingTranslations,
   inpaintingTranslations,
   generateModelsTranslations,
+  editWithWordsTranslations,
 ];
 
 const translations = modules.reduce((acc, module) => {

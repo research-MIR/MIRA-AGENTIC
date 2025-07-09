@@ -23,6 +23,7 @@ import SegmentationTool from "./pages/Developer/Segmentation.tsx";
 import ModelPacks from "./pages/ModelPacks.tsx";
 import ModelPackDetail from "./pages/ModelPackDetail.tsx";
 import VirtualTryOnPacks from "./pages/VirtualTryOnPacks.tsx";
+import EditWithWords from "./pages/EditWithWords.tsx";
 import { GlobalModals } from "./components/GlobalModals.tsx";
 
 const App = () => {
@@ -95,6 +96,7 @@ const App = () => {
             <Route path="/generator" element={<Generator />} />
             <Route path="/upscale" element={<Upscale />} />
             <Route path="/inpainting" element={<Inpainting />} />
+            <Route path="/edit-with-words" element={<EditWithWords />} />
             <Route path="/editor" element={<Editor />} />
             <Route path="/projects" element={<Projects />} />
             <Route path="/projects/:projectId" element={<ProjectDetail />} />

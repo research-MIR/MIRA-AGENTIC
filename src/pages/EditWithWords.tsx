@@ -1,0 +1,242 @@
+import { useState, useMemo, useRef } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSession } from "@/components/Auth/SessionContextProvider";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Loader2, Image as ImageIcon, Wand2, UploadCloud, X } from "lucide-react";
+import { useLanguage } from "@/context/LanguageContext";
+import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
+import { useFileUpload } from "@/hooks/useFileUpload";
+import { ImageCompareModal } from "@/components/ImageCompareModal";
+import { RecentJobThumbnail } from "@/components/Jobs/RecentJobThumbnail";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { useSecureImage } from "@/hooks/useSecureImage";
+
+interface EditJob {
+  id: string;
+  status: 'queued' | 'processing' | 'complete' | 'failed';
+  final_result?: {
+    publicUrl: string;
+  };
+  metadata?: {
+    source_image_url?: string;
+    prompt?: string;
+  };
+  error_message?: string;
+}
+
+const SecureDisplayImage = ({ imageUrl, alt }: { imageUrl: string | null, alt: string }) => {
+  const { displayUrl, isLoading, error } = useSecureImage(imageUrl);
+
+  if (!imageUrl) return null;
+
+  return (
+    <div className="relative w-full h-full">
+      {isLoading && <Skeleton className="w-full h-full" />}
+      {error && <div className="w-full h-full bg-destructive/10 rounded-md flex items-center justify-center text-destructive text-sm p-2">Error loading image.</div>}
+      {displayUrl && <img src={displayUrl} alt={alt} className="w-full h-full object-contain" />}
+    </div>
+  );
+};
+
+const EditWithWords = () => {
+  const { supabase, session } = useSession();
+  const { t } = useLanguage();
+  const queryClient = useQueryClient();
+  const { uploadedFiles, handleFileUpload, removeFile } = useFileUpload();
+  
+  const [instruction, setInstruction] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [isCompareModalOpen, setIsCompareModalOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const { data: recentJobs, isLoading: isLoadingRecent } = useQuery<EditJob[]>({
+    queryKey: ['recentEditJobs', session?.user?.id],
+    queryFn: async () => {
+      if (!session?.user) return [];
+      const { data, error } = await supabase
+        .from('mira-agent-comfyui-jobs')
+        .select('id, status, final_result, metadata, error_message')
+        .eq('metadata->>source', 'edit-with-words')
+        .eq('user_id', session.user.id)
+        .order('created_at', { ascending: false })
+        .limit(10);
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!session?.user,
+  });
+
+  const selectedJob = useMemo(() => recentJobs?.find(j => j.id === selectedJobId), [recentJobs, selectedJobId]);
+  const sourceFile = uploadedFiles[0]?.file;
+  const sourceImageUrl = sourceFile ? URL.createObjectURL(sourceFile) : null;
+
+  const startNew = () => {
+    setSelectedJobId(null);
+    removeFile(0);
+    setInstruction("");
+  };
+
+  const handleSubmit = async () => {
+    if (!sourceFile) return showError("Please upload an image to edit.");
+    if (!instruction.trim()) return showError("Please provide an editing instruction.");
+    
+    setIsSubmitting(true);
+    const toastId = showLoading(t('sendingJob'));
+
+    try {
+        const { data: { publicUrl }, error: uploadError } = await supabase.storage
+            .from('mira-agent-user-uploads')
+            .upload(`${session?.user?.id}/edit-source/${Date.now()}-${sourceFile.name}`, sourceFile);
+
+        if (uploadError) throw uploadError;
+
+        const payload = {
+            image_url: publicUrl,
+            prompt_text: instruction,
+            invoker_user_id: session?.user?.id,
+            source: 'edit-with-words',
+            workflow_type: 'edit-with-words',
+            original_prompt_for_gallery: instruction,
+        };
+
+        const { error } = await supabase.functions.invoke('MIRA-AGENT-proxy-comfyui', { body: payload });
+
+        if (error) throw error;
+        
+        dismissToast(toastId);
+        showSuccess("Edit job started! You can track its progress in the sidebar.");
+        queryClient.invalidateQueries({ queryKey: ['activeComfyJobs'] });
+        queryClient.invalidateQueries({ queryKey: ['recentEditJobs'] });
+        startNew();
+    } catch (err: any) {
+        dismissToast(toastId);
+        showError(`Job submission failed: ${err.message}`);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="p-4 md:p-8 h-screen overflow-y-auto">
+        <header className="pb-4 mb-8 border-b">
+          <h1 className="text-3xl font-bold">{t('editWithWords')}</h1>
+          <p className="text-muted-foreground">{t('editWithWordsDescription')}</p>
+        </header>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <div className="lg:col-span-1 space-y-6">
+            <Card>
+              <CardHeader><CardTitle>{t('sourceImage')}</CardTitle></CardHeader>
+              <CardContent>
+                {sourceImageUrl ? (
+                  <div className="relative">
+                    <img src={sourceImageUrl} alt="Source for editing" className="w-full h-auto object-contain rounded-md" />
+                    <Button variant="destructive" size="icon" className="absolute top-2 right-2 h-6 w-6 rounded-full" onClick={() => removeFile(0)}>
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ) : (
+                  <div onClick={() => fileInputRef.current?.click()} className="p-4 border-2 border-dashed rounded-lg text-center cursor-pointer hover:border-primary transition-colors">
+                    <UploadCloud className="mx-auto h-8 w-8 text-muted-foreground" />
+                    <p className="mt-2 text-sm font-medium">{t('uploadAFile')}</p>
+                    <p className="text-xs text-muted-foreground">{t('dragAndDrop')}</p>
+                    <Input ref={fileInputRef} id="edit-upload" type="file" className="hidden" accept="image/*" onChange={(e) => handleFileUpload(e.target.files)} />
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader><CardTitle>{t('editingInstruction')}</CardTitle></CardHeader>
+              <CardContent>
+                <Textarea value={instruction} onChange={(e) => setInstruction(e.target.value)} placeholder={t('instructionPlaceholder')} rows={4} />
+              </CardContent>
+            </Card>
+            <Button size="lg" className="w-full" onClick={handleSubmit} disabled={isSubmitting || !sourceFile || !instruction.trim()}>
+              {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+              {t('generate')}
+            </Button>
+          </div>
+          <div className="lg:col-span-2 space-y-6">
+            <Card>
+              <CardHeader>
+                <div className="flex justify-between items-center">
+                  <CardTitle>{t('result')}</CardTitle>
+                  {selectedJob && <Button variant="outline" onClick={startNew}>{t('newJob')}</Button>}
+                </div>
+              </CardHeader>
+              <CardContent className="min-h-[400px]">
+                {selectedJob ? (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="w-full aspect-square bg-muted rounded-md overflow-hidden flex justify-center items-center relative">
+                        <h3 className="font-semibold mb-2 absolute top-2 left-2 bg-background/80 px-2 py-1 rounded-full text-xs">{t('originalImage')}</h3>
+                        <SecureDisplayImage imageUrl={selectedJob.metadata?.source_image_url || null} alt="Original" />
+                      </div>
+                      <div className="w-full aspect-square bg-muted rounded-md overflow-hidden flex justify-center items-center relative">
+                        <h3 className="font-semibold mb-2 absolute top-2 left-2 bg-background/80 px-2 py-1 rounded-full text-xs">{t('result')}</h3>
+                        {selectedJob.status === 'complete' && selectedJob.final_result?.publicUrl ? (
+                          <SecureDisplayImage imageUrl={selectedJob.final_result.publicUrl} alt="Result" />
+                        ) : (
+                          <div className="w-full h-full flex flex-col items-center justify-center text-muted-foreground">
+                            <Loader2 className="h-8 w-8 animate-spin" />
+                            <p className="mt-2 text-sm">{t('inProgress')}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    {selectedJob.status === 'complete' && selectedJob.final_result?.publicUrl && (
+                      <Button className="w-full mt-4" onClick={() => setIsCompareModalOpen(true)}>{t('compareResults')}</Button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+                    <ImageIcon className="h-16 w-16" />
+                    <p className="mt-4">{t('uploadAnImageToStart')}</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader><CardTitle>{t('recentEdits')}</CardTitle></CardHeader>
+              <CardContent>
+                {isLoadingRecent ? <Skeleton className="h-24 w-full" /> : recentJobs && recentJobs.length > 0 ? (
+                  <ScrollArea className="h-32">
+                    <div className="flex gap-4 pb-2">
+                      {recentJobs.map(job => (
+                        <RecentJobThumbnail
+                          key={job.id}
+                          job={job}
+                          onClick={() => setSelectedJobId(job.id)}
+                          isSelected={selectedJobId === job.id}
+                        />
+                      ))}
+                    </div>
+                  </ScrollArea>
+                ) : (
+                  <p className="text-sm text-muted-foreground">{t('noRecentEdits')}</p>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </div>
+      {isCompareModalOpen && selectedJob?.metadata?.source_image_url && selectedJob?.final_result?.publicUrl && (
+        <ImageCompareModal 
+          isOpen={isCompareModalOpen}
+          onClose={() => setIsCompareModalOpen(false)}
+          beforeUrl={selectedJob.metadata.source_image_url}
+          afterUrl={selectedJob.final_result.publicUrl}
+        />
+      )}
+    </>
+  );
+};
+
+export default EditWithWords;
