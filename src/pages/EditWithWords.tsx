@@ -87,27 +87,44 @@ const EditWithWords = () => {
     if (!instruction.trim()) return showError("Please provide an editing instruction.");
     
     setIsSubmitting(true);
-    const toastId = showLoading(t('sendingJob'));
+    let toastId = showLoading(t('sendingJob'));
 
     try {
-        const { data: { publicUrl }, error: uploadError } = await supabase.storage
+        const { data: { publicUrl: sourcePublicUrl }, error: uploadError } = await supabase.storage
             .from('mira-agent-user-uploads')
             .upload(`${session?.user?.id}/edit-source/${Date.now()}-${sourceFile.name}`, sourceFile);
 
         if (uploadError) throw uploadError;
 
+        dismissToast(toastId);
+        toastId = showLoading("Enhancing your instruction...");
+
+        const { data: helperData, error: helperError } = await supabase.functions.invoke('MIRA-AGENT-tool-edit-with-words', {
+            body: {
+                source_image_url: sourcePublicUrl,
+                instruction: instruction,
+            }
+        });
+
+        if (helperError) throw helperError;
+        const enhancedPrompt = helperData.enhanced_prompt;
+        if (!enhancedPrompt) throw new Error("The AI helper failed to generate a detailed prompt.");
+
+        dismissToast(toastId);
+        toastId = showLoading("Sending job to the image editor...");
+
         const payload = {
-            image_url: publicUrl,
-            prompt_text: instruction,
+            image_url: sourcePublicUrl,
+            prompt_text: enhancedPrompt,
             invoker_user_id: session?.user?.id,
             source: 'edit-with-words',
             workflow_type: 'edit-with-words',
             original_prompt_for_gallery: instruction,
         };
 
-        const { error } = await supabase.functions.invoke('MIRA-AGENT-proxy-comfyui', { body: payload });
+        const { error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-comfyui', { body: payload });
 
-        if (error) throw error;
+        if (proxyError) throw proxyError;
         
         dismissToast(toastId);
         showSuccess("Edit job started! You can track its progress in the sidebar.");
