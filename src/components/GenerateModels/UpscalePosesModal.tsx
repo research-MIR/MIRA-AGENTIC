@@ -77,12 +77,10 @@ export const UpscalePosesModal = ({ isOpen, onClose, jobs, packId }: UpscalePose
       console.log(`[UpscaleModal] Grouping poses for upscale:`, Object.fromEntries(jobsToUpdate));
 
       const upscalePromises = Array.from(jobsToUpdate.entries()).map(([jobId, poseUrls]) => {
-        return supabase.functions.invoke('start_poses_upscaling', {
-          body: {
-            p_job_id: jobId,
-            p_pose_urls: poseUrls,
-            p_upscale_factor: factor
-          }
+        return supabase.rpc('MIRA-AGENT-start_poses_upscaling', {
+          p_job_id: jobId,
+          p_pose_urls: poseUrls,
+          p_upscale_factor: factor
         });
       });
 
