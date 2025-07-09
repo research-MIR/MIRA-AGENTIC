@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useCallback } from "react";
+import { useState, useMemo, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Button } from "@/components/ui/button";
@@ -25,7 +25,7 @@ interface EditJob {
   };
   metadata?: {
     source_image_url?: string;
-    reference_image_url?: string;
+    reference_image_urls?: string[];
     prompt?: string;
   };
   error_message?: string;
@@ -45,11 +45,11 @@ const SecureDisplayImage = ({ imageUrl, alt }: { imageUrl: string | null, alt: s
   );
 };
 
-const FileUploader = ({ onFileSelect, title, imageUrl, onClear, icon }: { onFileSelect: (file: File) => void, title: string, imageUrl: string | null, onClear: () => void, icon: React.ReactNode }) => {
+const FileUploader = ({ onFileSelect, title, imageUrl, onClear, icon, multiple = false }: { onFileSelect: (files: FileList) => void, title: string, imageUrl?: string | null, onClear?: () => void, icon: React.ReactNode, multiple?: boolean }) => {
     const inputRef = useRef<HTMLInputElement>(null);
-    const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: (e) => e.dataTransfer.files && onFileSelect(e.dataTransfer.files[0]) });
+    const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: (e) => e.dataTransfer.files && onFileSelect(e.dataTransfer.files) });
   
-    if (imageUrl) {
+    if (imageUrl && onClear) {
       return (
         <div className="relative h-48 w-full">
           <img src={imageUrl} alt={title} className="w-full h-full object-cover rounded-md" />
@@ -61,7 +61,7 @@ const FileUploader = ({ onFileSelect, title, imageUrl, onClear, icon }: { onFile
     return (
       <div {...dropzoneProps} className={cn("flex flex-col h-48 w-full justify-center items-center rounded-lg border border-dashed p-4 text-center transition-colors cursor-pointer", isDraggingOver && "border-primary bg-primary/10")} onClick={() => inputRef.current?.click()}>
         <div className="text-center pointer-events-none">{icon}<p className="mt-2 text-sm font-semibold">{title}</p></div>
-        <Input ref={inputRef} type="file" className="hidden" accept="image/*" onChange={(e) => e.target.files && onFileSelect(e.target.files[0])} />
+        <Input ref={inputRef} type="file" multiple={multiple} className="hidden" accept="image/*" onChange={(e) => e.target.files && onFileSelect(e.target.files)} />
       </div>
     );
 };
@@ -72,14 +72,14 @@ const EditWithWords = () => {
   const queryClient = useQueryClient();
   
   const [sourceFile, setSourceFile] = useState<File | null>(null);
-  const [referenceFile, setReferenceFile] = useState<File | null>(null);
+  const [referenceFiles, setReferenceFiles] = useState<File[]>([]);
   const [instruction, setInstruction] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [isCompareModalOpen, setIsCompareModalOpen] = useState(false);
 
   const sourceImageUrl = useMemo(() => sourceFile ? URL.createObjectURL(sourceFile) : null, [sourceFile]);
-  const referenceImageUrl = useMemo(() => referenceFile ? URL.createObjectURL(referenceFile) : null, [referenceFile]);
+  const referenceImageUrls = useMemo(() => referenceFiles.map(f => URL.createObjectURL(f)), [referenceFiles]);
 
   const { data: recentJobs, isLoading: isLoadingRecent } = useQuery<EditJob[]>({
     queryKey: ['recentEditJobs', session?.user?.id],
@@ -103,7 +103,7 @@ const EditWithWords = () => {
   const startNew = () => {
     setSelectedJobId(null);
     setSourceFile(null);
-    setReferenceFile(null);
+    setReferenceFiles([]);
     setInstruction("");
   };
 
@@ -124,44 +124,19 @@ const EditWithWords = () => {
         };
 
         const sourcePublicUrl = await uploadFile(sourceFile, 'source');
-        let referencePublicUrl: string | null = null;
-        if (referenceFile) {
-            referencePublicUrl = await uploadFile(referenceFile, 'reference');
-        }
-
-        dismissToast(toastId);
-        toastId = showLoading("Enhancing your instruction...");
-
-        const { data: helperData, error: helperError } = await supabase.functions.invoke('MIRA-AGENT-tool-edit-with-words', {
-            body: {
-                source_image_url: sourcePublicUrl,
-                instruction: instruction,
-                reference_image_url: referencePublicUrl,
-            }
-        });
-
-        if (helperError) throw helperError;
-        const enhancedPrompt = helperData.enhanced_prompt;
-        if (!enhancedPrompt) throw new Error("The AI helper failed to generate a detailed prompt.");
+        const referencePublicUrls = await Promise.all(referenceFiles.map(file => uploadFile(file, 'reference')));
 
         dismissToast(toastId);
         toastId = showLoading("Sending job to the image editor...");
 
         const payload = {
-            image_url: sourcePublicUrl,
-            prompt_text: enhancedPrompt,
+            source_image_url: sourcePublicUrl,
+            instruction: instruction,
+            reference_image_urls: referencePublicUrls,
             invoker_user_id: session?.user?.id,
-            source: 'edit-with-words',
-            workflow_type: 'edit-with-words',
-            original_prompt_for_gallery: instruction,
-            metadata: {
-                source_image_url: sourcePublicUrl,
-                reference_image_url: referencePublicUrl,
-                prompt: enhancedPrompt,
-            }
         };
 
-        const { error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-comfyui', { body: payload });
+        const { error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-tool-edit-with-words', { body: payload });
 
         if (proxyError) throw proxyError;
         
@@ -190,14 +165,24 @@ const EditWithWords = () => {
           <div className="lg:col-span-1 space-y-6">
             <Card>
               <CardHeader><CardTitle>1. Provide Images</CardTitle></CardHeader>
-              <CardContent className="grid grid-cols-2 gap-4">
+              <CardContent className="space-y-4">
                 <div className="space-y-2">
                     <Label>{t('sourceImage')}</Label>
-                    <FileUploader onFileSelect={setSourceFile} title="Source" imageUrl={sourceImageUrl} onClear={() => setSourceFile(null)} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
+                    <FileUploader onFileSelect={(files) => files && setSourceFile(files[0])} title="Source" imageUrl={sourceImageUrl} onClear={() => setSourceFile(null)} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
                 </div>
                 <div className="space-y-2">
                     <Label>{t('referenceImage')}</Label>
-                    <FileUploader onFileSelect={setReferenceFile} title="Reference" imageUrl={referenceImageUrl} onClear={() => setReferenceFile(null)} icon={<Palette className="h-8 w-8 text-muted-foreground" />} />
+                    <FileUploader onFileSelect={(files) => files && setReferenceFiles(Array.from(files))} title="Reference(s)" icon={<Palette className="h-8 w-8 text-muted-foreground" />} multiple />
+                    {referenceImageUrls.length > 0 && (
+                        <div className="flex flex-wrap gap-2 pt-2">
+                            {referenceImageUrls.map((url, index) => (
+                                <div key={index} className="relative">
+                                    <img src={url} alt={`Reference ${index}`} className="w-16 h-16 object-cover rounded-md" />
+                                    <Button variant="destructive" size="icon" className="absolute -top-2 -right-2 h-5 w-5 rounded-full" onClick={() => setReferenceFiles(files => files.filter((_, i) => i !== index))}><X className="h-3 w-3" /></Button>
+                                </div>
+                            ))}
+                        </div>
+                    )}
                 </div>
               </CardContent>
             </Card>

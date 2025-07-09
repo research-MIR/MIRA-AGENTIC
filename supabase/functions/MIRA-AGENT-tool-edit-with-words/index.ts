@@ -1,13 +1,17 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { GoogleGenAI, Content, Part } from 'https://esm.sh/@google/genai@0.15.0';
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
+import { fal } from 'npm:@fal-ai/client@1.5.0';
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-const MODEL_NAME = "gemini-1.5-flash-latest";
+const FAL_KEY = Deno.env.get('FAL_KEY');
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const UPLOAD_BUCKET = 'mira-agent-user-uploads';
+const GENERATED_IMAGES_BUCKET = 'mira-generations';
+const GEMINI_MODEL_NAME = "gemini-1.5-flash-latest";
+const FAL_MODEL_NAME = "fal-ai/flux-pro/kontext/max/multi";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -73,10 +77,7 @@ Summary of Your Task:
 Your output is NOT a conversation; it is ONLY the final, optimized prompt. Analyze the request and the provided images. Apply all relevant principles, especially the Hyper-Detailed Identity Lockdown and the Golden Rule of Reference Handling, to construct a single, precise, and explicit instruction. Describe what to change, but describe what to keep in even greater detail.`;
 
 async function downloadImageAsPart(publicUrl: string, label: string): Promise<Part[]> {
-    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-        throw new Error("Supabase URL or Service Role Key are not set in environment variables.");
-    }
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
     const url = new URL(publicUrl);
     const filePath = url.pathname.split(`/${UPLOAD_BUCKET}/`)[1];
     if (!filePath) throw new Error(`Could not parse file path from URL: ${publicUrl}`);
@@ -96,13 +97,8 @@ async function downloadImageAsPart(publicUrl: string, label: string): Promise<Pa
 
 function extractJson(text: string): any {
     const match = text.match(/```json\s*([\s\S]*?)\s*```/);
-    if (match && match[1]) {
-        return JSON.parse(match[1]);
-    }
-    try {
-        return JSON.parse(text);
-    } catch (e) {
-        console.error("Failed to parse JSON from model response:", text);
+    if (match && match[1]) return JSON.parse(match[1]);
+    try { return JSON.parse(text); } catch (e) {
         throw new Error("The model returned a response that could not be parsed as JSON.");
     }
 }
@@ -111,45 +107,79 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
 
   try {
-    const { source_image_url, instruction, reference_image_url } = await req.json();
-    if (!source_image_url || !instruction) {
-      throw new Error("source_image_url and instruction are required.");
+    const { source_image_url, instruction, reference_image_urls, invoker_user_id } = await req.json();
+    if (!source_image_url || !instruction || !invoker_user_id) {
+      throw new Error("source_image_url, instruction, and invoker_user_id are required.");
     }
 
+    // --- Step 1: Prompt Engineering with Gemini ---
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-    const parts: Part[] = [
-        { text: `**User Instruction:**\n${instruction}` }
-    ];
+    const parts: Part[] = [{ text: `**User Instruction:**\n${instruction}` }];
 
     const sourceParts = await downloadImageAsPart(source_image_url, "SOURCE IMAGE");
     parts.push(...sourceParts);
 
-    if (reference_image_url) {
-        const referenceParts = await downloadImageAsPart(reference_image_url, "REFERENCE IMAGE");
-        parts.push(...referenceParts);
+    if (reference_image_urls && Array.isArray(reference_image_urls)) {
+        const referencePromises = reference_image_urls.map((url, index) => 
+            downloadImageAsPart(url, `REFERENCE IMAGE ${index + 1}`)
+        );
+        const referencePartsArrays = await Promise.all(referencePromises);
+        parts.push(...referencePartsArrays.flat());
     }
 
-    const result = await ai.models.generateContent({
-        model: MODEL_NAME,
+    const geminiResult = await ai.models.generateContent({
+        model: GEMINI_MODEL_NAME,
         contents: [{ role: 'user', parts }],
-        generationConfig: { responseMimeType: "application/json" },
         config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
     });
 
-    const responseJson = extractJson(result.text);
-    const enhancedPrompt = responseJson.enhanced_prompt;
+    const enhancedPrompt = geminiResult.text;
+    if (!enhancedPrompt) throw new Error("AI Helper did not return an enhanced prompt.");
 
-    if (!enhancedPrompt) {
-        throw new Error("AI Helper did not return an enhanced prompt in the expected format.");
-    }
+    // --- Step 2: Image Generation with Fal.ai ---
+    fal.config({ credentials: FAL_KEY });
+    const allImageUrls = [source_image_url, ...(reference_image_urls || [])];
 
-    return new Response(JSON.stringify({ enhanced_prompt: enhancedPrompt }), {
+    const falResult: any = await fal.subscribe(FAL_MODEL_NAME, {
+      input: {
+        prompt: enhancedPrompt,
+        image_urls: allImageUrls,
+      },
+      logs: true,
+    });
+
+    const finalImage = falResult?.images?.[0];
+    if (!finalImage || !finalImage.url) throw new Error("Fal.ai did not return a valid image.");
+
+    // --- Step 3: Finalize and Store ---
+    const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
+    const imageResponse = await fetch(finalImage.url);
+    if (!imageResponse.ok) throw new Error("Failed to download final image from Fal.ai");
+    const imageBuffer = await imageResponse.arrayBuffer();
+    
+    const finalFilePath = `${invoker_user_id}/edit-with-words/${Date.now()}_final.png`;
+    await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(finalFilePath, imageBuffer, { contentType: 'image/png', upsert: true });
+    const { data: { publicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(finalFilePath);
+
+    await supabase.from('mira-agent-comfyui-jobs').insert({
+        user_id: invoker_user_id,
+        status: 'complete',
+        final_result: { publicUrl },
+        metadata: {
+            source: 'edit-with-words',
+            prompt: enhancedPrompt,
+            source_image_url,
+            reference_image_urls,
+        }
+    });
+
+    return new Response(JSON.stringify({ success: true, finalImageUrl: publicUrl }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });
 
   } catch (error) {
-    console.error("[EditWithWordsHelper] Error:", error);
+    console.error("[EditWithWordsTool] Error:", error);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,
