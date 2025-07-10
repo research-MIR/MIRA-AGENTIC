@@ -142,6 +142,13 @@ serve(async (req)=>{
         if (modelError) throw new Error(`Failed to fetch default image model: ${modelError.message}`);
         finalModelId = dbModel.model_id_string;
     }
+
+    // Temporary fix for deprecated model ID
+    if (finalModelId === 'imagen-4.0-ultra-generate-exp-05-20') {
+        console.log(`[ImageGenerator-Google][${requestId}] Deprecated model ID detected. Swapping to new model.`);
+        finalModelId = 'imagen-4.0-ultra-generate-preview-06-06';
+    }
+
     console.log(`[ImageGenerator-Google][${requestId}] Using model: ${finalModelId}`);
 
     const auth = new GoogleAuth({
