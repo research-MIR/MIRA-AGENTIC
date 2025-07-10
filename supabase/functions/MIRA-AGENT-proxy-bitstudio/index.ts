@@ -130,7 +130,10 @@ serve(async (req) => {
         body: JSON.stringify(inpaintPayload)
       });
       if (!inpaintResponse.ok) throw new Error(`BitStudio inpaint request failed: ${await inpaintResponse.text()}`);
+      
       const inpaintResult = await inpaintResponse.json();
+      console.log(`[BitStudioProxy][${requestId}] Full inpaint response from BitStudio:`, JSON.stringify(inpaintResult, null, 2));
+
       const taskId = inpaintResult[0]?.id;
       if (!taskId) throw new Error("BitStudio did not return a task ID for the inpaint job.");
 
