@@ -203,6 +203,9 @@ serve(async (req) => {
             full_source_image_base64: fullSourceImageBase64,
             bbox: bbox,
             cropped_dilated_mask_base64: croppedDilatedMaskBase64,
+            source_image_url: source_image_url,
+            mask_image_url: mask_image_url,
+            reference_image_url: reference_image_url,
         }
       }).select('id').single();
       if (insertError) throw insertError;

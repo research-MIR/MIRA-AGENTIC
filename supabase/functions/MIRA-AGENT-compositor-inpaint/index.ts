@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { createCanvas, loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
-import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
+import { decodeBase64, encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -11,6 +11,37 @@ const corsHeaders = {
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
+
+async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
+    const url = new URL(publicUrl);
+    const pathSegments = url.pathname.split('/');
+    let bucketName: string;
+    let filePath: string;
+
+    const publicSegmentIndex = pathSegments.indexOf('public');
+    const objectSegmentIndex = pathSegments.indexOf('object');
+
+    if (publicSegmentIndex !== -1 && publicSegmentIndex + 1 < pathSegments.length) {
+        bucketName = pathSegments[publicSegmentIndex + 1];
+        filePath = pathSegments.slice(publicSegmentIndex + 2).join('/');
+    } else if (objectSegmentIndex !== -1 && objectSegmentIndex + 2 < pathSegments.length) {
+        bucketName = pathSegments[objectSegmentIndex + 2];
+        const pathStartIndex = url.pathname.indexOf(bucketName) + bucketName.length + 1;
+        filePath = decodeURIComponent(url.pathname.substring(pathStartIndex));
+    } else {
+        throw new Error(`Could not parse bucket name or file path from URL: ${publicUrl}`);
+    }
+
+    if (!bucketName || !filePath) {
+        throw new Error(`Could not parse bucket or path from URL: ${publicUrl}`);
+    }
+
+    const { data, error } = await supabase.storage.from(bucketName).download(filePath);
+    if (error) {
+        throw new Error(`Failed to download from Supabase storage (${filePath}): ${error.message}`);
+    }
+    return data;
+}
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -26,7 +57,7 @@ serve(async (req) => {
   try {
     let job, fetchError;
     const tableName = job_type === 'bitstudio' ? 'mira-agent-bitstudio-jobs' : 'mira-agent-inpainting-jobs';
-    const selectColumns = 'metadata, user_id';
+    const selectColumns = job_type === 'bitstudio' ? 'metadata, user_id, source_person_image_url' : 'metadata, user_id';
 
     console.log(`[Compositor-Inpainting][${job_id}] Fetching from table: ${tableName}`);
     
@@ -38,52 +69,99 @@ serve(async (req) => {
 
     if (fetchError) throw fetchError;
     
-    const metadata = job.metadata || {};
+    let metadata = job.metadata || {};
+
+    // --- FALLBACK LOGIC ---
     if (!metadata.full_source_image_base64 || !metadata.bbox || !metadata.cropped_dilated_mask_base64) {
-      throw new Error("Job is missing essential metadata (source image, bbox, or mask) for compositing.");
+        console.log(`[Compositor-Inpainting][${job_id}] Metadata is missing. Attempting to regenerate from source URLs.`);
+        
+        const sourceUrl = job_type === 'bitstudio' ? job.source_person_image_url : metadata.source_image_url;
+        const maskUrl = metadata.mask_image_url;
+
+        if (!sourceUrl || !maskUrl) {
+            throw new Error("Job is missing essential metadata AND source/mask URLs for fallback regeneration.");
+        }
+
+        console.log(`[Compositor-Inpainting][${job_id}] Fallback: Downloading source from ${sourceUrl} and mask from ${maskUrl}`);
+        
+        const [sourceBlob, maskBlob] = await Promise.all([
+            downloadFromSupabase(supabase, sourceUrl),
+            downloadFromSupabase(supabase, maskUrl)
+        ]);
+
+        const fullSourceImage = await loadImage(await sourceBlob.arrayBuffer());
+        const rawMaskImage = await loadImage(await maskBlob.arrayBuffer());
+
+        const dilatedCanvas = createCanvas(rawMaskImage.width(), rawMaskImage.height());
+        const dilateCtx = dilatedCanvas.getContext('2d');
+        const dilationAmount = Math.max(10, Math.round(rawMaskImage.width() * 0.03));
+        dilateCtx.filter = `blur(${dilationAmount}px)`;
+        dilateCtx.drawImage(rawMaskImage, 0, 0);
+        dilateCtx.filter = 'none';
+        
+        const dilatedImageData = dilateCtx.getImageData(0, 0, dilatedCanvas.width, dilatedCanvas.height);
+        const data = dilatedImageData.data;
+        let minX = dilatedCanvas.width, minY = dilatedCanvas.height, maxX = 0, maxY = 0;
+        for (let i = 0; i < data.length; i += 4) {
+            if (data[i] > 128) {
+                data[i] = data[i+1] = data[i+2] = 255;
+                const x = (i / 4) % dilatedCanvas.width;
+                const y = Math.floor((i / 4) / dilatedCanvas.width);
+                if (x < minX) minX = x;
+                if (x > maxX) maxX = x;
+                if (y < minY) minY = y;
+                if (y > maxY) maxY = y;
+            } else {
+                data[i] = data[i+1] = data[i+2] = 0;
+            }
+        }
+        dilateCtx.putImageData(dilatedImageData, 0, 0);
+
+        if (maxX < minX || maxY < minY) throw new Error("Fallback: The provided mask is empty or invalid after processing.");
+
+        const padding = Math.round(Math.max(maxX - minX, maxY - minY) * 0.20);
+        const bbox = {
+            x: Math.max(0, minX - padding),
+            y: Math.max(0, minY - padding),
+            width: Math.min(fullSourceImage.width(), maxX + padding) - Math.max(0, minX - padding),
+            height: Math.min(fullSourceImage.height(), maxY + padding) - Math.max(0, minY - padding),
+        };
+
+        if (bbox.width <= 0 || bbox.height <= 0) throw new Error(`Fallback: Invalid bounding box dimensions: ${bbox.width}x${bbox.height}.`);
+
+        const croppedMaskCanvas = createCanvas(bbox.width, bbox.height);
+        croppedMaskCanvas.getContext('2d')!.drawImage(dilatedCanvas, bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
+        
+        metadata.full_source_image_base64 = encodeBase64(await sourceBlob.arrayBuffer());
+        metadata.bbox = bbox;
+        metadata.cropped_dilated_mask_base64 = encodeBase64(croppedMaskCanvas.toBuffer('image/png'));
+        
+        console.log(`[Compositor-Inpainting][${job_id}] Fallback metadata successfully regenerated.`);
     }
+    // --- END FALLBACK LOGIC ---
 
-    const fullSourceBuffer = decodeBase64(metadata.full_source_image_base64);
-    const fullSourceImage = await loadImage(fullSourceBuffer);
-
+    const fullSourceImage = await loadImage(decodeBase64(metadata.full_source_image_base64));
     const inpaintedCropResponse = await fetch(final_image_url);
     if (!inpaintedCropResponse.ok) throw new Error(`Failed to download inpainted crop: ${inpaintedCropResponse.statusText}`);
     const inpaintedCropArrayBuffer = await inpaintedCropResponse.arrayBuffer();
     const inpaintedCropImage = await loadImage(new Uint8Array(inpaintedCropArrayBuffer));
-
     const croppedMaskBuffer = decodeBase64(metadata.cropped_dilated_mask_base64);
     const croppedMaskImage = await loadImage(croppedMaskBuffer);
 
-    // Main canvas for the final image
     const canvas = createCanvas(fullSourceImage.width(), fullSourceImage.height());
     const ctx = canvas.getContext('2d');
-
-    // 1. Draw the original image as the base layer
     ctx.drawImage(fullSourceImage, 0, 0);
 
-    // 2. Create a temporary canvas for the feathered crop
     const featheredCropCanvas = createCanvas(metadata.bbox.width, metadata.bbox.height);
     const featheredCtx = featheredCropCanvas.getContext('2d');
-
-    // 3. Draw the inpainted crop onto the temp canvas
     featheredCtx.drawImage(inpaintedCropImage, 0, 0, metadata.bbox.width, metadata.bbox.height);
-
-    // 4. Apply the mask with feathering
     featheredCtx.globalCompositeOperation = 'destination-in';
-
-    // 5. Feather the mask by blurring it
-    const featherAmount = Math.max(5, Math.round(metadata.bbox.width * 0.05)); // Feather by 5% of width, with a minimum of 5px
+    const featherAmount = Math.max(5, Math.round(metadata.bbox.width * 0.05));
     featheredCtx.filter = `blur(${featherAmount}px)`;
-
-    // 6. Draw the mask onto the temp canvas. This will use the blur filter and the composite operation
-    // to create a feathered alpha channel on the inpainted crop.
     featheredCtx.drawImage(croppedMaskImage, 0, 0, metadata.bbox.width, metadata.bbox.height);
 
-    // 7. Reset composite operation and filter for the main canvas
     ctx.globalCompositeOperation = 'source-over';
-    ctx.filter = 'none'; // Reset filter on the main context just in case
-
-    // 8. Draw the feathered crop onto the main canvas at the correct position
+    ctx.filter = 'none';
     ctx.drawImage(featheredCropCanvas, metadata.bbox.x, metadata.bbox.y);
     
     const finalImageBuffer = canvas.toBuffer('image/png');
@@ -96,7 +174,6 @@ serve(async (req) => {
 
     const { data: { publicUrl: finalPublicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(finalFilePath);
 
-    // --- NEW: Verification Step ---
     let verificationResult = null;
     if (metadata.reference_image_url) {
         console.log(`[Compositor-Inpainting][${job_id}] Reference image found. Triggering verification step.`);
@@ -121,14 +198,13 @@ serve(async (req) => {
     } else {
         console.log(`[Compositor-Inpainting][${job_id}] No reference image in metadata. Skipping verification step.`);
     }
-    // --- END: Verification Step ---
 
     const finalResultPayload = { publicUrl: finalPublicUrl, storagePath: finalFilePath };
     const finalMetadata = { 
         ...metadata, 
         full_source_image_base64: null, 
         cropped_dilated_mask_base64: null,
-        verification_result: verificationResult // Store the verification result
+        verification_result: verificationResult
     };
 
     if (job_type === 'bitstudio') {
