@@ -55,7 +55,6 @@ async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string)
         throw new Error(`Could not parse bucket or path from URL: ${publicUrl}`);
     }
 
-    console.log(`[BitStudioProxy] Downloading from bucket '${bucketName}' with path: ${filePath}`);
     const { data, error } = await supabase.storage.from(bucketName).download(filePath);
 
     if (error) {
@@ -111,7 +110,6 @@ serve(async (req) => {
       ]);
 
       const inpaintPayload: any = {
-        base_image_id: sourceImageId,
         mask_image_id: maskImageId,
         prompt: prompt || "photorealistic",
         denoise: denoise || 0.99,
@@ -125,7 +123,7 @@ serve(async (req) => {
         inpaintPayload.reference_image_id = await uploadToBitStudio(referenceBlob, 'inpaint-reference', 'reference.png');
       }
 
-      const inpaintUrl = `${BITSTUDIO_API_BASE}/images/inpaint`;
+      const inpaintUrl = `${BITSTUDIO_API_BASE}/images/${sourceImageId}/inpaint`;
       const inpaintResponse = await fetch(inpaintUrl, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}`, 'Content-Type': 'application/json' },
