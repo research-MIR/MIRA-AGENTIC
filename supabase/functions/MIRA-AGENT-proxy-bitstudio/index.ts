@@ -143,13 +143,14 @@ serve(async (req) => {
         status: 'queued',
         source_person_image_url: source_image_url,
         source_garment_image_url: reference_image_url,
+        bitstudio_person_image_id: sourceImageId,
         bitstudio_task_id: taskId,
         batch_pair_job_id: batch_pair_job_id,
         vto_pack_job_id: vto_pack_job_id,
         metadata: {
             prompt_used: prompt,
             debug_assets: debug_assets,
-            bitstudio_version_id: taskId // Storing the version ID for the poller
+            bitstudio_version_id: taskId
         }
       }).select('id').single();
       if (insertError) throw insertError;

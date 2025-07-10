@@ -31,15 +31,24 @@ serve(async (req) => {
       .single();
 
     if (fetchError) throw new Error(`Failed to fetch job: ${fetchError.message}`);
-    console.log(`[BitStudioPoller][${job_id}] Fetched job from DB. Current status: ${job.status}, mode: ${job.mode}`);
+    console.log(`[BitStudioPoller][${job.id}] Fetched job from DB. Current status: ${job.status}, mode: ${job.mode}`);
     
     if (job.status === 'complete' || job.status === 'failed') {
         console.log(`[BitStudioPoller][${job.id}] Job already resolved. Halting check.`);
         return new Response(JSON.stringify({ success: true, message: "Job already resolved." }), { headers: corsHeaders });
     }
 
-    const taskId = job.bitstudio_task_id;
-    const statusUrl = `${BITSTUDIO_API_BASE}/images/${taskId}`;
+    let statusUrl;
+    if (job.mode === 'inpaint') {
+        const baseImageId = job.bitstudio_person_image_id;
+        if (!baseImageId) throw new Error("Inpaint job is missing the base image ID (bitstudio_person_image_id).");
+        statusUrl = `${BITSTUDIO_API_BASE}/images/${baseImageId}`;
+    } else {
+        const taskId = job.bitstudio_task_id;
+        if (!taskId) throw new Error("Job is missing the task ID (bitstudio_task_id).");
+        statusUrl = `${BITSTUDIO_API_BASE}/images/${taskId}`;
+    }
+
     console.log(`[BitStudioPoller][${job.id}] Fetching status from BitStudio: ${statusUrl}`);
     const statusResponse = await fetch(statusUrl, {
       headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}` }
@@ -51,10 +60,12 @@ serve(async (req) => {
     let jobStatus, finalImageUrl;
 
     if (job.mode === 'inpaint') {
-        const versionIdToFind = job.metadata?.bitstudio_version_id;
-        if (!versionIdToFind) throw new Error("Job is missing the version ID in its metadata.");
+        const versionIdToFind = job.bitstudio_task_id; // This is the version ID
+        if (!versionIdToFind) throw new Error("Inpaint job is missing the version ID (bitstudio_task_id).");
+        
         const targetVersion = statusData.versions?.find((v: any) => v.id === versionIdToFind);
         if (!targetVersion) throw new Error(`Could not find version ${versionIdToFind} in the base image's version list.`);
+        
         jobStatus = targetVersion.status;
         finalImageUrl = targetVersion.path;
     } else {
