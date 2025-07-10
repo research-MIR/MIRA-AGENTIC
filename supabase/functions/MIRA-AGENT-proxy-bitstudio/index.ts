@@ -1,5 +1,7 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { createCanvas, loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
+import { decodeBase64, encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -104,6 +106,53 @@ serve(async (req) => {
         getMaskBlob(supabase, mask_image_url)
       ]);
 
+      // --- Pre-processing for Compositor ---
+      const fullSourceImage = await loadImage(await sourceBlob.arrayBuffer());
+      const rawMaskImage = await loadImage(await maskBlob.arrayBuffer());
+
+      const dilatedCanvas = createCanvas(rawMaskImage.width(), rawMaskImage.height());
+      const dilateCtx = dilatedCanvas.getContext('2d');
+      const dilationAmount = Math.max(10, Math.round(rawMaskImage.width() * ((mask_expansion_percent || 3) / 100)));
+      dilateCtx.filter = `blur(${dilationAmount}px)`;
+      dilateCtx.drawImage(rawMaskImage, 0, 0);
+      dilateCtx.filter = 'none';
+      
+      const dilatedImageData = dilateCtx.getImageData(0, 0, dilatedCanvas.width, dilatedCanvas.height);
+      const data = dilatedImageData.data;
+      let minX = dilatedCanvas.width, minY = dilatedCanvas.height, maxX = 0, maxY = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        if (data[i] > 128) {
+          data[i] = data[i+1] = data[i+2] = 255;
+          const x = (i / 4) % dilatedCanvas.width;
+          const y = Math.floor((i / 4) / dilatedCanvas.width);
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        } else {
+          data[i] = data[i+1] = data[i+2] = 0;
+        }
+      }
+      dilateCtx.putImageData(dilatedImageData, 0, 0);
+
+      if (maxX < minX || maxY < minY) throw new Error("The provided mask is empty or invalid after processing.");
+
+      const padding = Math.round(Math.max(maxX - minX, maxY - minY) * 0.20);
+      const bbox = {
+        x: Math.max(0, minX - padding),
+        y: Math.max(0, minY - padding),
+        width: Math.min(fullSourceImage.width(), maxX + padding) - Math.max(0, minX - padding),
+        height: Math.min(fullSourceImage.height(), maxY + padding) - Math.max(0, minY - padding),
+      };
+
+      if (bbox.width <= 0 || bbox.height <= 0) throw new Error(`Invalid bounding box dimensions: ${bbox.width}x${bbox.height}.`);
+
+      const croppedMaskCanvas = createCanvas(bbox.width, bbox.height);
+      croppedMaskCanvas.getContext('2d')!.drawImage(dilatedCanvas, bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
+      const croppedDilatedMaskBase64 = encodeBase64(croppedMaskCanvas.toBuffer('image/png'));
+      const fullSourceImageBase64 = encodeBase64(await sourceBlob.arrayBuffer());
+      // --- End Pre-processing ---
+
       const [sourceImageId, maskImageId] = await Promise.all([
         uploadToBitStudio(sourceBlob, 'inpaint-base', 'source.png'),
         uploadToBitStudio(maskBlob, 'inpaint-mask', 'mask.png')
@@ -150,7 +199,10 @@ serve(async (req) => {
         metadata: {
             prompt_used: prompt,
             debug_assets: debug_assets,
-            bitstudio_version_id: taskId
+            bitstudio_version_id: taskId,
+            full_source_image_base64: fullSourceImageBase64,
+            bbox: bbox,
+            cropped_dilated_mask_base64: croppedDilatedMaskBase64,
         }
       }).select('id').single();
       if (insertError) throw insertError;
