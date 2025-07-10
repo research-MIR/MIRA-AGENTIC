@@ -134,7 +134,7 @@ serve(async (req) => {
       const inpaintResult = await inpaintResponse.json();
       console.log(`[BitStudioProxy][${requestId}] Full inpaint response from BitStudio:`, JSON.stringify(inpaintResult, null, 2));
 
-      const taskId = inpaintResult[0]?.id;
+      const taskId = inpaintResult.versions?.[0]?.id;
       if (!taskId) throw new Error("BitStudio did not return a task ID for the inpaint job.");
 
       const { data: newJob, error: insertError } = await supabase.from('mira-agent-bitstudio-jobs').insert({
@@ -148,7 +148,8 @@ serve(async (req) => {
         vto_pack_job_id: vto_pack_job_id,
         metadata: {
             prompt_used: prompt,
-            debug_assets: debug_assets
+            debug_assets: debug_assets,
+            bitstudio_version_id: taskId // Storing the version ID for the poller
         }
       }).select('id').single();
       if (insertError) throw insertError;
