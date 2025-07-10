@@ -3,7 +3,7 @@ import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useLanguage } from "@/context/LanguageContext";
-import { Loader2, AlertTriangle, RefreshCw, Layers } from "lucide-react";
+import { Loader2, AlertTriangle, RefreshCw, Layers, Skull } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
@@ -100,6 +100,7 @@ const Developer = () => {
   const { t } = useLanguage();
   const [isCancelling, setIsCancelling] = useState(false);
   const [isCancellingVTO, setIsCancellingVTO] = useState(false);
+  const [isShuttingDown, setIsShuttingDown] = useState(false);
 
   const handleCancelAllSegmentationJobs = async () => {
     setIsCancelling(true);
@@ -130,6 +131,22 @@ const Developer = () => {
         showError(`Failed to cancel jobs: ${err.message}`);
     } finally {
         setIsCancellingVTO(false);
+    }
+  };
+
+  const handleShutdown = async () => {
+    setIsShuttingDown(true);
+    const toastId = showLoading("Initiating system-wide job shutdown...");
+    try {
+        const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-admin-shutdown-all-jobs');
+        if (error) throw error;
+        dismissToast(toastId);
+        showSuccess(data.message);
+    } catch (err: any) {
+        dismissToast(toastId);
+        showError(`Shutdown failed: ${err.message}`);
+    } finally {
+        setIsShuttingDown(false);
     }
   };
 
@@ -188,6 +205,39 @@ const Developer = () => {
                   </AlertDialogFooter>
                 </AlertDialogContent>
               </AlertDialog>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-destructive">
+                    <Skull className="h-5 w-5" />
+                    Emergency Actions
+                </CardTitle>
+                <CardDescription>
+                    These actions are irreversible and affect the entire platform. Use with extreme caution.
+                </CardDescription>
+            </CardHeader>
+            <CardContent>
+                <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                        <Button variant="destructive">EMERGENCY SHUTDOWN: Cancel All Active Jobs</Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                        <AlertDialogHeader>
+                            <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                                This will attempt to cancel EVERY active job across ALL tables for ALL users. This is a last resort for system-wide issues. This action cannot be undone.
+                            </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                            <AlertDialogAction onClick={handleShutdown} disabled={isShuttingDown} className="bg-destructive hover:bg-destructive/90">
+                                {isShuttingDown && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                Yes, shut it all down
+                            </AlertDialogAction>
+                        </AlertDialogFooter>
+                    </AlertDialogContent>
+                </AlertDialog>
             </CardContent>
           </Card>
           <Card>
