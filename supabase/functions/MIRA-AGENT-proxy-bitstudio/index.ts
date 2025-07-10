@@ -58,7 +58,6 @@ async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string)
     }
 
     const { data, error } = await supabase.storage.from(bucketName).download(filePath);
-
     if (error) {
         throw new Error(`Failed to download from Supabase storage: ${error.message}`);
     }
@@ -106,12 +105,11 @@ serve(async (req) => {
         getMaskBlob(supabase, mask_image_url)
       ]);
 
-      // --- Pre-processing for Compositor ---
       const fullSourceImage = await loadImage(new Uint8Array(await sourceBlob.arrayBuffer()));
       const rawMaskImage = await loadImage(new Uint8Array(await maskBlob.arrayBuffer()));
 
       const dilatedCanvas = createCanvas(rawMaskImage.width(), rawMaskImage.height());
-      const dilateCtx = dilatedCanvas.getContext('2d');
+      const dilateCtx = dilatedCanvas.getContext('2d')!;
       const dilationAmount = Math.max(10, Math.round(rawMaskImage.width() * ((mask_expansion_percent || 3) / 100)));
       dilateCtx.filter = `blur(${dilationAmount}px)`;
       dilateCtx.drawImage(rawMaskImage, 0, 0);
@@ -147,14 +145,17 @@ serve(async (req) => {
 
       if (bbox.width <= 0 || bbox.height <= 0) throw new Error(`Invalid bounding box dimensions: ${bbox.width}x${bbox.height}.`);
 
+      const croppedCanvas = createCanvas(bbox.width, bbox.height);
+      croppedCanvas.getContext('2d')!.drawImage(fullSourceImage, bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
+      const croppedSourceBlob = new Blob([croppedCanvas.toBuffer('image/png')], { type: 'image/png' });
+
       const croppedMaskCanvas = createCanvas(bbox.width, bbox.height);
       croppedMaskCanvas.getContext('2d')!.drawImage(dilatedCanvas, bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
       const croppedDilatedMaskBase64 = encodeBase64(croppedMaskCanvas.toBuffer('image/png'));
       const fullSourceImageBase64 = encodeBase64(await sourceBlob.arrayBuffer());
-      // --- End Pre-processing ---
 
       const [sourceImageId, maskImageId] = await Promise.all([
-        uploadToBitStudio(sourceBlob, 'inpaint-base', 'source.png'),
+        uploadToBitStudio(croppedSourceBlob, 'inpaint-base', 'source_crop.png'),
         uploadToBitStudio(maskBlob, 'inpaint-mask', 'mask.png')
       ]);
 
@@ -181,31 +182,16 @@ serve(async (req) => {
       if (!inpaintResponse.ok) throw new Error(`BitStudio inpaint request failed: ${await inpaintResponse.text()}`);
       
       const inpaintResult = await inpaintResponse.json();
-      console.log(`[BitStudioProxy][${requestId}] Full inpaint response from BitStudio:`, JSON.stringify(inpaintResult, null, 2));
-
       const taskId = inpaintResult.versions?.[0]?.id;
       if (!taskId) throw new Error("BitStudio did not return a task ID for the inpaint job.");
 
       const { data: newJob, error: insertError } = await supabase.from('mira-agent-bitstudio-jobs').insert({
-        user_id,
-        mode,
-        status: 'queued',
-        source_person_image_url: source_image_url,
-        source_garment_image_url: reference_image_url,
-        bitstudio_person_image_id: sourceImageId,
-        bitstudio_task_id: taskId,
-        batch_pair_job_id: batch_pair_job_id,
-        vto_pack_job_id: vto_pack_job_id,
+        user_id, mode, status: 'queued', source_person_image_url: source_image_url, source_garment_image_url: reference_image_url,
+        bitstudio_person_image_id: sourceImageId, bitstudio_task_id: taskId, batch_pair_job_id: batch_pair_job_id, vto_pack_job_id: vto_pack_job_id,
         metadata: {
-            prompt_used: prompt,
-            debug_assets: debug_assets,
-            bitstudio_version_id: taskId,
-            full_source_image_base64: fullSourceImageBase64,
-            bbox: bbox,
-            cropped_dilated_mask_base64: croppedDilatedMaskBase64,
-            source_image_url: source_image_url,
-            mask_image_url: mask_image_url,
-            reference_image_url: reference_image_url,
+            prompt_used: prompt, debug_assets: debug_assets, bitstudio_version_id: taskId,
+            full_source_image_base64: fullSourceImageBase64, bbox: bbox, cropped_dilated_mask_base64: croppedDilatedMaskBase64,
+            source_image_url: source_image_url, mask_image_url: mask_image_url, reference_image_url: reference_image_url,
         }
       }).select('id').single();
       if (insertError) throw insertError;
