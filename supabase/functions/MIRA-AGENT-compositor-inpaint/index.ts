@@ -58,7 +58,7 @@ serve(async (req) => {
   try {
     let job, fetchError;
     const tableName = job_type === 'bitstudio' ? 'mira-agent-bitstudio-jobs' : 'mira-agent-inpainting-jobs';
-    const selectColumns = 'metadata, user_id, source_person_image_url'; // Ensure we fetch source_person_image_url for bitstudio jobs
+    const selectColumns = 'metadata, user_id, source_person_image_url, status';
 
     console.log(`${logPrefix} Fetching from table: ${tableName}`);
     
@@ -69,6 +69,16 @@ serve(async (req) => {
       .single());
 
     if (fetchError) throw fetchError;
+
+    // Idempotency Check: If the job is not in the 'compositing' state, it means another instance
+    // has already started or finished this work. Exit gracefully.
+    if (job.status !== 'compositing') {
+        console.log(`${logPrefix} Job status is '${job.status}', not 'compositing'. Halting to prevent duplicate work.`);
+        return new Response(JSON.stringify({ success: true, message: "Job already being processed or is complete." }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            status: 200,
+        });
+    }
     
     let metadata = job.metadata || {};
     console.log(`${logPrefix} Job data fetched. Metadata keys: ${Object.keys(metadata).join(', ')}`);
@@ -163,16 +173,30 @@ serve(async (req) => {
     const featherAmount = Math.max(5, Math.round(metadata.bbox.width * 0.05));
     console.log(`${logPrefix} Calculated feather amount: ${featherAmount}px.`);
 
-    const featheredCropCanvas = createCanvas(inpaintedCropImage.width(), inpaintedCropImage.height());
+    // Create a temporary canvas AT THE ORIGINAL BBOX SIZE
+    const featheredCropCanvas = createCanvas(metadata.bbox.width, metadata.bbox.height);
     const featheredCtx = featheredCropCanvas.getContext('2d');
-    featheredCtx.drawImage(inpaintedCropImage, 0, 0);
+
+    // Draw the (potentially upscaled) inpainted crop, SCALING IT DOWN to fit the original bbox size.
+    featheredCtx.drawImage(inpaintedCropImage, 0, 0, metadata.bbox.width, metadata.bbox.height);
+    console.log(`${logPrefix} Drew downscaled inpainted crop onto temp canvas.`);
+
+    // Apply the mask with feathering
     featheredCtx.globalCompositeOperation = 'destination-in';
     featheredCtx.filter = `blur(${featherAmount}px)`;
-    featheredCtx.drawImage(croppedMaskImage, 0, 0, inpaintedCropImage.width(), inpaintedCropImage.height());
+
+    // The croppedMaskImage is already at the correct size relative to the bbox.
+    // We need to draw it onto the temp canvas to apply the feathering.
+    featheredCtx.drawImage(croppedMaskImage, 0, 0, metadata.bbox.width, metadata.bbox.height);
     console.log(`${logPrefix} Feathered mask applied to inpainted crop.`);
 
+    // Reset composite operation and filter for the main canvas
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.filter = 'none';
+
+    // Draw the correctly sized, feathered crop onto the main canvas at the correct position.
+    ctx.drawImage(featheredCropCanvas, metadata.bbox.x, metadata.bbox.y);
     console.log(`${logPrefix} Pasting feathered crop at bbox:`, metadata.bbox);
-    ctx.drawImage(featheredCropCanvas, metadata.bbox.x, metadata.bbox.y, metadata.bbox.width, metadata.bbox.height);
     
     const finalImageBuffer = canvas.toBuffer('image/png');
     const finalFilePath = `${job.user_id}/inpainting-final/${Date.now()}_final.png`;
