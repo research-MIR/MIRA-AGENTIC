@@ -107,8 +107,8 @@ serve(async (req) => {
       ]);
 
       // --- Pre-processing for Compositor ---
-      const fullSourceImage = await loadImage(await sourceBlob.arrayBuffer());
-      const rawMaskImage = await loadImage(await maskBlob.arrayBuffer());
+      const fullSourceImage = await loadImage(new Uint8Array(await sourceBlob.arrayBuffer()));
+      const rawMaskImage = await loadImage(new Uint8Array(await maskBlob.arrayBuffer()));
 
       const dilatedCanvas = createCanvas(rawMaskImage.width(), rawMaskImage.height());
       const dilateCtx = dilatedCanvas.getContext('2d');
