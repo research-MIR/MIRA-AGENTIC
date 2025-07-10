@@ -151,12 +151,14 @@ serve(async (req) => {
 
       const croppedMaskCanvas = createCanvas(bbox.width, bbox.height);
       croppedMaskCanvas.getContext('2d')!.drawImage(dilatedCanvas, bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
+      const croppedMaskBlob = new Blob([croppedMaskCanvas.toBuffer('image/png')], { type: 'image/png' });
+      
       const croppedDilatedMaskBase64 = encodeBase64(croppedMaskCanvas.toBuffer('image/png'));
       const fullSourceImageBase64 = encodeBase64(await sourceBlob.arrayBuffer());
 
       const [sourceImageId, maskImageId] = await Promise.all([
         uploadToBitStudio(croppedSourceBlob, 'inpaint-base', 'source_crop.png'),
-        uploadToBitStudio(maskBlob, 'inpaint-mask', 'mask.png')
+        uploadToBitStudio(croppedMaskBlob, 'inpaint-mask', 'mask_crop.png')
       ]);
 
       const inpaintPayload: any = {
