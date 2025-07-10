@@ -11,6 +11,9 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const CANCELLATION_REASON = "System-wide shutdown initiated by admin.";
 
 serve(async (req) => {
+  const requestId = `shutdown-all-${Date.now()}`;
+  console.log(`[AdminShutdownAllJobs][${requestId}] Function invoked.`);
+
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
@@ -30,22 +33,24 @@ serve(async (req) => {
     ];
 
     for (const table of jobTables) {
+      console.log(`[AdminShutdownAllJobs][${requestId}] Cancelling jobs in table: ${table.name}`);
       const { count, error } = await supabase
         .from(table.name)
         .update({ status: 'failed', error_message: CANCELLATION_REASON })
         .in('status', table.statuses);
 
       if (error) {
-        console.error(`Error cancelling jobs in ${table.name}:`, error);
+        console.error(`[AdminShutdownAllJobs][${requestId}] Error cancelling jobs in ${table.name}:`, error);
         results[table.name] = { error: error.message };
       } else {
+        console.log(`[AdminShutdownAllJobs][${requestId}] Cancelled ${count || 0} jobs in ${table.name}.`);
         results[table.name] = { cancelled: count || 0 };
         totalCancelled += count || 0;
       }
     }
 
     const message = `Shutdown complete. Total jobs cancelled: ${totalCancelled}.`;
-    console.log(message, results);
+    console.log(`[AdminShutdownAllJobs][${requestId}] ${message}`, results);
 
     return new Response(JSON.stringify({ success: true, message, details: results }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -53,7 +58,7 @@ serve(async (req) => {
     });
 
   } catch (error) {
-    console.error("[AdminShutdownAllJobs] Error:", error);
+    console.error(`[AdminShutdownAllJobs][${requestId}] Unhandled error:`, error);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,
