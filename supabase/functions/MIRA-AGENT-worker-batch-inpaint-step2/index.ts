@@ -50,14 +50,12 @@ serve(async (req) => {
 
     console.log(`[BatchInpaintWorker-Step2][${pair_job_id}] Delegating prompt creation to helper. Helper enabled: ${isHelperEnabled}`);
 
-    // The prompt helper now handles all logic, including downloading images if needed.
     const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-prompt-helper', {
         body: {
-            // Pass URLs directly. The helper will decide whether to download them.
             person_image_url: source_person_image_url,
             garment_image_url: source_garment_image_url,
             prompt_appendix: prompt_appendix,
-            is_helper_enabled: isHelperEnabled, // Pass the flag
+            is_helper_enabled: isHelperEnabled,
             is_garment_mode: true,
         }
     });
@@ -69,7 +67,7 @@ serve(async (req) => {
         body: {
             mode: 'inpaint',
             user_id: user_id,
-            source_image_url: source_person_image_url, // Pass URLs directly
+            source_image_url: source_person_image_url,
             mask_image_url: final_mask_url,
             prompt: finalPrompt,
             reference_image_url: source_garment_image_url,
@@ -83,7 +81,22 @@ serve(async (req) => {
     });
     if (proxyError) throw new Error(`Job queuing failed: ${proxyError.message}`);
     
-    const inpaintingJobId = proxyData.jobIds[0];
+    const inpaintingJobId = proxyData?.jobIds?.[0];
+
+    if (!inpaintingJobId) {
+        console.error(`[BatchInpaintWorker-Step2][${pair_job_id}] Delegation failed: Proxy did not return a valid job ID. Marking pair as failed.`);
+        await supabase.from('mira-agent-batch-inpaint-pair-jobs')
+            .update({ 
+                status: 'failed', 
+                error_message: 'Delegation to inpainting service failed: Proxy did not return a valid job ID.' 
+            })
+            .eq('id', pair_job_id);
+        return new Response(JSON.stringify({ success: false, message: "Delegation failed." }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            status: 200,
+        });
+    }
+
     await supabase.from('mira-agent-batch-inpaint-pair-jobs')
         .update({ status: 'delegated', inpainting_job_id: inpaintingJobId, metadata: { ...metadata, prompt_used: finalPrompt } })
         .eq('id', pair_job_id);

@@ -1,7 +1,5 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { decodeBase64, encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
-import { createCanvas, loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -90,7 +88,7 @@ serve(async (req) => {
     const body = await req.json();
     console.log(`[BitStudioProxy][${requestId}] Received full payload:`, JSON.stringify(body, null, 2));
 
-    const { user_id, mode, batch_pair_job_id, vto_pack_job_id } = body; // Added vto_pack_job_id
+    const { user_id, mode, batch_pair_job_id, vto_pack_job_id } = body;
     if (!user_id || !mode) {
       throw new Error("user_id and mode are required.");
     }
@@ -99,7 +97,62 @@ serve(async (req) => {
     const jobIds: string[] = [];
 
     if (mode === 'inpaint') {
-      // ... (inpaint logic remains the same)
+      const { source_image_url, mask_image_url, reference_image_url, prompt, denoise, resolution, mask_expansion_percent, num_attempts, debug_assets } = body;
+      if (!source_image_url || !mask_image_url) throw new Error("source_image_url and mask_image_url are required for inpaint mode.");
+
+      const [sourceBlob, maskBlob] = await Promise.all([
+        downloadFromSupabase(supabase, source_image_url),
+        getMaskBlob(supabase, mask_image_url)
+      ]);
+
+      const [sourceImageId, maskImageId] = await Promise.all([
+        uploadToBitStudio(sourceBlob, 'inpaint-base', 'source.png'),
+        uploadToBitStudio(maskBlob, 'inpaint-mask', 'mask.png')
+      ]);
+
+      const inpaintPayload: any = {
+        base_image_id: sourceImageId,
+        mask_image_id: maskImageId,
+        prompt: prompt || "photorealistic",
+        denoise: denoise || 0.99,
+        resolution: resolution || 'standard',
+        mask_expansion_percent: mask_expansion_percent || 3,
+        num_images: num_attempts || 1,
+      };
+
+      if (reference_image_url) {
+        const referenceBlob = await downloadFromSupabase(supabase, reference_image_url);
+        inpaintPayload.reference_image_id = await uploadToBitStudio(referenceBlob, 'inpaint-reference', 'reference.png');
+      }
+
+      const inpaintUrl = `${BITSTUDIO_API_BASE}/images/inpaint`;
+      const inpaintResponse = await fetch(inpaintUrl, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(inpaintPayload)
+      });
+      if (!inpaintResponse.ok) throw new Error(`BitStudio inpaint request failed: ${await inpaintResponse.text()}`);
+      const inpaintResult = await inpaintResponse.json();
+      const taskId = inpaintResult[0]?.id;
+      if (!taskId) throw new Error("BitStudio did not return a task ID for the inpaint job.");
+
+      const { data: newJob, error: insertError } = await supabase.from('mira-agent-bitstudio-jobs').insert({
+        user_id,
+        mode,
+        status: 'queued',
+        source_person_image_url: source_image_url,
+        source_garment_image_url: reference_image_url,
+        bitstudio_task_id: taskId,
+        batch_pair_job_id: batch_pair_job_id,
+        vto_pack_job_id: vto_pack_job_id,
+        metadata: {
+            prompt_used: prompt,
+            debug_assets: debug_assets
+        }
+      }).select('id').single();
+      if (insertError) throw insertError;
+      jobIds.push(newJob.id);
+
     } else { // Default to virtual-try-on
       const { person_image_url, garment_image_url, num_images, prompt, prompt_appendix } = body;
       if (!person_image_url || !garment_image_url) throw new Error("person_image_url and garment_image_url are required for try-on mode.");
@@ -138,7 +191,7 @@ serve(async (req) => {
         user_id, mode, status: 'queued', source_person_image_url: person_image_url, source_garment_image_url: garment_image_url,
         bitstudio_person_image_id: personImageId, bitstudio_garment_image_id: outfitImageId, bitstudio_task_id: taskId,
         batch_pair_job_id: batch_pair_job_id,
-        vto_pack_job_id: vto_pack_job_id // Save the parent batch ID
+        vto_pack_job_id: vto_pack_job_id
       }).select('id').single();
       if (insertError) throw insertError;
       jobIds.push(newJob.id);
