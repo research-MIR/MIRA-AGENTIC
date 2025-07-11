@@ -88,7 +88,7 @@ serve(async (req) => {
     const body = await req.json();
     console.log(`[BitStudioProxy][${requestId}] Received full payload:`, JSON.stringify(body, null, 2));
 
-    const { user_id, mode, batch_pair_job_id, vto_pack_job_id } = body;
+    const { user_id, mode, batch_pair_job_id, vto_pack_job_id, retry_job_id } = body;
     if (!user_id || !mode) {
       throw new Error("user_id and mode are required.");
     }
@@ -97,7 +97,7 @@ serve(async (req) => {
     const jobIds: string[] = [];
 
     if (mode === 'inpaint') {
-      const { source_image_url, mask_image_url, reference_image_url, prompt, denoise, resolution, mask_expansion_percent, num_attempts, debug_assets } = body;
+      const { source_image_url, mask_image_url, reference_image_url, prompt, denoise, resolution, mask_expansion_percent, num_attempts, debug_assets, prompt_appendix } = body;
       if (!source_image_url || !mask_image_url) throw new Error("source_image_url and mask_image_url are required for inpaint mode.");
 
       const [sourceBlob, maskBlob] = await Promise.all([
@@ -187,14 +187,42 @@ serve(async (req) => {
       const taskId = inpaintResult.versions?.[0]?.id;
       if (!taskId) throw new Error("BitStudio did not return a task ID for the inpaint job.");
 
+      let metadataForInsert: any = {
+        prompt_used: prompt,
+        debug_assets: debug_assets,
+        bitstudio_version_id: taskId,
+        full_source_image_base64: fullSourceImageBase64,
+        bbox: bbox,
+        cropped_dilated_mask_base64: croppedDilatedMaskBase64,
+        source_image_url: source_image_url,
+        mask_image_url: mask_image_url,
+        reference_image_url: reference_image_url,
+      };
+
+      if (retry_job_id) {
+        console.log(`[BitStudioProxy][${requestId}] This is a retry for job ${retry_job_id}. Fetching original metadata.`);
+        const { data: originalJob, error: fetchError } = await supabase
+            .from('mira-agent-bitstudio-jobs')
+            .select('metadata')
+            .eq('id', retry_job_id)
+            .single();
+        
+        if (fetchError) {
+            console.warn(`[BitStudioProxy][${requestId}] Could not fetch original job metadata for retry: ${fetchError.message}`);
+        } else if (originalJob) {
+            metadataForInsert = {
+                ...originalJob.metadata,
+                ...metadataForInsert,
+                original_job_id: retry_job_id
+            };
+            console.log(`[BitStudioProxy][${requestId}] Merged metadata from original job. New retry count is: ${metadataForInsert.retry_count}`);
+        }
+      }
+
       const { data: newJob, error: insertError } = await supabase.from('mira-agent-bitstudio-jobs').insert({
         user_id, mode, status: 'queued', source_person_image_url: source_image_url, source_garment_image_url: reference_image_url,
         bitstudio_person_image_id: sourceImageId, bitstudio_task_id: taskId, batch_pair_job_id: batch_pair_job_id, vto_pack_job_id: vto_pack_job_id,
-        metadata: {
-            prompt_used: prompt, debug_assets: debug_assets, bitstudio_version_id: taskId,
-            full_source_image_base64: fullSourceImageBase64, bbox: bbox, cropped_dilated_mask_base64: croppedDilatedMaskBase64,
-            source_image_url: source_image_url, mask_image_url: mask_image_url, reference_image_url: reference_image_url,
-        }
+        metadata: metadataForInsert
       }).select('id').single();
       if (insertError) throw insertError;
       jobIds.push(newJob.id);
