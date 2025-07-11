@@ -34,6 +34,19 @@ serve(async (req) => {
       case 'retry_with_new_parameters': {
         const newParams = plan.parameters;
         console.log(`${logPrefix} Preparing to retry job with new parameters:`, newParams);
+
+        // Increment the retry count on the original job
+        const currentRetryCount = job.metadata?.retry_count || 0;
+        const newMetadata = {
+            ...job.metadata,
+            retry_count: currentRetryCount + 1,
+        };
+        const { error: updateError } = await supabase
+            .from('mira-agent-bitstudio-jobs')
+            .update({ metadata: newMetadata })
+            .eq('id', job_id);
+        if (updateError) throw new Error(`Failed to update retry count: ${updateError.message}`);
+        console.log(`${logPrefix} Incremented retry count to ${newMetadata.retry_count}.`);
         
         const { error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
           body: {
@@ -41,7 +54,7 @@ serve(async (req) => {
             user_id: job.user_id,
             mode: job.mode,
             source_image_url: job.source_person_image_url,
-            reference_image_url: job.source_garment_image_url, // CORRECTED KEY
+            reference_image_url: job.source_garment_image_url,
             mask_image_url: job.metadata.mask_image_url,
             // Pass new/modified info from the plan
             prompt_appendix: newParams.prompt_appendix,
