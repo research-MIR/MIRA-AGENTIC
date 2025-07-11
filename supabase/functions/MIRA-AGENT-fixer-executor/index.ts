@@ -14,7 +14,8 @@ serve(async (req) => {
   if (!job_id) throw new Error("job_id is required for the fixer-executor.");
 
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-  console.log(`[FixerExecutor][${job_id}] Invoked.`);
+  const logPrefix = `[FixerExecutor][${job_id}]`;
+  console.log(`${logPrefix} Invoked.`);
 
   try {
     const { data: job, error: fetchError } = await supabase
@@ -27,11 +28,12 @@ serve(async (req) => {
     const plan = job.metadata?.current_fix_plan;
     if (!plan || !plan.action) throw new Error("No valid repair plan found in the job metadata.");
 
-    console.log(`[FixerExecutor][${job_id}] Executing plan action: ${plan.action}`);
+    console.log(`${logPrefix} Executing plan action: ${plan.action}`);
 
     switch (plan.action) {
       case 'retry_with_new_parameters': {
         const newParams = plan.parameters;
+        console.log(`${logPrefix} Preparing to retry job with new parameters:`, newParams);
         
         const { error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
           body: {
@@ -41,16 +43,15 @@ serve(async (req) => {
             source_image_url: job.source_person_image_url,
             garment_image_url: job.source_garment_image_url,
             mask_image_url: job.metadata.mask_image_url,
-            // Pass new/modified info
-            prompt_appendix: newParams.prompt_appendix || job.metadata.prompt_appendix,
-            denoise: newParams.denoise_value || job.metadata.denoise,
+            // Pass new/modified info from the plan
+            prompt_appendix: newParams.prompt_appendix,
             // Pass the job ID to signal a retry
             retry_job_id: job.id,
           }
         });
         if (proxyError) throw proxyError;
 
-        console.log(`[FixerExecutor][${job_id}] Successfully re-queued VTO job via proxy.`);
+        console.log(`${logPrefix} Successfully re-queued VTO job via proxy.`);
         break;
       }
       case 'give_up': {
@@ -60,7 +61,7 @@ serve(async (req) => {
             error_message: plan.parameters.reason 
           })
           .eq('id', job.id);
-        console.log(`[FixerExecutor][${job_id}] Agent gave up. Reason: ${plan.parameters.reason}`);
+        console.log(`${logPrefix} Agent gave up. Reason: ${plan.parameters.reason}. Job marked as permanently_failed.`);
         break;
       }
       default:
@@ -70,7 +71,7 @@ serve(async (req) => {
     return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
 
   } catch (error) {
-    console.error(`[FixerExecutor][${job_id}] Error:`, error);
+    console.error(`${logPrefix} Error:`, error);
     await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'failed', error_message: `Fixer executor failed: ${error.message}` }).eq('id', job_id);
     return new Response(JSON.stringify({ error: error.message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
   }
