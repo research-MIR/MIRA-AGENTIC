@@ -75,11 +75,17 @@ serve(async (req) => {
         console.log(`${logPrefix} QA passed or was skipped. Finalizing job as complete.`);
         const finalMetadata = { ...job.metadata, verification_result: verificationResult };
         
-        const updatePayload = { 
+        const updatePayload: any = { 
             status: 'complete', 
             final_image_url: finalPublicUrl, 
             metadata: finalMetadata 
         };
+
+        // For comfyui jobs, the final result is stored in a different column
+        if (tableName === 'mira-agent-inpainting-jobs') {
+            updatePayload.final_result = { publicUrl: finalPublicUrl };
+            delete updatePayload.final_image_url;
+        }
 
         await supabase.from(tableName).update(updatePayload).eq('id', job_id);
     }

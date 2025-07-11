@@ -109,23 +109,49 @@ serve(async (req) => {
       if (promptError) throw promptError;
       const finalPrompt = promptData.final_prompt;
 
-      const vtoPayload: any = {
-        person_image_id: jobToRetry.bitstudio_person_image_id,
-        outfit_image_id: jobToRetry.bitstudio_garment_image_id,
-        prompt: finalPrompt,
-        resolution: 'high',
-        num_images: 1,
-      };
+      let newTaskId: string;
 
-      const vtoResponse = await fetch(`${BITSTUDIO_API_BASE}/images/virtual-try-on`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(vtoPayload)
-      });
-      if (!vtoResponse.ok) throw new Error(`BitStudio VTO retry request failed: ${await vtoResponse.text()}`);
-      const vtoResult = await vtoResponse.json();
-      const newTaskId = vtoResult[0]?.id;
-      if (!newTaskId) throw new Error("BitStudio did not return a new task ID on retry.");
+      if (jobToRetry.mode === 'inpaint') {
+        console.log(`[BitStudioProxy][${requestId}] Executing INPAINT retry logic.`);
+        const inpaintPayload: any = {
+            prompt: finalPrompt,
+            denoise: jobToRetry.metadata?.denoise || 0.99,
+            resolution: jobToRetry.metadata?.resolution || 'standard',
+            mask_expansion_percent: jobToRetry.metadata?.mask_expansion_percent || 3,
+            num_images: 1,
+        };
+        if (jobToRetry.bitstudio_garment_image_id) {
+            inpaintPayload.reference_image_id = jobToRetry.bitstudio_garment_image_id;
+        }
+        const inpaintUrl = `${BITSTUDIO_API_BASE}/images/${jobToRetry.bitstudio_person_image_id}/inpaint`;
+        const inpaintResponse = await fetch(inpaintUrl, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify(inpaintPayload)
+        });
+        if (!inpaintResponse.ok) throw new Error(`BitStudio inpaint retry request failed: ${await inpaintResponse.text()}`);
+        const inpaintResult = await inpaintResponse.json();
+        newTaskId = inpaintResult.versions?.[0]?.id;
+        if (!newTaskId) throw new Error("BitStudio did not return a new task ID on inpaint retry.");
+      } else { // Default to 'base' VTO
+        console.log(`[BitStudioProxy][${requestId}] Executing BASE VTO retry logic.`);
+        const vtoPayload: any = {
+            person_image_id: jobToRetry.bitstudio_person_image_id,
+            outfit_image_id: jobToRetry.bitstudio_garment_image_id,
+            prompt: finalPrompt,
+            resolution: 'high',
+            num_images: 1,
+        };
+        const vtoResponse = await fetch(`${BITSTUDIO_API_BASE}/images/virtual-try-on`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify(vtoPayload)
+        });
+        if (!vtoResponse.ok) throw new Error(`BitStudio VTO retry request failed: ${await vtoResponse.text()}`);
+        const vtoResult = await vtoResponse.json();
+        newTaskId = vtoResult[0]?.id;
+        if (!newTaskId) throw new Error("BitStudio did not return a new task ID on retry.");
+      }
 
       const { error: updateError } = await supabase.from('mira-agent-bitstudio-jobs').update({
         status: 'queued',
@@ -148,7 +174,6 @@ serve(async (req) => {
       const jobIds: string[] = [];
 
       if (mode === 'inpaint') {
-        // ... (inpaint logic remains the same as it's already complex and specific)
         const { source_image_url, mask_image_url, reference_image_url, prompt, denoise, resolution, mask_expansion_percent, num_attempts, debug_assets } = body;
         if (!source_image_url || !mask_image_url) throw new Error("source_image_url and mask_image_url are required for inpaint mode.");
 
@@ -222,9 +247,11 @@ serve(async (req) => {
           num_images: num_attempts || 1,
         };
 
+        let referenceImageId: string | null = null;
         if (reference_image_url) {
           const referenceBlob = await downloadFromSupabase(supabase, reference_image_url);
-          inpaintPayload.reference_image_id = await uploadToBitStudio(referenceBlob, 'inpaint-reference', 'reference.png');
+          referenceImageId = await uploadToBitStudio(referenceBlob, 'inpaint-reference', 'reference.png');
+          inpaintPayload.reference_image_id = referenceImageId;
         }
 
         const inpaintUrl = `${BITSTUDIO_API_BASE}/images/${sourceImageId}/inpaint`;
@@ -241,7 +268,7 @@ serve(async (req) => {
 
         const { data: newJob, error: insertError } = await supabase.from('mira-agent-bitstudio-jobs').insert({
           user_id, mode, status: 'queued', source_person_image_url: source_image_url, source_garment_image_url: reference_image_url,
-          bitstudio_person_image_id: sourceImageId, bitstudio_task_id: taskId, batch_pair_job_id: batch_pair_job_id, vto_pack_job_id: vto_pack_job_id,
+          bitstudio_person_image_id: sourceImageId, bitstudio_garment_image_id: referenceImageId, bitstudio_task_id: taskId, batch_pair_job_id: batch_pair_job_id, vto_pack_job_id: vto_pack_job_id,
           metadata: { 
             prompt_used: prompt,
             debug_assets: debug_assets,
