@@ -15,7 +15,7 @@ import { useImageTransferStore } from "@/store/imageTransferStore";
 import { BitStudioJob } from "@/types/vto";
 import { useVTOJobs } from "@/hooks/useVTOJobs";
 import { RecentJobsList } from "@/components/VTO/RecentJobsList";
-import { Star, HelpCircle } from "lucide-react";
+import { Star, HelpCircle, AlertTriangle } from "lucide-react";
 
 const VirtualTryOn = () => {
   const { isProMode, toggleProMode } = useSession();
@@ -23,6 +23,7 @@ const VirtualTryOn = () => {
   
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
+  const [isWarningOpen, setIsWarningOpen] = useState(true);
   
   const { consumeImageUrl, imageUrlToTransfer, vtoTarget } = useImageTransferStore();
   const { jobs, isLoading: isLoadingRecentJobs } = useVTOJobs();
@@ -55,6 +56,24 @@ const VirtualTryOn = () => {
 
   return (
     <>
+      <Dialog open={isWarningOpen} onOpenChange={setIsWarningOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader className="flex flex-col items-center text-center">
+            <AlertTriangle className="h-16 w-16 text-destructive mb-4" />
+            <DialogTitle className="text-2xl font-bold">WORK IN PROGRESS</DialogTitle>
+          </DialogHeader>
+          <div className="text-center p-4">
+            <p className="text-2xl font-bold text-destructive">DO NOT USE</p>
+            <p className="text-muted-foreground mt-2">This page is currently under development and may not function as expected.</p>
+          </div>
+          <DialogFooter className="sm:justify-center">
+            <Button type="button" onClick={() => setIsWarningOpen(false)}>
+              I Understand
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <div className="p-4 md:p-8 h-screen flex flex-col">
         <header className="pb-4 mb-4 border-b shrink-0 flex justify-between items-center">
           <div>
