@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { GoogleGenAI, Type } from 'https://esm.sh/@google/genai@0.15.0';
+import { GoogleGenAI, Type, Content } from 'https://esm.sh/@google/genai@0.15.0';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
@@ -13,7 +13,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const systemPrompt = `You are a VTO Repair Specialist. Your task is to analyze a Quality Assurance report and create a plan to fix the failed image generation.
+const systemPrompt = `You are a VTO Repair Specialist. Your task is to analyze a Quality Assurance report detailing why an image generation failed and create a plan to fix it.
 
 ### Your Primary Goal:
 Translate the 'fix_suggestion' from the QA report into a concise, actionable instruction for the image generator.
@@ -92,16 +92,21 @@ serve(async (req) => {
     }
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
-    const model = ai.getGenerativeModel({ model: MODEL_NAME, systemInstruction: systemPrompt, tools });
     
-    const chat = model.startChat({
-        history: [
-            { role: 'user', parts: [{ text: `A VTO job failed quality assurance. Here is the report:\n\n${JSON.stringify(lastReport, null, 2)}\n\nPlease formulate a plan to fix it.` }] }
-        ]
-    });
+    const contents: Content[] = [
+        { role: 'user', parts: [{ text: `A VTO job failed quality assurance. Here is the report:\n\n${JSON.stringify(lastReport, null, 2)}\n\nPlease formulate a plan to fix it.` }] }
+    ];
 
     console.log(`${logPrefix} Sending QA report to Gemini to formulate a plan.`);
-    const result = await chat.sendMessage("Formulate the plan.");
+    const result = await ai.models.generateContent({
+        model: MODEL_NAME,
+        contents: contents,
+        tools: tools,
+        config: {
+            systemInstruction: { role: "system", parts: [{ text: systemPrompt }] }
+        }
+    });
+
     const call = result.response.functionCalls()?.[0];
 
     if (!call) {
