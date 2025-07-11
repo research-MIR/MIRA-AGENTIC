@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { GoogleGenAI, Type, Content } from 'https://esm.sh/@google/genai@0.15.0';
+import { GoogleGenAI, Type, Content, GenerationResult } from 'https://esm.sh/@google/genai@0.15.0';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
@@ -56,6 +56,66 @@ const tools = [
   },
 ];
 
+/**
+ * Extracts a function call from a Gemini response, whether it's a direct
+ * functionCall object or embedded in a text block.
+ * @param result The GenerationResult from the Gemini API.
+ * @returns The parsed function call or null if none is found.
+ */
+function parseFunctionCall(result: GenerationResult): { name: string; args: any } | null {
+    // Ideal case: A direct function call is returned.
+    if (result.functionCalls && result.functionCalls.length > 0) {
+        console.log("[FixerParser] Found direct function call object.");
+        return result.functionCalls[0];
+    }
+
+    // Fallback case: The model returns the call as text.
+    const text = result.text;
+    if (text) {
+        console.log("[FixerParser] No direct function call. Attempting to parse from text:", text);
+        // Regex to find ```tool_code\n...``` or just the function call pattern.
+        const codeBlockMatch = text.match(/```(?:tool_code|javascript)\s*([\s\S]*?)\s*```/);
+        const callString = codeBlockMatch ? codeBlockMatch[1].trim() : text.trim();
+        
+        const functionCallMatch = callString.match(/(\w+)\(([\s\S]*)\)/);
+        if (functionCallMatch) {
+            const name = functionCallMatch[1];
+            const argsString = functionCallMatch[2];
+            
+            try {
+                // Attempt to parse the arguments string into a JSON object.
+                // This is a simplified parser that assumes a "key: value" structure.
+                const args: { [key: string]: any } = {};
+                const argParts = argsString.split(/,(?![^"]*"(?:(?:[^"]*"){2})*[^"]*$)/); // Split by comma, but not inside quotes
+                
+                argParts.forEach(part => {
+                    const [key, ...valueParts] = part.split(':');
+                    if (key && valueParts.length > 0) {
+                        const valueString = valueParts.join(':').trim();
+                        // Attempt to parse value as JSON, otherwise treat as a string.
+                        try {
+                            args[key.trim()] = JSON.parse(valueString);
+                        } catch {
+                            // If JSON.parse fails, it's likely a bare string. Remove quotes if they exist.
+                            args[key.trim()] = valueString.replace(/^"|"$/g, '');
+                        }
+                    }
+                });
+
+                console.log("[FixerParser] Successfully parsed text into function call:", { name, args });
+                return { name, args };
+            } catch (e) {
+                console.error("[FixerParser] Failed to parse arguments from string:", argsString, e);
+                return null;
+            }
+        }
+    }
+
+    console.log("[FixerParser] No function call could be parsed from the response.");
+    return null;
+}
+
+
 serve(async (req) => {
   const { job_id } = await req.json();
   if (!job_id) throw new Error("job_id is required for the fixer-orchestrator.");
@@ -107,11 +167,9 @@ serve(async (req) => {
         }
     });
 
-    // --- DEBUG LOGGING ADDED ---
     console.log(`[FixerOrchestrator][${job_id}] Full Gemini response:`, JSON.stringify(result, null, 2));
-    // ---------------------------
-
-    const call = result.functionCalls?.[0];
+    
+    const call = parseFunctionCall(result);
 
     if (!call) {
       throw new Error("Orchestrator LLM did not return a valid function call.");
