@@ -210,12 +210,13 @@ serve(async (req) => {
         if (fetchError) {
             console.warn(`[BitStudioProxy][${requestId}] Could not fetch original job metadata for retry: ${fetchError.message}`);
         } else if (originalJob) {
+            const root_job_id = originalJob.metadata?.original_job_id || retry_job_id;
             metadataForInsert = {
                 ...originalJob.metadata,
                 ...metadataForInsert,
-                original_job_id: retry_job_id
+                original_job_id: root_job_id
             };
-            console.log(`[BitStudioProxy][${requestId}] Merged metadata from original job. New retry count is: ${metadataForInsert.retry_count}`);
+            console.log(`[BitStudioProxy][${requestId}] Merged metadata. Root job is ${root_job_id}. New retry count is: ${metadataForInsert.retry_count}`);
         }
       }
 
