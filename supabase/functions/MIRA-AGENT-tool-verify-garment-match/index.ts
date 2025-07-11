@@ -1,12 +1,14 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { GoogleGenAI, Content, Part, HarmCategory, HarmBlockThreshold } from 'https://esm.sh/@google/genai@0.15.0';
+import { GoogleGenAI, Content, Part, HarmCategory, HarmBlockThreshold, GenerationResult } from 'https://esm.sh/@google/genai@0.15.0';
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-const MODEL_NAME = "gemini-1.5-flash-latest";
+const MODEL_NAME = "gemini-1.5-flash-latest"; // Using a faster model as requested
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 1000;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -129,13 +131,31 @@ serve(async (req) => {
         ]
     }];
 
-    const result = await ai.models.generateContent({
-        model: MODEL_NAME,
-        contents: contents,
-        generationConfig: { responseMimeType: "application/json" },
-        safetySettings,
-        config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
-    });
+    let result: GenerationResult | null = null;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+            console.log(`[VerifyGarmentMatch] Calling Gemini API, attempt ${attempt}...`);
+            result = await ai.models.generateContent({
+                model: MODEL_NAME,
+                contents: contents,
+                generationConfig: { responseMimeType: "application/json" },
+                safetySettings,
+                config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
+            });
+            break; // Success
+        } catch (error) {
+            if (error.message.includes("503") && attempt < MAX_RETRIES) {
+                console.warn(`[VerifyGarmentMatch] Gemini API is overloaded (503). Retrying in ${RETRY_DELAY_MS}ms...`);
+                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+            } else {
+                throw error; // Rethrow if it's not a 503 or if it's the last attempt
+            }
+        }
+    }
+
+    if (!result) {
+        throw new Error("AI model failed to respond after all retries.");
+    }
 
     const responseJson = extractJson(result.text);
 
