@@ -113,7 +113,11 @@ serve(async (req) => {
 
       if (jobToRetry.mode === 'inpaint') {
         console.log(`[BitStudioProxy][${requestId}] Executing INPAINT retry logic.`);
+        const maskImageId = jobToRetry.metadata?.bitstudio_mask_image_id;
+        if (!maskImageId) throw new Error("Cannot retry inpaint job: bitstudio_mask_image_id is missing from metadata.");
+
         const inpaintPayload: any = {
+            mask_image_id: maskImageId,
             prompt: finalPrompt,
             denoise: jobToRetry.metadata?.denoise || 0.99,
             resolution: jobToRetry.metadata?.resolution || 'standard',
@@ -273,6 +277,7 @@ serve(async (req) => {
             prompt_used: prompt,
             debug_assets: debug_assets,
             bitstudio_version_id: taskId,
+            bitstudio_mask_image_id: maskImageId, // <-- FIX: Storing the mask ID
             full_source_image_base64: fullSourceImageBase64,
             bbox: bbox,
             cropped_dilated_mask_base64: croppedDilatedMaskBase64,
