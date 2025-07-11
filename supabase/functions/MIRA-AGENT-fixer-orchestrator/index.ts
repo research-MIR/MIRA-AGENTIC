@@ -127,6 +127,8 @@ serve(async (req) => {
     const call = parseFunctionCall(result);
 
     if (!call) {
+      // --- ADDED LOGGING ---
+      console.error(`${logPrefix} Orchestrator LLM did not return a valid function call. Raw response text:`, result.text);
       throw new Error("Orchestrator LLM did not return a valid function call.");
     }
 
