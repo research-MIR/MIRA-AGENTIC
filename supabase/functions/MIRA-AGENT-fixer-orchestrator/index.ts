@@ -13,32 +13,41 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const systemPrompt = `You are a VTO Repair Specialist. Your task is to analyze a Quality Assurance report detailing why an image generation failed and create a plan to fix it.
+const systemPrompt = `You are a VTO Repair Specialist AI. Your task is to analyze a Quality Assurance (QA) report detailing why an image generation failed and create a new, complete API request payload to fix it.
+
+### Your Inputs:
+1.  **QA Report:** A JSON object describing the failure (e.g., 'mismatch_reason', 'fix_suggestion').
+2.  **Original Request Payload:** The full JSON payload that was sent to the API and resulted in the failure.
 
 ### Your Primary Goal:
-Translate the 'fix_suggestion' from the QA report into a concise, actionable instruction for the image generator.
-
-### Your Toolkit:
-You have two primary tools:
-1.  \`retry_with_new_parameters\`: This is your main tool. Use its \`prompt_appendix\` argument to provide the new instruction. For example, if the suggestion is "Try adding 'natural cotton texture'", you should call the tool with \`prompt_appendix: "natural cotton texture"\`.
-2.  \`give_up\`: If the problem seems unfixable (e.g., the model is completely wrong) or you are out of ideas, call this function with a clear reason.
+Construct a new, complete, and valid JSON payload for the API.
 
 ### Your Process:
-1.  Analyze the 'mismatch_reason' and 'fix_suggestion'.
-2.  Call ONE of your tools. Your entire response must be a single tool call.`;
+1.  **Analyze the Failure:** Read the 'mismatch_reason' and 'fix_suggestion' from the QA report to understand the problem.
+2.  **Use Original as Base:** Start with the 'original_request_payload'.
+3.  **Apply the Fix:** Modify the payload based on the 'fix_suggestion'. This usually involves changing the 'prompt' or 'prompt_appendix' field.
+4.  **Preserve Everything Else:** All other fields from the original payload (like image IDs, resolution, denoise values, etc.) MUST be preserved in the new payload unless the fix explicitly requires changing them.
+5.  **Call the Tool:** Use the \`execute_vto_job\` tool, passing the entire new JSON payload you constructed as the 'payload' argument.
+
+### Example:
+- **QA Report:** \`{ "fix_suggestion": "Try adding 'natural cotton texture' to the prompt." }\`
+- **Original Payload:** \`{ "prompt": "a red t-shirt", "person_image_id": "xyz", ... }\`
+- **Your Thought Process:** The suggestion is to add 'natural cotton texture'. I will modify the 'prompt' field.
+- **Your Action:** Call \`execute_vto_job\` with the new payload: \`{ "payload": { "prompt": "a red t-shirt with natural cotton texture", "person_image_id": "xyz", ... } }\`
+`;
 
 const tools = [
   {
     functionDeclarations: [
       {
-        name: "retry_with_new_parameters",
-        description: "The final step. Re-queues the VTO job with a new instruction to fix the prompt.",
+        name: "execute_vto_job",
+        description: "The final step. Re-queues the VTO job with a new, complete payload to fix the issue.",
         parameters: {
           type: Type.OBJECT,
           properties: {
-            prompt_appendix: { type: Type.STRING, description: "A short, specific instruction to add to the original prompt to fix the issue, based on the QA report's suggestion." },
+            payload: { type: Type.OBJECT, description: "The entire, new, valid JSON payload to be sent to the BitStudio API for the retry attempt." },
           },
-          required: ["prompt_appendix"],
+          required: ["payload"],
         },
       },
       {
@@ -56,62 +65,10 @@ const tools = [
   },
 ];
 
-/**
- * Extracts a function call from a Gemini response, whether it's a direct
- * functionCall object or embedded in a text block.
- * @param result The GenerationResult from the Gemini API.
- * @returns The parsed function call or null if none is found.
- */
 function parseFunctionCall(result: GenerationResult): { name: string; args: any } | null {
-    // Ideal case: A direct function call is returned.
     if (result.functionCalls && result.functionCalls.length > 0) {
-        console.log("[FixerParser] Found direct function call object.");
         return result.functionCalls[0];
     }
-
-    // Fallback case: The model returns the call as text.
-    const text = result.text;
-    if (text) {
-        console.log("[FixerParser] No direct function call. Attempting to parse from text:", text);
-        // Regex to find ```tool_code\n...``` or just the function call pattern.
-        const codeBlockMatch = text.match(/```(?:tool_code|javascript)\s*([\s\S]*?)\s*```/);
-        const callString = codeBlockMatch ? codeBlockMatch[1].trim() : text.trim();
-        
-        const functionCallMatch = callString.match(/(\w+)\(([\s\S]*)\)/);
-        if (functionCallMatch) {
-            const name = functionCallMatch[1];
-            const argsString = functionCallMatch[2];
-            
-            try {
-                // Attempt to parse the arguments string into a JSON object.
-                // This is a simplified parser that assumes a "key: value" structure.
-                const args: { [key: string]: any } = {};
-                const argParts = argsString.split(/,(?![^"]*"(?:(?:[^"]*"){2})*[^"]*$)/); // Split by comma, but not inside quotes
-                
-                argParts.forEach(part => {
-                    const [key, ...valueParts] = part.split(':');
-                    if (key && valueParts.length > 0) {
-                        const valueString = valueParts.join(':').trim();
-                        // Attempt to parse value as JSON, otherwise treat as a string.
-                        try {
-                            args[key.trim()] = JSON.parse(valueString);
-                        } catch {
-                            // If JSON.parse fails, it's likely a bare string. Remove quotes if they exist.
-                            args[key.trim()] = valueString.replace(/^"|"$/g, '');
-                        }
-                    }
-                });
-
-                console.log("[FixerParser] Successfully parsed text into function call:", { name, args });
-                return { name, args };
-            } catch (e) {
-                console.error("[FixerParser] Failed to parse arguments from string:", argsString, e);
-                return null;
-            }
-        }
-    }
-
-    console.log("[FixerParser] No function call could be parsed from the response.");
     return null;
 }
 
@@ -135,10 +92,10 @@ serve(async (req) => {
     const retryCount = job.metadata?.retry_count || 0;
     const qaHistory = job.metadata?.qa_history || [];
     const lastReport = qaHistory[qaHistory.length - 1];
+    const originalPayload = job.metadata?.original_request_payload;
 
-    if (!lastReport) {
-        throw new Error("Job is awaiting fix but has no QA report in its history.");
-    }
+    if (!lastReport) throw new Error("Job is awaiting fix but has no QA report in its history.");
+    if (!originalPayload) throw new Error("Job is awaiting fix but has no original_request_payload in its metadata.");
 
     console.log(`${logPrefix} Current retry count: ${retryCount}. Analyzing last QA report.`);
 
@@ -154,10 +111,10 @@ serve(async (req) => {
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
     
     const contents: Content[] = [
-        { role: 'user', parts: [{ text: `A VTO job failed quality assurance. Here is the report:\n\n${JSON.stringify(lastReport, null, 2)}\n\nPlease formulate a plan to fix it.` }] }
+        { role: 'user', parts: [{ text: `A VTO job failed quality assurance. Here is the report and the original request payload that caused the failure. Your task is to construct a new, complete payload to fix the issue.\n\n**QA REPORT:**\n${JSON.stringify(lastReport, null, 2)}\n\n**ORIGINAL REQUEST PAYLOAD:**\n${JSON.stringify(originalPayload, null, 2)}` }] }
     ];
 
-    console.log(`${logPrefix} Sending QA report to Gemini to formulate a plan.`);
+    console.log(`${logPrefix} Sending QA report and original payload to Gemini to formulate a plan.`);
     const result = await ai.models.generateContent({
         model: MODEL_NAME,
         contents: contents,
@@ -166,8 +123,6 @@ serve(async (req) => {
             systemInstruction: { role: "system", parts: [{ text: systemPrompt }] }
         }
     });
-
-    console.log(`[FixerOrchestrator][${job_id}] Full Gemini response:`, JSON.stringify(result, null, 2));
     
     const call = parseFunctionCall(result);
 
@@ -191,7 +146,6 @@ serve(async (req) => {
     
     console.log(`${logPrefix} Repair plan saved to job metadata. Status updated to 'fixing'.`);
 
-    // Asynchronously invoke the executor to carry out the plan
     supabase.functions.invoke('MIRA-AGENT-fixer-executor', { body: { job_id } }).catch(console.error);
     console.log(`${logPrefix} Executor invoked asynchronously.`);
 

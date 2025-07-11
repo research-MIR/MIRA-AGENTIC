@@ -20,7 +20,7 @@ serve(async (req) => {
   try {
     const { data: job, error: fetchError } = await supabase
       .from('mira-agent-bitstudio-jobs')
-      .select('*')
+      .select('metadata')
       .eq('id', job_id)
       .single();
     if (fetchError) throw fetchError;
@@ -31,28 +31,21 @@ serve(async (req) => {
     console.log(`${logPrefix} Executing plan action: ${plan.action}`);
 
     switch (plan.action) {
-      case 'retry_with_new_parameters': {
-        const newParams = plan.parameters;
-        console.log(`${logPrefix} Preparing to retry job with new parameters:`, newParams);
-
-        // This is the job that failed and needs to be retried.
-        const jobToRetryId = job.id;
+      case 'execute_vto_job': {
+        const payload = plan.parameters.payload;
+        if (!payload) throw new Error("Plan is missing the 'payload' parameter for execute_vto_job action.");
         
-        // This is the original job that started the entire chain of retries.
-        const originalRootJobId = job.metadata?.original_job_id || job.id;
-        console.log(`${logPrefix} This is part of a retry chain for original job: ${originalRootJobId}.`);
+        console.log(`${logPrefix} Preparing to retry job with new payload:`, payload);
 
         const { error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
           body: {
-            // Pass the ID of the job we want to UPDATE and re-run
-            retry_job_id: jobToRetryId,
-            // Pass the new instruction from the repair plan
-            prompt_appendix: newParams.prompt_appendix,
+            retry_job_id: job_id,
+            payload: payload,
           }
         });
         if (proxyError) throw proxyError;
 
-        console.log(`${logPrefix} Successfully sent retry request to proxy for job ${jobToRetryId}.`);
+        console.log(`${logPrefix} Successfully sent retry request to proxy for job ${job_id}.`);
         break;
       }
       case 'give_up': {
@@ -61,7 +54,7 @@ serve(async (req) => {
             status: 'permanently_failed', 
             error_message: plan.parameters.reason 
           })
-          .eq('id', job.id);
+          .eq('id', job_id);
         console.log(`${logPrefix} Agent gave up. Reason: ${plan.parameters.reason}. Job marked as permanently_failed.`);
         break;
       }

@@ -89,7 +89,7 @@ serve(async (req) => {
   
   try {
     const body = await req.json();
-    const { retry_job_id } = body;
+    const { retry_job_id, payload: retryPayload } = body;
 
     if (retry_job_id) {
       // --- RETRY LOGIC ---
@@ -97,77 +97,42 @@ serve(async (req) => {
       const { data: jobToRetry, error: fetchError } = await supabase.from('mira-agent-bitstudio-jobs').select('*').eq('id', retry_job_id).single();
       if (fetchError) throw fetchError;
 
-      const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-prompt-helper', {
-        body: {
-          person_image_url: jobToRetry.source_person_image_url,
-          garment_image_url: jobToRetry.source_garment_image_url,
-          prompt_appendix: body.prompt_appendix,
-          is_helper_enabled: true,
-          is_garment_mode: jobToRetry.mode !== 'inpaint',
-        }
-      });
-      if (promptError) throw promptError;
-      const finalPrompt = promptData.final_prompt;
+      if (!retryPayload) {
+        throw new Error("Retry request is missing the 'payload' object from the orchestrator.");
+      }
 
       let newTaskId: string;
+      let apiResponse;
 
       if (jobToRetry.mode === 'inpaint') {
         console.log(`[BitStudioProxy][${requestId}] Executing INPAINT retry logic.`);
-        const maskImageId = jobToRetry.metadata?.bitstudio_mask_image_id;
-        if (!maskImageId) throw new Error("Cannot retry inpaint job: bitstudio_mask_image_id is missing from metadata.");
-        console.log(`[BitStudioProxy][${requestId}] Found mask ID in metadata: ${maskImageId}`);
-
-        const inpaintPayload: any = {
-            mask_image_id: maskImageId,
-            prompt: finalPrompt,
-            denoise: jobToRetry.metadata?.denoise || 0.99,
-            resolution: jobToRetry.metadata?.resolution || 'standard',
-            mask_expansion_percent: jobToRetry.metadata?.mask_expansion_percent || 3,
-            num_images: 1,
-        };
-        if (jobToRetry.bitstudio_garment_image_id) {
-            inpaintPayload.reference_image_id = jobToRetry.bitstudio_garment_image_id;
-        }
-        
-        console.log(`[BitStudioProxy][${requestId}] Sending inpaint retry payload to BitStudio...`, inpaintPayload);
         const inpaintUrl = `${BITSTUDIO_API_BASE}/images/${jobToRetry.bitstudio_person_image_id}/inpaint`;
-        const inpaintResponse = await fetch(inpaintUrl, {
+        apiResponse = await fetch(inpaintUrl, {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify(inpaintPayload)
+            body: JSON.stringify(retryPayload)
         });
-        if (!inpaintResponse.ok) throw new Error(`BitStudio inpaint retry request failed: ${await inpaintResponse.text()}`);
-        const inpaintResult = await inpaintResponse.json();
+        if (!apiResponse.ok) throw new Error(`BitStudio inpaint retry request failed: ${await apiResponse.text()}`);
+        const inpaintResult = await apiResponse.json();
         newTaskId = inpaintResult.versions?.[0]?.id;
         if (!newTaskId) throw new Error("BitStudio did not return a new task ID on inpaint retry.");
-        console.log(`[BitStudioProxy][${requestId}] Inpaint retry successful. New task ID: ${newTaskId}`);
-
       } else { // Default to 'base' VTO
         console.log(`[BitStudioProxy][${requestId}] Executing BASE VTO retry logic.`);
-        const vtoPayload: any = {
-            person_image_id: jobToRetry.bitstudio_person_image_id,
-            outfit_image_id: jobToRetry.bitstudio_garment_image_id,
-            prompt: finalPrompt,
-            resolution: 'high',
-            num_images: 1,
-        };
-        console.log(`[BitStudioProxy][${requestId}] Sending VTO retry payload to BitStudio...`, vtoPayload);
         const vtoResponse = await fetch(`${BITSTUDIO_API_BASE}/images/virtual-try-on`, {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify(vtoPayload)
+            body: JSON.stringify(retryPayload)
         });
         if (!vtoResponse.ok) throw new Error(`BitStudio VTO retry request failed: ${await vtoResponse.text()}`);
         const vtoResult = await vtoResponse.json();
         newTaskId = vtoResult[0]?.id;
         if (!newTaskId) throw new Error("BitStudio did not return a new task ID on retry.");
-        console.log(`[BitStudioProxy][${requestId}] VTO retry successful. New task ID: ${newTaskId}`);
       }
 
       const { error: updateError } = await supabase.from('mira-agent-bitstudio-jobs').update({
         status: 'queued',
         bitstudio_task_id: newTaskId,
-        metadata: { ...jobToRetry.metadata, prompt_used: finalPrompt, retry_count: (jobToRetry.metadata.retry_count || 0) + 1 },
+        metadata: { ...jobToRetry.metadata, prompt_used: retryPayload.prompt, retry_count: (jobToRetry.metadata.retry_count || 0) + 1 },
         error_message: null,
         last_polled_at: new Date().toISOString(),
       }).eq('id', retry_job_id);
@@ -185,7 +150,6 @@ serve(async (req) => {
       const jobIds: string[] = [];
 
       if (mode === 'inpaint') {
-        console.log(`[BitStudioProxy][${requestId}] Creating new INPAINT job.`);
         const { source_image_url, mask_image_url, reference_image_url, prompt, denoise, resolution, mask_expansion_percent, num_attempts, debug_assets } = body;
         if (!source_image_url || !mask_image_url) throw new Error("source_image_url and mask_image_url are required for inpaint mode.");
 
@@ -194,62 +158,10 @@ serve(async (req) => {
           getMaskBlob(supabase, mask_image_url)
         ]);
 
-        const fullSourceImage = await loadImage(new Uint8Array(await sourceBlob.arrayBuffer()));
-        const rawMaskImage = await loadImage(new Uint8Array(await maskBlob.arrayBuffer()));
-
-        const dilatedCanvas = createCanvas(rawMaskImage.width(), rawMaskImage.height());
-        const dilateCtx = dilatedCanvas.getContext('2d')!;
-        const dilationAmount = Math.max(10, Math.round(rawMaskImage.width() * ((mask_expansion_percent || 3) / 100)));
-        dilateCtx.filter = `blur(${dilationAmount}px)`;
-        dilateCtx.drawImage(rawMaskImage, 0, 0);
-        dilateCtx.filter = 'none';
-        
-        const dilatedImageData = dilateCtx.getImageData(0, 0, dilatedCanvas.width, dilatedCanvas.height);
-        const data = dilatedImageData.data;
-        let minX = dilatedCanvas.width, minY = dilatedCanvas.height, maxX = 0, maxY = 0;
-        for (let i = 0; i < data.length; i += 4) {
-          if (data[i] > 128) {
-            data[i] = data[i+1] = data[i+2] = 255;
-            const x = (i / 4) % dilatedCanvas.width;
-            const y = Math.floor((i / 4) / dilatedCanvas.width);
-            if (x < minX) minX = x;
-            if (x > maxX) maxX = x;
-            if (y < minY) minY = y;
-            if (y > maxY) maxY = y;
-          } else {
-            data[i] = data[i+1] = data[i+2] = 0;
-          }
-        }
-        dilateCtx.putImageData(dilatedImageData, 0, 0);
-
-        if (maxX < minX || maxY < minY) throw new Error("The provided mask is empty or invalid after processing.");
-
-        const padding = Math.round(Math.max(maxX - minX, maxY - minY) * 0.20);
-        const bbox = {
-          x: Math.max(0, minX - padding),
-          y: Math.max(0, minY - padding),
-          width: Math.min(fullSourceImage.width(), maxX + padding) - Math.max(0, minX - padding),
-          height: Math.min(fullSourceImage.height(), maxY + padding) - Math.max(0, minY - padding),
-        };
-
-        if (bbox.width <= 0 || bbox.height <= 0) throw new Error(`Invalid bounding box dimensions: ${bbox.width}x${bbox.height}.`);
-
-        const croppedCanvas = createCanvas(bbox.width, bbox.height);
-        croppedCanvas.getContext('2d')!.drawImage(fullSourceImage, bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
-        const croppedSourceBlob = new Blob([croppedCanvas.toBuffer('image/png')], { type: 'image/png' });
-
-        const croppedMaskCanvas = createCanvas(bbox.width, bbox.height);
-        croppedMaskCanvas.getContext('2d')!.drawImage(dilatedCanvas, bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
-        const croppedMaskBlob = new Blob([croppedMaskCanvas.toBuffer('image/png')], { type: 'image/png' });
-        
-        const croppedDilatedMaskBase64 = encodeBase64(croppedMaskCanvas.toBuffer('image/png'));
-        const fullSourceImageBase64 = encodeBase64(await sourceBlob.arrayBuffer());
-
         const [sourceImageId, maskImageId] = await Promise.all([
-          uploadToBitStudio(croppedSourceBlob, 'inpaint-base', 'source_crop.png'),
-          uploadToBitStudio(croppedMaskBlob, 'inpaint-mask', 'mask_crop.png')
+          uploadToBitStudio(sourceBlob, 'inpaint-base', 'source.png'),
+          uploadToBitStudio(maskBlob, 'inpaint-mask', 'mask.png')
         ]);
-        console.log(`[BitStudioProxy][${requestId}] Uploaded inpaint source (${sourceImageId}) and mask (${maskImageId}) to BitStudio.`);
 
         const inpaintPayload: any = {
           mask_image_id: maskImageId,
@@ -265,7 +177,6 @@ serve(async (req) => {
           const referenceBlob = await downloadFromSupabase(supabase, reference_image_url);
           referenceImageId = await uploadToBitStudio(referenceBlob, 'inpaint-reference', 'reference.png');
           inpaintPayload.reference_image_id = referenceImageId;
-          console.log(`[BitStudioProxy][${requestId}] Uploaded inpaint reference image (${referenceImageId}) to BitStudio.`);
         }
 
         const inpaintUrl = `${BITSTUDIO_API_BASE}/images/${sourceImageId}/inpaint`;
@@ -279,26 +190,20 @@ serve(async (req) => {
         const inpaintResult = await inpaintResponse.json();
         const taskId = inpaintResult.versions?.[0]?.id;
         if (!taskId) throw new Error("BitStudio did not return a task ID for the inpaint job.");
-        console.log(`[BitStudioProxy][${requestId}] Inpaint job created on BitStudio. Task ID: ${taskId}`);
-
-        const metadataToSave = { 
-            prompt_used: prompt,
-            debug_assets: debug_assets,
-            bitstudio_version_id: taskId,
-            bitstudio_mask_image_id: maskImageId, // <-- FIX: Storing the mask ID
-            full_source_image_base64: fullSourceImageBase64,
-            bbox: bbox,
-            cropped_dilated_mask_base64: croppedDilatedMaskBase64,
-            source_image_url: source_image_url,
-            mask_image_url: mask_image_url,
-            reference_image_url: reference_image_url,
-        };
-        console.log(`[BitStudioProxy][${requestId}] Saving job to DB with metadata:`, metadataToSave);
 
         const { data: newJob, error: insertError } = await supabase.from('mira-agent-bitstudio-jobs').insert({
           user_id, mode, status: 'queued', source_person_image_url: source_image_url, source_garment_image_url: reference_image_url,
           bitstudio_person_image_id: sourceImageId, bitstudio_garment_image_id: referenceImageId, bitstudio_task_id: taskId, batch_pair_job_id: batch_pair_job_id, vto_pack_job_id: vto_pack_job_id,
-          metadata: metadataToSave
+          metadata: { 
+            prompt_used: prompt,
+            debug_assets: debug_assets,
+            bitstudio_version_id: taskId,
+            bitstudio_mask_image_id: maskImageId,
+            source_image_url: source_image_url,
+            mask_image_url: mask_image_url,
+            reference_image_url: reference_image_url,
+            original_request_payload: inpaintPayload, // Save the original request
+          }
         }).select('id').single();
         if (insertError) throw insertError;
         jobIds.push(newJob.id);
@@ -341,7 +246,10 @@ serve(async (req) => {
           user_id, mode, status: 'queued', source_person_image_url: person_image_url, source_garment_image_url: garment_image_url,
           bitstudio_person_image_id: personImageId, bitstudio_garment_image_id: outfitImageId, bitstudio_task_id: taskId,
           batch_pair_job_id: batch_pair_job_id,
-          vto_pack_job_id: vto_pack_job_id
+          vto_pack_job_id: vto_pack_job_id,
+          metadata: {
+            original_request_payload: vtoPayload // Save the original request
+          }
         }).select('id').single();
         if (insertError) throw insertError;
         jobIds.push(newJob.id);
