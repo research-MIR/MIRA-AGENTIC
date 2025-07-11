@@ -5,8 +5,9 @@ import { GoogleGenAI, Type, Content, GenerationResult } from 'https://esm.sh/@go
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-const MODEL_NAME = "gemini-1.5-flash-latest";
-const MAX_RETRIES = 2;
+const MODEL_NAME = "gemini-2.5-pro"; // Enforcing the correct model name
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 1500;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -114,20 +115,36 @@ serve(async (req) => {
         { role: 'user', parts: [{ text: `A VTO job failed quality assurance. Here is the report and the original request payload that caused the failure. Your task is to construct a new, complete payload to fix the issue.\n\n**QA REPORT:**\n${JSON.stringify(lastReport, null, 2)}\n\n**ORIGINAL REQUEST PAYLOAD:**\n${JSON.stringify(originalPayload, null, 2)}` }] }
     ];
 
-    console.log(`${logPrefix} Sending QA report and original payload to Gemini to formulate a plan.`);
-    const result = await ai.models.generateContent({
-        model: MODEL_NAME,
-        contents: contents,
-        tools: tools,
-        config: {
-            systemInstruction: { role: "system", parts: [{ text: systemPrompt }] }
+    let result: GenerationResult | null = null;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+            console.log(`${logPrefix} Calling Gemini model, attempt ${attempt}...`);
+            result = await ai.models.generateContent({
+                model: MODEL_NAME,
+                contents: contents,
+                tools: tools,
+                config: {
+                    systemInstruction: { role: "system", parts: [{ text: systemPrompt }] }
+                }
+            });
+            break; // Success, exit loop
+        } catch (error) {
+            if (error.message.includes("503") && attempt < MAX_RETRIES) {
+                console.warn(`${logPrefix} Gemini API is overloaded (503). Retrying in ${RETRY_DELAY_MS}ms...`);
+                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+            } else {
+                throw error; // Rethrow if it's not a 503 or if it's the last attempt
+            }
         }
-    });
+    }
     
+    if (!result) {
+        throw new Error("AI planner failed to respond after all retries.");
+    }
+
     const call = parseFunctionCall(result);
 
     if (!call) {
-      // --- ADDED LOGGING ---
       console.error(`${logPrefix} Orchestrator LLM did not return a valid function call. Raw response text:`, result.text);
       throw new Error("Orchestrator LLM did not return a valid function call.");
     }
