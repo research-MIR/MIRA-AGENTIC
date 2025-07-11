@@ -35,9 +35,6 @@ serve(async (req) => {
     if (fetchError) throw fetchError;
 
     // --- Image Composition Logic (Placeholder) ---
-    // In a real scenario, this section would download the source, download the crop,
-    // and composite them together. For this implementation, we'll assume the 
-    // final_image_url is the already-composited image URL for simplicity.
     const finalPublicUrl = final_image_url; 
     console.log(`${logPrefix} Composition complete. Final URL: ${finalPublicUrl}`);
     // --- End Composition Logic ---
@@ -60,15 +57,13 @@ serve(async (req) => {
     }
 
     if (verificationResult && verificationResult.is_match === false) {
-        console.log(`${logPrefix} QA failed. Handing off to Fixer Agent.`);
-        const currentRetryCount = job.metadata?.retry_count || 0;
+        console.log(`${logPrefix} QA failed. Setting status to 'awaiting_fix' and invoking orchestrator.`);
         const qaHistory = job.metadata?.qa_history || [];
         
         await supabase.from(tableName).update({ 
             status: 'awaiting_fix',
             metadata: {
                 ...job.metadata,
-                retry_count: currentRetryCount + 1,
                 qa_history: [...qaHistory, { timestamp: new Date().toISOString(), report: verificationResult }]
             }
         }).eq('id', job_id);

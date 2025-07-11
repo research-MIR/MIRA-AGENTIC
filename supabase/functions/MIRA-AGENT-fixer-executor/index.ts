@@ -28,9 +28,6 @@ serve(async (req) => {
     const plan = job.metadata?.current_fix_plan;
     if (!plan || !plan.action) throw new Error("No valid repair plan found in the job metadata.");
 
-    const originalFailedJobId = job.metadata?.original_job_id || job.id;
-    console.log(`${logPrefix} This is part of a retry chain for original job: ${originalFailedJobId}.`);
-
     console.log(`${logPrefix} Executing plan action: ${plan.action}`);
 
     switch (plan.action) {
@@ -38,34 +35,24 @@ serve(async (req) => {
         const newParams = plan.parameters;
         console.log(`${logPrefix} Preparing to retry job with new parameters:`, newParams);
 
-        const currentRetryCount = job.metadata?.retry_count || 0;
-        console.log(`${logPrefix} Current retry count is ${currentRetryCount}. Incrementing...`);
+        // This is the job that failed and needs to be retried.
+        const jobToRetryId = job.id;
         
-        const newMetadata = {
-            ...job.metadata,
-            retry_count: currentRetryCount + 1,
-        };
-        const { error: updateError } = await supabase
-            .from('mira-agent-bitstudio-jobs')
-            .update({ metadata: newMetadata })
-            .eq('id', job_id);
-        if (updateError) throw new Error(`Failed to update retry count: ${updateError.message}`);
-        console.log(`${logPrefix} Incremented retry count to ${newMetadata.retry_count}.`);
-        
+        // This is the original job that started the entire chain of retries.
+        const originalRootJobId = job.metadata?.original_job_id || job.id;
+        console.log(`${logPrefix} This is part of a retry chain for original job: ${originalRootJobId}.`);
+
         const { error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
           body: {
-            user_id: job.user_id,
-            mode: job.mode,
-            source_image_url: job.source_person_image_url,
-            reference_image_url: job.source_garment_image_url,
-            mask_image_url: job.metadata.mask_image_url,
+            // Pass the ID of the job we want to UPDATE and re-run
+            retry_job_id: jobToRetryId,
+            // Pass the new instruction from the repair plan
             prompt_appendix: newParams.prompt_appendix,
-            retry_job_id: job.id,
           }
         });
         if (proxyError) throw proxyError;
 
-        console.log(`${logPrefix} Successfully re-queued VTO job via proxy.`);
+        console.log(`${logPrefix} Successfully sent retry request to proxy for job ${jobToRetryId}.`);
         break;
       }
       case 'give_up': {
