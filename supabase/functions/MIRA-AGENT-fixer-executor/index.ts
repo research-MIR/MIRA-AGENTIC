@@ -37,6 +37,8 @@ serve(async (req) => {
 
         // Increment the retry count on the original job
         const currentRetryCount = job.metadata?.retry_count || 0;
+        console.log(`${logPrefix} Current retry count is ${currentRetryCount}. Incrementing...`);
+        
         const newMetadata = {
             ...job.metadata,
             retry_count: currentRetryCount + 1,
