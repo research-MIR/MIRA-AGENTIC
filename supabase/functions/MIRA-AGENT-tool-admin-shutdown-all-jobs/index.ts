@@ -26,7 +26,7 @@ serve(async (req) => {
     const jobTables = [
       { name: 'mira-agent-jobs', statuses: ['processing', 'awaiting_feedback', 'awaiting_refinement', 'queued'] },
       { name: 'mira-agent-comfyui-jobs', statuses: ['queued', 'processing'] },
-      { name: 'mira-agent-bitstudio-jobs', statuses: ['queued', 'processing', 'delegated', 'compositing'] },
+      { name: 'mira-agent-bitstudio-jobs', statuses: ['queued', 'processing', 'delegated', 'compositing', 'awaiting_fix', 'fixing'] },
       { name: 'mira-agent-batch-inpaint-pair-jobs', statuses: ['pending', 'segmenting', 'delegated'] },
       { name: 'mira-agent-mask-aggregation-jobs', statuses: ['aggregating', 'compositing'] },
       { name: 'mira-agent-model-generation-jobs', statuses: ['pending', 'base_generation_complete', 'awaiting_approval', 'generating_poses', 'polling_poses', 'upscaling_poses'] }
