@@ -82,6 +82,9 @@ async function getMaskBlob(supabase: SupabaseClient, maskUrl: string): Promise<B
 
 serve(async (req) => {
   const requestId = `proxy-${Date.now()}`;
+  const logPrefix = `[BitStudioProxy][${requestId}]`;
+  console.log(`${logPrefix} Function invoked.`);
+
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
 
   try {
@@ -92,7 +95,6 @@ serve(async (req) => {
     }
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-    const logPrefix = `[BitStudioProxy][${requestId}]`;
     console.log(`${logPrefix} Invoked. Mode: ${mode}. Retry Job ID: ${retry_job_id || 'N/A'}`);
 
     let finalJobId = retry_job_id || null;
