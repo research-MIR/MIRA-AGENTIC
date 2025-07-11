@@ -41,7 +41,7 @@ serve(async (req) => {
             user_id: job.user_id,
             mode: job.mode,
             source_image_url: job.source_person_image_url,
-            garment_image_url: job.source_garment_image_url,
+            reference_image_url: job.source_garment_image_url, // CORRECTED KEY
             mask_image_url: job.metadata.mask_image_url,
             // Pass new/modified info from the plan
             prompt_appendix: newParams.prompt_appendix,
