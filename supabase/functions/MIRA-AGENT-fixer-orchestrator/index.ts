@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { GoogleGenAI, Type } from 'https://esm.sh/@google/genai@0.15.0';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
@@ -19,8 +19,7 @@ You have a toolkit of functions. Your plan MUST be a sequence of calls to these 
 
 1.  **Analyze the 'mismatch_reason' and 'fix_suggestion' in the QA report.**
 2.  **Formulate a strategy.** If the shape is wrong, you should adjust the 'denoise' parameter. If the color or texture is wrong, you should modify the prompt. You can do both.
-3.  **Define the steps.** Call \`modify_prompt\` or \`adjust_parameters\` to set up the fix.
-4.  **Execute the fix.** Your final step MUST ALWAYS be a call to \`retry_with_new_parameters\`, which will take your prepared changes and re-run the generation.
+3.  **Execute the fix.** Your final step MUST ALWAYS be a call to \`retry_with_new_parameters\`, which will take your prepared changes and re-run the generation.
 
 If you believe the issue is unfixable or you have no new ideas, you MUST call the \`give_up\` function with a clear reason.`;
 
@@ -55,25 +54,30 @@ const tools = [
 ];
 
 serve(async (req) => {
-  const { fixer_job_id } = await req.json();
-  if (!fixer_job_id) throw new Error("fixer_job_id is required.");
+  const { job_id } = await req.json();
+  if (!job_id) throw new Error("job_id is required for the fixer-orchestrator.");
 
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-  console.log(`[FixerOrchestrator][${fixer_job_id}] Invoked.`);
+  console.log(`[FixerOrchestrator][${job_id}] Invoked.`);
 
   try {
     const { data: job, error: fetchError } = await supabase
-      .from('mira-agent-fixer-jobs')
-      .select('*')
-      .eq('id', fixer_job_id)
+      .from('mira-agent-bitstudio-jobs')
+      .select('metadata')
+      .eq('id', job_id)
       .single();
     if (fetchError) throw fetchError;
 
-    if (job.retry_count >= MAX_RETRIES) {
-      console.log(`[FixerOrchestrator][${fixer_job_id}] Max retries reached. Giving up.`);
-      await supabase.from('mira-agent-fixer-jobs').update({ status: 'failed', repair_plan: { final_action: 'give_up', reason: 'Max retries reached.' } }).eq('id', fixer_job_id);
-      // Also update the original job to permanently failed
-      await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'permanently_failed', error_message: 'Automated repair failed after multiple attempts.' }).eq('id', job.source_vto_job_id);
+    const retryCount = job.metadata?.retry_count || 0;
+    const qaHistory = job.metadata?.qa_history || [];
+    const lastReport = qaHistory[qaHistory.length - 1];
+
+    if (retryCount >= MAX_RETRIES) {
+      console.log(`[FixerOrchestrator][${job_id}] Max retries reached. Giving up.`);
+      await supabase.from('mira-agent-bitstudio-jobs').update({ 
+        status: 'permanently_failed', 
+        error_message: 'Automated repair failed after multiple attempts.' 
+      }).eq('id', job_id);
       return new Response(JSON.stringify({ success: true, message: "Max retries reached." }), { headers: corsHeaders });
     }
 
@@ -82,7 +86,7 @@ serve(async (req) => {
     
     const chat = model.startChat({
         history: [
-            { role: 'user', parts: [{ text: `A VTO job failed quality assurance. Here is the report:\n\n${JSON.stringify(job.initial_qa_report, null, 2)}\n\nPlease formulate a plan to fix it.` }] }
+            { role: 'user', parts: [{ text: `A VTO job failed quality assurance. Here is the report:\n\n${JSON.stringify(lastReport, null, 2)}\n\nPlease formulate a plan to fix it.` }] }
         ]
     });
 
@@ -93,25 +97,28 @@ serve(async (req) => {
       throw new Error("Orchestrator LLM did not return a valid function call.");
     }
 
-    console.log(`[FixerOrchestrator][${fixer_job_id}] LLM decided to call: ${call.name} with args:`, call.args);
+    console.log(`[FixerOrchestrator][${job_id}] LLM decided to call: ${call.name} with args:`, call.args);
 
     const repair_plan = {
       action: call.name,
       parameters: call.args,
     };
 
-    await supabase.from('mira-agent-fixer-jobs')
-      .update({ repair_plan, status: 'plan_created' })
-      .eq('id', fixer_job_id);
+    await supabase.from('mira-agent-bitstudio-jobs')
+      .update({ 
+        metadata: { ...job.metadata, current_fix_plan: repair_plan }, 
+        status: 'fixing' 
+      })
+      .eq('id', job_id);
 
     // Asynchronously invoke the executor to carry out the plan
-    supabase.functions.invoke('MIRA-AGENT-fixer-executor', { body: { fixer_job_id } }).catch(console.error);
+    supabase.functions.invoke('MIRA-AGENT-fixer-executor', { body: { job_id } }).catch(console.error);
 
     return new Response(JSON.stringify({ success: true, plan: repair_plan }), { headers: corsHeaders });
 
   } catch (error) {
-    console.error(`[FixerOrchestrator][${fixer_job_id}] Error:`, error);
-    await supabase.from('mira-agent-fixer-jobs').update({ status: 'failed' }).eq('id', fixer_job_id);
+    console.error(`[FixerOrchestrator][${job_id}] Error:`, error);
+    await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'failed', error_message: `Fixer orchestrator failed: ${error.message}` }).eq('id', job_id);
     return new Response(JSON.stringify({ error: error.message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
   }
 });

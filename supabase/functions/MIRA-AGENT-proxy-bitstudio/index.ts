@@ -88,13 +88,14 @@ serve(async (req) => {
     const body = await req.json();
     console.log(`[BitStudioProxy][${requestId}] Received full payload:`, JSON.stringify(body, null, 2));
 
-    const { user_id, mode, batch_pair_job_id, vto_pack_job_id } = body;
+    const { user_id, mode, batch_pair_job_id, vto_pack_job_id, retry_job_id } = body;
     if (!user_id || !mode) {
       throw new Error("user_id and mode are required.");
     }
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-    const jobIds: string[] = [];
+    let jobIds: string[] = [];
+    let finalJobId = retry_job_id || null;
 
     if (mode === 'inpaint') {
       const { source_image_url, mask_image_url, reference_image_url, prompt, denoise, resolution, mask_expansion_percent, num_attempts, debug_assets } = body;
@@ -105,60 +106,9 @@ serve(async (req) => {
         getMaskBlob(supabase, mask_image_url)
       ]);
 
-      const fullSourceImage = await loadImage(new Uint8Array(await sourceBlob.arrayBuffer()));
-      const rawMaskImage = await loadImage(new Uint8Array(await maskBlob.arrayBuffer()));
-
-      const dilatedCanvas = createCanvas(rawMaskImage.width(), rawMaskImage.height());
-      const dilateCtx = dilatedCanvas.getContext('2d')!;
-      const dilationAmount = Math.max(10, Math.round(rawMaskImage.width() * ((mask_expansion_percent || 3) / 100)));
-      dilateCtx.filter = `blur(${dilationAmount}px)`;
-      dilateCtx.drawImage(rawMaskImage, 0, 0);
-      dilateCtx.filter = 'none';
-      
-      const dilatedImageData = dilateCtx.getImageData(0, 0, dilatedCanvas.width, dilatedCanvas.height);
-      const data = dilatedImageData.data;
-      let minX = dilatedCanvas.width, minY = dilatedCanvas.height, maxX = 0, maxY = 0;
-      for (let i = 0; i < data.length; i += 4) {
-        if (data[i] > 128) {
-          data[i] = data[i+1] = data[i+2] = 255;
-          const x = (i / 4) % dilatedCanvas.width;
-          const y = Math.floor((i / 4) / dilatedCanvas.width);
-          if (x < minX) minX = x;
-          if (x > maxX) maxX = x;
-          if (y < minY) minY = y;
-          if (y > maxY) maxY = y;
-        } else {
-          data[i] = data[i+1] = data[i+2] = 0;
-        }
-      }
-      dilateCtx.putImageData(dilatedImageData, 0, 0);
-
-      if (maxX < minX || maxY < minY) throw new Error("The provided mask is empty or invalid after processing.");
-
-      const padding = Math.round(Math.max(maxX - minX, maxY - minY) * 0.20);
-      const bbox = {
-        x: Math.max(0, minX - padding),
-        y: Math.max(0, minY - padding),
-        width: Math.min(fullSourceImage.width(), maxX + padding) - Math.max(0, minX - padding),
-        height: Math.min(fullSourceImage.height(), maxY + padding) - Math.max(0, minY - padding),
-      };
-
-      if (bbox.width <= 0 || bbox.height <= 0) throw new Error(`Invalid bounding box dimensions: ${bbox.width}x${bbox.height}.`);
-
-      const croppedCanvas = createCanvas(bbox.width, bbox.height);
-      croppedCanvas.getContext('2d')!.drawImage(fullSourceImage, bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
-      const croppedSourceBlob = new Blob([croppedCanvas.toBuffer('image/png')], { type: 'image/png' });
-
-      const croppedMaskCanvas = createCanvas(bbox.width, bbox.height);
-      croppedMaskCanvas.getContext('2d')!.drawImage(dilatedCanvas, bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
-      const croppedMaskBlob = new Blob([croppedMaskCanvas.toBuffer('image/png')], { type: 'image/png' });
-      
-      const croppedDilatedMaskBase64 = encodeBase64(croppedMaskCanvas.toBuffer('image/png'));
-      const fullSourceImageBase64 = encodeBase64(await sourceBlob.arrayBuffer());
-
       const [sourceImageId, maskImageId] = await Promise.all([
-        uploadToBitStudio(croppedSourceBlob, 'inpaint-base', 'source_crop.png'),
-        uploadToBitStudio(croppedMaskBlob, 'inpaint-mask', 'mask_crop.png')
+        uploadToBitStudio(sourceBlob, 'inpaint-base', 'source.png'),
+        uploadToBitStudio(maskBlob, 'inpaint-mask', 'mask.png')
       ]);
 
       const inpaintPayload: any = {
@@ -187,17 +137,24 @@ serve(async (req) => {
       const taskId = inpaintResult.versions?.[0]?.id;
       if (!taskId) throw new Error("BitStudio did not return a task ID for the inpaint job.");
 
-      const { data: newJob, error: insertError } = await supabase.from('mira-agent-bitstudio-jobs').insert({
+      const jobData = {
         user_id, mode, status: 'queued', source_person_image_url: source_image_url, source_garment_image_url: reference_image_url,
         bitstudio_person_image_id: sourceImageId, bitstudio_task_id: taskId, batch_pair_job_id: batch_pair_job_id, vto_pack_job_id: vto_pack_job_id,
         metadata: {
+            ...body.metadata, // Carry over existing metadata
             prompt_used: prompt, debug_assets: debug_assets, bitstudio_version_id: taskId,
-            full_source_image_base64: fullSourceImageBase64, bbox: bbox, cropped_dilated_mask_base64: croppedDilatedMaskBase64,
             source_image_url: source_image_url, mask_image_url: mask_image_url, reference_image_url: reference_image_url,
         }
-      }).select('id').single();
-      if (insertError) throw insertError;
-      jobIds.push(newJob.id);
+      };
+
+      if (retry_job_id) {
+        const { error } = await supabase.from('mira-agent-bitstudio-jobs').update(jobData).eq('id', retry_job_id);
+        if (error) throw error;
+      } else {
+        const { data: newJob, error } = await supabase.from('mira-agent-bitstudio-jobs').insert(jobData).select('id').single();
+        if (error) throw error;
+        finalJobId = newJob.id;
+      }
 
     } else { // Default to virtual-try-on
       const { person_image_url, garment_image_url, num_images, prompt, prompt_appendix } = body;
@@ -233,21 +190,28 @@ serve(async (req) => {
       const taskId = vtoResult[0]?.id;
       if (!taskId) throw new Error("BitStudio did not return a task ID for the VTO job.");
 
-      const { data: newJob, error: insertError } = await supabase.from('mira-agent-bitstudio-jobs').insert({
+      const jobData = {
         user_id, mode, status: 'queued', source_person_image_url: person_image_url, source_garment_image_url: garment_image_url,
         bitstudio_person_image_id: personImageId, bitstudio_garment_image_id: outfitImageId, bitstudio_task_id: taskId,
         batch_pair_job_id: batch_pair_job_id,
         vto_pack_job_id: vto_pack_job_id
-      }).select('id').single();
-      if (insertError) throw insertError;
-      jobIds.push(newJob.id);
+      };
+
+      if (retry_job_id) {
+        const { error } = await supabase.from('mira-agent-bitstudio-jobs').update(jobData).eq('id', retry_job_id);
+        if (error) throw error;
+      } else {
+        const { data: newJob, error } = await supabase.from('mira-agent-bitstudio-jobs').insert(jobData).select('id').single();
+        if (error) throw error;
+        finalJobId = newJob.id;
+      }
     }
 
-    jobIds.forEach(jobId => {
-      supabase.functions.invoke('MIRA-AGENT-poller-bitstudio', { body: { job_id: jobId } }).catch(console.error);
-    });
+    if (finalJobId) {
+      supabase.functions.invoke('MIRA-AGENT-poller-bitstudio', { body: { job_id: finalJobId } }).catch(console.error);
+    }
 
-    return new Response(JSON.stringify({ success: true, jobIds }), {
+    return new Response(JSON.stringify({ success: true, jobId: finalJobId }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });
