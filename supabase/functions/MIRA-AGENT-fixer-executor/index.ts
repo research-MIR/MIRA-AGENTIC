@@ -28,6 +28,9 @@ serve(async (req) => {
     const plan = job.metadata?.current_fix_plan;
     if (!plan || !plan.action) throw new Error("No valid repair plan found in the job metadata.");
 
+    const originalFailedJobId = job.metadata?.original_job_id || job.id;
+    console.log(`${logPrefix} This is part of a retry chain for original job: ${originalFailedJobId}.`);
+
     console.log(`${logPrefix} Executing plan action: ${plan.action}`);
 
     switch (plan.action) {
@@ -35,7 +38,6 @@ serve(async (req) => {
         const newParams = plan.parameters;
         console.log(`${logPrefix} Preparing to retry job with new parameters:`, newParams);
 
-        // Increment the retry count on the original job
         const currentRetryCount = job.metadata?.retry_count || 0;
         console.log(`${logPrefix} Current retry count is ${currentRetryCount}. Incrementing...`);
         
@@ -52,15 +54,12 @@ serve(async (req) => {
         
         const { error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
           body: {
-            // Pass original info
             user_id: job.user_id,
             mode: job.mode,
             source_image_url: job.source_person_image_url,
             reference_image_url: job.source_garment_image_url,
             mask_image_url: job.metadata.mask_image_url,
-            // Pass new/modified info from the plan
             prompt_appendix: newParams.prompt_appendix,
-            // Pass the job ID to signal a retry
             retry_job_id: job.id,
           }
         });
