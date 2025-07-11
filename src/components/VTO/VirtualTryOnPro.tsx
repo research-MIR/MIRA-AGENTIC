@@ -100,6 +100,8 @@ const VirtualTryOnPro = ({
         <AlertTitle>{t('proMode')}</AlertTitle>
         <AlertDescription>
           {t('vtoProModeDescription')}
+          <br />
+          <strong className="mt-2 block">{t('vtoProModeDisclaimer')}</strong>
         </AlertDescription>
       </Alert>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
