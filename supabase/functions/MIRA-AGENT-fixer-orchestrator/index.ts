@@ -107,7 +107,7 @@ serve(async (req) => {
         }
     });
 
-    const call = result.response.functionCalls()?.[0];
+    const call = result.functionCalls?.[0];
 
     if (!call) {
       throw new Error("Orchestrator LLM did not return a valid function call.");
