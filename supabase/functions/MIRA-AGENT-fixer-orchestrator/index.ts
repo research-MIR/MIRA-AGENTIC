@@ -107,6 +107,10 @@ serve(async (req) => {
         }
     });
 
+    // --- DEBUG LOGGING ADDED ---
+    console.log(`[FixerOrchestrator][${job_id}] Full Gemini response:`, JSON.stringify(result, null, 2));
+    // ---------------------------
+
     const call = result.functionCalls?.[0];
 
     if (!call) {
