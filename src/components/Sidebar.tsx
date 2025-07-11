@@ -1,12 +1,12 @@
 import { useState } from "react";
 import { NavLink, useNavigate, useParams } from "react-router-dom";
 import { Button } from "./ui/button";
-import { MessageSquare, Image, GalleryHorizontal, LogOut, HelpCircle, LogIn, Shirt, Code, Wand2, PencilRuler, Pencil, Trash2, Settings, FolderPlus, LayoutGrid, Cog, Brush, Users, MessageSquareQuote } from "lucide-react";
+import { MessageSquare, Image, GalleryHorizontal, LogOut, HelpCircle, LogIn, Shirt, Code, Wand2, PencilRuler, Pencil, Trash2, Settings, FolderPlus, LayoutGrid, Cog, Brush, Users, MessageSquareQuote, ChevronRight } from "lucide-react";
 import { useSession } from "./Auth/SessionContextProvider";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Skeleton } from "./ui/skeleton";
-import { useLanguage } from "@/context/LanguageContext";
+import { useLanguage } from "./LanguageContext";
 import { useOnboardingTour } from "@/context/OnboardingTourContext";
 import { ActiveJobsTracker } from "@/components/Jobs/ActiveJobsTracker";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
@@ -17,6 +17,7 @@ import { RadioGroup, RadioGroupItem } from "./ui/radio-group";
 import { showError, showSuccess, showLoading, dismissToast } from "@/utils/toast";
 import { AddToProjectDialog } from "./Jobs/AddToProjectDialog";
 import { useModalStore } from "@/store/modalStore";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 interface JobHistory {
   id: string;
@@ -43,6 +44,7 @@ export const Sidebar = () => {
   const [newName, setNewName] = useState("");
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [sortOrder, setSortOrder] = useState<'created_at' | 'updated_at'>('updated_at');
+  const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
 
   const { data: projects } = useQuery<Project[]>({
     queryKey: ['projects', session?.user?.id],
@@ -143,10 +145,6 @@ export const Sidebar = () => {
             <Image size={20} />
             {t('generator')}
           </NavLink>
-          <NavLink id="edit-with-words-nav-link" to="/edit-with-words" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-            <MessageSquareQuote size={20} />
-            {t('editWithWords')}
-          </NavLink>
           <NavLink id="upscale-nav-link" to="/upscale" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
             <Wand2 size={20} />
             {t('upscale')}
@@ -155,30 +153,48 @@ export const Sidebar = () => {
             <Brush size={20} />
             {t('inpainting')}
           </NavLink>
-          <NavLink id="editor-nav-link" to="/editor" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-            <PencilRuler size={20} />
-            {t('imageEditor')}
-          </NavLink>
           <NavLink id="virtual-try-on-nav-link" to="/virtual-try-on" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
             <Shirt size={20} />
             {t('virtualTryOn')}
-          </NavLink>
-          <NavLink id="virtual-try-on-packs-nav-link" to="/virtual-try-on-packs" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-            <Shirt size={20} />
-            {t('virtualTryOnPacks')}
-          </NavLink>
-          <NavLink id="model-packs-nav-link" to="/model-packs" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-            <Users size={20} />
-            {t('modelPacks')}
           </NavLink>
           <NavLink id="gallery-nav-link" to="/gallery" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
             <GalleryHorizontal size={20} />
             {t('gallery')}
           </NavLink>
-          <NavLink id="developer-nav-link" to="/developer" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-            <Code size={20} />
-            {t('developer')}
-          </NavLink>
+          
+          <Collapsible open={isAdvancedOpen} onOpenChange={setIsAdvancedOpen}>
+            <CollapsibleTrigger asChild>
+              <Button variant="ghost" className="w-full justify-between p-2">
+                <div className="flex items-center gap-2">
+                  <Wand2 size={20} />
+                  {t('advancedTools')}
+                </div>
+                <ChevronRight className={`h-4 w-4 transition-transform duration-200 ${isAdvancedOpen ? 'rotate-90' : ''}`} />
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="pl-4 space-y-1 pt-1">
+              <NavLink id="edit-with-words-nav-link" to="/edit-with-words" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
+                <MessageSquareQuote size={20} />
+                {t('editWithWords')}
+              </NavLink>
+              <NavLink id="editor-nav-link" to="/editor" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
+                <PencilRuler size={20} />
+                {t('imageEditor')}
+              </NavLink>
+              <NavLink id="virtual-try-on-packs-nav-link" to="/virtual-try-on-packs" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
+                <Shirt size={20} />
+                {t('virtualTryOnPacks')}
+              </NavLink>
+              <NavLink id="model-packs-nav-link" to="/model-packs" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
+                <Users size={20} />
+                {t('modelPacks')}
+              </NavLink>
+              <NavLink id="developer-nav-link" to="/developer" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
+                <Code size={20} />
+                {t('developer')}
+              </NavLink>
+            </CollapsibleContent>
+          </Collapsible>
         </nav>
         <div className="flex-1 flex flex-col overflow-hidden">
             <div className="flex justify-between items-center w-full px-4 pt-4 pb-2">
