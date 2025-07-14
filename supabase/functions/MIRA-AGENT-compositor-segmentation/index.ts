@@ -28,21 +28,29 @@ async function uploadBufferToStorage(supabase: SupabaseClient, buffer: Uint8Arra
 
 /**
  * Dilate an opaque-white / transparent-black mask by N pixels.
- * Uses 4-neighbour copies; ≈ Chebyshev distance.
+ * Uses a safe, double-buffer technique with 4-neighbour copies.
  */
 function dilateMask(srcCanvas: Canvas, iterations: number): Canvas {
-  const work = createCanvas(srcCanvas.width(), srcCanvas.height());
-  const wctx = work.getContext('2d');
-  wctx.drawImage(srcCanvas, 0, 0); // start with original
+  const w = srcCanvas.width;
+  const h = srcCanvas.height;
+  let curr = srcCanvas;
+  let buff = createCanvas(w, h);
 
   for (let i = 0; i < iterations; i++) {
-    // copy the current mask one pixel in each cardinal direction
-    wctx.drawImage(work, -1, 0);
-    wctx.drawImage(work, 1, 0);
-    wctx.drawImage(work, 0, -1);
-    wctx.drawImage(work, 0, 1);
+    const bctx = buff.getContext('2d');
+    bctx.clearRect(0, 0, w, h);
+    bctx.drawImage(curr,  0,  0);
+    bctx.drawImage(curr, -1,  0);
+    bctx.drawImage(curr,  1,  0);
+    bctx.drawImage(curr,  0, -1);
+    bctx.drawImage(curr,  0,  1);
+
+    // swap buffers
+    const tmp = curr;
+    curr = buff;
+    buff = tmp;
   }
-  return work;
+  return curr; // canvas that holds the final dilated mask
 }
 
 serve(async (req) => {
