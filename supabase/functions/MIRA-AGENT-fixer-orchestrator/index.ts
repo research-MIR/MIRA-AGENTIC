@@ -6,6 +6,8 @@ import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
+const BITSTUDIO_API_KEY = Deno.env.get('BITSTUDIO_API_KEY');
+const BITSTUDIO_API_BASE = 'https://api.bitstudio.ai';
 const MODEL_NAME = "gemini-2.5-pro-preview-06-05";
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1500;
@@ -15,39 +17,24 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const systemPrompt = `You are a VTO Repair Specialist AI. Your task is to analyze a Quality Assurance (QA) report, an original API request payload, and a set of images, then decide on a course of action.
+const systemPrompt = `You are a VTO Repair Specialist AI. Your task is to analyze a Quality Assurance (QA) report and a set of images, then formulate a new, corrected text prompt to fix the failed generation.
 
 ### Your Inputs:
 You will receive a prompt containing:
-1.  **Image Identifiers:** The original string URLs/IDs for the images.
-2.  **Image Data:** The actual visual data for the Source, Reference, and Failed images.
-3.  **QA Report:** The analysis of what went wrong.
-4.  **Original Payload:** The API request that produced the failed image.
+1.  **Image Data:** The visual data for the Source, Reference, and Failed images.
+2.  **QA Report:** The analysis of what went wrong, including a \`fix_suggestion\`.
 
 ### Your Task:
 1.  **Visually Analyze:** Look at the provided image data to understand the failure described in the QA report.
-2.  **Formulate a Plan:** Decide whether to 'retry' with a new payload or 'give_up'.
-3.  **Construct the Output:**
-    -   If retrying, create a new, complete JSON payload. **CRITICAL: In this new payload, you MUST use the original string identifiers (e.g., 'person_image_id', 'mask_image_id') provided in the prompt's text section. DO NOT use the image data itself.**
-    -   If giving up, provide a reason.
+2.  **Formulate a New Prompt:** Based on the \`fix_suggestion\` and your visual analysis, create a new, complete, and detailed text-to-image prompt that is likely to fix the issue. The new prompt should incorporate the original intent but add specific details to address the failure.
 
-### Output Format & Rules:
-Your entire output MUST be a single, valid JSON object. Do not include any other text or explanations.
+### Your Output:
+Your entire response MUST be a single, valid JSON object with ONE key, "new_prompt".
 
-**If you decide to retry:**
+**Example Output:**
 \`\`\`json
 {
-  "action": "retry",
-  "payload": { ... }
-}
-\`\`\`
-- The "payload" object MUST be the complete, new, corrected JSON payload to be sent to the BitStudio API. Start with the 'original_request_payload' and modify it according to the 'fix_suggestion'.
-
-**If you decide to give up:**
-\`\`\`json
-{
-  "action": "give_up",
-  "reason": "A user-friendly explanation for why the automated fix failed."
+  "new_prompt": "A photorealistic image of a woman wearing a red silk blouse with a high collar. The silk material should have a subtle, realistic sheen and drape naturally. Preserve the model's face and the studio background."
 }
 \`\`\`
 `;
@@ -65,77 +52,61 @@ async function downloadAndEncodeImage(supabase: SupabaseClient, url: string): Pr
     if (url.includes('supabase.co')) {
         const urlObj = new URL(url);
         const pathSegments = urlObj.pathname.split('/');
-        
         const publicSegmentIndex = pathSegments.indexOf('public');
-        if (publicSegmentIndex === -1 || publicSegmentIndex + 1 >= pathSegments.length) {
-            throw new Error(`Could not parse bucket name from URL: ${url}`);
-        }
-        
+        if (publicSegmentIndex === -1 || publicSegmentIndex + 1 >= pathSegments.length) throw new Error(`Could not parse bucket name from URL: ${url}`);
         const bucketName = pathSegments[publicSegmentIndex + 1];
         const filePath = pathSegments.slice(publicSegmentIndex + 2).join('/');
-
-        if (!bucketName || !filePath) {
-            throw new Error(`Could not parse bucket or path from Supabase URL: ${url}`);
-        }
-
+        if (!bucketName || !filePath) throw new Error(`Could not parse bucket or path from Supabase URL: ${url}`);
         const { data: blob, error } = await supabase.storage.from(bucketName).download(filePath);
-        if (error) {
-            throw new Error(`Failed to download image from Supabase storage (${filePath}): ${error.message}`);
-        }
+        if (error) throw new Error(`Failed to download image from Supabase storage (${filePath}): ${error.message}`);
         const buffer = await blob.arrayBuffer();
-        const base64 = encodeBase64(buffer);
-        return { base64, mimeType: blob.type || 'image/png' };
+        return { base64: encodeBase64(buffer), mimeType: blob.type || 'image/png' };
     } else {
         const response = await fetch(url);
-        if (!response.ok) {
-            throw new Error(`Failed to download image from external URL ${url}. Status: ${response.statusText}`);
-        }
+        if (!response.ok) throw new Error(`Failed to download image from external URL ${url}. Status: ${response.statusText}`);
         const blob = await response.blob();
         const buffer = await blob.arrayBuffer();
-        const base64 = encodeBase64(buffer);
-        return { base64, mimeType: blob.type || 'image/png' };
+        return { base64: encodeBase64(buffer), mimeType: blob.type || 'image/png' };
     }
+}
+
+async function uploadToBitStudio(fileBlob: Blob, type: 'inpaint-base', filename: string): Promise<string> {
+  const formData = new FormData();
+  formData.append('file', fileBlob, filename);
+  formData.append('type', type);
+  const response = await fetch(`${BITSTUDIO_API_BASE}/images`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}` },
+    body: formData,
+  });
+  if (!response.ok) throw new Error(`BitStudio upload failed for type ${type}: ${await response.text()}`);
+  const result = await response.json();
+  if (!result.id) throw new Error(`BitStudio upload for ${type} did not return an ID.`);
+  return result.id;
 }
 
 serve(async (req) => {
   const { job_id, qa_report_object } = await req.json();
-  if (!job_id) throw new Error("job_id is required for the fixer-orchestrator.");
-  if (!qa_report_object) throw new Error("qa_report_object is required for the fixer.");
+  if (!job_id || !qa_report_object) throw new Error("job_id and qa_report_object are required.");
 
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
   const logPrefix = `[FixerOrchestrator][${job_id}]`;
   console.log(`${logPrefix} Invoked.`);
 
   try {
-    const { data: job, error: fetchError } = await supabase
-      .from('mira-agent-bitstudio-jobs')
-      .select('metadata')
-      .eq('id', job_id)
-      .single();
+    const { data: job, error: fetchError } = await supabase.from('mira-agent-bitstudio-jobs').select('metadata').eq('id', job_id).single();
     if (fetchError) throw fetchError;
 
-    const retryCount = job.metadata?.retry_count || 0;
-    const fixHistory = job.metadata?.fix_history || [];
-    const lastReport = qa_report_object.report;
-    const failedImageUrl = qa_report_object.failed_image_url;
-    const originalPayload = job.metadata?.original_request_payload;
-    const sourceImageUrl = job.metadata?.source_image_url;
-    const referenceImageUrl = job.metadata?.reference_image_url;
+    const { retry_count = 0, fix_history = [], original_request_payload, source_image_url, reference_image_url, bitstudio_mask_image_id, bitstudio_garment_image_id } = job.metadata || {};
+    const { report: lastReport, failed_image_url } = qa_report_object;
 
-    if (!lastReport) throw new Error("Job is awaiting fix but has no QA report in its history.");
-    if (!originalPayload) throw new Error("Job is awaiting fix but has no original_request_payload in its metadata.");
-    if (!sourceImageUrl || !referenceImageUrl || !failedImageUrl) {
-        throw new Error("Missing one or more critical image URLs for full context.");
+    if (!lastReport || !original_request_payload || !source_image_url || !reference_image_url || !failed_image_url || !bitstudio_mask_image_id || !bitstudio_garment_image_id) {
+      throw new Error("Job is missing critical metadata for a fix attempt.");
     }
 
-    console.log(`${logPrefix} Current retry count: ${retryCount}. Analyzing last QA report.`);
-
-    if (retryCount >= MAX_RETRIES) {
+    if (retry_count >= MAX_RETRIES) {
       console.log(`${logPrefix} Max retries reached. Giving up.`);
-      await supabase.from('mira-agent-bitstudio-jobs').update({ 
-        status: 'permanently_failed', 
-        error_message: 'Automated repair failed after multiple attempts.' 
-      }).eq('id', job_id);
+      await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'permanently_failed', error_message: 'Automated repair failed after multiple attempts.' }).eq('id', job_id);
       return new Response(JSON.stringify({ success: true, message: "Max retries reached." }), { headers: corsHeaders });
     }
 
@@ -151,10 +122,9 @@ serve(async (req) => {
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
     const geminiInputParts: Part[] = [
-        { text: `A VTO job failed quality assurance. Here is the report and the original request payload that caused the failure. Your task is to construct a new, complete payload to fix the issue.` },
+        { text: `A VTO job failed quality assurance. Here is the report and the relevant images. Your task is to formulate a new, corrected text prompt to fix the issue.` },
         { text: `--- QA REPORT --- \n ${JSON.stringify(lastReport, null, 2)}` },
-        { text: `--- ORIGINAL PAYLOAD --- \n ${JSON.stringify(originalPayload, null, 2)}` },
-        { text: `--- SOURCE IMAGE ---` },
+        { text: `--- ORIGINAL SOURCE IMAGE ---` },
         { inlineData: { mimeType: sourceData.mimeType, data: sourceData.base64 } },
         { text: `--- REFERENCE GARMENT ---` },
         { inlineData: { mimeType: referenceData.mimeType, data: referenceData.base64 } },
@@ -163,41 +133,45 @@ serve(async (req) => {
     ];
     const contents: Content[] = [{ role: 'user', parts: geminiInputParts }];
 
-    let result: GenerationResult | null = null;
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-        try {
-            console.log(`${logPrefix} Calling Gemini model, attempt ${attempt}...`);
-            result = await ai.models.generateContent({
-                model: MODEL_NAME,
-                contents: contents,
-                generationConfig: { responseMimeType: "application/json" },
-                config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
-            });
-            break;
-        } catch (error) {
-            if (error.message.includes("503") && attempt < MAX_RETRIES) {
-                console.warn(`${logPrefix} Gemini API is overloaded (503). Retrying in ${RETRY_DELAY_MS}ms...`);
-                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
-            } else {
-                throw error;
-            }
-        }
-    }
+    const result = await ai.models.generateContent({
+        model: MODEL_NAME,
+        contents: contents,
+        generationConfig: { responseMimeType: "application/json" },
+        config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
+    });
     
-    if (!result || !result.text) {
-        throw new Error("AI planner failed to respond after all retries.");
-    }
-
-    console.log(`${logPrefix} Raw Gemini response:`, result.text);
+    if (!result || !result.text) throw new Error("AI planner failed to respond.");
     const plan = extractJson(result.text);
-    console.log(`${logPrefix} Parsed plan:`, JSON.stringify(plan, null, 2));
+    const newPrompt = plan?.new_prompt;
 
-    if (!plan || !plan.action) {
-      console.error(`${logPrefix} Orchestrator LLM did not return a valid JSON action. Full raw response:`, result.text);
-      throw new Error("Orchestrator LLM did not return a valid JSON action.");
+    if (!newPrompt) {
+        console.log(`${logPrefix} AI could not generate a new prompt. Giving up.`);
+        await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'permanently_failed', error_message: 'AI could not determine a fix.' }).eq('id', job_id);
+        return new Response(JSON.stringify({ success: true, message: "AI gave up." }), { headers: corsHeaders });
     }
 
-    console.log(`${logPrefix} LLM decided on action: ${plan.action}`);
+    console.log(`${logPrefix} AI generated new prompt. Uploading failed image as new source...`);
+    const failedImageBlob = new Blob([decodeBase64(failedData.base64)], { type: failedData.mimeType });
+    const newSourceImageId = await uploadToBitStudio(failedImageBlob, 'inpaint-base', 'failed_result_as_source.png');
+    console.log(`${logPrefix} New source image ID from BitStudio: ${newSourceImageId}`);
+
+    const newPayload = {
+        ...original_request_payload,
+        prompt: newPrompt,
+        mask_image_id: bitstudio_mask_image_id,
+        reference_image_id: bitstudio_garment_image_id,
+    };
+
+    const inpaintUrl = `${BITSTUDIO_API_BASE}/images/${newSourceImageId}/inpaint`;
+    const inpaintResponse = await fetch(inpaintUrl, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(newPayload)
+    });
+    if (!inpaintResponse.ok) throw new Error(`BitStudio inpaint retry request failed: ${await inpaintResponse.text()}`);
+    const inpaintResult = await inpaintResponse.json();
+    const newTaskId = inpaintResult.versions?.[0]?.id;
+    if (!newTaskId) throw new Error("BitStudio did not return a new task ID on retry.");
 
     const currentFixAttemptLog = {
         timestamp: new Date().toISOString(),
@@ -208,53 +182,19 @@ serve(async (req) => {
         parsed_plan: plan,
     };
 
-    switch (plan.action) {
-      case 'retry': {
-        const payload = plan.payload;
-        if (!payload) throw new Error("Plan action 'retry' is missing the 'payload' parameter.");
-        
-        console.log(`${logPrefix} Preparing to retry job with new payload.`);
-        
-        await supabase.from('mira-agent-bitstudio-jobs')
-          .update({ 
-            metadata: { ...job.metadata, fix_history: [...fixHistory, currentFixAttemptLog] }
-          })
-          .eq('id', job_id);
-
-        const { error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
-          body: {
-            retry_job_id: job_id,
-            payload: payload,
-          }
-        });
-        if (proxyError) throw proxyError;
-
-        console.log(`${logPrefix} Successfully sent retry request to proxy for job ${job_id}.`);
-        break;
-      }
-      case 'give_up': {
-        const reason = plan.reason || 'Automated repair failed after multiple attempts.';
-        console.log(`${logPrefix} Agent gave up. Reason: ${reason}. Marking job as permanently_failed.`);
-        
-        await supabase.from('mira-agent-bitstudio-jobs')
-          .update({ 
-            status: 'permanently_failed', 
-            error_message: reason,
-            metadata: { ...job.metadata, fix_history: [...fixHistory, currentFixAttemptLog] }
-          })
-          .eq('id', job_id);
-
-        if (job.metadata?.batch_pair_job_id) {
-            console.log(`${logPrefix} Propagating 'failed' status to parent pair job: ${job.metadata.batch_pair_job_id}`);
-            await supabase.from('mira-agent-batch-inpaint-pair-jobs')
-                .update({ status: 'failed', error_message: reason })
-                .eq('id', job.metadata.batch_pair_job_id);
+    await supabase.from('mira-agent-bitstudio-jobs').update({
+        status: 'queued',
+        bitstudio_person_image_id: newSourceImageId,
+        bitstudio_task_id: newTaskId,
+        metadata: { 
+            ...job.metadata, 
+            retry_count: retryCount + 1,
+            fix_history: [...fixHistory, currentFixAttemptLog],
+            original_request_payload: newPayload
         }
-        break;
-      }
-      default:
-        throw new Error(`Unknown plan action: ${plan.action}`);
-    }
+    }).eq('id', job_id);
+
+    supabase.functions.invoke('MIRA-AGENT-poller-bitstudio', { body: { job_id } }).catch(console.error);
 
     return new Response(JSON.stringify({ success: true, plan }), { headers: corsHeaders });
 
