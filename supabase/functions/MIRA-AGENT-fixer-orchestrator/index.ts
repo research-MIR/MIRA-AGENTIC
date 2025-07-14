@@ -131,24 +131,18 @@ serve(async (req) => {
 
     console.log(`${logPrefix} Downloading images for multimodal context...`);
     const [sourceData, referenceData, failedData] = await Promise.all([
-        downloadAndEncodeImage(supabase, sourceImageUrl),
-        downloadAndEncodeImage(supabase, referenceImageUrl),
-        downloadAndEncodeImage(supabase, failedImageUrl)
+        downloadAndEncodeImage(supabase, source_image_url),
+        downloadAndEncodeImage(supabase, reference_image_url),
+        downloadAndEncodeImage(supabase, failed_image_url)
     ]);
     console.log(`${logPrefix} All images downloaded and encoded.`);
-
-    // --- THE CRITICAL FIX: Upload the failed image to get a new source ID ---
-    console.log(`${logPrefix} Uploading failed image as new source for inpainting...`);
-    const newSourceImageId = await uploadToBitStudio(failedData.blob, 'inpaint-base', 'failed_result_as_source.png');
-    console.log(`${logPrefix} New source image ID from BitStudio: ${newSourceImageId}`);
-    // --- END OF CRITICAL FIX ---
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
     const geminiInputParts: Part[] = [
         { text: `A VTO job failed quality assurance. Here is the report and the original request payload that caused the failure. Your task is to construct a new, complete payload to fix the issue.` },
         { text: `--- QA REPORT --- \n ${JSON.stringify(lastReport, null, 2)}` },
         { text: `--- ORIGINAL PAYLOAD --- \n ${JSON.stringify(original_request_payload, null, 2)}` },
-        { text: `--- IMAGE IDENTIFIERS --- \n person_image_id: ${newSourceImageId}\n mask_image_id: ${bitstudio_mask_image_id}\n reference_image_id: ${bitstudio_garment_image_id}` },
+        { text: `--- IMAGE IDENTIFIERS --- \n person_image_id: ${job.metadata.bitstudio_person_image_id}\n mask_image_id: ${bitstudio_mask_image_id}\n reference_image_id: ${bitstudio_garment_image_id}` },
         { text: `--- SOURCE IMAGE ---` },
         { inlineData: { mimeType: sourceData.mimeType, data: sourceData.base64 } },
         { text: `--- REFERENCE GARMENT ---` },
@@ -206,7 +200,6 @@ serve(async (req) => {
           body: { 
             retry_job_id: job_id, 
             payload: payload,
-            new_source_image_id: newSourceImageId // Pass the new ID to the proxy
           }
         });
         if (proxyError) throw proxyError;
