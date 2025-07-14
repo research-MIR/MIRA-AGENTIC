@@ -60,7 +60,6 @@ serve(async (req) => {
   if (!COMFYUI_ENDPOINT_URL) throw new Error("COMFYUI_ENDPOINT_URL is not set.");
 
   const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
-  const sanitizedAddress = COMFYUI_ENDPOINT_URL.replace(/\/+$/, "");
 
   try {
     const body = await req.json();
@@ -103,9 +102,6 @@ serve(async (req) => {
     }
 
     if (!finalPrompt) throw new Error("Prompt is required for inpainting.");
-
-    const rawMaskBlob = new Blob([decodeBase64(mask_image_base64)], { type: 'image/png' });
-    const rawMaskUrl = await uploadToSupabaseStorage(supabase, rawMaskBlob, user_id, 'raw_mask.png');
 
     const fullSourceImage = await loadImage(`data:image/png;base64,${source_image_base64}`);
     const rawMaskImage = await loadImage(`data:image/jpeg;base64,${mask_image_base64}`);
@@ -221,7 +217,6 @@ serve(async (req) => {
         style_strength,
         source_image_url: sourceImageUrl,
         reference_image_url: referenceImageUrl,
-        raw_mask_url: rawMaskUrl,
         full_source_image_base64: source_image_base64,
         bbox: bbox,
         cropped_dilated_mask_base64: croppedDilatedMaskBase64,

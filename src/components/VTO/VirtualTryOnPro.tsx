@@ -32,7 +32,7 @@ const VirtualTryOnPro = ({
 
   const renderJobResult = (job: BitStudioJob) => {
     const isFailed = job.status === 'failed' || job.status === 'permanently_failed';
-    const hasDebugAssets = !!job.metadata?.debug_assets || (job.metadata?.qa_history && job.metadata.qa_history.length > 0);
+    const hasDebugAssets = !!job.metadata?.debug_assets;
 
     if (isFailed) {
       return (
@@ -153,8 +153,7 @@ const VirtualTryOnPro = ({
       <DebugStepsModal 
         isOpen={isDebugModalOpen}
         onClose={() => setIsDebugModalOpen(false)}
-        qaHistory={selectedJob?.metadata?.qa_history || []}
-        finalAssets={selectedJob?.metadata?.debug_assets || null}
+        assets={selectedJob?.metadata?.debug_assets || null}
       />
     </>
   );
