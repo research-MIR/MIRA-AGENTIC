@@ -33,9 +33,9 @@ serve(async (req) => {
     if (fetchError) throw new Error(`Failed to fetch job: ${fetchError.message}`);
     console.log(`[BitStudioPoller][${job.id}] Fetched job from DB. Current status: ${job.status}, mode: ${job.mode}`);
     
-    if (job.status === 'complete' || job.status === 'failed') {
-        console.log(`[BitStudioPoller][${job.id}] Job already resolved. Halting check.`);
-        return new Response(JSON.stringify({ success: true, message: "Job already resolved." }), { headers: corsHeaders });
+    if (job.status === 'complete' || job.status === 'failed' || job.status === 'compositing') {
+        console.log(`[BitStudioPoller][${job.id}] Job already resolved or being composited. Halting check.`);
+        return new Response(JSON.stringify({ success: true, message: "Job already resolved or being composited." }), { headers: corsHeaders });
     }
 
     let statusUrl;
@@ -60,7 +60,7 @@ serve(async (req) => {
     let jobStatus, finalImageUrl;
 
     if (job.mode === 'inpaint') {
-        const versionIdToFind = job.bitstudio_task_id; // This is the version ID
+        const versionIdToFind = job.bitstudio_task_id;
         if (!versionIdToFind) throw new Error("Inpaint job is missing the version ID (bitstudio_task_id).");
         
         const targetVersion = statusData.versions?.find((v: any) => v.id === versionIdToFind);
@@ -121,7 +121,7 @@ serve(async (req) => {
     return new Response(JSON.stringify({ success: true, status: jobStatus }), { headers: corsHeaders });
 
   } catch (error) {
-    console.error(`[BitStudioPoller][${job_id}] Error:`, error);
+    console.error(`[BitStudioPoller][${job.id}] Error:`, error);
     await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'failed', error_message: error.message }).eq('id', job_id);
     if (job_id) {
         const { data: job } = await supabase.from('mira-agent-bitstudio-jobs').select('batch_pair_job_id').eq('id', job_id).single();
