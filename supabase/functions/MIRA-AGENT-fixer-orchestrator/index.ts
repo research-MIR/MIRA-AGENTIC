@@ -30,7 +30,7 @@ You will receive a prompt containing:
 1.  **Visually Analyze:** Look at the provided image data to understand the failure described in the QA report.
 2.  **Formulate a Plan:** Decide whether to 'retry' with a new payload or 'give_up'.
 3.  **Construct the Output:**
-    -   If retrying, create a new, complete JSON payload. **CRITICAL: In this new payload, you MUST use the original string identifiers (e.g., 'person_image_id', 'mask_image_id') provided in the prompt's text section. DO NOT use the image data itself.**
+    -   If retrying, create a new, complete JSON payload. **CRITICAL: In this new payload, you MUST include the 'person_image_id' from the 'IMAGE IDENTIFIERS' text block.**
     -   If giving up, provide a reason.
 
 ### Output Format & Rules:
@@ -40,7 +40,10 @@ Your entire output MUST be a single, valid JSON object. Do not include any other
 \`\`\`json
 {
   "action": "retry",
-  "payload": { ... }
+  "payload": { 
+    "person_image_id": "...",
+    ... 
+  }
 }
 \`\`\`
 - The "payload" object MUST be the complete, new, corrected JSON payload to be sent to the BitStudio API. Start with the 'original_request_payload' and modify it according to the 'fix_suggestion'.
@@ -196,18 +199,18 @@ serve(async (req) => {
     const plan = extractJson(result.text);
     if (!plan || !plan.action) throw new Error("Orchestrator LLM did not return a valid JSON action.");
 
-    // --- VERIFICATION LOGGING ---
     console.log(`${logPrefix} AI has generated a plan. Full plan object:`, JSON.stringify(plan, null, 2));
     if (plan.action === 'retry' && plan.payload) {
         console.log(`${logPrefix} VERIFICATION: The 'person_image_id' in the generated payload is: ${plan.payload.person_image_id}`);
     }
-    // --- END VERIFICATION LOGGING ---
 
     const currentFixAttemptLog = {
         timestamp: new Date().toISOString(),
         retry_number: retry_count + 1,
-        qa_report_used: qa_report_object,
-        failed_image_url: qa_report_object.failed_image_url,
+        qa_report_used: {
+            report: lastReport,
+            failed_image_url: failed_image_url // Log the URL of the image that was actually fixed in this step
+        },
         gemini_input_prompt: "Multimodal prompt sent (see logs for details)",
         gemini_raw_output: result.text,
         parsed_plan: plan,

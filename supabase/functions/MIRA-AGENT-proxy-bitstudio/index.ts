@@ -136,14 +136,20 @@ serve(async (req) => {
 
       if (jobToRetry.mode === 'inpaint') {
         console.log(`[BitStudioProxy][${requestId}] Executing INPAINT retry logic.`);
-        const sourceIdForInpaint = new_source_image_id || jobToRetry.bitstudio_person_image_id;
+        
+        // THE FIX: Use the ID from the payload if available, otherwise use the one passed separately.
+        const sourceIdForInpaint = retryPayload.person_image_id || new_source_image_id || jobToRetry.bitstudio_person_image_id;
         if (!sourceIdForInpaint) throw new Error("Cannot retry inpaint: missing source image ID.");
         
+        // Clean the payload before sending to BitStudio
+        const finalPayload = { ...retryPayload };
+        delete finalPayload.person_image_id;
+
         const inpaintUrl = `${BITSTUDIO_API_BASE}/images/${sourceIdForInpaint}/inpaint`;
         apiResponse = await fetch(inpaintUrl, {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify(retryPayload)
+            body: JSON.stringify(finalPayload)
         });
         if (!apiResponse.ok) throw new Error(`BitStudio inpaint retry request failed: ${await apiResponse.text()}`);
         const inpaintResult = await apiResponse.json();
