@@ -9,8 +9,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ArrowDown, AlertCircle, Wrench } from "lucide-react";
+import { ArrowDown, AlertCircle, Wrench, BrainCircuit, FileText, Check, X } from "lucide-react";
 import { BitStudioJob } from "@/types/vto";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 
 interface FixHistoryModalProps {
   isOpen: boolean;
@@ -19,60 +20,82 @@ interface FixHistoryModalProps {
 }
 
 export const FixHistoryModal = ({ isOpen, onClose, job }: FixHistoryModalProps) => {
-  if (!isOpen || !job || !job.metadata?.qa_history) return null;
+  if (!isOpen || !job || !job.metadata?.fix_history) return null;
 
-  const history = job.metadata.qa_history;
+  const history = job.metadata.fix_history;
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-4xl">
         <DialogHeader>
           <DialogTitle>Automated Fix History</DialogTitle>
           <DialogDescription>
-            Review of the automated attempts to fix this VTO generation based on QA feedback.
+            A detailed log of each automated attempt to fix this VTO generation.
           </DialogDescription>
         </DialogHeader>
-        <ScrollArea className="max-h-[60vh] my-4 pr-4">
+        <ScrollArea className="max-h-[70vh] my-4 pr-4">
           <div className="space-y-4">
-            {history.map((report: any, index: number) => (
+            {history.map((attempt: any, index: number) => (
               <div key={index} className="space-y-2">
-                <Card className="bg-destructive/10 border-destructive">
+                <Card>
                   <CardHeader>
-                    <CardTitle className="text-base flex items-center gap-2">
-                      <AlertCircle className="h-5 w-5" />
-                      Attempt {index + 1}: QA Failed
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <Wrench className="h-5 w-5" />
+                      Fix Attempt #{attempt.retry_number || index + 1}
                     </CardTitle>
                   </CardHeader>
-                  <CardContent className="space-y-2 text-sm">
-                    <p><strong>Reason:</strong> {report.mismatch_reason || "No reason provided."}</p>
-                    <p><strong>Suggestion:</strong> {report.fix_suggestion || "No suggestion provided."}</p>
+                  <CardContent>
+                    <Accordion type="multiple" className="w-full">
+                      <AccordionItem value="qa-report">
+                        <AccordionTrigger>
+                          <div className="flex items-center gap-2">
+                            <AlertCircle className="h-4 w-4 text-destructive" />
+                            <span>QA Report Used</span>
+                          </div>
+                        </AccordionTrigger>
+                        <AccordionContent className="text-xs space-y-2">
+                          <p><strong>Match:</strong> {attempt.qa_report_used?.report?.is_match ? <CheckCircle className="inline h-4 w-4 text-green-500"/> : <XCircle className="inline h-4 w-4 text-destructive"/>}</p>
+                          <p><strong>Reason:</strong> {attempt.qa_report_used?.report?.mismatch_reason || "N/A"}</p>
+                          <p><strong>Suggestion:</strong> {attempt.qa_report_used?.report?.fix_suggestion || "N/A"}</p>
+                        </AccordionContent>
+                      </AccordionItem>
+                      <AccordionItem value="gemini-input">
+                        <AccordionTrigger>
+                          <div className="flex items-center gap-2">
+                            <FileText className="h-4 w-4 text-blue-500" />
+                            <span>Input to Planner AI</span>
+                          </div>
+                        </AccordionTrigger>
+                        <AccordionContent>
+                          <pre className="bg-muted p-2 rounded-md text-xs overflow-x-auto">
+                            {attempt.gemini_input_prompt}
+                          </pre>
+                        </AccordionContent>
+                      </AccordionItem>
+                      <AccordionItem value="gemini-output">
+                        <AccordionTrigger>
+                           <div className="flex items-center gap-2">
+                            <BrainCircuit className="h-4 w-4 text-purple-500" />
+                            <span>Planner AI Output</span>
+                          </div>
+                        </AccordionTrigger>
+                        <AccordionContent>
+                          <pre className="bg-muted p-2 rounded-md text-xs overflow-x-auto">
+                            {JSON.stringify(attempt.parsed_plan, null, 2)}
+                          </pre>
+                        </AccordionContent>
+                      </AccordionItem>
+                    </Accordion>
                   </CardContent>
                 </Card>
                 
-                {index < history.length && (
+                {index < history.length - 1 && (
                   <div className="flex justify-center">
                     <ArrowDown className="h-6 w-6 text-muted-foreground" />
                   </div>
                 )}
               </div>
             ))}
-             {job.metadata.current_fix_plan && (
-                <Card>
-                    <CardHeader>
-                        <CardTitle className="text-base flex items-center gap-2">
-                            <Wrench className="h-5 w-5" />
-                            Last Fix Attempt
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-2 text-sm">
-                        <p><strong>Action:</strong> {job.metadata.current_fix_plan.action}</p>
-                        <p><strong>New Prompt:</strong></p>
-                        <pre className="bg-muted p-2 rounded-md text-xs overflow-x-auto">
-                            {job.metadata.current_fix_plan.parameters?.payload?.prompt || "No new prompt generated."}
-                        </pre>
-                    </CardContent>
-                </Card>
-             )}
           </div>
         </ScrollArea>
         <DialogFooter>

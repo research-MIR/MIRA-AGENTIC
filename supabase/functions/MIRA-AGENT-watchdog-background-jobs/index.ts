@@ -80,7 +80,7 @@ serve(async (req) => {
     const { data: stalledAggregationJobs, error: aggregationError } = await supabase
       .from('mira-agent-mask-aggregation-jobs')
       .select('id, results')
-      .in('status', ['aggregating', 'compositing']) // <-- CORRECTED: Now checks for both states
+      .in('status', ['aggregating', 'compositing'])
       .lt('updated_at', segmentationThreshold);
 
     if (aggregationError) {

@@ -1,6 +1,6 @@
 export interface BitStudioJob {
   id: string;
-  status: 'queued' | 'processing' | 'complete' | 'failed' | 'compositing' | 'delegated' | 'pending' | 'segmenting' | 'permanently_failed';
+  status: 'queued' | 'processing' | 'complete' | 'failed' | 'compositing' | 'delegated' | 'pending' | 'segmenting' | 'permanently_failed' | 'awaiting_fix' | 'fixing';
   source_person_image_url?: string;
   source_garment_image_url?: string;
   final_image_url?: string;
@@ -13,6 +13,9 @@ export interface BitStudioJob {
     prompt_used?: string;
     source_image_url?: string;
     reference_image_url?: string;
+    qa_history?: any[];
+    fix_history?: any[]; // To store detailed fix attempts
+    current_fix_plan?: any;
     verification_result?: {
       is_match: boolean;
       confidence_score: number;

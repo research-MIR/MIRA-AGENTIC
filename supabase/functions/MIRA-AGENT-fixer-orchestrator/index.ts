@@ -48,18 +48,9 @@ function extractJson(text: string): any | null {
     if (!text) return null;
     const match = text.match(/```json\s*([\s\S]*?)\s*```/);
     if (match && match[1]) {
-        try {
-            return JSON.parse(match[1]);
-        } catch (e) {
-            console.error("Failed to parse extracted JSON block:", e);
-            return null;
-        }
+        try { return JSON.parse(match[1]); } catch (e) { console.error("Failed to parse extracted JSON block:", e); return null; }
     }
-    try {
-        return JSON.parse(text);
-    } catch (e) {
-        return null;
-    }
+    try { return JSON.parse(text); } catch (e) { return null; }
 }
 
 serve(async (req) => {
@@ -80,6 +71,7 @@ serve(async (req) => {
 
     const retryCount = job.metadata?.retry_count || 0;
     const qaHistory = job.metadata?.qa_history || [];
+    const fixHistory = job.metadata?.fix_history || [];
     const lastReport = qaHistory[qaHistory.length - 1];
     const originalPayload = job.metadata?.original_request_payload;
 
@@ -97,11 +89,12 @@ serve(async (req) => {
       return new Response(JSON.stringify({ success: true, message: "Max retries reached." }), { headers: corsHeaders });
     }
 
+    // Set status to 'fixing' to prevent watchdog interference
+    await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'fixing' }).eq('id', job_id);
+
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
-    
-    const contents: Content[] = [
-        { role: 'user', parts: [{ text: `A VTO job failed quality assurance. Here is the report and the original request payload that caused the failure. Your task is to construct a new, complete payload to fix the issue.\n\n**QA REPORT:**\n${JSON.stringify(lastReport, null, 2)}\n\n**ORIGINAL REQUEST PAYLOAD:**\n${JSON.stringify(originalPayload, null, 2)}` }] }
-    ];
+    const geminiInputPrompt = `A VTO job failed quality assurance. Here is the report and the original request payload that caused the failure. Your task is to construct a new, complete payload to fix the issue.\n\n**QA REPORT:**\n${JSON.stringify(lastReport, null, 2)}\n\n**ORIGINAL REQUEST PAYLOAD:**\n${JSON.stringify(originalPayload, null, 2)}`;
+    const contents: Content[] = [{ role: 'user', parts: [{ text: geminiInputPrompt }] }];
 
     let result: GenerationResult | null = null;
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
@@ -111,9 +104,7 @@ serve(async (req) => {
                 model: MODEL_NAME,
                 contents: contents,
                 generationConfig: { responseMimeType: "application/json" },
-                config: {
-                    systemInstruction: { role: "system", parts: [{ text: systemPrompt }] }
-                }
+                config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
             });
             break;
         } catch (error) {
@@ -139,19 +130,26 @@ serve(async (req) => {
 
     console.log(`${logPrefix} LLM decided on action: ${plan.action}`);
 
+    const currentFixAttemptLog = {
+        timestamp: new Date().toISOString(),
+        retry_number: retryCount + 1,
+        qa_report_used: lastReport,
+        gemini_input_prompt: geminiInputPrompt,
+        gemini_raw_output: result.text,
+        parsed_plan: plan,
+    };
+
     // --- EXECUTION LOGIC ---
     switch (plan.action) {
       case 'retry': {
         const payload = plan.payload;
         if (!payload) throw new Error("Plan action 'retry' is missing the 'payload' parameter.");
         
-        console.log(`${logPrefix} Preparing to retry job with new payload. Updating status to 'fixing'.`);
+        console.log(`${logPrefix} Preparing to retry job with new payload.`);
         
-        // **THE FIX:** Update the status BEFORE invoking the next step.
         await supabase.from('mira-agent-bitstudio-jobs')
           .update({ 
-            status: 'fixing',
-            metadata: { ...job.metadata, current_fix_plan: plan }
+            metadata: { ...job.metadata, fix_history: [...fixHistory, currentFixAttemptLog] }
           })
           .eq('id', job_id);
 
@@ -170,7 +168,8 @@ serve(async (req) => {
         await supabase.from('mira-agent-bitstudio-jobs')
           .update({ 
             status: 'permanently_failed', 
-            error_message: plan.reason 
+            error_message: plan.reason,
+            metadata: { ...job.metadata, fix_history: [...fixHistory, currentFixAttemptLog] }
           })
           .eq('id', job_id);
         console.log(`${logPrefix} Agent gave up. Reason: ${plan.reason}. Job marked as permanently_failed.`);
