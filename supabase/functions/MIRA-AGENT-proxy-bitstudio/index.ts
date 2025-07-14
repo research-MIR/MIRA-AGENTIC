@@ -137,11 +137,9 @@ serve(async (req) => {
       if (jobToRetry.mode === 'inpaint') {
         console.log(`[BitStudioProxy][${requestId}] Executing INPAINT retry logic.`);
         
-        // THE FIX: Use the ID from the payload if available, otherwise use the one passed separately.
         const sourceIdForInpaint = retryPayload.person_image_id || new_source_image_id || jobToRetry.bitstudio_person_image_id;
         if (!sourceIdForInpaint) throw new Error("Cannot retry inpaint: missing source image ID.");
         
-        // Clean the payload before sending to BitStudio
         const finalPayload = { ...retryPayload };
         delete finalPayload.person_image_id;
 
@@ -170,7 +168,7 @@ serve(async (req) => {
 
       const { error: updateError } = await supabase.from('mira-agent-bitstudio-jobs').update({
         status: 'queued',
-        bitstudio_person_image_id: new_source_image_id || jobToRetry.bitstudio_person_image_id, // Update if new one was provided
+        bitstudio_person_image_id: new_source_image_id || jobToRetry.bitstudio_person_image_id,
         bitstudio_task_id: newTaskId,
         metadata: { ...jobToRetry.metadata, prompt_used: retryPayload.prompt, retry_count: (jobToRetry.metadata.retry_count || 0) + 1 },
         error_message: null,
@@ -190,7 +188,7 @@ serve(async (req) => {
       const jobIds: string[] = [];
 
       if (mode === 'inpaint') {
-        const { source_image_url, mask_image_url, reference_image_url, prompt, denoise, resolution, mask_expansion_percent, num_images, debug_assets } = body;
+        const { source_image_url, mask_image_url, reference_image_url, prompt, denoise, resolution, num_images, debug_assets } = body;
         if (!source_image_url || !mask_image_url) throw new Error("source_image_url and mask_image_url are required for inpaint mode.");
 
         const [sourceBlob, maskBlob] = await Promise.all([
@@ -208,7 +206,6 @@ serve(async (req) => {
           prompt: prompt || "photorealistic",
           denoise: denoise || 0.99,
           resolution: resolution || 'standard',
-          mask_expansion_percent: mask_expansion_percent || 3,
           num_images: num_images || 1,
         };
 
@@ -242,7 +239,7 @@ serve(async (req) => {
             source_image_url: source_image_url,
             mask_image_url: mask_image_url,
             reference_image_url: reference_image_url,
-            original_request_payload: inpaintPayload, // Save the original request
+            original_request_payload: inpaintPayload,
           }
         }).select('id').single();
         if (insertError) throw insertError;
@@ -288,7 +285,7 @@ serve(async (req) => {
           batch_pair_job_id: batch_pair_job_id,
           vto_pack_job_id: vto_pack_job_id,
           metadata: {
-            original_request_payload: vtoPayload // Save the original request
+            original_request_payload: vtoPayload
           }
         }).select('id').single();
         if (insertError) throw insertError;

@@ -65,11 +65,11 @@ serve(async (req) => {
     const height = sourceImage.height();
     console.log(`[Compositor][${requestId}] Source image decoded with canvas. Dimensions: ${width}x${height}`);
     
-    const finalMaskCanvas = createCanvas(width, height);
-    const finalMaskCtx = finalMaskCanvas.getContext('2d');
-    finalMaskCtx.fillStyle = 'black';
-    finalMaskCtx.fillRect(0, 0, width, height);
-    console.log(`[Compositor][${requestId}] Created final mask canvas.`);
+    const rawMaskCanvas = createCanvas(width, height);
+    const rawMaskCtx = rawMaskCanvas.getContext('2d');
+    rawMaskCtx.fillStyle = 'black';
+    rawMaskCtx.fillRect(0, 0, width, height);
+    console.log(`[Compositor][${requestId}] Created raw mask canvas.`);
 
     const allMasks = (job.results || []).flat().filter((item: any) => item && item.mask && item.box_2d);
     console.log(`[Compositor][${requestId}] Found ${allMasks.length} valid masks to process.`);
@@ -90,7 +90,7 @@ serve(async (req) => {
             const bboxHeight = Math.ceil(((y1 - y0) / 1000) * height);
 
             if (bboxWidth > 0 && bboxHeight > 0) {
-                finalMaskCtx.drawImage(maskImage, absX0, absY0, bboxWidth, bboxHeight);
+                rawMaskCtx.drawImage(maskImage, absX0, absY0, bboxWidth, bboxHeight);
             } else {
                 console.warn(`[Compositor][${requestId}] Mask ${index + 1} has invalid dimensions (${bboxWidth}x${bboxHeight}). Skipping.`);
             }
@@ -99,28 +99,45 @@ serve(async (req) => {
         }
         console.timeEnd(`[Compositor][${requestId}] Mask ${index + 1}`);
     }
-    console.log(`[Compositor][${requestId}] All individual masks have been drawn onto the final mask canvas.`);
+    console.log(`[Compositor][${requestId}] All individual masks have been drawn onto the raw mask canvas.`);
 
-    const finalImageData = finalMaskCtx.getImageData(0, 0, width, height);
-    const data = finalImageData.data;
+    // --- NEW "FEATHER AND SOLIDIFY" MASK EXPANSION LOGIC ---
+    const expansionRadius = Math.round(Math.min(width, height) * 0.12); // 12% expansion
+    console.log(`[Compositor][${requestId}] Applying mask expansion with radius: ${expansionRadius}px`);
+
+    const expansionCanvas = createCanvas(width, height);
+    const expansionCtx = expansionCanvas.getContext('2d');
+
+    // Apply blur filter to create the "glow"
+    expansionCtx.filter = `blur(${expansionRadius}px)`;
+    expansionCtx.drawImage(rawMaskCanvas, 0, 0);
+    expansionCtx.filter = 'none'; // Reset filter
+
+    // Threshold the blurred image to create a solid, expanded mask
+    const imageData = expansionCtx.getImageData(0, 0, width, height);
+    const data = imageData.data;
     for (let i = 0; i < data.length; i += 4) {
-        if (data[i] > 0 || data[i+1] > 0 || data[i+2] > 0) {
-            data[i] = 255; data[i+1] = 255; data[i+2] = 255;
+        // If any color channel has a value, it's part of the mask or its glow
+        if (data[i] > 5 || data[i+1] > 5 || data[i+2] > 5) { 
+            data[i] = 255;     // R
+            data[i + 1] = 255; // G
+            data[i + 2] = 255; // B
         }
-        data[i+3] = 255;
+        data[i+3] = 255; // Ensure full alpha
     }
-    finalMaskCtx.putImageData(finalImageData, 0, 0);
-    console.log(`[Compositor][${requestId}] Final mask canvas processed to be pure B&W.`);
+    expansionCtx.putImageData(imageData, 0, 0);
+    console.log(`[Compositor][${requestId}] Mask expansion and solidification complete.`);
+    // --- END OF NEW LOGIC ---
 
-    const finalMaskBuffer = finalMaskCanvas.toBuffer('image/png');
+    const finalMaskBuffer = expansionCanvas.toBuffer('image/png');
     const finalMaskBase64 = encodeBase64(finalMaskBuffer);
-    console.log(`[Compositor][${requestId}] Final mask encoded to PNG buffer. Length: ${finalMaskBuffer.length}`);
+    console.log(`[Compositor][${requestId}] Final expanded mask encoded to PNG buffer. Length: ${finalMaskBuffer.length}`);
 
-    const finalMaskUrl = await uploadBufferToStorage(supabase, finalMaskBuffer, job.user_id, 'final_mask.png');
+    const finalMaskUrl = await uploadBufferToStorage(supabase, finalMaskBuffer, job.user_id, 'final_expanded_mask.png');
     if (!finalMaskUrl) {
         throw new Error("Failed to upload the final composited mask to storage.");
     }
-    console.log(`[Compositor][${requestId}] Final mask uploaded to: ${finalMaskUrl}`);
+    console.log(`[Compositor][${requestId}] Final expanded mask uploaded to: ${finalMaskUrl}`);
 
     const { data: parentPairJob, error: parentFetchError } = await supabase
         .from('mira-agent-batch-inpaint-pair-jobs')
