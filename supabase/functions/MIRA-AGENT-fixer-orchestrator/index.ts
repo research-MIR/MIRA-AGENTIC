@@ -57,43 +57,11 @@ const tools = [
   },
 ];
 
-function extractJsonFromText(text: string): any | null {
-    if (!text) return null;
-    const match = text.match(/```json\s*([\s\S]*?)\s*```/);
-    if (match && match[1]) {
-        try {
-            return JSON.parse(match[1]);
-        } catch (e) {
-            console.error("Failed to parse extracted JSON block:", e);
-            return null;
-        }
-    }
-    try {
-        return JSON.parse(text);
-    } catch (e) {
-        return null;
-    }
-}
-
 function getToolCallFromResponse(result: GenerationResult): { name: string; args: any } | null {
     if (result.functionCalls && result.functionCalls.length > 0) {
         console.log("Found direct function call from model.");
         return result.functionCalls[0];
     }
-
-    const text = result.text;
-    if (text) {
-        console.log("No direct function call. Attempting to extract JSON payload from text response.");
-        const extractedJson = extractJsonFromText(text);
-        if (extractedJson) {
-            console.log("Successfully extracted JSON payload from text. Reconstructing 'execute_vto_job' tool call.");
-            return {
-                name: 'execute_vto_job',
-                args: { payload: extractedJson }
-            };
-        }
-    }
-    
     return null;
 }
 
