@@ -31,7 +31,9 @@ const VirtualTryOnPro = ({
   const [isDebugModalOpen, setIsDebugModalOpen] = useState(false);
 
   const renderJobResult = (job: BitStudioJob) => {
-    if (job.status === 'failed') return <p className="text-destructive text-sm p-2">{t('jobFailed', { errorMessage: job.error_message })}</p>;
+    if (job.status === 'failed' || job.status === 'permanently_failed') {
+      return <p className="text-destructive text-sm p-2">{t('jobFailed', { errorMessage: job.error_message })}</p>;
+    }
     if (job.status === 'complete' && job.final_image_url) {
       const verification = job.metadata?.verification_result;
       return (

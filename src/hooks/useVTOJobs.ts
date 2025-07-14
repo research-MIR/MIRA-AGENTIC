@@ -17,6 +17,7 @@ export const useVTOJobs = () => {
         .from('mira-agent-bitstudio-jobs')
         .select('*, batch_pair_job_id')
         .eq('user_id', session.user.id)
+        .in('status', ['complete', 'failed', 'permanently_failed'])
         .order('created_at', { ascending: false })
         .limit(50);
 
