@@ -12,6 +12,20 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
 
+async function uploadBufferToStorage(supabase: SupabaseClient, buffer: Uint8Array | null, userId: string, filename: string): Promise<string | null> {
+    if (!buffer) return null;
+    const filePath = `${userId}/vto-debug/${Date.now()}-${filename}`;
+    const { error } = await supabase.storage
+      .from(GENERATED_IMAGES_BUCKET)
+      .upload(filePath, buffer, { contentType: 'image/png', upsert: true });
+    if (error) {
+        console.error(`Storage upload failed for ${filename}: ${error.message}`);
+        return null;
+    }
+    const { data: { publicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
+    return publicUrl;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -60,11 +74,23 @@ serve(async (req) => {
         console.log(`${logPrefix} QA failed. Setting status to 'awaiting_fix' and invoking orchestrator.`);
         const qaHistory = job.metadata?.qa_history || [];
         
+        const croppedDilatedMaskBuffer = decodeBase64(job.metadata.cropped_dilated_mask_base64);
+        const expandedMaskUrl = await uploadBufferToStorage(supabase, croppedDilatedMaskBuffer, job.user_id, `expanded_mask_attempt_${qaHistory.length}.png`);
+
+        const attemptDebugAssets = {
+            raw_mask_url: job.metadata.raw_mask_url,
+            expanded_mask_url: expandedMaskUrl,
+        };
+
         await supabase.from(tableName).update({ 
             status: 'awaiting_fix',
             metadata: {
                 ...job.metadata,
-                qa_history: [...qaHistory, { timestamp: new Date().toISOString(), report: verificationResult }]
+                qa_history: [...qaHistory, { 
+                    timestamp: new Date().toISOString(), 
+                    report: verificationResult,
+                    debug_assets: attemptDebugAssets
+                }]
             }
         }).eq('id', job_id);
 
@@ -73,18 +99,25 @@ serve(async (req) => {
 
     } else {
         console.log(`${logPrefix} QA passed or was skipped. Finalizing job as complete.`);
-        const finalMetadata = { ...job.metadata, verification_result: verificationResult };
+        
+        const croppedDilatedMaskBuffer = decodeBase64(job.metadata.cropped_dilated_mask_base64);
+        const expandedMaskUrl = await uploadBufferToStorage(supabase, croppedDilatedMaskBuffer, job.user_id, `expanded_mask_final.png`);
+        const finalDebugAssets = {
+            raw_mask_url: job.metadata.raw_mask_url,
+            expanded_mask_url: expandedMaskUrl,
+        };
+
+        const finalMetadata = { ...job.metadata, verification_result: verificationResult, debug_assets: finalDebugAssets };
         
         const updatePayload: any = { 
             status: 'complete', 
-            final_image_url: finalPublicUrl, 
             metadata: finalMetadata 
         };
 
-        // For comfyui jobs, the final result is stored in a different column
         if (tableName === 'mira-agent-inpainting-jobs') {
             updatePayload.final_result = { publicUrl: finalPublicUrl };
-            delete updatePayload.final_image_url;
+        } else {
+            updatePayload.final_image_url = finalPublicUrl;
         }
 
         await supabase.from(tableName).update(updatePayload).eq('id', job_id);
