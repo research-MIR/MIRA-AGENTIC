@@ -96,7 +96,7 @@ serve(async (req) => {
 
     if (parentFetchError) throw parentFetchError;
 
-    const debug_assets = { raw_mask_url, expanded_mask_url: expandedMaskUrl };
+    const debug_assets = { raw_mask_url: raw_mask_url, expanded_mask_url: expandedMaskUrl };
     await supabase.from('mira-agent-batch-inpaint-pair-jobs')
         .update({ metadata: { ...parentPairJob.metadata, debug_assets } })
         .eq('id', parent_pair_job_id);
