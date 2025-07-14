@@ -4,7 +4,7 @@ import { BatchInpaintPro } from "./BatchInpaintPro";
 import { BitStudioJob } from "@/types/vto";
 import { RecentJobsList } from "./RecentJobsList";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Info, Eye, CheckCircle, XCircle } from "lucide-react";
+import { Info, Eye, CheckCircle, XCircle, History } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Loader2 } from "lucide-react";
@@ -12,6 +12,7 @@ import { useImagePreview } from "@/context/ImagePreviewContext";
 import { SecureImageDisplay } from "./SecureImageDisplay";
 import { DebugStepsModal } from "./DebugStepsModal";
 import { Badge } from "@/components/ui/badge";
+import { FixHistoryModal } from "./FixHistoryModal";
 
 interface VirtualTryOnProProps {
     recentJobs: BitStudioJob[] | undefined;
@@ -29,26 +30,38 @@ const VirtualTryOnPro = ({
   const { t } = useLanguage();
   const { showImage } = useImagePreview();
   const [isDebugModalOpen, setIsDebugModalOpen] = useState(false);
+  const [isFixHistoryModalOpen, setIsFixHistoryModalOpen] = useState(false);
 
   const renderJobResult = (job: BitStudioJob) => {
     const isFailed = job.status === 'failed' || job.status === 'permanently_failed';
     const hasDebugAssets = !!job.metadata?.debug_assets;
+    const hasFixHistory = !!job.metadata?.qa_history && job.metadata.qa_history.length > 0;
 
     if (isFailed) {
       return (
         <div className="space-y-4">
           <div className="relative group w-full h-full">
             <SecureImageDisplay imageUrl={job.metadata?.source_image_url || job.source_person_image_url || null} alt="Source of Failed Job" />
-            {hasDebugAssets && (
-              <Button 
-                variant="secondary" 
-                className="absolute bottom-2 right-2"
-                onClick={(e) => { e.stopPropagation(); setIsDebugModalOpen(true); }}
-              >
-                <Eye className="mr-2 h-4 w-4" />
-                Show Debug
-              </Button>
-            )}
+            <div className="absolute bottom-2 right-2 flex gap-2">
+              {hasDebugAssets && (
+                <Button 
+                  variant="secondary" 
+                  onClick={(e) => { e.stopPropagation(); setIsDebugModalOpen(true); }}
+                >
+                  <Eye className="mr-2 h-4 w-4" />
+                  Show Debug
+                </Button>
+              )}
+              {hasFixHistory && (
+                <Button 
+                  variant="secondary" 
+                  onClick={(e) => { e.stopPropagation(); setIsFixHistoryModalOpen(true); }}
+                >
+                  <History className="mr-2 h-4 w-4" />
+                  Fix History
+                </Button>
+              )}
+            </div>
           </div>
           <Alert variant="destructive">
             <AlertTitle>Job Failed</AlertTitle>
@@ -64,19 +77,26 @@ const VirtualTryOnPro = ({
         <div className="space-y-4">
           <div className="relative group w-full h-full">
             <SecureImageDisplay imageUrl={job.final_image_url} alt="Final Result" onClick={() => showImage({ images: [{ url: job.final_image_url! }], currentIndex: 0 })} />
-            {hasDebugAssets && (
-              <Button 
-                variant="secondary" 
-                className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setIsDebugModalOpen(true);
-                }}
-              >
-                <Eye className="mr-2 h-4 w-4" />
-                Show Debug
-              </Button>
-            )}
+            <div className="absolute bottom-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+              {hasDebugAssets && (
+                <Button 
+                  variant="secondary" 
+                  onClick={(e) => { e.stopPropagation(); setIsDebugModalOpen(true); }}
+                >
+                  <Eye className="mr-2 h-4 w-4" />
+                  Show Debug
+                </Button>
+              )}
+              {hasFixHistory && (
+                <Button 
+                  variant="secondary" 
+                  onClick={(e) => { e.stopPropagation(); setIsFixHistoryModalOpen(true); }}
+                >
+                  <History className="mr-2 h-4 w-4" />
+                  Fix History
+                </Button>
+              )}
+            </div>
           </div>
           {verification && (
             <Card>
@@ -154,6 +174,11 @@ const VirtualTryOnPro = ({
         isOpen={isDebugModalOpen}
         onClose={() => setIsDebugModalOpen(false)}
         assets={selectedJob?.metadata?.debug_assets || null}
+      />
+      <FixHistoryModal
+        isOpen={isFixHistoryModalOpen}
+        onClose={() => setIsFixHistoryModalOpen(false)}
+        job={selectedJob}
       />
     </>
   );
