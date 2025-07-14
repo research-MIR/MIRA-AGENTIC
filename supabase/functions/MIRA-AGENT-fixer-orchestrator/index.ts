@@ -186,6 +186,7 @@ serve(async (req) => {
         timestamp: new Date().toISOString(),
         retry_number: retry_count + 1,
         qa_report_used: qa_report_object,
+        failed_image_url: qa_report_object.failed_image_url,
         gemini_input_prompt: "Multimodal prompt sent (see logs for details)",
         gemini_raw_output: result.text,
         parsed_plan: plan,
