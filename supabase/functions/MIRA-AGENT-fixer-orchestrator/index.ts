@@ -145,7 +145,15 @@ serve(async (req) => {
         const payload = plan.payload;
         if (!payload) throw new Error("Plan action 'retry' is missing the 'payload' parameter.");
         
-        console.log(`${logPrefix} Preparing to retry job with new payload:`, payload);
+        console.log(`${logPrefix} Preparing to retry job with new payload. Updating status to 'fixing'.`);
+        
+        // **THE FIX:** Update the status BEFORE invoking the next step.
+        await supabase.from('mira-agent-bitstudio-jobs')
+          .update({ 
+            status: 'fixing',
+            metadata: { ...job.metadata, current_fix_plan: plan }
+          })
+          .eq('id', job_id);
 
         const { error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
           body: {
