@@ -99,6 +99,16 @@ serve(async (req) => {
   } catch (error) {
     console.error(`${logPrefix} Error:`, error);
     await supabase.from(tableName).update({ status: 'failed', error_message: `Compositor failed: ${error.message}` }).eq('id', job_id);
+    
+    // **THE FIX:** Propagate failure to parent job if it exists
+    const { data: failedJob } = await supabase.from(tableName).select('metadata').eq('id', job_id).single();
+    if (failedJob?.metadata?.batch_pair_job_id) {
+        console.log(`${logPrefix} Propagating failure to parent pair job: ${failedJob.metadata.batch_pair_job_id}`);
+        await supabase.from('mira-agent-batch-inpaint-pair-jobs')
+            .update({ status: 'failed', error_message: `Compositor failed: ${error.message}` })
+            .eq('id', failedJob.metadata.batch_pair_job_id);
+    }
+
     return new Response(JSON.stringify({ error: error.message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
   }
 });
