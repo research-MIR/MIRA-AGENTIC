@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { GoogleGenAI, Content, GenerationResult } from 'https://esm.sh/@google/genai@0.15.0';
+import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { GoogleGenAI, Content, GenerationResult, Part } from 'https://esm.sh/@google/genai@0.15.0';
+import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
@@ -14,14 +15,21 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const systemPrompt = `You are a VTO Repair Specialist AI. Your task is to analyze a Quality Assurance (QA) report and an original API request payload, then decide on a course of action.
+const systemPrompt = `You are a VTO Repair Specialist AI. Your task is to analyze a Quality Assurance (QA) report, an original API request payload, and a set of images, then decide on a course of action.
 
-### Your Process:
-1.  **Analyze Failure:** Read the 'mismatch_reason' and 'fix_suggestion' from the QA report to understand the problem.
-2.  **Decide Action:**
-    -   If the issue is fixable (e.g., requires a more descriptive prompt), decide to "retry".
-    -   If the issue seems unfixable (e.g., the model cannot handle the request), decide to "give_up".
-3.  **Construct Output:** Based on your decision, create a single, valid JSON object.
+### Your Inputs:
+You will receive a prompt containing:
+1.  **Image Identifiers:** The original string URLs/IDs for the images.
+2.  **Image Data:** The actual visual data for the Source, Reference, and Failed images.
+3.  **QA Report:** The analysis of what went wrong.
+4.  **Original Payload:** The API request that produced the failed image.
+
+### Your Task:
+1.  **Visually Analyze:** Look at the provided image data to understand the failure described in the QA report.
+2.  **Formulate a Plan:** Decide whether to 'retry' with a new payload or 'give_up'.
+3.  **Construct the Output:**
+    -   If retrying, create a new, complete JSON payload. **CRITICAL: In this new payload, you MUST use the original string identifiers (e.g., 'person_image_id', 'mask_image_id') provided in the prompt's text section. DO NOT use the image data itself.**
+    -   If giving up, provide a reason.
 
 ### Output Format & Rules:
 Your entire output MUST be a single, valid JSON object. Do not include any other text or explanations.
@@ -53,6 +61,42 @@ function extractJson(text: string): any | null {
     try { return JSON.parse(text); } catch (e) { return null; }
 }
 
+async function downloadAndEncodeImage(supabase: SupabaseClient, url: string): Promise<{ base64: string, mimeType: string }> {
+    if (url.includes('supabase.co')) {
+        const urlObj = new URL(url);
+        const pathSegments = urlObj.pathname.split('/');
+        
+        const publicSegmentIndex = pathSegments.indexOf('public');
+        if (publicSegmentIndex === -1 || publicSegmentIndex + 1 >= pathSegments.length) {
+            throw new Error(`Could not parse bucket name from URL: ${url}`);
+        }
+        
+        const bucketName = pathSegments[publicSegmentIndex + 1];
+        const filePath = pathSegments.slice(publicSegmentIndex + 2).join('/');
+
+        if (!bucketName || !filePath) {
+            throw new Error(`Could not parse bucket or path from Supabase URL: ${url}`);
+        }
+
+        const { data: blob, error } = await supabase.storage.from(bucketName).download(filePath);
+        if (error) {
+            throw new Error(`Failed to download image from Supabase storage (${filePath}): ${error.message}`);
+        }
+        const buffer = await blob.arrayBuffer();
+        const base64 = encodeBase64(buffer);
+        return { base64, mimeType: blob.type || 'image/png' };
+    } else {
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`Failed to download image from external URL ${url}. Status: ${response.statusText}`);
+        }
+        const blob = await response.blob();
+        const buffer = await blob.arrayBuffer();
+        const base64 = encodeBase64(buffer);
+        return { base64, mimeType: blob.type || 'image/png' };
+    }
+}
+
 serve(async (req) => {
   const { job_id } = await req.json();
   if (!job_id) throw new Error("job_id is required for the fixer-orchestrator.");
@@ -81,9 +125,8 @@ serve(async (req) => {
 
     if (!lastReport) throw new Error("Job is awaiting fix but has no QA report in its history.");
     if (!originalPayload) throw new Error("Job is awaiting fix but has no original_request_payload in its metadata.");
-
     if (!sourceImageUrl || !referenceImageUrl || !failedImageUrl) {
-        console.warn(`${logPrefix} Missing one or more critical URLs for full context. Source: ${!!sourceImageUrl}, Reference: ${!!referenceImageUrl}, Failed: ${!!failedImageUrl}`);
+        throw new Error("Missing one or more critical image URLs for full context.");
     }
 
     console.log(`${logPrefix} Current retry count: ${retryCount}. Analyzing last QA report.`);
@@ -97,23 +140,29 @@ serve(async (req) => {
       return new Response(JSON.stringify({ success: true, message: "Max retries reached." }), { headers: corsHeaders });
     }
 
-    // Set status to 'fixing' to prevent watchdog interference
     await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'fixing' }).eq('id', job_id);
 
+    console.log(`${logPrefix} Downloading images for multimodal context...`);
+    const [sourceData, referenceData, failedData] = await Promise.all([
+        downloadAndEncodeImage(supabase, sourceImageUrl),
+        downloadAndEncodeImage(supabase, referenceImageUrl),
+        downloadAndEncodeImage(supabase, failedImageUrl)
+    ]);
+    console.log(`${logPrefix} All images downloaded and encoded.`);
+
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
-    const geminiInputPrompt = `A VTO job failed quality assurance. Here is the report and the original request payload that caused the failure. Your task is to construct a new, complete payload to fix the issue.
-
-**CONTEXTUAL IMAGE URLS:**
-- Source Person Image: ${sourceImageUrl || "Not Available"}
-- Reference Garment Image: ${referenceImageUrl || "Not Available"}
-- Failed Result Image (The one you are critiquing): ${failedImageUrl || "Not Available"}
-
-**QA REPORT:**
-${JSON.stringify(lastReport, null, 2)}
-
-**ORIGINAL REQUEST PAYLOAD (The one that produced the failed image):**
-${JSON.stringify(originalPayload, null, 2)}`;
-    const contents: Content[] = [{ role: 'user', parts: [{ text: geminiInputPrompt }] }];
+    const geminiInputParts: Part[] = [
+        { text: `A VTO job failed quality assurance. Here is the report and the original request payload that caused the failure. Your task is to construct a new, complete payload to fix the issue.` },
+        { text: `--- QA REPORT --- \n ${JSON.stringify(lastReport, null, 2)}` },
+        { text: `--- ORIGINAL PAYLOAD --- \n ${JSON.stringify(originalPayload, null, 2)}` },
+        { text: `--- SOURCE IMAGE ---` },
+        { inlineData: { mimeType: sourceData.mimeType, data: sourceData.base64 } },
+        { text: `--- REFERENCE GARMENT ---` },
+        { inlineData: { mimeType: referenceData.mimeType, data: referenceData.base64 } },
+        { text: `--- FAILED RESULT TO ANALYZE ---` },
+        { inlineData: { mimeType: failedData.mimeType, data: failedData.base64 } },
+    ];
+    const contents: Content[] = [{ role: 'user', parts: geminiInputParts }];
 
     let result: GenerationResult | null = null;
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
@@ -155,12 +204,11 @@ ${JSON.stringify(originalPayload, null, 2)}`;
         timestamp: new Date().toISOString(),
         retry_number: retryCount + 1,
         qa_report_used: lastReportObject,
-        gemini_input_prompt: geminiInputPrompt,
+        gemini_input_prompt: "Multimodal prompt sent (see logs for details)", // No longer logging the full base64
         gemini_raw_output: result.text,
         parsed_plan: plan,
     };
 
-    // --- EXECUTION LOGIC ---
     switch (plan.action) {
       case 'retry': {
         const payload = plan.payload;
