@@ -137,12 +137,16 @@ serve(async (req) => {
     ]);
     console.log(`${logPrefix} All images downloaded and encoded.`);
 
+    console.log(`${logPrefix} Uploading failed image as new source for inpainting...`);
+    const newSourceImageId = await uploadToBitStudio(failedData.blob, 'inpaint-base', 'failed_result_as_source.png');
+    console.log(`${logPrefix} New source image ID from BitStudio: ${newSourceImageId}`);
+
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
     const geminiInputParts: Part[] = [
         { text: `A VTO job failed quality assurance. Here is the report and the original request payload that caused the failure. Your task is to construct a new, complete payload to fix the issue.` },
         { text: `--- QA REPORT --- \n ${JSON.stringify(lastReport, null, 2)}` },
         { text: `--- ORIGINAL PAYLOAD --- \n ${JSON.stringify(original_request_payload, null, 2)}` },
-        { text: `--- IMAGE IDENTIFIERS --- \n person_image_id: ${job.metadata.bitstudio_person_image_id}\n mask_image_id: ${bitstudio_mask_image_id}\n reference_image_id: ${bitstudio_garment_image_id}` },
+        { text: `--- IMAGE IDENTIFIERS --- \n person_image_id: ${newSourceImageId}\n mask_image_id: ${bitstudio_mask_image_id}\n reference_image_id: ${bitstudio_garment_image_id}` },
         { text: `--- SOURCE IMAGE ---` },
         { inlineData: { mimeType: sourceData.mimeType, data: sourceData.base64 } },
         { text: `--- REFERENCE GARMENT ---` },
@@ -180,7 +184,7 @@ serve(async (req) => {
 
     const currentFixAttemptLog = {
         timestamp: new Date().toISOString(),
-        retry_number: retryCount + 1,
+        retry_number: retry_count + 1,
         qa_report_used: qa_report_object,
         gemini_input_prompt: "Multimodal prompt sent (see logs for details)",
         gemini_raw_output: result.text,
@@ -193,13 +197,14 @@ serve(async (req) => {
         if (!payload) throw new Error("Plan action 'retry' is missing the 'payload' parameter.");
         
         await supabase.from('mira-agent-bitstudio-jobs').update({ 
-            metadata: { ...job.metadata, fix_history: [...fixHistory, currentFixAttemptLog] }
+            metadata: { ...job.metadata, fix_history: [...fix_history, currentFixAttemptLog] }
         }).eq('id', job_id);
 
         const { error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
           body: { 
             retry_job_id: job_id, 
             payload: payload,
+            new_source_image_id: newSourceImageId
           }
         });
         if (proxyError) throw proxyError;
@@ -210,7 +215,7 @@ serve(async (req) => {
         await supabase.from('mira-agent-bitstudio-jobs').update({ 
             status: 'permanently_failed', 
             error_message: reason,
-            metadata: { ...job.metadata, fix_history: [...fixHistory, currentFixAttemptLog] }
+            metadata: { ...job.metadata, fix_history: [...fix_history, currentFixAttemptLog] }
         }).eq('id', job_id);
         if (job.metadata?.batch_pair_job_id) {
             await supabase.from('mira-agent-batch-inpaint-pair-jobs')
