@@ -125,8 +125,9 @@ serve(async (req) => {
 
     if (!lastReport) throw new Error("Job is awaiting fix but has no QA report in its history.");
     if (!originalPayload) throw new Error("Job is awaiting fix but has no original_request_payload in its metadata.");
+
     if (!sourceImageUrl || !referenceImageUrl || !failedImageUrl) {
-        throw new Error("Missing one or more critical image URLs for full context.");
+        console.warn(`${logPrefix} Missing one or more critical URLs for full context. Source: ${!!sourceImageUrl}, Reference: ${!!referenceImageUrl}, Failed: ${!!failedImageUrl}`);
     }
 
     console.log(`${logPrefix} Current retry count: ${retryCount}. Analyzing last QA report.`);
@@ -204,7 +205,7 @@ serve(async (req) => {
         timestamp: new Date().toISOString(),
         retry_number: retryCount + 1,
         qa_report_used: lastReportObject,
-        gemini_input_prompt: "Multimodal prompt sent (see logs for details)", // No longer logging the full base64
+        gemini_input_prompt: "Multimodal prompt sent (see logs for details)",
         gemini_raw_output: result.text,
         parsed_plan: plan,
     };
@@ -234,14 +235,25 @@ serve(async (req) => {
         break;
       }
       case 'give_up': {
+        const reason = plan.reason || 'Automated repair failed after multiple attempts.';
+        console.log(`${logPrefix} Agent gave up. Reason: ${reason}. Marking job as permanently_failed.`);
+        
+        // Update the main bitstudio job
         await supabase.from('mira-agent-bitstudio-jobs')
           .update({ 
             status: 'permanently_failed', 
-            error_message: plan.reason,
+            error_message: reason,
             metadata: { ...job.metadata, fix_history: [...fixHistory, currentFixAttemptLog] }
           })
           .eq('id', job_id);
-        console.log(`${logPrefix} Agent gave up. Reason: ${plan.reason}. Job marked as permanently_failed.`);
+
+        // **THE FIX:** Also update the original pair job if it exists
+        if (job.metadata?.batch_pair_job_id) {
+            console.log(`${logPrefix} Propagating 'failed' status to parent pair job: ${job.metadata.batch_pair_job_id}`);
+            await supabase.from('mira-agent-batch-inpaint-pair-jobs')
+                .update({ status: 'failed', error_message: reason })
+                .eq('id', job.metadata.batch_pair_job_id);
+        }
         break;
       }
       default:
