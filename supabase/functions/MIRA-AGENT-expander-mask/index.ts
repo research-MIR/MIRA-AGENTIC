@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { createCanvas, loadImage, Canvas } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
+import { createCanvas, loadImage, Canvas, CanvasRenderingContext2D } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -25,26 +25,40 @@ async function uploadBufferToStorage(supabase: SupabaseClient, buffer: Uint8Arra
     return publicUrl;
 }
 
-function dilateMask(srcCanvas: Canvas, iterations: number): Canvas {
-  const w = srcCanvas.width;
-  const h = srcCanvas.height;
-  let curr = srcCanvas;
-  let buff = createCanvas(w, h);
+/**
+ * Performs a fast, linear-time dilation on an alpha channel mask.
+ * This is highly memory and CPU efficient.
+ */
+function dilateAlpha(alpha: Uint8ClampedArray, w: number, h: number, r: number) {
+  const inf = 1e9;
+  const dist = new Float32Array(w * h);
 
-  for (let i = 0; i < iterations; i++) {
-    const bctx = buff.getContext('2d');
-    bctx.clearRect(0, 0, w, h);
-    bctx.drawImage(curr,  0,  0);
-    bctx.drawImage(curr, -1,  0);
-    bctx.drawImage(curr,  1,  0);
-    bctx.drawImage(curr,  0, -1);
-    bctx.drawImage(curr,  0,  1);
-
-    const tmp = curr;
-    curr = buff;
-    buff = tmp;
+  for (let y = 0; y < h; y++) {
+    let d = inf;
+    for (let x = 0; x < w; x++) {
+      if (alpha[y*w + x]) d = 0;
+      dist[y*w + x] = d = Math.min(d + 1, inf);
+    }
+    d = inf;
+    for (let x = w - 1; x >= 0; x--) {
+      if (alpha[y*w + x]) d = 0;
+      dist[y*w + x] = Math.min(dist[y*w + x], d = Math.min(d + 1, inf));
+    }
   }
-  return curr;
+  for (let x = 0; x < w; x++) {
+    let d = inf;
+    for (let y = 0; y < h; y++) {
+      d = Math.min(d + 1, dist[y*w + x]);
+      dist[y*w + x] = d;
+    }
+    d = inf;
+    for (let y = h - 1; y >= 0; y--) {
+      d = Math.min(d + 1, dist[y*w + x]);
+      const idx = y*w + x;
+      if (Math.min(d, dist[idx]) <= r) alpha[idx] = 255;
+      else alpha[idx] = 0;
+    }
+  }
 }
 
 serve(async (req) => {
@@ -67,21 +81,54 @@ serve(async (req) => {
     const rawMaskBuffer = await response.arrayBuffer();
     const rawMaskImage = await loadImage(new Uint8Array(rawMaskBuffer));
     
-    const width = rawMaskImage.width();
-    const height = rawMaskImage.height();
+    const originalWidth = rawMaskImage.width();
+    const originalHeight = rawMaskImage.height();
 
-    const rawMaskCanvas = createCanvas(width, height);
-    rawMaskCanvas.getContext('2d').drawImage(rawMaskImage, 0, 0);
+    // --- Down-scaling for large images ---
+    const MAX_DIMENSION = 2048;
+    let scale = 1;
+    let w = originalWidth;
+    let h = originalHeight;
+    if (Math.max(w, h) > MAX_DIMENSION) {
+        scale = MAX_DIMENSION / Math.max(w, h);
+        w = Math.round(w * scale);
+        h = Math.round(h * scale);
+        console.log(`[Expander][${requestId}] Image too large, down-scaling to ${w}x${h}`);
+    }
 
-    const expansionPx = Math.max(1, Math.round(Math.min(width, height) * 0.06));
-    console.log(`[Expander][${requestId}] Expanding mask by ${expansionPx}px.`);
-    const expandedCanvas = dilateMask(rawMaskCanvas, expansionPx);
+    const canvas = createCanvas(w, h);
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(rawMaskImage, 0, 0, w, h);
 
-    const finalCanvas = createCanvas(width, height);
-    const finalCtx = finalCanvas.getContext('2d');
-    finalCtx.fillStyle = 'black';
-    finalCtx.fillRect(0, 0, width, height);
-    finalCtx.drawImage(expandedCanvas, 0, 0);
+    const imageData = ctx.getImageData(0, 0, w, h);
+    const alphaChannel = new Uint8ClampedArray(w * h);
+    for (let i = 0; i < imageData.data.length; i += 4) {
+        alphaChannel[i / 4] = imageData.data[i] > 128 ? 255 : 0;
+    }
+
+    const expansionPx = Math.max(1, Math.round(Math.min(w, h) * 0.06));
+    console.log(`[Expander][${requestId}] Expanding alpha mask by ${expansionPx}px.`);
+    dilateAlpha(alphaChannel, w, h, expansionPx);
+
+    // Create the final black and white mask from the dilated alpha channel
+    for (let i = 0; i < alphaChannel.length; i++) {
+        const value = alphaChannel[i];
+        imageData.data[i * 4] = value;
+        imageData.data[i * 4 + 1] = value;
+        imageData.data[i * 4 + 2] = value;
+        imageData.data[i * 4 + 3] = 255;
+    }
+    ctx.putImageData(imageData, 0, 0);
+
+    let finalCanvas = canvas;
+    if (scale < 1) {
+        console.log(`[Expander][${requestId}] Scaling mask back up to ${originalWidth}x${originalHeight}.`);
+        const upscaledCanvas = createCanvas(originalWidth, originalHeight);
+        const upscaledCtx = upscaledCanvas.getContext('2d');
+        upscaledCtx.imageSmoothingEnabled = false;
+        upscaledCtx.drawImage(canvas, 0, 0, originalWidth, originalHeight);
+        finalCanvas = upscaledCanvas;
+    }
 
     const finalMaskBuffer = finalCanvas.toBuffer('image/png');
     const expandedMaskUrl = await uploadBufferToStorage(supabase, finalMaskBuffer, user_id, 'final_expanded_mask.png');
@@ -96,7 +143,7 @@ serve(async (req) => {
 
     if (parentFetchError) throw parentFetchError;
 
-    const debug_assets = { raw_mask_url: raw_mask_url, expanded_mask_url: expandedMaskUrl };
+    const debug_assets = { raw_mask_url, expanded_mask_url: expandedMaskUrl };
     await supabase.from('mira-agent-batch-inpaint-pair-jobs')
         .update({ metadata: { ...parentPairJob.metadata, debug_assets } })
         .eq('id', parent_pair_job_id);
@@ -112,7 +159,7 @@ serve(async (req) => {
     });
 
   } catch (error) {
-    console.error(`[Expander][${requestId}] Error:`, error);
+    console.error(`[Expander][${parent_pair_job_id || 'unknown'}] Error:`, error);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,
