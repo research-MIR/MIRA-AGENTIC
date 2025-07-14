@@ -148,7 +148,6 @@ serve(async (req) => {
         downloadAndEncodeImage(supabase, failed_image_url)
     ]);
     
-    // THE FIX: The failed image IS the new source image for the next attempt.
     const sourceData = failedData;
     console.log(`${logPrefix} All images downloaded. The FAILED image will now be used as the SOURCE for the next attempt.`);
 
@@ -197,6 +196,13 @@ serve(async (req) => {
     const plan = extractJson(result.text);
     if (!plan || !plan.action) throw new Error("Orchestrator LLM did not return a valid JSON action.");
 
+    // --- VERIFICATION LOGGING ---
+    console.log(`${logPrefix} AI has generated a plan. Full plan object:`, JSON.stringify(plan, null, 2));
+    if (plan.action === 'retry' && plan.payload) {
+        console.log(`${logPrefix} VERIFICATION: The 'person_image_id' in the generated payload is: ${plan.payload.person_image_id}`);
+    }
+    // --- END VERIFICATION LOGGING ---
+
     const currentFixAttemptLog = {
         timestamp: new Date().toISOString(),
         retry_number: retry_count + 1,
@@ -211,8 +217,6 @@ serve(async (req) => {
       case 'retry': {
         const payload = plan.payload;
         if (!payload) throw new Error("Plan action 'retry' is missing the 'payload' parameter.");
-        
-        console.log(`${logPrefix} AI decided to RETRY. New payload:`, JSON.stringify(payload, null, 2));
         
         await supabase.from('mira-agent-bitstudio-jobs').update({ 
             metadata: { ...job.metadata, fix_history: [...fix_history, currentFixAttemptLog] }
