@@ -58,13 +58,12 @@ serve(async (req) => {
 
     const sourceImageBuffer = decodeBase64(job.source_image_base64);
     const sourceImage = await loadImage(sourceImageBuffer);
-    const width = sourceImage.width;
-    const height = sourceImage.height;
+    const width = sourceImage.width();
+    const height = sourceImage.height();
     console.log(`[Compositor][${requestId}] Source image decoded. Dimensions: ${width}x${height}`);
     
     const rawMaskCanvas = createCanvas(width, height);
     const rawMaskCtx = rawMaskCanvas.getContext('2d');
-    // Start with a transparent background
     rawMaskCtx.clearRect(0, 0, width, height);
 
     const allMasks = (job.results || []).flat().filter((item: any) => item && item.mask && item.box_2d);
@@ -88,7 +87,6 @@ serve(async (req) => {
         }
     }
 
-    // For debugging, create a viewable version of the raw mask (white on black)
     const previewMaskCanvas = createCanvas(width, height);
     const previewMaskCtx = previewMaskCanvas.getContext('2d');
     previewMaskCtx.fillStyle = 'black';
@@ -97,36 +95,31 @@ serve(async (req) => {
     const rawMaskUrl = await uploadBufferToStorage(supabase, previewMaskCanvas.toBuffer('image/png'), job.user_id, 'raw_mask.png');
     console.log(`[Compositor][${requestId}] Raw mask uploaded to: ${rawMaskUrl}`);
 
-    // --- CORRECTED MASK EXPANSION LOGIC ---
-    const expansionRadius = Math.round(Math.min(width, height) * 0.06); // 6% radius for ~12% diameter increase
+    const expansionRadius = Math.round(Math.min(width, height) * 0.06);
     console.log(`[Compositor][${requestId}] Applying mask expansion with blur filter radius: ${expansionRadius}px`);
 
     const expansionCanvas = createCanvas(width, height);
     const expansionCtx = expansionCanvas.getContext('2d');
 
-    // 1. Apply blur filter to the raw mask (which has a transparent background)
     expansionCtx.filter = `blur(${expansionRadius}px)`;
     expansionCtx.drawImage(rawMaskCanvas, 0, 0);
-    expansionCtx.filter = 'none'; // Reset filter
+    expansionCtx.filter = 'none';
 
-    // 2. Solidify the result into a pure black and white image
     const finalCanvas = createCanvas(width, height);
     const finalCtx = finalCanvas.getContext('2d');
     finalCtx.fillStyle = 'black';
     finalCtx.fillRect(0, 0, width, height);
-    finalCtx.drawImage(expansionCanvas, 0, 0); // Draw the blurred (now glowing) mask
+    finalCtx.drawImage(expansionCanvas, 0, 0);
 
     const imageData = finalCtx.getImageData(0, 0, width, height);
     const data = imageData.data;
     for (let i = 0; i < data.length; i += 4) {
-        // If any color channel has a value > 5, it's part of the mask or its glow.
         if (data[i] > 5 || data[i+1] > 5 || data[i+2] > 5) { 
             data[i] = 255; data[i + 1] = 255; data[i + 2] = 255;
         }
     }
     finalCtx.putImageData(imageData, 0, 0);
     console.log(`[Compositor][${requestId}] Mask expansion and solidification complete.`);
-    // --- END OF CORRECTED LOGIC ---
 
     const finalMaskBuffer = finalCanvas.toBuffer('image/png');
     const finalMaskBase64 = encodeBase64(finalMaskBuffer);
