@@ -5,7 +5,7 @@ import { GoogleGenAI, Type, Content, GenerationResult } from 'https://esm.sh/@go
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-const MODEL_NAME = "gemini-2.5-pro"; // Enforcing the correct model name
+const MODEL_NAME = "gemini-2.5-pro-preview-06-05"; // Aligning with master-worker for reliability
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1500;
 
@@ -145,7 +145,8 @@ serve(async (req) => {
     const call = parseFunctionCall(result);
 
     if (!call) {
-      console.error(`${logPrefix} Orchestrator LLM did not return a valid function call. Raw response text:`, result.text);
+      // Enhanced logging to capture the full response object for debugging
+      console.error(`${logPrefix} Orchestrator LLM did not return a valid function call. Full raw response object:`, JSON.stringify(result, null, 2));
       throw new Error("Orchestrator LLM did not return a valid function call.");
     }
 
