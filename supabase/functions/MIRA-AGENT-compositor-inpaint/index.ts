@@ -34,10 +34,8 @@ serve(async (req) => {
       .single();
     if (fetchError) throw fetchError;
 
-    // --- Image Composition Logic (Placeholder) ---
     const finalPublicUrl = final_image_url; 
     console.log(`${logPrefix} Composition complete. Final URL: ${finalPublicUrl}`);
-    // --- End Composition Logic ---
 
     let verificationResult = null;
     if (job.metadata?.reference_image_url) {
@@ -60,19 +58,26 @@ serve(async (req) => {
         console.log(`${logPrefix} QA failed. Setting status to 'awaiting_fix' and invoking orchestrator.`);
         const qaHistory = job.metadata?.qa_history || [];
         
+        const newQaReportObject = { 
+            timestamp: new Date().toISOString(), 
+            report: verificationResult,
+            failed_image_url: final_image_url
+        };
+
         await supabase.from(tableName).update({ 
             status: 'awaiting_fix',
             metadata: {
                 ...job.metadata,
-                qa_history: [...qaHistory, { 
-                    timestamp: new Date().toISOString(), 
-                    report: verificationResult,
-                    failed_image_url: final_image_url
-                }]
+                qa_history: [...qaHistory, newQaReportObject]
             }
         }).eq('id', job_id);
 
-        supabase.functions.invoke('MIRA-AGENT-fixer-orchestrator', { body: { job_id } }).catch(console.error);
+        supabase.functions.invoke('MIRA-AGENT-fixer-orchestrator', { 
+            body: { 
+                job_id,
+                qa_report_object: newQaReportObject 
+            } 
+        }).catch(console.error);
         console.log(`${logPrefix} Fixer orchestrator invoked for job.`);
 
     } else {
@@ -85,7 +90,6 @@ serve(async (req) => {
             metadata: finalMetadata 
         };
 
-        // For comfyui jobs, the final result is stored in a different column
         if (tableName === 'mira-agent-inpainting-jobs') {
             updatePayload.final_result = { publicUrl: finalPublicUrl };
             delete updatePayload.final_image_url;
@@ -100,7 +104,6 @@ serve(async (req) => {
     console.error(`${logPrefix} Error:`, error);
     await supabase.from(tableName).update({ status: 'failed', error_message: `Compositor failed: ${error.message}` }).eq('id', job_id);
     
-    // **THE FIX:** Propagate failure to parent job if it exists
     const { data: failedJob } = await supabase.from(tableName).select('metadata').eq('id', job_id).single();
     if (failedJob?.metadata?.batch_pair_job_id) {
         console.log(`${logPrefix} Propagating failure to parent pair job: ${failedJob.metadata.batch_pair_job_id}`);

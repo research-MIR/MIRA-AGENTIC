@@ -98,8 +98,9 @@ async function downloadAndEncodeImage(supabase: SupabaseClient, url: string): Pr
 }
 
 serve(async (req) => {
-  const { job_id } = await req.json();
+  const { job_id, qa_report_object } = await req.json();
   if (!job_id) throw new Error("job_id is required for the fixer-orchestrator.");
+  if (!qa_report_object) throw new Error("qa_report_object is required for the fixer.");
 
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
   const logPrefix = `[FixerOrchestrator][${job_id}]`;
@@ -114,20 +115,17 @@ serve(async (req) => {
     if (fetchError) throw fetchError;
 
     const retryCount = job.metadata?.retry_count || 0;
-    const qaHistory = job.metadata?.qa_history || [];
     const fixHistory = job.metadata?.fix_history || [];
-    const lastReportObject = qaHistory[qaHistory.length - 1];
-    const lastReport = lastReportObject?.report;
-    const failedImageUrl = lastReportObject?.failed_image_url;
+    const lastReport = qa_report_object.report;
+    const failedImageUrl = qa_report_object.failed_image_url;
     const originalPayload = job.metadata?.original_request_payload;
     const sourceImageUrl = job.metadata?.source_image_url;
     const referenceImageUrl = job.metadata?.reference_image_url;
 
     if (!lastReport) throw new Error("Job is awaiting fix but has no QA report in its history.");
     if (!originalPayload) throw new Error("Job is awaiting fix but has no original_request_payload in its metadata.");
-
     if (!sourceImageUrl || !referenceImageUrl || !failedImageUrl) {
-        console.warn(`${logPrefix} Missing one or more critical URLs for full context. Source: ${!!sourceImageUrl}, Reference: ${!!referenceImageUrl}, Failed: ${!!failedImageUrl}`);
+        throw new Error("Missing one or more critical image URLs for full context.");
     }
 
     console.log(`${logPrefix} Current retry count: ${retryCount}. Analyzing last QA report.`);
@@ -204,7 +202,7 @@ serve(async (req) => {
     const currentFixAttemptLog = {
         timestamp: new Date().toISOString(),
         retry_number: retryCount + 1,
-        qa_report_used: lastReportObject,
+        qa_report_used: qa_report_object,
         gemini_input_prompt: "Multimodal prompt sent (see logs for details)",
         gemini_raw_output: result.text,
         parsed_plan: plan,
@@ -264,7 +262,6 @@ serve(async (req) => {
     console.error(`${logPrefix} Error:`, error);
     await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'failed', error_message: `Fixer orchestrator failed: ${error.message}` }).eq('id', job_id);
     
-    // **THE FIX:** Propagate failure to parent job if it exists
     const { data: failedJob } = await supabase.from('mira-agent-bitstudio-jobs').select('metadata').eq('id', job_id).single();
     if (failedJob?.metadata?.batch_pair_job_id) {
         console.log(`${logPrefix} Propagating failure to parent pair job: ${failedJob.metadata.batch_pair_job_id}`);
