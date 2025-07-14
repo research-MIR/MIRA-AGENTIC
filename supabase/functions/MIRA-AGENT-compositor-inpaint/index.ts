@@ -45,7 +45,7 @@ serve(async (req) => {
         const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-verify-garment-match', {
             body: {
                 original_garment_url: job.metadata.reference_image_url,
-                final_generated_url: finalPublicUrl
+                final_generated_url: final_image_url
             }
         });
         if (error) {
@@ -64,7 +64,11 @@ serve(async (req) => {
             status: 'awaiting_fix',
             metadata: {
                 ...job.metadata,
-                qa_history: [...qaHistory, { timestamp: new Date().toISOString(), report: verificationResult }]
+                qa_history: [...qaHistory, { 
+                    timestamp: new Date().toISOString(), 
+                    report: verificationResult,
+                    failed_image_url: final_image_url
+                }]
             }
         }).eq('id', job_id);
 

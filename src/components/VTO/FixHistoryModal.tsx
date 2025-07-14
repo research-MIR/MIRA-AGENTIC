@@ -9,9 +9,21 @@ import {
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ArrowDown, AlertCircle, Wrench, BrainCircuit, FileText, Check, X } from "lucide-react";
+import { ArrowDown, AlertCircle, Wrench, BrainCircuit, FileText, Check, X, ImageIcon } from "lucide-react";
 import { BitStudioJob } from "@/types/vto";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { SecureImageDisplay } from "./SecureImageDisplay";
+
+const ImageCard = ({ title, url }: { title: string, url?: string }) => {
+  return (
+    <div className="space-y-1">
+      <h4 className="text-xs font-semibold text-center text-muted-foreground">{title}</h4>
+      <div className="aspect-square bg-muted rounded-md overflow-hidden">
+        {url ? <SecureImageDisplay imageUrl={url} alt={title} /> : <div className="w-full h-full flex items-center justify-center"><ImageIcon className="h-6 w-6 text-muted-foreground/50" /></div>}
+      </div>
+    </div>
+  );
+};
 
 interface FixHistoryModalProps {
   isOpen: boolean;
@@ -23,6 +35,8 @@ export const FixHistoryModal = ({ isOpen, onClose, job }: FixHistoryModalProps) 
   if (!isOpen || !job || !job.metadata?.fix_history) return null;
 
   const history = job.metadata.fix_history;
+  const sourceImageUrl = job.metadata.source_image_url;
+  const referenceImageUrl = job.metadata.reference_image_url;
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -45,6 +59,11 @@ export const FixHistoryModal = ({ isOpen, onClose, job }: FixHistoryModalProps) 
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
+                    <div className="grid grid-cols-3 gap-2 mb-4">
+                      <ImageCard title="Source Person" url={sourceImageUrl} />
+                      <ImageCard title="Reference Garment" url={referenceImageUrl} />
+                      <ImageCard title="Failed Result" url={attempt.qa_report_used?.failed_image_url} />
+                    </div>
                     <Accordion type="multiple" className="w-full">
                       <AccordionItem value="qa-report">
                         <AccordionTrigger>
@@ -54,7 +73,7 @@ export const FixHistoryModal = ({ isOpen, onClose, job }: FixHistoryModalProps) 
                           </div>
                         </AccordionTrigger>
                         <AccordionContent className="text-xs space-y-2">
-                          <p><strong>Match:</strong> {attempt.qa_report_used?.report?.is_match ? <CheckCircle className="inline h-4 w-4 text-green-500"/> : <XCircle className="inline h-4 w-4 text-destructive"/>}</p>
+                          <p><strong>Match:</strong> {attempt.qa_report_used?.report?.is_match ? <CheckCircle className="inline h-4 w-4 text-green-500"/> : <X className="inline h-4 w-4 text-destructive"/>}</p>
                           <p><strong>Reason:</strong> {attempt.qa_report_used?.report?.mismatch_reason || "N/A"}</p>
                           <p><strong>Suggestion:</strong> {attempt.qa_report_used?.report?.fix_suggestion || "N/A"}</p>
                         </AccordionContent>

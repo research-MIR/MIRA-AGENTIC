@@ -72,11 +72,19 @@ serve(async (req) => {
     const retryCount = job.metadata?.retry_count || 0;
     const qaHistory = job.metadata?.qa_history || [];
     const fixHistory = job.metadata?.fix_history || [];
-    const lastReport = qaHistory[qaHistory.length - 1];
+    const lastReportObject = qaHistory[qaHistory.length - 1];
+    const lastReport = lastReportObject?.report;
+    const failedImageUrl = lastReportObject?.failed_image_url;
     const originalPayload = job.metadata?.original_request_payload;
+    const sourceImageUrl = job.metadata?.source_image_url;
+    const referenceImageUrl = job.metadata?.reference_image_url;
 
     if (!lastReport) throw new Error("Job is awaiting fix but has no QA report in its history.");
     if (!originalPayload) throw new Error("Job is awaiting fix but has no original_request_payload in its metadata.");
+
+    if (!sourceImageUrl || !referenceImageUrl || !failedImageUrl) {
+        console.warn(`${logPrefix} Missing one or more critical URLs for full context. Source: ${!!sourceImageUrl}, Reference: ${!!referenceImageUrl}, Failed: ${!!failedImageUrl}`);
+    }
 
     console.log(`${logPrefix} Current retry count: ${retryCount}. Analyzing last QA report.`);
 
@@ -93,7 +101,18 @@ serve(async (req) => {
     await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'fixing' }).eq('id', job_id);
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
-    const geminiInputPrompt = `A VTO job failed quality assurance. Here is the report and the original request payload that caused the failure. Your task is to construct a new, complete payload to fix the issue.\n\n**QA REPORT:**\n${JSON.stringify(lastReport, null, 2)}\n\n**ORIGINAL REQUEST PAYLOAD:**\n${JSON.stringify(originalPayload, null, 2)}`;
+    const geminiInputPrompt = `A VTO job failed quality assurance. Here is the report and the original request payload that caused the failure. Your task is to construct a new, complete payload to fix the issue.
+
+**CONTEXTUAL IMAGE URLS:**
+- Source Person Image: ${sourceImageUrl || "Not Available"}
+- Reference Garment Image: ${referenceImageUrl || "Not Available"}
+- Failed Result Image (The one you are critiquing): ${failedImageUrl || "Not Available"}
+
+**QA REPORT:**
+${JSON.stringify(lastReport, null, 2)}
+
+**ORIGINAL REQUEST PAYLOAD (The one that produced the failed image):**
+${JSON.stringify(originalPayload, null, 2)}`;
     const contents: Content[] = [{ role: 'user', parts: [{ text: geminiInputPrompt }] }];
 
     let result: GenerationResult | null = null;
@@ -121,7 +140,9 @@ serve(async (req) => {
         throw new Error("AI planner failed to respond after all retries.");
     }
 
+    console.log(`${logPrefix} Raw Gemini response:`, result.text);
     const plan = extractJson(result.text);
+    console.log(`${logPrefix} Parsed plan:`, JSON.stringify(plan, null, 2));
 
     if (!plan || !plan.action) {
       console.error(`${logPrefix} Orchestrator LLM did not return a valid JSON action. Full raw response:`, result.text);
@@ -133,7 +154,7 @@ serve(async (req) => {
     const currentFixAttemptLog = {
         timestamp: new Date().toISOString(),
         retry_number: retryCount + 1,
-        qa_report_used: lastReport,
+        qa_report_used: lastReportObject,
         gemini_input_prompt: geminiInputPrompt,
         gemini_raw_output: result.text,
         parsed_plan: plan,
