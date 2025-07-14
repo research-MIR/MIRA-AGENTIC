@@ -104,30 +104,35 @@ serve(async (req) => {
     const rawMaskUrl = await uploadBufferToStorage(supabase, rawMaskCanvas.toBuffer('image/png'), job.user_id, 'raw_mask.png');
     console.log(`[Compositor][${requestId}] Raw mask uploaded to: ${rawMaskUrl}`);
 
-    const expansionRadius = Math.round(Math.min(width, height) * 0.12);
-    console.log(`[Compositor][${requestId}] Applying mask expansion with radius: ${expansionRadius}px`);
+    // --- NEW "SHADOW GLOW & SOLIDIFY" MASK EXPANSION LOGIC ---
+    const expansionRadius = Math.round(Math.min(width, height) * 0.06); // 6% radius for a ~12% diameter increase
+    console.log(`[Compositor][${requestId}] Applying mask expansion with shadow blur radius: ${expansionRadius}px`);
 
     const expansionCanvas = createCanvas(width, height);
     const expansionCtx = expansionCanvas.getContext('2d');
+    expansionCtx.fillStyle = 'black';
+    expansionCtx.fillRect(0, 0, width, height);
 
-    expansionCtx.filter = `blur(${expansionRadius}px)`;
-    expansionCtx.drawImage(rawMaskCanvas, 0, 0);
-    expansionCtx.filter = 'none';
-
-    const imageData = expansionCtx.getImageData(0, 0, width, height);
-    const data = imageData.data;
-    for (let i = 0; i < data.length; i += 4) {
-        if (data[i] > 5 || data[i+1] > 5 || data[i+2] > 5) { 
-            data[i] = 255; data[i + 1] = 255; data[i + 2] = 255;
-        }
-        data[i+3] = 255;
+    // Apply a "glow" by drawing the mask with a white shadow
+    expansionCtx.shadowColor = 'white';
+    expansionCtx.shadowBlur = expansionRadius;
+    
+    // Draw it multiple times to make the glow effect stronger and more solid
+    for (let i = 0; i < 5; i++) {
+        expansionCtx.drawImage(rawMaskCanvas, 0, 0);
     }
-    expansionCtx.putImageData(imageData, 0, 0);
-    console.log(`[Compositor][${requestId}] Mask expansion and solidification complete.`);
+
+    // Reset shadow effect
+    expansionCtx.shadowBlur = 0;
+
+    // Draw the original mask on top to ensure the original area is perfectly filled
+    expansionCtx.drawImage(rawMaskCanvas, 0, 0);
+    console.log(`[Compositor][${requestId}] Mask expansion complete.`);
+    // --- END OF NEW LOGIC ---
 
     const finalMaskBuffer = expansionCanvas.toBuffer('image/png');
     const finalMaskBase64 = encodeBase64(finalMaskBuffer);
-    console.log(`[Compositor][${requestId}] Final expanded mask encoded. Length: ${finalMaskBuffer.length}`);
+    console.log(`[Compositor][${requestId}] Final expanded mask encoded to PNG buffer. Length: ${finalMaskBuffer.length}`);
 
     const expandedMaskUrl = await uploadBufferToStorage(supabase, finalMaskBuffer, job.user_id, 'final_expanded_mask.png');
     if (!expandedMaskUrl) {
