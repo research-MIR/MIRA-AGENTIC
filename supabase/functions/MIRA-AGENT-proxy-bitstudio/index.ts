@@ -274,7 +274,7 @@ serve(async (req) => {
           headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}`, 'Content-Type': 'application/json' },
           body: JSON.stringify(vtoPayload)
         });
-        if (!vtoResponse.ok) throw new Error(`BitStudio VTO request failed: ${await vtoResponse.text()}`);
+        if (!vtoResponse.ok) throw new Error(`BitStudio VTO retry request failed: ${await vtoResponse.text()}`);
         const vtoResult = await vtoResponse.json();
         const taskId = vtoResult[0]?.id;
         if (!taskId) throw new Error("BitStudio did not return a task ID for the VTO job.");
