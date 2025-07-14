@@ -68,17 +68,30 @@ async function downloadAndEncodeImage(supabase: SupabaseClient, url: string): Pr
     if (url.includes('supabase.co')) {
         const urlObj = new URL(url);
         const pathSegments = urlObj.pathname.split('/');
+        
         const publicSegmentIndex = pathSegments.indexOf('public');
-        if (publicSegmentIndex === -1 || publicSegmentIndex + 1 >= pathSegments.length) throw new Error(`Could not parse bucket name from URL: ${url}`);
+        if (publicSegmentIndex === -1 || publicSegmentIndex + 1 >= pathSegments.length) {
+            throw new Error(`Could not parse bucket name from Supabase URL: ${url}`);
+        }
+        
         const bucketName = pathSegments[publicSegmentIndex + 1];
         const filePath = pathSegments.slice(publicSegmentIndex + 2).join('/');
-        if (!bucketName || !filePath) throw new Error(`Could not parse bucket or path from Supabase URL: ${url}`);
+
+        if (!bucketName || !filePath) {
+            throw new Error(`Could not parse bucket or path from Supabase URL: ${url}`);
+        }
+
         const { data, error } = await supabase.storage.from(bucketName).download(filePath);
-        if (error) throw new Error(`Failed to download image from Supabase storage (${filePath}): ${error.message}`);
+        if (error) {
+            throw new Error(`Failed to download image from Supabase storage (${filePath}): ${error.message}`);
+        }
         blob = data;
     } else {
+        // Handle external URLs (like BitStudio)
         const response = await fetch(url);
-        if (!response.ok) throw new Error(`Failed to download image from external URL ${url}. Status: ${response.statusText}`);
+        if (!response.ok) {
+            throw new Error(`Failed to download image from external URL ${url}. Status: ${response.statusText}`);
+        }
         blob = await response.blob();
     }
     const buffer = await blob.arrayBuffer();
@@ -114,10 +127,10 @@ serve(async (req) => {
     const { data: job, error: fetchError } = await supabase.from('mira-agent-bitstudio-jobs').select('metadata').eq('id', job_id).single();
     if (fetchError) throw fetchError;
 
-    const { retry_count = 0, fix_history = [], original_request_payload, source_image_url, reference_image_url, bitstudio_mask_image_id, bitstudio_garment_image_id } = job.metadata || {};
+    const { retry_count = 0, fix_history = [], original_request_payload, reference_image_url, bitstudio_mask_image_id, bitstudio_garment_image_id } = job.metadata || {};
     const { report: lastReport, failed_image_url } = qa_report_object;
 
-    if (!lastReport || !original_request_payload || !source_image_url || !reference_image_url || !failed_image_url) {
+    if (!lastReport || !original_request_payload || !reference_image_url || !failed_image_url) {
       throw new Error("Job is missing critical metadata for a fix attempt.");
     }
 
@@ -130,12 +143,14 @@ serve(async (req) => {
     await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'fixing' }).eq('id', job_id);
 
     console.log(`${logPrefix} Downloading images for multimodal context...`);
-    const [sourceData, referenceData, failedData] = await Promise.all([
-        downloadAndEncodeImage(supabase, source_image_url),
+    const [referenceData, failedData] = await Promise.all([
         downloadAndEncodeImage(supabase, reference_image_url),
         downloadAndEncodeImage(supabase, failed_image_url)
     ]);
-    console.log(`${logPrefix} All images downloaded and encoded.`);
+    
+    // THE FIX: The failed image IS the new source image for the next attempt.
+    const sourceData = failedData;
+    console.log(`${logPrefix} All images downloaded. The FAILED image will now be used as the SOURCE for the next attempt.`);
 
     console.log(`${logPrefix} Uploading failed image as new source for inpainting...`);
     const newSourceImageId = await uploadToBitStudio(failedData.blob, 'inpaint-base', 'failed_result_as_source.png');
@@ -147,11 +162,11 @@ serve(async (req) => {
         { text: `--- QA REPORT --- \n ${JSON.stringify(lastReport, null, 2)}` },
         { text: `--- ORIGINAL PAYLOAD --- \n ${JSON.stringify(original_request_payload, null, 2)}` },
         { text: `--- IMAGE IDENTIFIERS --- \n person_image_id: ${newSourceImageId}\n mask_image_id: ${bitstudio_mask_image_id}\n reference_image_id: ${bitstudio_garment_image_id}` },
-        { text: `--- SOURCE IMAGE ---` },
+        { text: `--- SOURCE IMAGE (This is the previous failed attempt) ---` },
         { inlineData: { mimeType: sourceData.mimeType, data: sourceData.base64 } },
         { text: `--- REFERENCE GARMENT ---` },
         { inlineData: { mimeType: referenceData.mimeType, data: referenceData.base64 } },
-        { text: `--- FAILED RESULT TO ANALYZE ---` },
+        { text: `--- FAILED RESULT TO ANALYZE (This is the same as the source image) ---` },
         { inlineData: { mimeType: failedData.mimeType, data: failedData.base64 } },
     ];
     const contents: Content[] = [{ role: 'user', parts: geminiInputParts }];
@@ -197,6 +212,8 @@ serve(async (req) => {
         const payload = plan.payload;
         if (!payload) throw new Error("Plan action 'retry' is missing the 'payload' parameter.");
         
+        console.log(`${logPrefix} AI decided to RETRY. New payload:`, JSON.stringify(payload, null, 2));
+        
         await supabase.from('mira-agent-bitstudio-jobs').update({ 
             metadata: { ...job.metadata, fix_history: [...fix_history, currentFixAttemptLog] }
         }).eq('id', job_id);
@@ -213,6 +230,7 @@ serve(async (req) => {
       }
       case 'give_up': {
         const reason = plan.reason || 'Automated repair failed after multiple attempts.';
+        console.log(`${logPrefix} AI decided to GIVE UP. Reason: ${reason}`);
         await supabase.from('mira-agent-bitstudio-jobs').update({ 
             status: 'permanently_failed', 
             error_message: reason,
