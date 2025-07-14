@@ -17,7 +17,6 @@ export const useVTOJobs = () => {
         .from('mira-agent-bitstudio-jobs')
         .select('*, batch_pair_job_id')
         .eq('user_id', session.user.id)
-        .in('status', ['complete', 'failed', 'permanently_failed'])
         .order('created_at', { ascending: false })
         .limit(50);
 
@@ -37,18 +36,13 @@ export const useVTOJobs = () => {
       const bitstudioJobs: BitStudioJob[] = (bitstudioResult.data as any[]) || [];
       const batchPairJobs = batchPairResult.data || [];
 
-      // Separate base jobs, they are always included
-      const baseJobs = bitstudioJobs.filter(j => j.mode === 'base');
+      // Create a set of batch_pair_job_ids that have already been processed in the main bitstudio table.
+      // This is the key to avoiding stale statuses.
+      const processedPairJobIds = new Set(bitstudioJobs.map(j => j.batch_pair_job_id).filter(Boolean));
 
-      // Get pro jobs that are already in bitstudio_jobs
-      const proBitstudioJobs = bitstudioJobs.filter(j => j.mode === 'inpaint');
-
-      // Get the IDs of pro jobs that have already been processed
-      const processedProJobIds = new Set(proBitstudioJobs.map(j => j.batch_pair_job_id).filter(Boolean));
-
-      // Get pending pro jobs that have NOT been processed yet
+      // Filter out pending/segmenting jobs if a final version of them already exists.
       const pendingProJobs = batchPairJobs
-        .filter(job => !processedProJobIds.has(job.id))
+        .filter(job => !processedPairJobIds.has(job.id))
         .map(job => ({
           id: job.id,
           status: job.status as BitStudioJob['status'],
@@ -63,7 +57,7 @@ export const useVTOJobs = () => {
           }
         } as BitStudioJob));
 
-      const unifiedJobs: BitStudioJob[] = [...baseJobs, ...proBitstudioJobs, ...pendingProJobs];
+      const unifiedJobs: BitStudioJob[] = [...bitstudioJobs, ...pendingProJobs];
 
       unifiedJobs.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
