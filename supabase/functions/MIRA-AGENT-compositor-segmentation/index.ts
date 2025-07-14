@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { createCanvas, loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
+import { createCanvas, loadImage, Canvas } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
 import { decodeBase64, encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const corsHeaders = {
@@ -24,6 +24,25 @@ async function uploadBufferToStorage(supabase: SupabaseClient, buffer: Uint8Arra
     }
     const { data: { publicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
     return publicUrl;
+}
+
+/**
+ * Dilate an opaque-white / transparent-black mask by N pixels.
+ * Uses 4-neighbour copies; ≈ Chebyshev distance.
+ */
+function dilateMask(srcCanvas: Canvas, iterations: number): Canvas {
+  const work = createCanvas(srcCanvas.width(), srcCanvas.height());
+  const wctx = work.getContext('2d');
+  wctx.drawImage(srcCanvas, 0, 0); // start with original
+
+  for (let i = 0; i < iterations; i++) {
+    // copy the current mask one pixel in each cardinal direction
+    wctx.drawImage(work, -1, 0);
+    wctx.drawImage(work, 1, 0);
+    wctx.drawImage(work, 0, -1);
+    wctx.drawImage(work, 0, 1);
+  }
+  return work;
 }
 
 serve(async (req) => {
@@ -95,31 +114,20 @@ serve(async (req) => {
     const rawMaskUrl = await uploadBufferToStorage(supabase, previewMaskCanvas.toBuffer('image/png'), job.user_id, 'raw_mask.png');
     console.log(`[Compositor][${requestId}] Raw mask uploaded to: ${rawMaskUrl}`);
 
-    const expansionRadius = Math.round(Math.min(width, height) * 0.06);
-    console.log(`[Compositor][${requestId}] Applying mask expansion with blur filter radius: ${expansionRadius}px`);
+    // --- CORRECTED MORPHOLOGICAL DILATION LOGIC ---
+    const expansionPx = Math.max(1, Math.round(Math.min(width, height) * 0.06));
+    console.log(`[Compositor][${requestId}] Expanding mask by ${expansionPx}px using iterative dilation.`);
 
-    const expansionCanvas = createCanvas(width, height);
-    const expansionCtx = expansionCanvas.getContext('2d');
+    const expandedCanvas = dilateMask(rawMaskCanvas, expansionPx);
 
-    expansionCtx.filter = `blur(${expansionRadius}px)`;
-    expansionCtx.drawImage(rawMaskCanvas, 0, 0);
-    expansionCtx.filter = 'none';
-
+    // Binarize the result to ensure pure black and white
     const finalCanvas = createCanvas(width, height);
     const finalCtx = finalCanvas.getContext('2d');
     finalCtx.fillStyle = 'black';
     finalCtx.fillRect(0, 0, width, height);
-    finalCtx.drawImage(expansionCanvas, 0, 0);
-
-    const imageData = finalCtx.getImageData(0, 0, width, height);
-    const data = imageData.data;
-    for (let i = 0; i < data.length; i += 4) {
-        if (data[i] > 5 || data[i+1] > 5 || data[i+2] > 5) { 
-            data[i] = 255; data[i + 1] = 255; data[i + 2] = 255;
-        }
-    }
-    finalCtx.putImageData(imageData, 0, 0);
-    console.log(`[Compositor][${requestId}] Mask expansion and solidification complete.`);
+    finalCtx.drawImage(expandedCanvas, 0, 0);
+    console.log(`[Compositor][${requestId}] Mask expansion complete.`);
+    // --- END OF CORRECTED LOGIC ---
 
     const finalMaskBuffer = finalCanvas.toBuffer('image/png');
     const finalMaskBase64 = encodeBase64(finalMaskBuffer);
