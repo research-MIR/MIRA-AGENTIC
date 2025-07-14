@@ -1,7 +1,6 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { createCanvas, loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
-import { decodeBase64, encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
+import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -55,7 +54,7 @@ async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string)
     const filePath = pathSegments.slice(publicSegmentIndex + 2).join('/');
 
     if (!bucketName || !filePath) {
-        throw new Error(`Could not parse bucket or path from URL: ${publicUrl}`);
+        throw new Error(`Could not parse bucket or path from Supabase URL: ${publicUrl}`);
     }
 
     const { data, error } = await supabase.storage.from(bucketName).download(filePath);
@@ -88,7 +87,38 @@ serve(async (req) => {
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
   
   try {
-    const body = await req.json();
+    let body;
+    let imageFile = null;
+    let originalFilename = 'image.png';
+    let sourceImageUrlForCheck: string | null = null;
+
+    const contentType = req.headers.get('content-type');
+    if (contentType && contentType.includes('multipart/form-data')) {
+      const formData = await req.formData();
+      body = Object.fromEntries(formData.entries());
+      const image = formData.get('image');
+      if (image instanceof File) {
+        imageFile = image;
+        originalFilename = image.name;
+      }
+    } else {
+      body = await req.json();
+      if (body.image_url) {
+        sourceImageUrlForCheck = body.image_url;
+        const imageResponse = await fetch(body.image_url);
+        if (!imageResponse.ok) throw new Error(`Failed to download image from URL: ${imageResponse.statusText}`);
+        imageFile = await imageResponse.blob();
+        originalFilename = body.image_url.split('/').pop() || 'image.png';
+      } else if (body.base64_image_data) {
+        const imageBuffer = decodeBase64(body.base64_image_data);
+        imageFile = new Blob([
+          imageBuffer
+        ], {
+          type: body.mime_type || 'image/png'
+        });
+        originalFilename = 'agent_history_image.png';
+      }
+    }
     const { retry_job_id, payload: retryPayload } = body;
 
     if (retry_job_id) {
@@ -150,7 +180,7 @@ serve(async (req) => {
       const jobIds: string[] = [];
 
       if (mode === 'inpaint') {
-        const { source_image_url, mask_image_url, reference_image_url, prompt, denoise, resolution, mask_expansion_percent, num_attempts, debug_assets } = body;
+        const { source_image_url, mask_image_url, reference_image_url, prompt, denoise, resolution, mask_expansion_percent, num_images, debug_assets } = body;
         if (!source_image_url || !mask_image_url) throw new Error("source_image_url and mask_image_url are required for inpaint mode.");
 
         const [sourceBlob, maskBlob] = await Promise.all([
@@ -169,7 +199,7 @@ serve(async (req) => {
           denoise: denoise || 0.99,
           resolution: resolution || 'standard',
           mask_expansion_percent: mask_expansion_percent || 3,
-          num_images: num_attempts || 1,
+          num_images: num_images || 1,
         };
 
         let referenceImageId: string | null = null;
