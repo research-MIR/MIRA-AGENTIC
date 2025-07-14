@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { createCanvas, loadImage, Canvas } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
-import { decodeBase64, encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
+import { createCanvas, loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
+import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -26,33 +26,6 @@ async function uploadBufferToStorage(supabase: SupabaseClient, buffer: Uint8Arra
     return publicUrl;
 }
 
-/**
- * Dilate an opaque-white / transparent-black mask by N pixels.
- * Uses a safe, double-buffer technique with 4-neighbour copies.
- */
-function dilateMask(srcCanvas: Canvas, iterations: number): Canvas {
-  const w = srcCanvas.width;
-  const h = srcCanvas.height;
-  let curr = srcCanvas;
-  let buff = createCanvas(w, h);
-
-  for (let i = 0; i < iterations; i++) {
-    const bctx = buff.getContext('2d');
-    bctx.clearRect(0, 0, w, h);
-    bctx.drawImage(curr,  0,  0);
-    bctx.drawImage(curr, -1,  0);
-    bctx.drawImage(curr,  1,  0);
-    bctx.drawImage(curr,  0, -1);
-    bctx.drawImage(curr,  0,  1);
-
-    // swap buffers
-    const tmp = curr;
-    curr = buff;
-    buff = tmp;
-  }
-  return curr; // canvas that holds the final dilated mask
-}
-
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -70,7 +43,6 @@ serve(async (req) => {
     
     const requestId = `compositor-${aggregationJobId}`;
     console.log(`[Compositor][${requestId}] Function invoked.`);
-    console.time(`[Compositor][${requestId}] Full Process`);
 
     const { data: job, error: fetchError } = await supabase
       .from('mira-agent-mask-aggregation-jobs')
@@ -87,14 +59,13 @@ serve(async (req) => {
     const sourceImage = await loadImage(sourceImageBuffer);
     const width = sourceImage.width();
     const height = sourceImage.height();
-    console.log(`[Compositor][${requestId}] Source image decoded. Dimensions: ${width}x${height}`);
     
     const rawMaskCanvas = createCanvas(width, height);
     const rawMaskCtx = rawMaskCanvas.getContext('2d');
-    rawMaskCtx.clearRect(0, 0, width, height);
+    rawMaskCtx.fillStyle = 'black';
+    rawMaskCtx.fillRect(0, 0, width, height);
 
     const allMasks = (job.results || []).flat().filter((item: any) => item && item.mask && item.box_2d);
-    console.log(`[Compositor][${requestId}] Found ${allMasks.length} valid masks to process.`);
 
     for (const maskData of allMasks) {
         const maskBase64 = maskData.mask.startsWith('data:image/png;base64,') 
@@ -114,61 +85,36 @@ serve(async (req) => {
         }
     }
 
-    const previewMaskCanvas = createCanvas(width, height);
-    const previewMaskCtx = previewMaskCanvas.getContext('2d');
-    previewMaskCtx.fillStyle = 'black';
-    previewMaskCtx.fillRect(0, 0, width, height);
-    previewMaskCtx.drawImage(rawMaskCanvas, 0, 0);
-    const rawMaskUrl = await uploadBufferToStorage(supabase, previewMaskCanvas.toBuffer('image/png'), job.user_id, 'raw_mask.png');
+    const rawMaskUrl = await uploadBufferToStorage(supabase, rawMaskCanvas.toBuffer('image/png'), job.user_id, 'raw_mask.png');
+    if (!rawMaskUrl) throw new Error("Failed to upload the raw mask to storage.");
     console.log(`[Compositor][${requestId}] Raw mask uploaded to: ${rawMaskUrl}`);
 
-    // --- CORRECTED MORPHOLOGICAL DILATION LOGIC ---
-    const expansionPx = Math.max(1, Math.round(Math.min(width, height) * 0.06));
-    console.log(`[Compositor][${requestId}] Expanding mask by ${expansionPx}px using iterative dilation.`);
-
-    const expandedCanvas = dilateMask(rawMaskCanvas, expansionPx);
-
-    // Binarize the result to ensure pure black and white
-    const finalCanvas = createCanvas(width, height);
-    const finalCtx = finalCanvas.getContext('2d');
-    finalCtx.fillStyle = 'black';
-    finalCtx.fillRect(0, 0, width, height);
-    finalCtx.drawImage(expandedCanvas, 0, 0);
-    console.log(`[Compositor][${requestId}] Mask expansion complete.`);
-    // --- END OF CORRECTED LOGIC ---
-
-    const finalMaskBuffer = finalCanvas.toBuffer('image/png');
-    const finalMaskBase64 = encodeBase64(finalMaskBuffer);
-    const expandedMaskUrl = await uploadBufferToStorage(supabase, finalMaskBuffer, job.user_id, 'final_expanded_mask.png');
-    if (!expandedMaskUrl) throw new Error("Failed to upload the final composited mask to storage.");
-    console.log(`[Compositor][${requestId}] Final expanded mask uploaded to: ${expandedMaskUrl}`);
-
-    const { data: parentPairJob } = await supabase
+    const { data: parentPairJob, error: parentFetchError } = await supabase
         .from('mira-agent-batch-inpaint-pair-jobs')
-        .select('id, metadata')
+        .select('id')
         .eq('metadata->>aggregation_job_id', aggregationJobId)
         .maybeSingle();
 
-    if (parentPairJob) {
-        const debug_assets = { raw_mask_url: rawMaskUrl, expanded_mask_url: expandedMaskUrl };
-        await supabase.from('mira-agent-batch-inpaint-pair-jobs')
-            .update({ metadata: { ...parentPairJob.metadata, debug_assets } })
-            .eq('id', parentPairJob.id);
-        await supabase.functions.invoke('MIRA-AGENT-worker-batch-inpaint-step2', {
-            body: { pair_job_id: parentPairJob.id, final_mask_url: expandedMaskUrl }
+    if (parentFetchError) {
+        console.warn(`[Compositor][${requestId}] Could not check for parent job: ${parentFetchError.message}`);
+    } else if (parentPairJob) {
+        console.log(`[Compositor][${requestId}] Found parent job ${parentPairJob.id}. Invoking expander function...`);
+        await supabase.functions.invoke('MIRA-AGENT-expander-mask', {
+            body: { 
+                raw_mask_url: rawMaskUrl, 
+                user_id: job.user_id,
+                parent_pair_job_id: parentPairJob.id
+            }
         });
+    } else {
+        console.warn(`[Compositor][${requestId}] No parent job found for aggregation job. Expansion step will not be triggered.`);
     }
 
     await supabase.from('mira-agent-mask-aggregation-jobs')
-      .update({ 
-          status: 'complete', 
-          final_mask_base64: finalMaskBase64,
-          metadata: { final_mask_url: expandedMaskUrl, raw_mask_url: rawMaskUrl }
-      })
+      .update({ status: 'complete', metadata: { raw_mask_url: rawMaskUrl } })
       .eq('id', aggregationJobId);
     
-    console.timeEnd(`[Compositor][${requestId}] Full Process`);
-    return new Response(JSON.stringify({ success: true, finalMaskUrl: expandedMaskUrl }), {
+    return new Response(JSON.stringify({ success: true, rawMaskUrl }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });
