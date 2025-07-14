@@ -24,7 +24,7 @@ export const useVTOJobs = () => {
         .from('mira-agent-batch-inpaint-pair-jobs')
         .select('*')
         .eq('user_id', session.user.id)
-        .in('status', ['pending', 'segmenting', 'delegated'])
+        .in('status', ['pending', 'segmenting', 'delegated', 'failed', 'permanently_failed']) // <-- THE FIX
         .order('created_at', { ascending: false })
         .limit(20);
 
@@ -36,11 +36,8 @@ export const useVTOJobs = () => {
       const bitstudioJobs: BitStudioJob[] = (bitstudioResult.data as any[]) || [];
       const batchPairJobs = batchPairResult.data || [];
 
-      // Create a set of batch_pair_job_ids that have already been processed in the main bitstudio table.
-      // This is the key to avoiding stale statuses.
       const processedPairJobIds = new Set(bitstudioJobs.map(j => j.batch_pair_job_id).filter(Boolean));
 
-      // Filter out pending/segmenting jobs if a final version of them already exists.
       const pendingProJobs = batchPairJobs
         .filter(job => !processedPairJobIds.has(job.id))
         .map(job => ({
@@ -49,8 +46,8 @@ export const useVTOJobs = () => {
           source_person_image_url: job.source_person_image_url,
           source_garment_image_url: job.source_garment_image_url,
           final_image_url: undefined,
-          error_message: undefined,
-          mode: 'inpaint', // Explicitly set mode
+          error_message: job.error_message,
+          mode: 'inpaint',
           created_at: job.created_at,
           metadata: {
             prompt_used: job.prompt_appendix
