@@ -5,7 +5,7 @@ import { GoogleGenAI, Type, Content, GenerationResult } from 'https://esm.sh/@go
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-const MODEL_NAME = "gemini-2.5-pro-preview-06-05"; // Aligning with master-worker for reliability
+const MODEL_NAME = "gemini-2.5-pro-preview-06-05";
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1500;
 
@@ -57,10 +57,43 @@ const tools = [
   },
 ];
 
-function parseFunctionCall(result: GenerationResult): { name: string; args: any } | null {
+function extractJsonFromText(text: string): any | null {
+    if (!text) return null;
+    const match = text.match(/```json\s*([\s\S]*?)\s*```/);
+    if (match && match[1]) {
+        try {
+            return JSON.parse(match[1]);
+        } catch (e) {
+            console.error("Failed to parse extracted JSON block:", e);
+            return null;
+        }
+    }
+    try {
+        return JSON.parse(text);
+    } catch (e) {
+        return null;
+    }
+}
+
+function getToolCallFromResponse(result: GenerationResult): { name: string; args: any } | null {
     if (result.functionCalls && result.functionCalls.length > 0) {
+        console.log("Found direct function call from model.");
         return result.functionCalls[0];
     }
+
+    const text = result.text;
+    if (text) {
+        console.log("No direct function call. Attempting to extract JSON payload from text response.");
+        const extractedJson = extractJsonFromText(text);
+        if (extractedJson) {
+            console.log("Successfully extracted JSON payload from text. Reconstructing 'execute_vto_job' tool call.");
+            return {
+                name: 'execute_vto_job',
+                args: { payload: extractedJson }
+            };
+        }
+    }
+    
     return null;
 }
 
@@ -133,10 +166,9 @@ serve(async (req) => {
         throw new Error("AI planner failed to respond after all retries.");
     }
 
-    const call = parseFunctionCall(result);
+    const call = getToolCallFromResponse(result);
 
     if (!call) {
-      // Enhanced logging to capture the full response object for debugging
       console.error(`${logPrefix} Orchestrator LLM did not return a valid function call. Full raw response object:`, JSON.stringify(result, null, 2));
       throw new Error("Orchestrator LLM did not return a valid function call.");
     }
