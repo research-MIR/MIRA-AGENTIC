@@ -31,16 +31,40 @@ const VirtualTryOnPro = ({
   const [isDebugModalOpen, setIsDebugModalOpen] = useState(false);
 
   const renderJobResult = (job: BitStudioJob) => {
-    if (job.status === 'failed' || job.status === 'permanently_failed') {
-      return <p className="text-destructive text-sm p-2">{t('jobFailed', { errorMessage: job.error_message })}</p>;
+    const isFailed = job.status === 'failed' || job.status === 'permanently_failed';
+    const hasDebugAssets = !!job.metadata?.debug_assets;
+
+    if (isFailed) {
+      return (
+        <div className="space-y-4">
+          <div className="relative group w-full h-full">
+            <SecureImageDisplay imageUrl={job.metadata?.source_image_url || job.source_person_image_url || null} alt="Source of Failed Job" />
+            {hasDebugAssets && (
+              <Button 
+                variant="secondary" 
+                className="absolute bottom-2 right-2"
+                onClick={(e) => { e.stopPropagation(); setIsDebugModalOpen(true); }}
+              >
+                <Eye className="mr-2 h-4 w-4" />
+                Show Debug
+              </Button>
+            )}
+          </div>
+          <Alert variant="destructive">
+            <AlertTitle>Job Failed</AlertTitle>
+            <AlertDescription>{job.error_message || "An unknown error occurred."}</AlertDescription>
+          </Alert>
+        </div>
+      );
     }
+
     if (job.status === 'complete' && job.final_image_url) {
       const verification = job.metadata?.verification_result;
       return (
         <div className="space-y-4">
           <div className="relative group w-full h-full">
             <SecureImageDisplay imageUrl={job.final_image_url} alt="Final Result" onClick={() => showImage({ images: [{ url: job.final_image_url! }], currentIndex: 0 })} />
-            {job.metadata?.debug_assets && (
+            {hasDebugAssets && (
               <Button 
                 variant="secondary" 
                 className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
