@@ -119,7 +119,7 @@ serve(async (req) => {
         originalFilename = 'agent_history_image.png';
       }
     }
-    const { retry_job_id, payload: retryPayload } = body;
+    const { retry_job_id, payload: retryPayload, new_source_image_id } = body;
 
     if (retry_job_id) {
       // --- RETRY LOGIC ---
@@ -136,7 +136,10 @@ serve(async (req) => {
 
       if (jobToRetry.mode === 'inpaint') {
         console.log(`[BitStudioProxy][${requestId}] Executing INPAINT retry logic.`);
-        const inpaintUrl = `${BITSTUDIO_API_BASE}/images/${jobToRetry.bitstudio_person_image_id}/inpaint`;
+        const sourceIdForInpaint = new_source_image_id || jobToRetry.bitstudio_person_image_id;
+        if (!sourceIdForInpaint) throw new Error("Cannot retry inpaint: missing source image ID.");
+        
+        const inpaintUrl = `${BITSTUDIO_API_BASE}/images/${sourceIdForInpaint}/inpaint`;
         apiResponse = await fetch(inpaintUrl, {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}`, 'Content-Type': 'application/json' },
@@ -161,6 +164,7 @@ serve(async (req) => {
 
       const { error: updateError } = await supabase.from('mira-agent-bitstudio-jobs').update({
         status: 'queued',
+        bitstudio_person_image_id: new_source_image_id || jobToRetry.bitstudio_person_image_id, // Update if new one was provided
         bitstudio_task_id: newTaskId,
         metadata: { ...jobToRetry.metadata, prompt_used: retryPayload.prompt, retry_count: (jobToRetry.metadata.retry_count || 0) + 1 },
         error_message: null,

@@ -6,6 +6,8 @@ import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
+const BITSTUDIO_API_KEY = Deno.env.get('BITSTUDIO_API_KEY');
+const BITSTUDIO_API_BASE = 'https://api.bitstudio.ai';
 const MODEL_NAME = "gemini-2.5-pro-preview-06-05";
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1500;
@@ -61,7 +63,8 @@ function extractJson(text: string): any | null {
     try { return JSON.parse(text); } catch (e) { return null; }
 }
 
-async function downloadAndEncodeImage(supabase: SupabaseClient, url: string): Promise<{ base64: string, mimeType: string }> {
+async function downloadAndEncodeImage(supabase: SupabaseClient, url: string): Promise<{ blob: Blob, base64: string, mimeType: string }> {
+    let blob: Blob;
     if (url.includes('supabase.co')) {
         const urlObj = new URL(url);
         const pathSegments = urlObj.pathname.split('/');
@@ -70,17 +73,32 @@ async function downloadAndEncodeImage(supabase: SupabaseClient, url: string): Pr
         const bucketName = pathSegments[publicSegmentIndex + 1];
         const filePath = pathSegments.slice(publicSegmentIndex + 2).join('/');
         if (!bucketName || !filePath) throw new Error(`Could not parse bucket or path from Supabase URL: ${url}`);
-        const { data: blob, error } = await supabase.storage.from(bucketName).download(filePath);
+        const { data, error } = await supabase.storage.from(bucketName).download(filePath);
         if (error) throw new Error(`Failed to download image from Supabase storage (${filePath}): ${error.message}`);
-        const buffer = await blob.arrayBuffer();
-        return { base64: encodeBase64(buffer), mimeType: blob.type || 'image/png' };
+        blob = data;
     } else {
         const response = await fetch(url);
         if (!response.ok) throw new Error(`Failed to download image from external URL ${url}. Status: ${response.statusText}`);
-        const blob = await response.blob();
-        const buffer = await blob.arrayBuffer();
-        return { base64: encodeBase64(buffer), mimeType: blob.type || 'image/png' };
+        blob = await response.blob();
     }
+    const buffer = await blob.arrayBuffer();
+    const base64 = encodeBase64(buffer);
+    return { blob, base64, mimeType: blob.type || 'image/png' };
+}
+
+async function uploadToBitStudio(fileBlob: Blob, type: 'inpaint-base', filename: string): Promise<string> {
+  const formData = new FormData();
+  formData.append('file', fileBlob, filename);
+  formData.append('type', type);
+  const response = await fetch(`${BITSTUDIO_API_BASE}/images`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}` },
+    body: formData,
+  });
+  if (!response.ok) throw new Error(`BitStudio upload failed for type ${type}: ${await response.text()}`);
+  const result = await response.json();
+  if (!result.id) throw new Error(`BitStudio upload for ${type} did not return an ID.`);
+  return result.id;
 }
 
 serve(async (req) => {
@@ -96,7 +114,7 @@ serve(async (req) => {
     const { data: job, error: fetchError } = await supabase.from('mira-agent-bitstudio-jobs').select('metadata').eq('id', job_id).single();
     if (fetchError) throw fetchError;
 
-    const { retry_count = 0, fix_history = [], original_request_payload, source_image_url, reference_image_url, bitstudio_person_image_id, bitstudio_mask_image_id, bitstudio_garment_image_id } = job.metadata || {};
+    const { retry_count = 0, fix_history = [], original_request_payload, source_image_url, reference_image_url, bitstudio_mask_image_id, bitstudio_garment_image_id } = job.metadata || {};
     const { report: lastReport, failed_image_url } = qa_report_object;
 
     if (!lastReport || !original_request_payload || !source_image_url || !reference_image_url || !failed_image_url) {
@@ -119,12 +137,18 @@ serve(async (req) => {
     ]);
     console.log(`${logPrefix} All images downloaded and encoded.`);
 
+    // --- THE CRITICAL FIX: Upload the failed image to get a new source ID ---
+    console.log(`${logPrefix} Uploading failed image as new source for inpainting...`);
+    const newSourceImageId = await uploadToBitStudio(failedData.blob, 'inpaint-base', 'failed_result_as_source.png');
+    console.log(`${logPrefix} New source image ID from BitStudio: ${newSourceImageId}`);
+    // --- END OF CRITICAL FIX ---
+
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
     const geminiInputParts: Part[] = [
         { text: `A VTO job failed quality assurance. Here is the report and the original request payload that caused the failure. Your task is to construct a new, complete payload to fix the issue.` },
         { text: `--- QA REPORT --- \n ${JSON.stringify(lastReport, null, 2)}` },
         { text: `--- ORIGINAL PAYLOAD --- \n ${JSON.stringify(original_request_payload, null, 2)}` },
-        { text: `--- IMAGE IDENTIFIERS --- \n person_image_id: ${bitstudio_person_image_id}\n mask_image_id: ${bitstudio_mask_image_id}\n reference_image_id: ${bitstudio_garment_image_id}` },
+        { text: `--- IMAGE IDENTIFIERS --- \n person_image_id: ${newSourceImageId}\n mask_image_id: ${bitstudio_mask_image_id}\n reference_image_id: ${bitstudio_garment_image_id}` },
         { text: `--- SOURCE IMAGE ---` },
         { inlineData: { mimeType: sourceData.mimeType, data: sourceData.base64 } },
         { text: `--- REFERENCE GARMENT ---` },
@@ -179,7 +203,11 @@ serve(async (req) => {
         }).eq('id', job_id);
 
         const { error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
-          body: { retry_job_id: job_id, payload: payload }
+          body: { 
+            retry_job_id: job_id, 
+            payload: payload,
+            new_source_image_id: newSourceImageId // Pass the new ID to the proxy
+          }
         });
         if (proxyError) throw proxyError;
         break;
