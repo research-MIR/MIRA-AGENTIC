@@ -181,7 +181,7 @@ const Refine = () => {
               <CardContent className="space-y-4">
                 <div>
                   <Label>{t('upscaleFactor')}: {upscaleFactor}x</Label>
-                  <Slider value={[upscaleFactor]} onValueChange={(v) => setUpscaleFactor(v[0])} min={1} max={3} step={0.1} />
+                  <Slider value={[upscaleFactor]} onValueChange={(v) => setUpscaleFactor(v[0])} min={1} max={4} step={0.1} />
                 </div>
                 <div>
                   <div className="flex items-center gap-2 mb-1">
