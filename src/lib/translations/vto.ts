@@ -134,6 +134,12 @@ Prima di tentare di nuovo, controlla se il tuo lavoro appare nella lista dei "Jo
     useEntirePack: "Usa Intero Pack",
     provideInputs: "1. Fornisci gli Input",
     createBatch: "Crea Batch",
+    selectEngine: "Seleziona Motore",
+    engine: "Motore",
+    googleVTO: "Google VTO",
+    bitstudioVTO: "BitStudio VTO",
+    googleVTODescription: "Veloce e ottimo per risultati rapidi e concettuali.",
+    bitstudioVTODescription: "Più lento ma con una qualità e un realismo superiori, ideale per risultati finali.",
   },
   en: {
     proMode: "Pro Mode",
@@ -158,6 +164,8 @@ Prima di tentare di nuovo, controlla se il tuo lavoro appare nella lista dei "Jo
     uploadPeople: "Upload People",
     selectMultiplePersonImages: "Select multiple person images.",
     randomPairsDescription: "Upload lists of people and garments. The system will randomly pair them up to create diverse combinations.",
+    uploadGarments: "Upload Garments",
+    selectMultipleGarmentImages: "Select multiple garment images.",
     precisePairsDescription: "Create specific model-garment pairs one by one for full control over the output.",
     person: "Person",
     garment: "Garment",
@@ -214,16 +222,16 @@ The **Reference Image** is the key. The AI analyzes the garment in your referenc
 -   A **shoe** reference will replace the shoes.
 -   A **shirt** reference will replace the shirt.
 
-#### 3. Ideal for Similar Garments
-For best results, use this tool to swap similar types of clothing. For example:
--   Replacing a t-shirt on a model with another t-shirt.
--   Changing the texture or color of an existing jacket.
-It is less effective at placing a garment on a person wearing something completely different (e.g., putting a t-shirt on a model wearing a bulky winter coat).
+#### 3. Ideale per Indumenti Simili
+Per i migliori risultati, usa questo strumento per scambiare tipi di abbigliamento simili. Per esempio:
+-   Sostituire una t-shirt su un modello con un'altra t-shirt.
+-   Cambiare la texture o il colore di una giacca esistente.
+È meno efficace nel posizionare un indumento su una persona che indossa qualcosa di completamente diverso (es. mettere una t-shirt a un modello che indossa un ingombrante cappotto invernale).
 
-#### 4. One Garment at a Time
-This tool processes one garment at a time. If you need to create a full outfit with multiple pieces (e.g., a t-shirt and jeans), you must perform two separate operations:
-1.  First, run the process with the person and the t-shirt reference.
-2.  Then, use the resulting image as your new source image and run the process again with the jeans reference.
+#### 4. Un Capo alla Volta
+Questo strumento elabora un indumento alla volta. Se hai bisogno di creare un outfit completo con più pezzi (es. una t-shirt e dei jeans), devi eseguire un processo iterativo (a più passaggi).
+1.  Prima, esegui il processo con la persona e il riferimento della t-shirt.
+2.  Poi, usa l'immagine risultante come nuova immagine sorgente ed esegui nuovamente il processo con il riferimento dei jeans.
 
 #### 5. Impostazioni PRO Spiegate
 - **Numero di Tentativi:** Genera più variazioni della stessa richiesta di inpainting. Utile per ottenere diverse interpretazioni dall'IA.
@@ -268,5 +276,11 @@ Before trying again, please check if your job shows up in the "Recent Jobs" list
     useEntirePack: "Use Entire Pack",
     provideInputs: "1. Provide Inputs",
     createBatch: "Create Batch",
+    selectEngine: "Select Engine",
+    engine: "Engine",
+    googleVTO: "Google VTO",
+    bitstudioVTO: "BitStudio VTO",
+    googleVTODescription: "Fast and great for quick, conceptual results.",
+    bitstudioVTODescription: "Slower but with superior quality and realism, ideal for final results.",
   },
 };

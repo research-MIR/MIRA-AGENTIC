@@ -12,9 +12,13 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RecentVtoPacks } from "@/components/VTO/RecentVtoPacks";
 import { optimizeImage, sanitizeFilename } from "@/lib/utils";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Label } from "@/components/ui/label";
+import { Card, CardContent } from "@/components/ui/card";
 
 type WizardStep = 'select-mode' | 'provide-inputs' | 'review-queue';
 type VtoMode = 'one-to-many' | 'precise-pairs' | 'random-pairs';
+type Engine = 'google' | 'bitstudio';
 
 const VirtualTryOnPacks = () => {
   const { supabase, session } = useSession();
@@ -23,6 +27,7 @@ const VirtualTryOnPacks = () => {
 
   const [step, setStep] = useState<WizardStep>('select-mode');
   const [mode, setMode] = useState<VtoMode | null>(null);
+  const [engine, setEngine] = useState<Engine>('bitstudio');
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -83,7 +88,8 @@ const VirtualTryOnPacks = () => {
       const { error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-vto-packs', {
         body: {
           pairs: pairsForBackend,
-          user_id: session?.user?.id
+          user_id: session?.user?.id,
+          engine: engine,
         }
       });
 
@@ -120,14 +126,41 @@ const VirtualTryOnPacks = () => {
         return <VtoInputProvider mode={mode!} onQueueReady={handleQueueReady} onGoBack={handleGoBack} />;
       case 'review-queue':
         return (
-          <div className="max-w-2xl mx-auto space-y-6">
-            <VtoReviewQueue queue={queue} />
-            <div className="flex justify-between items-center">
-              <Button variant="outline" onClick={handleGoBack}>{t('goBack')}</Button>
-              <Button size="lg" onClick={handleGenerate} disabled={isLoading}>
-                {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
-                {t('generateNImages', { count: queue.length })}
-              </Button>
+          <div className="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-8">
+            <div className="md:col-span-2">
+              <VtoReviewQueue queue={queue} />
+            </div>
+            <div className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>{t('selectEngine')}</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <RadioGroup value={engine} onValueChange={(v) => setEngine(v as Engine)}>
+                    <div className="flex items-start space-x-2 p-4 border rounded-md has-[:checked]:border-primary">
+                      <RadioGroupItem value="bitstudio" id="bitstudio" />
+                      <Label htmlFor="bitstudio" className="w-full">
+                        <span className="font-semibold">{t('bitstudioVTO')}</span>
+                        <p className="text-xs text-muted-foreground">{t('bitstudioVTODescription')}</p>
+                      </Label>
+                    </div>
+                    <div className="flex items-start space-x-2 p-4 border rounded-md has-[:checked]:border-primary">
+                      <RadioGroupItem value="google" id="google" />
+                      <Label htmlFor="google" className="w-full">
+                        <span className="font-semibold">{t('googleVTO')}</span>
+                        <p className="text-xs text-muted-foreground">{t('googleVTODescription')}</p>
+                      </Label>
+                    </div>
+                  </RadioGroup>
+                </CardContent>
+              </Card>
+              <div className="flex flex-col gap-2">
+                <Button size="lg" onClick={handleGenerate} disabled={isLoading}>
+                  {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+                  {t('generateNImages', { count: queue.length })}
+                </Button>
+                <Button variant="outline" onClick={handleGoBack}>{t('goBack')}</Button>
+              </div>
             </div>
           </div>
         );
