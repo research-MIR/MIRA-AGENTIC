@@ -832,7 +832,7 @@ serve(async (req) => {
     return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
 
   } catch (error) {
-    console.error(`[ModelGenPoller][${job.id}] Error:`, error);
+    console.error(`[ModelGenPoller][${job_id}] Error:`, error);
     await supabase.from('mira-agent-model-generation-jobs').update({ status: 'failed', error_message: error.message }).eq('id', job_id);
     return new Response(JSON.stringify({ error: error.message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
   }
