@@ -64,22 +64,6 @@ async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string)
     return data;
 }
 
-async function getMaskBlob(supabase: SupabaseClient, maskUrl: string): Promise<Blob> {
-    const url = new URL(maskUrl);
-    const pathSegments = url.pathname.split('/');
-    const bucketName = pathSegments[pathSegments.indexOf('object') + 2];
-    const pathStartIndex = url.pathname.indexOf(bucketName) + bucketName.length + 1;
-    const storagePath = decodeURIComponent(url.pathname.substring(pathStartIndex));
-
-    if (!bucketName || !storagePath) {
-        throw new Error(`Could not parse bucket or path from mask URL: ${maskUrl}`);
-    }
-
-    const { data, error } = await supabase.storage.from(bucketName).download(storagePath);
-    if (error) throw new Error(`Failed to download mask from Supabase: ${error.message}`);
-    return data;
-}
-
 serve(async (req) => {
   const requestId = `proxy-${Date.now()}`;
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
@@ -188,19 +172,17 @@ serve(async (req) => {
     } else {
       // --- NEW JOB LOGIC ---
       console.log(`[BitStudioProxy][${requestId}] Handling new job creation.`);
-      const { user_id, mode, batch_pair_job_id, vto_pack_job_id } = body;
+      const { user_id, mode, batch_pair_job_id, vto_pack_job_id, metadata } = body;
       if (!user_id || !mode) throw new Error("user_id and mode are required for new jobs.");
 
       const jobIds: string[] = [];
 
       if (mode === 'inpaint') {
-        const { source_image_url, mask_image_url, reference_image_url, prompt, denoise, resolution, num_images, debug_assets } = body;
-        if (!source_image_url || !mask_image_url) throw new Error("source_image_url and mask_image_url are required for inpaint mode.");
+        const { base64_image_data, base64_mask_data, reference_image_url, prompt, denoise, resolution, num_images } = body;
+        if (!base64_image_data || !base64_mask_data) throw new Error("base64_image_data and base64_mask_data are required for inpaint mode.");
 
-        const [sourceBlob, maskBlob] = await Promise.all([
-          downloadFromSupabase(supabase, source_image_url),
-          getMaskBlob(supabase, mask_image_url)
-        ]);
+        const sourceBlob = new Blob([decodeBase64(base64_image_data)], { type: 'image/png' });
+        const maskBlob = new Blob([decodeBase64(base64_mask_data)], { type: 'image/png' });
 
         const [sourceImageId, maskImageId] = await Promise.all([
           uploadToBitStudio(sourceBlob, 'inpaint-base', 'source.png'),
@@ -235,16 +217,11 @@ serve(async (req) => {
         if (!taskId) throw new Error("BitStudio did not return a task ID for the inpaint job.");
 
         const { data: newJob, error: insertError } = await supabase.from('mira-agent-bitstudio-jobs').insert({
-          user_id, mode, status: 'queued', source_person_image_url: source_image_url, source_garment_image_url: reference_image_url,
+          user_id, mode, status: 'queued', source_garment_image_url: reference_image_url,
           bitstudio_person_image_id: sourceImageId, bitstudio_garment_image_id: referenceImageId, bitstudio_task_id: taskId, batch_pair_job_id: batch_pair_job_id, vto_pack_job_id: vto_pack_job_id,
           metadata: { 
+            ...metadata,
             prompt_used: prompt,
-            debug_assets: debug_assets,
-            bitstudio_version_id: taskId,
-            bitstudio_mask_image_id: maskImageId,
-            source_image_url: source_image_url,
-            mask_image_url: mask_image_url,
-            reference_image_url: reference_image_url,
             original_request_payload: inpaintPayload,
           }
         }).select('id').single();

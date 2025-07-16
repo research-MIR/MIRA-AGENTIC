@@ -1,5 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { createCanvas, loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
+import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
@@ -9,6 +11,22 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
+    const url = new URL(publicUrl);
+    const pathSegments = url.pathname.split('/');
+    const bucketName = pathSegments[pathSegments.indexOf('object') + 2];
+    const pathStartIndex = url.pathname.indexOf(bucketName) + bucketName.length + 1;
+    const filePath = decodeURIComponent(url.pathname.substring(pathStartIndex));
+
+    if (!bucketName || !filePath) {
+        throw new Error(`Could not parse bucket or path from URL: ${publicUrl}`);
+    }
+
+    const { data, error } = await supabase.storage.from(bucketName).download(filePath);
+    if (error) throw new Error(`Failed to download from Supabase storage (${filePath}): ${error.message}`);
+    return data;
+}
+
 serve(async (req) => {
   console.log(`[BatchInpaintWorker-Step2] Function invoked.`);
   if (req.method === 'OPTIONS') {
@@ -16,15 +34,15 @@ serve(async (req) => {
   }
 
   const { pair_job_id, final_mask_url } = await req.json();
-  console.log(`[BatchInpaintWorker-Step2][${pair_job_id}] Received payload. pair_job_id: ${pair_job_id}, final_mask_url: ${final_mask_url}`);
+  const logPrefix = `[BatchInpaintWorker-Step2][${pair_job_id}]`;
+  console.log(`${logPrefix} Received payload. pair_job_id: ${pair_job_id}, final_mask_url: ${final_mask_url}`);
 
   if (!pair_job_id || !final_mask_url) {
-    console.error(`[BatchInpaintWorker-Step2] Missing required parameters. pair_job_id: ${!!pair_job_id}, final_mask_url: ${!!final_mask_url}`);
+    console.error(`${logPrefix} Missing required parameters.`);
     return new Response(JSON.stringify({ error: "pair_job_id and final_mask_url are required." }), { status: 400, headers: corsHeaders });
   }
 
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-  console.log(`[BatchInpaintWorker-Step2][${pair_job_id}] Starting inpainting process.`);
 
   try {
     const { data: pairJob, error: fetchError } = await supabase
@@ -37,7 +55,7 @@ serve(async (req) => {
     if (!pairJob) throw new Error(`Pair job with ID ${pair_job_id} not found.`);
 
     if (pairJob.inpainting_job_id) {
-        console.warn(`[BatchInpaintWorker-Step2][${pair_job_id}] Safety check triggered. Inpainting job already exists (${pairJob.inpainting_job_id}). This is a duplicate invocation. Exiting gracefully.`);
+        console.warn(`${logPrefix} Safety check triggered. Inpainting job already exists (${pairJob.inpainting_job_id}). This is a duplicate invocation. Exiting gracefully.`);
         return new Response(JSON.stringify({ success: true, message: "Duplicate invocation detected, exiting." }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
             status: 200,
@@ -45,63 +63,98 @@ serve(async (req) => {
     }
 
     const { user_id, source_person_image_url, source_garment_image_url, prompt_appendix, metadata } = pairJob;
-    const debug_assets = metadata?.debug_assets || null;
-    const isHelperEnabled = metadata?.is_helper_enabled !== false; // Default to true
+    
+    console.log(`${logPrefix} Downloading source and mask images...`);
+    const [sourceBlob, maskBlob] = await Promise.all([
+        downloadFromSupabase(supabase, source_person_image_url),
+        downloadFromSupabase(supabase, final_mask_url)
+    ]);
 
-    console.log(`[BatchInpaintWorker-Step2][${pair_job_id}] Delegating prompt creation to helper. Helper enabled: ${isHelperEnabled}`);
+    const sourceImage = await loadImage(await sourceBlob.arrayBuffer());
+    const maskImage = await loadImage(await maskBlob.arrayBuffer());
+    const { width, height } = sourceImage;
+
+    console.log(`${logPrefix} Calculating bounding box from mask...`);
+    const maskCanvas = createCanvas(width, height);
+    const maskCtx = maskCanvas.getContext('2d');
+    maskCtx.drawImage(maskImage, 0, 0);
+    const maskImageData = maskCtx.getImageData(0, 0, width, height);
+    const data = maskImageData.data;
+    let minX = width, minY = height, maxX = 0, maxY = 0;
+
+    for (let i = 0; i < data.length; i += 4) {
+        if (data[i] > 128) { // Check if pixel is not black
+            const x = (i / 4) % width;
+            const y = Math.floor((i / 4) / width);
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+        }
+    }
+
+    if (maxX < minX || maxY < minY) throw new Error("The provided mask is empty or invalid.");
+
+    const padding = Math.round(Math.max(maxX - minX, maxY - minY) * 0.05);
+    const bbox = {
+      x: Math.max(0, minX - padding),
+      y: Math.max(0, minY - padding),
+      width: Math.min(width, maxX + padding) - Math.max(0, minX - padding),
+      height: Math.min(height, maxY + padding) - Math.max(0, minY - padding),
+    };
+    console.log(`${logPrefix} Bounding box calculated with 5% padding:`, bbox);
+
+    const croppedSourceCanvas = createCanvas(bbox.width, bbox.height);
+    croppedSourceCanvas.getContext('2d')!.drawImage(sourceImage, bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
+    const croppedSourceBase64 = encodeBase64(croppedSourceCanvas.toBuffer('image/png'));
+
+    const croppedMaskCanvas = createCanvas(bbox.width, bbox.height);
+    croppedMaskCanvas.getContext('2d')!.drawImage(maskImage, bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
+    const croppedMaskBase64 = encodeBase64(croppedMaskCanvas.toBuffer('image/png'));
+    console.log(`${logPrefix} Source and mask images cropped and encoded.`);
 
     const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-prompt-helper', {
         body: {
-            person_image_url: source_person_image_url,
+            person_image_base64: croppedSourceBase64,
             garment_image_url: source_garment_image_url,
             prompt_appendix: prompt_appendix,
-            is_helper_enabled: isHelperEnabled,
+            is_helper_enabled: metadata?.is_helper_enabled !== false,
             is_garment_mode: true,
         }
     });
-
     if (promptError) throw new Error(`Prompt generation failed: ${promptError.message}`);
     const finalPrompt = promptData.final_prompt;
+    console.log(`${logPrefix} Prompt generated: "${finalPrompt.substring(0, 50)}..."`);
 
     const { data: proxyData, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
-        body: {
+        body: { 
             mode: 'inpaint',
             user_id: user_id,
-            source_image_url: source_person_image_url,
-            mask_image_url: final_mask_url,
+            base64_image_data: croppedSourceBase64,
+            base64_mask_data: croppedMaskBase64,
             prompt: finalPrompt,
             reference_image_url: source_garment_image_url,
             denoise: 0.99,
             resolution: 'standard',
-            mask_expansion_percent: 3,
-            num_attempts: 1,
+            num_images: 1,
             batch_pair_job_id: pair_job_id,
-            debug_assets: debug_assets
+            metadata: {
+                ...metadata,
+                bbox: bbox,
+                full_source_image_url: source_person_image_url,
+            }
         }
     });
     if (proxyError) throw new Error(`Job queuing failed: ${proxyError.message}`);
     
     const inpaintingJobId = proxyData?.jobIds?.[0];
-
-    if (!inpaintingJobId) {
-        console.error(`[BatchInpaintWorker-Step2][${pair_job_id}] Delegation failed: Proxy did not return a valid job ID. Marking pair as failed.`);
-        await supabase.from('mira-agent-batch-inpaint-pair-jobs')
-            .update({ 
-                status: 'failed', 
-                error_message: 'Delegation to inpainting service failed: Proxy did not return a valid job ID.' 
-            })
-            .eq('id', pair_job_id);
-        return new Response(JSON.stringify({ success: false, message: "Delegation failed." }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            status: 200,
-        });
-    }
+    if (!inpaintingJobId) throw new Error('Delegation failed: Proxy did not return a valid job ID.');
 
     await supabase.from('mira-agent-batch-inpaint-pair-jobs')
         .update({ status: 'delegated', inpainting_job_id: inpaintingJobId, metadata: { ...metadata, prompt_used: finalPrompt } })
         .eq('id', pair_job_id);
 
-    console.log(`[BatchInpaintWorker-Step2][${pair_job_id}] Inpainting job queued successfully. Inpainting Job ID: ${inpaintingJobId}`);
+    console.log(`${logPrefix} Inpainting job queued successfully. Inpainting Job ID: ${inpaintingJobId}`);
 
     return new Response(JSON.stringify({ success: true }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -109,7 +162,7 @@ serve(async (req) => {
     });
 
   } catch (error) {
-    console.error(`[BatchInpaintWorker-Step2][${pair_job_id}] Error:`, error);
+    console.error(`${logPrefix} Error:`, error);
     await supabase.from('mira-agent-batch-inpaint-pair-jobs')
       .update({ status: 'failed', error_message: error.message })
       .eq('id', pair_job_id);
