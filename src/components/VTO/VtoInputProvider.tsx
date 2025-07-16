@@ -13,7 +13,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Label } from '../ui/label';
 import { Textarea } from '../ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 
 export interface QueueItem {
   person: { url: string; file?: File };
@@ -25,8 +24,6 @@ interface VtoInputProviderProps {
   mode: 'one-to-many' | 'precise-pairs' | 'random-pairs';
   onQueueReady: (queue: QueueItem[]) => void;
   onGoBack: () => void;
-  engine: 'google' | 'bitstudio';
-  onEngineChange: (engine: 'google' | 'bitstudio') => void;
 }
 
 const ImageUploader = ({ onFileSelect, title, imageUrl, onClear }: { onFileSelect: (file: File) => void, title: string, imageUrl: string | null, onClear: () => void }) => {
@@ -64,7 +61,7 @@ const MultiImageUploader = ({ onFilesSelect, title, icon, description }: { onFil
     );
 };
 
-export const VtoInputProvider = ({ mode, onQueueReady, onGoBack, engine, onEngineChange }: VtoInputProviderProps) => {
+export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProviderProps) => {
   const { t } = useLanguage();
   const [isModelModalOpen, setIsModelModalOpen] = useState(false);
   
@@ -283,29 +280,6 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack, engine, onEngin
           {mode === 'precise-pairs' && renderPrecisePairs()}
         </div>
         <div className="lg:col-span-1 space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>{t('selectEngine')}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <RadioGroup value={engine} onValueChange={(v) => onEngineChange(v as any)} className="space-y-2">
-                <Label htmlFor="bitstudio" className="flex items-start space-x-2 p-4 border rounded-md has-[:checked]:border-primary cursor-pointer">
-                  <RadioGroupItem value="bitstudio" id="bitstudio" />
-                  <div className="w-full">
-                    <span className="font-semibold">{t('bitstudioVTO')}</span>
-                    <p className="text-xs text-muted-foreground">{t('bitstudioVTODescription')}</p>
-                  </div>
-                </Label>
-                <Label htmlFor="google" className="flex items-start space-x-2 p-4 border rounded-md has-[:checked]:border-primary cursor-pointer">
-                  <RadioGroupItem value="google" id="google" />
-                  <div className="w-full">
-                    <span className="font-semibold">{t('googleVTO')}</span>
-                    <p className="text-xs text-muted-foreground">{t('googleVTODescription')}</p>
-                  </div>
-                </Label>
-              </RadioGroup>
-            </CardContent>
-          </Card>
           <div className="flex flex-col gap-2">
             <Button size="lg" onClick={handleProceed} disabled={isProceedDisabled}>{t('reviewQueue', { count: mode === 'precise-pairs' ? precisePairs.length : selectedModelUrls.size })}</Button>
             <Button variant="outline" onClick={onGoBack}>{t('goBack')}</Button>

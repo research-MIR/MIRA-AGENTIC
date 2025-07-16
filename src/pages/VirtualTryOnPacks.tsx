@@ -12,6 +12,9 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RecentVtoPacks } from "@/components/VTO/RecentVtoPacks";
 import { optimizeImage, sanitizeFilename } from "@/lib/utils";
+import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 type WizardStep = 'select-mode' | 'provide-inputs' | 'review-queue';
 type VtoMode = 'one-to-many' | 'precise-pairs' | 'random-pairs';
@@ -124,8 +127,6 @@ const VirtualTryOnPacks = () => {
                   mode={mode!} 
                   onQueueReady={handleQueueReady} 
                   onGoBack={handleGoBack}
-                  engine={engine}
-                  onEngineChange={setEngine}
                 />;
       case 'review-queue':
         return (
@@ -164,8 +165,41 @@ const VirtualTryOnPacks = () => {
   return (
     <div className="p-4 md:p-8 h-screen flex flex-col">
       <header className="pb-4 mb-4 border-b shrink-0">
-        <h1 className="text-3xl font-bold">{t('virtualTryOnPacks')}</h1>
-        <p className="text-muted-foreground">{getStepTitle()}</p>
+        <div className="flex justify-between items-center">
+            <div>
+                <h1 className="text-3xl font-bold">{t('virtualTryOnPacks')}</h1>
+                <p className="text-muted-foreground">{getStepTitle()}</p>
+            </div>
+            <div className="flex items-center gap-4">
+                <Label>{t('engine')}</Label>
+                <RadioGroup value={engine} onValueChange={(v) => setEngine(v as any)} className="flex items-center space-x-2 border p-1 rounded-md">
+                    <TooltipProvider>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Label htmlFor="bitstudio-engine" className="flex items-center space-x-2 p-2 rounded-sm has-[:checked]:bg-muted cursor-pointer">
+                                    <RadioGroupItem value="bitstudio" id="bitstudio-engine" />
+                                    <span>{t('bitstudioVTO')}</span>
+                                </Label>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                                <p>{t('bitstudioVTODescription')}</p>
+                            </TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Label htmlFor="google-engine" className="flex items-center space-x-2 p-2 rounded-sm has-[:checked]:bg-muted cursor-pointer">
+                                    <RadioGroupItem value="google" id="google-engine" />
+                                    <span>{t('googleVTO')}</span>
+                                </Label>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                                <p>{t('googleVTODescription')}</p>
+                            </TooltipContent>
+                        </Tooltip>
+                    </TooltipProvider>
+                </RadioGroup>
+            </div>
+        </div>
       </header>
       <div className="flex-1 overflow-y-auto">
         <Tabs defaultValue="create" className="w-full">
@@ -177,7 +211,7 @@ const VirtualTryOnPacks = () => {
             {renderCreateStep()}
           </TabsContent>
           <TabsContent value="recent" className="pt-6">
-            <RecentVtoPacks />
+            <RecentVtoPacks engine={engine} />
           </TabsContent>
         </Tabs>
       </div>
