@@ -14,7 +14,6 @@ import { Button } from '../ui/button';
 
 interface Pose {
   final_url: string;
-  is_upscaled?: boolean;
 }
 
 interface ModelPack {
@@ -22,11 +21,17 @@ interface ModelPack {
   name: string;
 }
 
+export interface VtoModel {
+  jobId: string;
+  baseModelUrl: string | null;
+  poses: Pose[];
+}
+
 interface ModelPoseSelectorProps {
   mode: 'single' | 'multiple' | 'get-all';
   selectedUrls?: Set<string>;
-  onSelect?: (url: string) => void;
-  onUseEntirePack?: (poses: Pose[]) => void;
+  onSelect?: (urls: string[]) => void;
+  onUseEntirePack?: (models: VtoModel[]) => void;
 }
 
 export const ModelPoseSelector = ({ mode, selectedUrls, onSelect, onUseEntirePack }: ModelPoseSelectorProps) => {
@@ -45,13 +50,13 @@ export const ModelPoseSelector = ({ mode, selectedUrls, onSelect, onUseEntirePac
     enabled: !!session?.user,
   });
 
-  const { data: poses, isLoading, error } = useQuery<Pose[]>({
-    queryKey: ['upscaledModelPoses', session?.user?.id, selectedPackId],
+  const { data: models, isLoading, error } = useQuery<VtoModel[]>({
+    queryKey: ['vtoPackModels', session?.user?.id, selectedPackId],
     queryFn: async () => {
       if (!session?.user) return [];
       let query = supabase
         .from('mira-agent-model-generation-jobs')
-        .select('final_posed_images')
+        .select('id, base_model_image_url, final_posed_images')
         .eq('user_id', session.user.id)
         .eq('status', 'complete');
       
@@ -60,23 +65,22 @@ export const ModelPoseSelector = ({ mode, selectedUrls, onSelect, onUseEntirePac
       }
 
       const { data, error } = await query;
-      
       if (error) throw error;
 
-      const allPoses = data
-        .flatMap(job => job.final_posed_images || [])
-        .filter(pose => pose.is_upscaled);
-      
-      const uniquePoses = Array.from(new Map(allPoses.map(pose => [pose.final_url, pose])).values());
-      
-      return uniquePoses;
+      return data
+        .map(job => ({
+          jobId: job.id,
+          baseModelUrl: job.base_model_image_url,
+          poses: (job.final_posed_images || []).filter((p: any) => p.is_upscaled)
+        }))
+        .filter(model => model.poses.length > 0);
     },
     enabled: !!session?.user,
   });
 
-  const handleSelect = (url: string) => {
+  const handleSelect = (poseUrls: string[]) => {
     if (onSelect) {
-      onSelect(url);
+      onSelect(poseUrls);
     }
   };
 
@@ -94,7 +98,7 @@ export const ModelPoseSelector = ({ mode, selectedUrls, onSelect, onUseEntirePac
             ))}
           </SelectContent>
         </Select>
-        <Button onClick={() => onUseEntirePack?.(poses || [])} disabled={isLoading || !poses || poses.length === 0}>
+        <Button onClick={() => onUseEntirePack?.(models || [])} disabled={isLoading || !models || models.length === 0}>
           {t('useEntirePack')}
         </Button>
       </div>
@@ -121,16 +125,16 @@ export const ModelPoseSelector = ({ mode, selectedUrls, onSelect, onUseEntirePac
         <div className="grid grid-cols-3 gap-2"><Skeleton className="h-32 w-full" /><Skeleton className="h-32 w-full" /><Skeleton className="h-32 w-full" /></div>
       ) : error ? (
         <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Error</AlertTitle><AlertDescription>{error.message}</AlertDescription></Alert>
-      ) : !poses || poses.length === 0 ? (
+      ) : !models || models.length === 0 ? (
         <p className="text-sm text-muted-foreground text-center py-4">No upscaled models found in this pack.</p>
       ) : (
         <ScrollArea className="h-96">
           <div className="grid grid-cols-3 md:grid-cols-4 gap-2 pr-4">
-            {poses.map((pose, index) => {
-              const isSelected = selectedUrls?.has(pose.final_url);
+            {models.map((model) => {
+              const isSelected = model.poses.length > 0 && model.poses.some(p => selectedUrls?.has(p.final_url));
               return (
-                <button key={index} onClick={() => handleSelect(pose.final_url)} className="relative aspect-square block w-full h-full group">
-                  <SecureImageDisplay imageUrl={pose.final_url} alt={`Model pose ${index + 1}`} />
+                <button key={model.jobId} onClick={() => handleSelect(model.poses.map(p => p.final_url))} className="relative aspect-square block w-full h-full group">
+                  <SecureImageDisplay imageUrl={model.baseModelUrl} alt={`Model ${model.jobId}`} />
                   {isSelected && (
                     <div className="absolute inset-0 bg-primary/70 flex items-center justify-center rounded-md">
                       <CheckCircle className="h-8 w-8 text-primary-foreground" />

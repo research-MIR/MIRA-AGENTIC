@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { ModelPoseSelector } from './ModelPoseSelector';
+import { ModelPoseSelector, VtoModel } from './ModelPoseSelector';
 import { SecureImageDisplay } from './SecureImageDisplay';
 import { useLanguage } from '@/context/LanguageContext';
 import { PlusCircle, Shirt, Users, X, Link2, Shuffle } from 'lucide-react';
@@ -83,23 +83,29 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack, engine, onEngin
   const tempPairPersonPreviewUrl = useMemo(() => tempPairPersonFile ? URL.createObjectURL(tempPairPersonFile) : tempPairPersonUrl, [tempPairPersonFile, tempPairPersonUrl]);
   const tempPairGarmentUrl = useMemo(() => tempPairGarmentFile ? URL.createObjectURL(tempPairGarmentFile) : null, [tempPairGarmentFile]);
 
-  const handleMultiModelSelect = (url: string) => {
+  const handleMultiModelSelect = (poseUrls: string[]) => {
     setSelectedModelUrls(prev => {
       const newSet = new Set(prev);
-      if (newSet.has(url)) newSet.delete(url);
-      else newSet.add(url);
+      const isSelected = poseUrls.length > 0 && newSet.has(poseUrls[0]);
+      if (isSelected) {
+        poseUrls.forEach(url => newSet.delete(url));
+      } else {
+        poseUrls.forEach(url => newSet.add(url));
+      }
       return newSet;
     });
   };
 
-  const handleSingleModelSelect = (url: string) => {
-    setTempPairPersonUrl(url);
+  const handleSingleModelSelect = (poseUrls: string[]) => {
+    if (poseUrls.length > 0) {
+      setTempPairPersonUrl(poseUrls[0]); // For precise pairs, we only need one pose
+    }
     setIsModelModalOpen(false);
   };
 
-  const handleUseEntirePack = (poses: any[]) => {
-    const urls = poses.map(p => p.final_url);
-    setSelectedModelUrls(new Set(urls));
+  const handleUseEntirePack = (models: VtoModel[]) => {
+    const allUrls = models.flatMap(model => model.poses.map(p => p.final_url));
+    setSelectedModelUrls(new Set(allUrls));
   };
 
   const addPrecisePair = () => {
