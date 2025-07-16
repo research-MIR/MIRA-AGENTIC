@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useMemo } from "react";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,11 +20,11 @@ const fileToBase64 = (file: File): Promise<string> => {
   });
 };
 
-const ImageUploader = ({ onFileSelect, title, imageUrl, onClear }: { onFileSelect: (file: File) => void, title: string, imageUrl: string | null, onClear: () => void }) => {
+const ImageUploader = ({ onFileSelect, title, imageUrl, onClear, multiple = false }: { onFileSelect: (files: FileList) => void, title: string, imageUrl?: string | null, onClear?: () => void, multiple?: boolean }) => {
     const inputRef = useRef<HTMLInputElement>(null);
-    const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: (e) => e.dataTransfer.files && onFileSelect(e.dataTransfer.files[0]) });
+    const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: (e) => e.dataTransfer.files && onFileSelect(e.dataTransfer.files) });
   
-    if (imageUrl) {
+    if (imageUrl && onClear) {
       return (
         <div className="relative aspect-square">
           <img src={imageUrl} alt={title} className="w-full h-full object-cover rounded-md" />
@@ -36,7 +36,7 @@ const ImageUploader = ({ onFileSelect, title, imageUrl, onClear }: { onFileSelec
     return (
       <div {...dropzoneProps} className={cn("flex aspect-square justify-center items-center rounded-lg border border-dashed p-4 text-center transition-colors cursor-pointer", isDraggingOver && "border-primary bg-primary/10")} onClick={() => inputRef.current?.click()}>
         <div className="text-center pointer-events-none"><UploadCloud className="mx-auto h-8 w-8 text-muted-foreground" /><p className="mt-2 text-sm font-semibold">{title}</p></div>
-        <Input ref={inputRef} type="file" className="hidden" accept="image/*" onChange={(e) => e.target.files && onFileSelect(e.target.files[0])} />
+        <Input ref={inputRef} type="file" multiple={multiple} className="hidden" accept="image/*" onChange={(e) => e.target.files && onFileSelect(e.target.files)} />
       </div>
     );
 };
@@ -46,7 +46,7 @@ const Experimental = () => {
   const { t } = useLanguage();
 
   // State for Recontext
-  const [recontextProductFile, setRecontextProductFile] = useState<File | null>(null);
+  const [recontextProductFiles, setRecontextProductFiles] = useState<File[]>([]);
   const [recontextPrompt, setRecontextPrompt] = useState("");
   const [recontextDescription, setRecontextDescription] = useState("");
   const [recontextResult, setRecontextResult] = useState<string | null>(null);
@@ -58,17 +58,31 @@ const Experimental = () => {
   const [vtoResult, setVtoResult] = useState<string | null>(null);
   const [isVtoLoading, setIsVtoLoading] = useState(false);
 
+  const recontextPreviews = useMemo(() => recontextProductFiles.map(f => URL.createObjectURL(f)), [recontextProductFiles]);
+  const vtoPersonPreview = useMemo(() => vtoPersonFile ? URL.createObjectURL(vtoPersonFile) : null, [vtoPersonFile]);
+  const vtoGarmentPreview = useMemo(() => vtoGarmentFile ? URL.createObjectURL(vtoGarmentFile) : null, [vtoGarmentFile]);
+
+  const handleRecontextFileSelect = (files: FileList | null) => {
+    if (!files) return;
+    const newFiles = Array.from(files);
+    setRecontextProductFiles(prev => [...prev, ...newFiles].slice(0, 3));
+  };
+
+  const removeRecontextFile = (index: number) => {
+    setRecontextProductFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
   const handleRecontextGenerate = async () => {
-    if (!recontextProductFile || !recontextPrompt) {
-      showError("Please provide a product image and a scene prompt.");
+    if (recontextProductFiles.length === 0 || !recontextPrompt) {
+      showError("Please provide at least one product image and a scene prompt.");
       return;
     }
     setIsRecontextLoading(true);
     const toastId = showLoading("Generating recontextualized image...");
     try {
-      const product_image_base64 = await fileToBase64(recontextProductFile);
+      const product_images_base64 = await Promise.all(recontextProductFiles.map(fileToBase64));
       const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-product-recontext', {
-        body: { product_image_base64, prompt: recontextPrompt, product_description: recontextDescription }
+        body: { product_images_base64, prompt: recontextPrompt, product_description: recontextDescription }
       });
       if (error) throw error;
       setRecontextResult(`data:${data.mimeType};base64,${data.base64Image}`);
@@ -123,8 +137,18 @@ const Experimental = () => {
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>{t('productImage')}</Label>
-                <ImageUploader onFileSelect={setRecontextProductFile} title={t('uploadProduct')} imageUrl={recontextProductFile ? URL.createObjectURL(recontextProductFile) : null} onClear={() => setRecontextProductFile(null)} />
+                <Label>{t('productImage')} (up to 3)</Label>
+                <FileUploader onFileSelect={handleRecontextFileSelect} title={t('uploadProduct')} multiple />
+                {recontextPreviews.length > 0 && (
+                  <div className="flex flex-wrap gap-2 pt-2">
+                    {recontextPreviews.map((url, index) => (
+                      <div key={index} className="relative">
+                        <img src={url} alt={`Product preview ${index + 1}`} className="w-16 h-16 object-cover rounded-md" />
+                        <Button variant="destructive" size="icon" className="absolute -top-2 -right-2 h-5 w-5 rounded-full" onClick={() => removeRecontextFile(index)}><X className="h-3 w-3" /></Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="scene-prompt">{t('scenePrompt')}</Label>
@@ -156,11 +180,11 @@ const Experimental = () => {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>{t('personImage')}</Label>
-                <ImageUploader onFileSelect={setVtoPersonFile} title={t('uploadPerson')} imageUrl={vtoPersonFile ? URL.createObjectURL(vtoPersonFile) : null} onClear={() => setVtoPersonFile(null)} />
+                <ImageUploader onFileSelect={(files) => files && setVtoPersonFile(files[0])} title={t('uploadPerson')} imageUrl={vtoPersonPreview} onClear={() => setVtoPersonFile(null)} />
               </div>
               <div className="space-y-2">
                 <Label>{t('garmentImage')}</Label>
-                <ImageUploader onFileSelect={setVtoGarmentFile} title={t('uploadGarment')} imageUrl={vtoGarmentFile ? URL.createObjectURL(vtoGarmentFile) : null} onClear={() => setVtoGarmentFile(null)} />
+                <ImageUploader onFileSelect={(files) => files && setVtoGarmentFile(files[0])} title={t('uploadGarment')} imageUrl={vtoGarmentPreview} onClear={() => setVtoGarmentFile(null)} />
               </div>
             </div>
             <Button className="w-full" onClick={handleVtoGenerate} disabled={isVtoLoading}>

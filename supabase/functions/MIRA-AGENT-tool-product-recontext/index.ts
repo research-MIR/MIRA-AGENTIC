@@ -21,9 +21,12 @@ serve(async (req) => {
       throw new Error("Server configuration error: Missing Google Cloud credentials.");
     }
 
-    const { product_image_base64, prompt, product_description } = await req.json();
-    if (!product_image_base64 || !prompt) {
-      throw new Error("product_image_base64 and prompt are required.");
+    const { product_images_base64, prompt, product_description } = await req.json();
+    if (!product_images_base64 || !Array.isArray(product_images_base64) || product_images_base64.length === 0 || !prompt) {
+      throw new Error("product_images_base64 (as an array) and prompt are required.");
+    }
+    if (product_images_base64.length > 3) {
+      throw new Error("A maximum of 3 product images are allowed.");
     }
 
     const auth = new GoogleAuth({
@@ -37,14 +40,14 @@ serve(async (req) => {
     const requestBody = {
       instances: [{
         prompt: prompt,
-        productImages: [{
+        productImages: product_images_base64.map((base64String: string) => ({
           image: {
-            bytesBase64Encoded: product_image_base64
+            bytesBase64Encoded: base64String
           },
           productConfig: {
             productDescription: product_description || ""
           }
-        }]
+        }))
       }],
       parameters: {
         sampleCount: 1,
