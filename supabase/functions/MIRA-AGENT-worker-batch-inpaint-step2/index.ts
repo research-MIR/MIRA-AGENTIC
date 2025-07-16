@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { Image as ISImage } from "https://deno.land/x/imagescript@1.2.15/mod.ts";
-import { createCanvas } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
+import { createCanvas, ImageData } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
@@ -16,11 +16,11 @@ function parseStorageURL(url: string) {
     const u = new URL(url);
     const pathSegments = u.pathname.split('/');
     const objectSegmentIndex = pathSegments.indexOf('object');
-    if (objectSegmentIndex === -1 || objectSegmentIndex + 1 >= pathSegments.length) {
+    if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) {
         throw new Error(`Invalid Supabase storage URL format: ${url}`);
     }
-    const bucket = pathSegments[objectSegmentIndex + 1];
-    const path = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 2).join('/'));
+    const bucket = pathSegments[objectSegmentIndex + 2];
+    const path = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
     return { bucket, path };
 }
 
