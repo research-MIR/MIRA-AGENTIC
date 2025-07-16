@@ -138,7 +138,7 @@ const Experimental = () => {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>{t('productImage')} (up to 3)</Label>
-                <FileUploader onFileSelect={handleRecontextFileSelect} title={t('uploadProduct')} multiple />
+                <ImageUploader onFileSelect={handleRecontextFileSelect} title={t('uploadProduct')} multiple />
                 {recontextPreviews.length > 0 && (
                   <div className="flex flex-wrap gap-2 pt-2">
                     {recontextPreviews.map((url, index) => (
