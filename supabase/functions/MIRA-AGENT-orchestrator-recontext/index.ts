@@ -15,7 +15,7 @@ serve(async (req) => {
   }
 
   try {
-    const { product_images_base64, user_scene_prompt, scene_reference_image_base64 } = await req.json();
+    const { product_images_base64, user_scene_prompt, scene_reference_image_base64, sample_step } = await req.json();
     if (!product_images_base64 || (user_scene_prompt === undefined && !scene_reference_image_base64)) {
       throw new Error("product_images_base64 and either user_scene_prompt or scene_reference_image_base64 are required.");
     }
@@ -42,7 +42,8 @@ serve(async (req) => {
       body: {
         product_images_base64,
         prompt: final_prompt,
-        product_description: product_description
+        product_description: product_description,
+        sample_step: sample_step
       }
     });
     if (generationError) throw new Error(`Image generation failed: ${generationError.message}`);

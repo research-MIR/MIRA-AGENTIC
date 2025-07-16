@@ -5,12 +5,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Loader2, Wand2, UploadCloud, X } from "lucide-react";
+import { Loader2, Wand2, UploadCloud, X, FlaskConical } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
-import { showError, showLoading, dismissToast } from "@/utils/toast";
+import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { cn } from "@/lib/utils";
 import { useDropzone } from "@/hooks/useDropzone";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { Switch } from "@/components/ui/switch";
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -42,6 +43,13 @@ const ImageUploader = ({ onFileSelect, title, imageUrl, onClear, multiple = fals
     );
 };
 
+interface AnalysisResult {
+  imageUrl: string;
+  description: string;
+  finalPrompt: string;
+  steps: number;
+}
+
 const ProductRecontext = () => {
   const { supabase } = useSession();
   const { t } = useLanguage();
@@ -49,8 +57,11 @@ const ProductRecontext = () => {
   const [productFiles, setProductFiles] = useState<File[]>([]);
   const [sceneFile, setSceneFile] = useState<File | null>(null);
   const [prompt, setPrompt] = useState("");
-  const [result, setResult] = useState<{ imageUrl: string; description: string; finalPrompt: string; } | null>(null);
+  const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [analysisResults, setAnalysisResults] = useState<AnalysisResult[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isAnalysisMode, setIsAnalysisMode] = useState(false);
+  const [stepAmounts, setStepAmounts] = useState("15, 30, 50");
 
   const productPreviews = useMemo(() => productFiles.map(f => URL.createObjectURL(f)), [productFiles]);
   const scenePreview = useMemo(() => sceneFile ? URL.createObjectURL(sceneFile) : null, [sceneFile]);
@@ -72,28 +83,54 @@ const ProductRecontext = () => {
     }
     setIsLoading(true);
     setResult(null);
-    const toastId = showLoading("Orchestrating creative prompt...");
+    setAnalysisResults([]);
+
     try {
       const product_images_base64 = await Promise.all(productFiles.map(fileToBase64));
       const scene_reference_image_base64 = sceneFile ? await fileToBase64(sceneFile) : null;
 
-      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-recontext', {
-        body: { 
-          product_images_base64, 
-          user_scene_prompt: prompt,
-          scene_reference_image_base64
-        }
-      });
-      if (error) throw error;
-      setResult({
-        imageUrl: `data:${data.mimeType};base64,${data.base64Image}`,
-        description: data.productDescription,
-        finalPrompt: data.finalPromptUsed
-      });
-      dismissToast(toastId);
+      if (isAnalysisMode) {
+        const steps = stepAmounts.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n) && n > 0);
+        if (steps.length === 0) throw new Error("Please enter valid, comma-separated step amounts for Analysis Mode.");
+        
+        const toastId = showLoading(`Generating ${steps.length} images...`);
+        const promises = steps.map(step => 
+          supabase.functions.invoke('MIRA-AGENT-orchestrator-recontext', {
+            body: { product_images_base64, user_scene_prompt: prompt, scene_reference_image_base64, sample_step: step }
+          }).then(res => ({ ...res, steps: step }))
+        );
+        
+        const results = await Promise.all(promises);
+        const successfulResults: AnalysisResult[] = [];
+        results.forEach(res => {
+          if (res.error) throw res.error;
+          successfulResults.push({
+            imageUrl: `data:${res.data.mimeType};base64,${res.data.base64Image}`,
+            description: res.data.productDescription,
+            finalPrompt: res.data.finalPromptUsed,
+            steps: res.steps,
+          });
+        });
+        setAnalysisResults(successfulResults);
+        dismissToast(toastId);
+        showSuccess("Analysis complete!");
+
+      } else {
+        const toastId = showLoading("Generating image...");
+        const { data, error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-recontext', {
+          body: { product_images_base64, user_scene_prompt: prompt, scene_reference_image_base64 }
+        });
+        if (error) throw error;
+        setResult({
+          imageUrl: `data:${data.mimeType};base64,${data.base64Image}`,
+          description: data.productDescription,
+          finalPrompt: data.finalPromptUsed,
+          steps: 0 // Not applicable in single mode
+        });
+        dismissToast(toastId);
+      }
     } catch (err: any) {
-      dismissToast(toastId);
-      showError(err.message);
+      showError(`Generation failed: ${err.message}`);
     } finally {
       setIsLoading(false);
     }
@@ -134,6 +171,18 @@ const ProductRecontext = () => {
                 <ImageUploader onFileSelect={(files) => files && setSceneFile(files[0])} title={t('uploadSceneReference')} imageUrl={scenePreview} onClear={() => setSceneFile(null)} />
               </div>
             </div>
+            <div className="space-y-2 p-3 border rounded-md">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="analysis-mode" className="flex items-center gap-2"><FlaskConical className="h-4 w-4" />{t('analysisMode')}</Label>
+                <Switch id="analysis-mode" checked={isAnalysisMode} onCheckedChange={setIsAnalysisMode} />
+              </div>
+              {isAnalysisMode && (
+                <div className="pt-2">
+                  <Label htmlFor="step-amounts">{t('stepAmounts')}</Label>
+                  <Input id="step-amounts" value={stepAmounts} onChange={(e) => setStepAmounts(e.target.value)} placeholder="e.g., 15, 30, 50" />
+                </div>
+              )}
+            </div>
             <Button className="w-full" onClick={handleGenerate} disabled={isLoading}>
               {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
               {t('generate')}
@@ -145,25 +194,42 @@ const ProductRecontext = () => {
             <CardTitle>{t('result')}</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="mt-2 aspect-square w-full bg-muted rounded-md flex items-center justify-center">
-              {isLoading ? <Loader2 className="h-8 w-8 animate-spin" /> : result ? <img src={result.imageUrl} className="max-w-full max-h-full object-contain" /> : <p className="text-sm text-muted-foreground">{t('resultPlaceholder')}</p>}
-            </div>
-            {result && (
-              <Accordion type="single" collapsible className="w-full mt-2">
-                <AccordionItem value="item-1">
-                  <AccordionTrigger>View AI Analysis & Final Prompt</AccordionTrigger>
-                  <AccordionContent className="space-y-2">
-                    <div>
-                      <h4 className="font-semibold text-sm">AI Product Description:</h4>
-                      <p className="text-sm p-2 bg-muted rounded-md">{result.description}</p>
-                    </div>
-                    <div>
-                      <h4 className="font-semibold text-sm">Final Prompt Used:</h4>
-                      <p className="text-sm p-2 bg-muted rounded-md font-mono">{result.finalPrompt}</p>
-                    </div>
-                  </AccordionContent>
-                </AccordionItem>
-              </Accordion>
+            {isLoading ? (
+              <div className="flex justify-center p-12"><Loader2 className="h-8 w-8 animate-spin" /></div>
+            ) : isAnalysisMode ? (
+              <div className="grid grid-cols-2 gap-4">
+                {analysisResults.map((res, index) => (
+                  <div key={index} className="space-y-2">
+                    <Label className="text-center block">{res.steps} steps</Label>
+                    <img src={res.imageUrl} className="max-w-full max-h-full object-contain rounded-md" />
+                  </div>
+                ))}
+              </div>
+            ) : result ? (
+              <>
+                <div className="mt-2 aspect-square w-full bg-muted rounded-md flex items-center justify-center">
+                  <img src={result.imageUrl} className="max-w-full max-h-full object-contain" />
+                </div>
+                <Accordion type="single" collapsible className="w-full mt-2">
+                  <AccordionItem value="item-1">
+                    <AccordionTrigger>View AI Analysis & Final Prompt</AccordionTrigger>
+                    <AccordionContent className="space-y-2">
+                      <div>
+                        <h4 className="font-semibold text-sm">AI Product Description:</h4>
+                        <p className="text-sm p-2 bg-muted rounded-md">{result.description}</p>
+                      </div>
+                      <div>
+                        <h4 className="font-semibold text-sm">Final Prompt Used:</h4>
+                        <p className="text-sm p-2 bg-muted rounded-md font-mono">{result.finalPrompt}</p>
+                      </div>
+                    </AccordionContent>
+                  </AccordionItem>
+                </Accordion>
+              </>
+            ) : (
+              <div className="flex items-center justify-center h-64">
+                <p className="text-sm text-muted-foreground">{t('resultPlaceholder')}</p>
+              </div>
             )}
           </CardContent>
         </Card>

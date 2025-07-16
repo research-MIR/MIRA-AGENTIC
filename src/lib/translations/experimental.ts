@@ -22,6 +22,9 @@ export const experimentalTranslations = {
     resultPlaceholder: "Il risultato apparirà qui.",
     sceneReferenceImage: "Immagine di Riferimento Scena (Opzionale)",
     uploadSceneReference: "Carica Riferimento Scena",
+    analysisMode: "Modalità Analisi",
+    analysisModeDescription: "Esegui lo stesso prompt con diversi conteggi di passi per confrontare i risultati.",
+    stepAmounts: "Conteggio Passi (separati da virgola)",
   },
   en: {
     experimentalTools: "Experimental Tools",
@@ -46,5 +49,8 @@ export const experimentalTranslations = {
     resultPlaceholder: "Your result will appear here.",
     sceneReferenceImage: "Scene Reference Image (Optional)",
     uploadSceneReference: "Upload Scene Reference",
+    analysisMode: "Analysis Mode",
+    analysisModeDescription: "Run the same prompt with different step counts to compare results.",
+    stepAmounts: "Step Amounts (comma-separated)",
   },
 };

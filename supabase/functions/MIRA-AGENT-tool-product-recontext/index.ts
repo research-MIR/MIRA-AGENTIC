@@ -21,7 +21,7 @@ serve(async (req) => {
       throw new Error("Server configuration error: Missing Google Cloud credentials.");
     }
 
-    const { product_images_base64, prompt, product_description } = await req.json();
+    const { product_images_base64, prompt, product_description, sample_step } = await req.json();
     if (!product_images_base64 || !Array.isArray(product_images_base64) || product_images_base64.length === 0 || !prompt) {
       throw new Error("product_images_base64 (as an array) and prompt are required.");
     }
@@ -53,6 +53,7 @@ serve(async (req) => {
         sampleCount: 1,
         personGeneration: "allow_adult",
         addWatermark: false,
+        ...(sample_step && { sampleStep: sample_step })
       }
     };
 
