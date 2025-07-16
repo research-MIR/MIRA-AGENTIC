@@ -44,6 +44,26 @@ serve(async (req) => {
     const requestId = `compositor-${aggregationJobId}`;
     console.log(`[Compositor][${requestId}] Function invoked.`);
 
+    // --- FIX: Check job status before proceeding ---
+    const { data: jobStatusCheck, error: statusCheckError } = await supabase
+      .from('mira-agent-mask-aggregation-jobs')
+      .select('status')
+      .eq('id', aggregationJobId)
+      .single();
+
+    if (statusCheckError && statusCheckError.code !== 'PGRST116') { // Ignore 'not found' errors for now
+        console.error(`[Compositor][${requestId}] Error checking job status:`, statusCheckError.message);
+    }
+
+    if (jobStatusCheck && (jobStatusCheck.status === 'complete' || jobStatusCheck.status === 'failed')) {
+        console.log(`[Compositor][${requestId}] Job status is already '${jobStatusCheck.status}'. Exiting to prevent re-processing.`);
+        return new Response(JSON.stringify({ success: true, message: "Job already processed." }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            status: 200,
+        });
+    }
+    // --- END OF FIX ---
+
     const { data: job, error: fetchError } = await supabase
       .from('mira-agent-mask-aggregation-jobs')
       .select('results, source_image_base64, user_id')
