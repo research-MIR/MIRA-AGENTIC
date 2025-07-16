@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { useDropzone } from "@/hooks/useDropzone";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Switch } from "@/components/ui/switch";
+import { useImagePreview } from "@/context/ImagePreviewContext";
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -53,6 +54,7 @@ interface AnalysisResult {
 const ProductRecontext = () => {
   const { supabase } = useSession();
   const { t } = useLanguage();
+  const { showImage } = useImagePreview();
 
   const [productFiles, setProductFiles] = useState<File[]>([]);
   const [sceneFile, setSceneFile] = useState<File | null>(null);
@@ -201,14 +203,30 @@ const ProductRecontext = () => {
                 {analysisResults.map((res, index) => (
                   <div key={index} className="space-y-2">
                     <Label className="text-center block">{res.steps} steps</Label>
-                    <img src={res.imageUrl} className="max-w-full max-h-full object-contain rounded-md" />
+                    <button
+                      className="w-full aspect-square block"
+                      onClick={() => showImage({
+                        images: analysisResults.map(r => ({ url: r.imageUrl })),
+                        currentIndex: index
+                      })}
+                    >
+                      <img src={res.imageUrl} className="max-w-full max-h-full object-contain rounded-md" />
+                    </button>
                   </div>
                 ))}
               </div>
             ) : result ? (
               <>
                 <div className="mt-2 aspect-square w-full bg-muted rounded-md flex items-center justify-center">
-                  <img src={result.imageUrl} className="max-w-full max-h-full object-contain" />
+                  <button
+                    className="w-full h-full"
+                    onClick={() => showImage({
+                      images: [{ url: result.imageUrl }],
+                      currentIndex: 0
+                    })}
+                  >
+                    <img src={result.imageUrl} className="max-w-full max-h-full object-contain" />
+                  </button>
                 </div>
                 <Accordion type="single" collapsible className="w-full mt-2">
                   <AccordionItem value="item-1">
