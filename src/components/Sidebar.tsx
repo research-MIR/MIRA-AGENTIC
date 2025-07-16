@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { NavLink, useNavigate, useParams } from "react-router-dom";
 import { Button } from "./ui/button";
-import { MessageSquare, Image, GalleryHorizontal, LogOut, HelpCircle, LogIn, Shirt, Code, Wand2, PencilRuler, Pencil, Trash2, Settings, FolderPlus, LayoutGrid, Cog, Brush, Users, MessageSquareQuote, ChevronRight, FlaskConical } from "lucide-react";
+import { MessageSquare, Image, GalleryHorizontal, LogOut, HelpCircle, LogIn, Shirt, Code, Wand2, PencilRuler, Pencil, Trash2, Settings, FolderPlus, LayoutGrid, Cog, Brush, Users, MessageSquareQuote, ChevronRight, FlaskConical, Shapes } from "lucide-react";
 import { useSession } from "./Auth/SessionContextProvider";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -176,6 +176,10 @@ export const Sidebar = () => {
               <NavLink id="edit-with-words-nav-link" to="/edit-with-words" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
                 <MessageSquareQuote size={20} />
                 {t('editWithWords')}
+              </NavLink>
+              <NavLink id="recontext-nav-link" to="/product-recontext" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
+                <Shapes size={20} />
+                {t('productRecontextualization')}
               </NavLink>
               <NavLink id="editor-nav-link" to="/editor" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
                 <PencilRuler size={20} />
