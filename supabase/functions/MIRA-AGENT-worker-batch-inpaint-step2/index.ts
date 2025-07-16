@@ -83,8 +83,14 @@ serve(async (req) => {
 
     console.log(`${logPrefix} Calculating bounding box from mask...`);
     let minX = width, minY = height, maxX = 0, maxY = 0;
-    for (const [x, y, color] of maskImage.iterateWithAlpha()) {
-        if (color > 128) { // Check alpha channel to find non-transparent pixels
+    const maskData = maskImage.bitmap; // Access raw pixel data
+
+    for (let i = 0; i < maskData.length; i += 4) {
+        // The bitmap is RGBA, so the alpha channel is at i + 3
+        if (maskData[i + 3] > 128) { 
+            const pixelIndex = i / 4;
+            const x = pixelIndex % width;
+            const y = Math.floor(pixelIndex / width);
             if (x < minX) minX = x;
             if (x > maxX) maxX = x;
             if (y < minY) minY = y;
