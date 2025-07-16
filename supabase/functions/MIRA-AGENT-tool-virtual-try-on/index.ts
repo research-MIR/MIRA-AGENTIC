@@ -21,7 +21,7 @@ serve(async (req) => {
       throw new Error("Server configuration error: Missing Google Cloud credentials.");
     }
 
-    const { person_image_base64, garment_image_base64 } = await req.json();
+    const { person_image_base64, garment_image_base64, sample_step } = await req.json();
     if (!person_image_base64 || !garment_image_base64) {
       throw new Error("person_image_base64 and garment_image_base64 are required.");
     }
@@ -50,6 +50,7 @@ serve(async (req) => {
       parameters: {
         sampleCount: 1,
         addWatermark: false,
+        ...(sample_step && { sampleStep: sample_step })
       }
     };
 
