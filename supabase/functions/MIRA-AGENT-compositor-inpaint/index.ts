@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { Image } from 'https://deno.land/x/imagescript@1.2.15/mod.ts';
+import { Image as ISImage } from 'https://deno.land/x/imagescript@1.2.15/mod.ts';
+import { createCanvas, ImageData } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -10,6 +11,15 @@ const corsHeaders = {
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
+
+function imgToCanvas(img: ISImage) {
+  const cv = createCanvas(img.width, img.height);
+  cv.getContext("2d").putImageData(
+    new ImageData(new Uint8ClampedArray(img.bitmap), img.width, img.height),
+    0, 0,
+  );
+  return cv;
+}
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -51,16 +61,19 @@ serve(async (req) => {
     if (!sourceImageResponse.ok) throw new Error(`Failed to download full source image: ${sourceImageResponse.statusText}`);
     if (!inpaintedPatchResponse.ok) throw new Error(`Failed to download inpainted patch: ${inpaintedPatchResponse.statusText}`);
 
-    const [sourceImage, inpaintedPatch] = await Promise.all([
-        Image.decode(await sourceImageResponse.arrayBuffer()),
-        Image.decode(await inpaintedPatchResponse.arrayBuffer())
+    const [sourceImg, inpaintedPatchImg] = await Promise.all([
+        ISImage.decode(await sourceImageResponse.arrayBuffer()),
+        ISImage.decode(await inpaintedPatchResponse.arrayBuffer())
     ]);
 
     console.log(`${logPrefix} Compositing final image...`);
+    const canvas = imgToCanvas(sourceImg);
+    const ctx = canvas.getContext('2d');
     
-    sourceImage.composite(inpaintedPatch, bbox.x, bbox.y);
+    const inpaintedPatchCanvas = imgToCanvas(inpaintedPatchImg);
+    ctx.drawImage(inpaintedPatchCanvas, bbox.x, bbox.y, bbox.width, bbox.height);
 
-    const finalImageBuffer = await sourceImage.encode(0); // 0 for PNG
+    const finalImageBuffer = canvas.toBuffer('image/png');
     const finalFilePath = `${job.user_id}/vto-final/${Date.now()}_final_composite.png`;
     
     const { error: uploadError } = await supabase.storage
