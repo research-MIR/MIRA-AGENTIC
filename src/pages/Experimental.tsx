@@ -48,6 +48,7 @@ const Experimental = () => {
 
   // State for Recontext
   const [recontextProductFiles, setRecontextProductFiles] = useState<File[]>([]);
+  const [recontextSceneFile, setRecontextSceneFile] = useState<File | null>(null);
   const [recontextPrompt, setRecontextPrompt] = useState("");
   const [recontextResult, setRecontextResult] = useState<{ imageUrl: string; description: string; finalPrompt: string; } | null>(null);
   const [isRecontextLoading, setIsRecontextLoading] = useState(false);
@@ -59,6 +60,7 @@ const Experimental = () => {
   const [isVtoLoading, setIsVtoLoading] = useState(false);
 
   const recontextPreviews = useMemo(() => recontextProductFiles.map(f => URL.createObjectURL(f)), [recontextProductFiles]);
+  const recontextScenePreview = useMemo(() => recontextSceneFile ? URL.createObjectURL(recontextSceneFile) : null, [recontextSceneFile]);
   const vtoPersonPreview = useMemo(() => vtoPersonFile ? URL.createObjectURL(vtoPersonFile) : null, [vtoPersonFile]);
   const vtoGarmentPreview = useMemo(() => vtoGarmentFile ? URL.createObjectURL(vtoGarmentFile) : null, [vtoGarmentFile]);
 
@@ -73,8 +75,8 @@ const Experimental = () => {
   };
 
   const handleRecontextGenerate = async () => {
-    if (recontextProductFiles.length === 0 || !recontextPrompt) {
-      showError("Please provide at least one product image and a scene prompt.");
+    if (recontextProductFiles.length === 0 || (!recontextPrompt && !recontextSceneFile)) {
+      showError("Please provide at least one product image and either a scene prompt or a scene reference image.");
       return;
     }
     setIsRecontextLoading(true);
@@ -82,8 +84,14 @@ const Experimental = () => {
     const toastId = showLoading("Orchestrating creative prompt...");
     try {
       const product_images_base64 = await Promise.all(recontextProductFiles.map(fileToBase64));
+      const scene_reference_image_base64 = recontextSceneFile ? await fileToBase64(recontextSceneFile) : null;
+
       const { data, error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-recontext', {
-        body: { product_images_base64, user_scene_prompt: recontextPrompt }
+        body: { 
+          product_images_base64, 
+          user_scene_prompt: recontextPrompt,
+          scene_reference_image_base64
+        }
       });
       if (error) throw error;
       setRecontextResult({
@@ -157,7 +165,9 @@ const Experimental = () => {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="scene-prompt">{t('scenePrompt')}</Label>
-                <Textarea id="scene-prompt" value={recontextPrompt} onChange={(e) => setRecontextPrompt(e.target.value)} placeholder={t('scenePromptPlaceholder')} rows={4} />
+                <Textarea id="scene-prompt" value={recontextPrompt} onChange={(e) => setRecontextPrompt(e.target.value)} placeholder={t('scenePromptPlaceholder')} rows={3} />
+                <Label className="pt-2 block">{t('sceneReferenceImage')}</Label>
+                <ImageUploader onFileSelect={(files) => files && setRecontextSceneFile(files[0])} title={t('uploadSceneReference')} imageUrl={recontextScenePreview} onClear={() => setRecontextSceneFile(null)} />
               </div>
             </div>
             <Button className="w-full" onClick={handleRecontextGenerate} disabled={isRecontextLoading}>

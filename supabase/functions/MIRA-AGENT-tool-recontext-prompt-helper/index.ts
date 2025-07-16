@@ -9,7 +9,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const systemPrompt = `You are a "Creative Director" AI that specializes in product recontextualization. Your task is to perform a two-step process: first, analyze product images to create a detailed description, and second, create a separate, enhanced scene prompt.
+const systemPrompt = `You are a "Creative Director" AI that specializes in product recontextualization. Your task is to perform a two-step process: first, analyze product images to create a detailed description, and second, create a separate, enhanced scene prompt based on user input which can include text and a reference image.
 
 ### Step 1: Product Analysis
 - You will be given up to three images of a single product.
@@ -18,22 +18,27 @@ const systemPrompt = `You are a "Creative Director" AI that specializes in produ
   - **Primary Color & Material:** Identify the main color and the dominant material (e.g., "red silk," "dark wash denim").
 - The output of this step should be a single paragraph stored in the 'product_description' field.
 
-### Step 2: Prompt Synthesis
-- You will be given a user's 'scene_prompt'.
-- For the \`final_prompt\`, your task is to enhance the user's \`scene_prompt\` only. You MUST use a generic placeholder like 'the product' or 'the item' to refer to the object. **DO NOT** include the detailed product description in the \`final_prompt\`.
-- **Translate & Enhance:** If the user's prompt is not in English, translate its core meaning. Enhance the prompt by adding descriptive details to the scene, lighting, and mood to make it more vivid and photorealistic.
+### Step 2: Prompt Synthesis (Scene Generation)
+- You will be given a user's 'scene_prompt' (text) and an optional 'scene_reference_image'.
+- **Your Hierarchy of Instruction:**
+  1.  **If a Scene Reference Image is provided:** This is your primary source of truth for the scene. Visually analyze it to generate a rich, descriptive prompt capturing its environment, lighting, and mood.
+  2.  **If a Text Prompt is *also* provided:** Use the text as a *modifier* to the scene reference image. For example, if the image is a sunny beach and the text is "make it stormy," your prompt should describe a stormy beach scene.
+  3.  **If ONLY a Text Prompt is provided:** Enhance the user's text prompt by adding descriptive details to the scene, lighting, and mood to make it more vivid and photorealistic.
+- **Crucial Rule:** The final prompt MUST use a generic placeholder like 'the product' or 'the item' to refer to the object. **DO NOT** include the detailed product description in the \`final_prompt\`.
+- **Language:** The final prompt must be in English.
 
 ### Output Format
 Your entire response MUST be a single, valid JSON object with two keys: "product_description" and "final_prompt".
 
-**Example:**
+**Example (with Scene Reference Image):**
 - **User Images:** [Photos of an orange sneaker]
-- **User Scene Prompt:** "on a beach"
+- **User Scene Prompt:** "make it look like it's on a city street at night"
+- **Scene Reference Image:** [Photo of a mossy rock in a forest]
 - **Your JSON Output:**
 \`\`\`json
 {
   "product_description": "A low-top orange athletic sneaker made of breathable mesh with a white rubber sole.",
-  "final_prompt": "A photorealistic shot of the product resting on the damp sand of a serene beach during sunset. The warm, golden light of the setting sun glints off the item's surface, and gentle waves are visible in the background."
+  "final_prompt": "A photorealistic shot of the product resting on a wet, dark city street at night. The street is illuminated by the glow of neon signs, casting colorful reflections on the item's surface."
 }
 \`\`\`
 `;
@@ -50,21 +55,26 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
 
   try {
-    const { product_images_base64, user_scene_prompt } = await req.json();
+    const { product_images_base64, user_scene_prompt, scene_reference_image_base64 } = await req.json();
     if (!product_images_base64 || !Array.isArray(product_images_base64) || product_images_base64.length === 0) {
       throw new Error("product_images_base64 array is required.");
     }
-    if (!user_scene_prompt) {
-      throw new Error("user_scene_prompt is required.");
+    if (!user_scene_prompt && !scene_reference_image_base64) {
+      throw new Error("Either user_scene_prompt or scene_reference_image_base64 is required.");
     }
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-    const parts: Part[] = [{ text: `**User Scene Prompt:**\n${user_scene_prompt}` }];
+    const parts: Part[] = [{ text: `**User Scene Prompt:**\n${user_scene_prompt || '(Not provided)'}` }];
 
     product_images_base64.forEach((base64, index) => {
         parts.push({ text: `--- PRODUCT IMAGE ${index + 1} ---` });
         parts.push({ inlineData: { mimeType: 'image/png', data: base64 } });
     });
+
+    if (scene_reference_image_base64) {
+        parts.push({ text: `--- SCENE REFERENCE IMAGE ---` });
+        parts.push({ inlineData: { mimeType: 'image/png', data: scene_reference_image_base64 } });
+    }
 
     const result = await ai.models.generateContent({
         model: MODEL_NAME,

@@ -20,6 +20,8 @@ export const experimentalTranslations = {
     uploadPerson: "Carica Persona",
     uploadProduct: "Carica Prodotto",
     resultPlaceholder: "Il risultato apparirà qui.",
+    sceneReferenceImage: "Immagine di Riferimento Scena (Opzionale)",
+    uploadSceneReference: "Carica Riferimento Scena",
   },
   en: {
     experimentalTools: "Experimental Tools",
@@ -42,5 +44,7 @@ export const experimentalTranslations = {
     uploadPerson: "Upload Person",
     uploadProduct: "Upload Product",
     resultPlaceholder: "Your result will appear here.",
+    sceneReferenceImage: "Scene Reference Image (Optional)",
+    uploadSceneReference: "Upload Scene Reference",
   },
 };

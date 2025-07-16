@@ -15,9 +15,9 @@ serve(async (req) => {
   }
 
   try {
-    const { product_images_base64, user_scene_prompt } = await req.json();
-    if (!product_images_base64 || !user_scene_prompt) {
-      throw new Error("product_images_base64 and user_scene_prompt are required.");
+    const { product_images_base64, user_scene_prompt, scene_reference_image_base64 } = await req.json();
+    if (!product_images_base64 || (user_scene_prompt === undefined && !scene_reference_image_base64)) {
+      throw new Error("product_images_base64 and either user_scene_prompt or scene_reference_image_base64 are required.");
     }
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
@@ -25,7 +25,11 @@ serve(async (req) => {
     // Step 1: Call the prompt helper to get the detailed description and final prompt
     console.log("[RecontextOrchestrator] Calling prompt helper...");
     const { data: promptData, error: helperError } = await supabase.functions.invoke('MIRA-AGENT-tool-recontext-prompt-helper', {
-      body: { product_images_base64, user_scene_prompt }
+      body: { 
+        product_images_base64, 
+        user_scene_prompt,
+        scene_reference_image_base64
+      }
     });
     if (helperError) throw new Error(`Prompt helper failed: ${helperError.message}`);
     console.log("[RecontextOrchestrator] Prompt helper successful.");
