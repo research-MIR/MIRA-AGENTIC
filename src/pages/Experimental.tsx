@@ -10,6 +10,7 @@ import { useLanguage } from "@/context/LanguageContext";
 import { showError, showLoading, dismissToast } from "@/utils/toast";
 import { cn } from "@/lib/utils";
 import { useDropzone } from "@/hooks/useDropzone";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -48,8 +49,7 @@ const Experimental = () => {
   // State for Recontext
   const [recontextProductFiles, setRecontextProductFiles] = useState<File[]>([]);
   const [recontextPrompt, setRecontextPrompt] = useState("");
-  const [recontextDescription, setRecontextDescription] = useState("");
-  const [recontextResult, setRecontextResult] = useState<string | null>(null);
+  const [recontextResult, setRecontextResult] = useState<{ imageUrl: string; description: string; finalPrompt: string; } | null>(null);
   const [isRecontextLoading, setIsRecontextLoading] = useState(false);
 
   // State for VTO
@@ -78,14 +78,19 @@ const Experimental = () => {
       return;
     }
     setIsRecontextLoading(true);
-    const toastId = showLoading("Generating recontextualized image...");
+    setRecontextResult(null);
+    const toastId = showLoading("Orchestrating creative prompt...");
     try {
       const product_images_base64 = await Promise.all(recontextProductFiles.map(fileToBase64));
-      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-product-recontext', {
-        body: { product_images_base64, prompt: recontextPrompt, product_description: recontextDescription }
+      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-recontext', {
+        body: { product_images_base64, user_scene_prompt: recontextPrompt }
       });
       if (error) throw error;
-      setRecontextResult(`data:${data.mimeType};base64,${data.base64Image}`);
+      setRecontextResult({
+        imageUrl: `data:${data.mimeType};base64,${data.base64Image}`,
+        description: data.productDescription,
+        finalPrompt: data.finalPromptUsed
+      });
       dismissToast(toastId);
     } catch (err: any) {
       dismissToast(toastId);
@@ -153,8 +158,6 @@ const Experimental = () => {
               <div className="space-y-2">
                 <Label htmlFor="scene-prompt">{t('scenePrompt')}</Label>
                 <Textarea id="scene-prompt" value={recontextPrompt} onChange={(e) => setRecontextPrompt(e.target.value)} placeholder={t('scenePromptPlaceholder')} rows={4} />
-                <Label htmlFor="product-desc">{t('productDescription')}</Label>
-                <Input id="product-desc" value={recontextDescription} onChange={(e) => setRecontextDescription(e.target.value)} placeholder={t('productDescriptionPlaceholder')} />
               </div>
             </div>
             <Button className="w-full" onClick={handleRecontextGenerate} disabled={isRecontextLoading}>
@@ -164,8 +167,25 @@ const Experimental = () => {
             <div>
               <Label>{t('result')}</Label>
               <div className="mt-2 aspect-square w-full bg-muted rounded-md flex items-center justify-center">
-                {isRecontextLoading ? <Loader2 className="h-8 w-8 animate-spin" /> : recontextResult ? <img src={recontextResult} className="max-w-full max-h-full object-contain" /> : <p className="text-sm text-muted-foreground">{t('resultPlaceholder')}</p>}
+                {isRecontextLoading ? <Loader2 className="h-8 w-8 animate-spin" /> : recontextResult ? <img src={recontextResult.imageUrl} className="max-w-full max-h-full object-contain" /> : <p className="text-sm text-muted-foreground">{t('resultPlaceholder')}</p>}
               </div>
+              {recontextResult && (
+                <Accordion type="single" collapsible className="w-full mt-2">
+                  <AccordionItem value="item-1">
+                    <AccordionTrigger>View AI Analysis & Final Prompt</AccordionTrigger>
+                    <AccordionContent className="space-y-2">
+                      <div>
+                        <h4 className="font-semibold text-sm">AI Product Description:</h4>
+                        <p className="text-sm p-2 bg-muted rounded-md">{recontextResult.description}</p>
+                      </div>
+                      <div>
+                        <h4 className="font-semibold text-sm">Final Prompt Used:</h4>
+                        <p className="text-sm p-2 bg-muted rounded-md font-mono">{recontextResult.finalPrompt}</p>
+                      </div>
+                    </AccordionContent>
+                  </AccordionItem>
+                </Accordion>
+              )}
             </div>
           </CardContent>
         </Card>
