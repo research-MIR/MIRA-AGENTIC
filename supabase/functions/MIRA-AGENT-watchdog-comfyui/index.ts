@@ -39,7 +39,7 @@ serve(async (req) => {
     const { data: stalledModelGenJobs, error: modelGenError } = await supabase
       .from('mira-agent-model-generation-jobs')
       .select('id')
-      .in('status', ['pending', 'generating_poses'])
+      .in('status', ['pending', 'base_generation_complete', 'generating_poses', 'polling_poses', 'upscaling_poses'])
       .lt('last_polled_at', threshold);
 
     if (refinerError) console.error("Error querying refiner jobs:", refinerError.message);
