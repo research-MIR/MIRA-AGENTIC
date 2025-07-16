@@ -11,8 +11,8 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
 const POLLING_INTERVAL_MS = 5000;
-const FINAL_OUTPUT_NODE_ID = "445";
-const FALLBACK_NODE_IDS = ["431", "430", "9", "4"];
+const FINAL_OUTPUT_NODE_ID = "283"; // CORRECTED for tiled upscaler
+const FALLBACK_NODE_IDS = ["9", "4"]; // Generic fallbacks
 const MAX_RETRIES = 2;
 
 async function findOutputImage(historyOutputs: any): Promise<any | null> {
@@ -126,7 +126,6 @@ serve(async (req) => {
         console.log(`[Poller][${job.id}] All steps complete. Polling finished.`);
         return new Response(JSON.stringify({ success: true, status: 'complete', publicUrl }), { headers: corsHeaders });
     } else {
-        // Job is not in queue and has no output. It has failed.
         console.warn(`[Poller][${job.id}] Job finished with no output. Attempting retry #${(job.retry_count || 0) + 1}...`);
         if ((job.retry_count || 0) < MAX_RETRIES) {
             const originalWorkflow = job.metadata?.workflow_payload;
