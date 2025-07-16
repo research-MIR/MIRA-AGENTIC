@@ -1,7 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { createCanvas, loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
-import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
+import { Image } from 'https://deno.land/x/imagescript@1.2.15/mod.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -39,7 +38,6 @@ serve(async (req) => {
 
     if (!full_source_image_url || !bbox) {
         console.warn(`${logPrefix} Job is missing metadata for compositing (full_source_image_url or bbox). Assuming it's a legacy job and skipping composition.`);
-        // Fallback for old jobs that didn't have the crop/composite step
         await supabase.from(tableName).update({ status: 'complete', final_image_url: final_image_url }).eq('id', job_id);
         return new Response(JSON.stringify({ success: true, message: "Legacy job finalized without composition." }), { headers: corsHeaders });
     }
@@ -54,21 +52,15 @@ serve(async (req) => {
     if (!inpaintedPatchResponse.ok) throw new Error(`Failed to download inpainted patch: ${inpaintedPatchResponse.statusText}`);
 
     const [sourceImage, inpaintedPatch] = await Promise.all([
-        loadImage(await sourceImageResponse.arrayBuffer()),
-        loadImage(await inpaintedPatchResponse.arrayBuffer())
+        Image.decode(await sourceImageResponse.arrayBuffer()),
+        Image.decode(await inpaintedPatchResponse.arrayBuffer())
     ]);
 
     console.log(`${logPrefix} Compositing final image...`);
-    const canvas = createCanvas(sourceImage.width(), sourceImage.height());
-    const ctx = canvas.getContext('2d');
     
-    // 1. Draw the original full-res image
-    ctx.drawImage(sourceImage, 0, 0);
-    
-    // 2. Draw the inpainted patch on top at the correct location
-    ctx.drawImage(inpaintedPatch, bbox.x, bbox.y, bbox.width, bbox.height);
+    sourceImage.composite(inpaintedPatch, bbox.x, bbox.y);
 
-    const finalImageBuffer = canvas.toBuffer('image/png');
+    const finalImageBuffer = await sourceImage.encode(0); // 0 for PNG
     const finalFilePath = `${job.user_id}/vto-final/${Date.now()}_final_composite.png`;
     
     const { error: uploadError } = await supabase.storage
@@ -85,7 +77,7 @@ serve(async (req) => {
         const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-verify-garment-match', {
             body: {
                 original_garment_url: job.metadata.reference_image_url,
-                final_generated_url: finalPublicUrl // Use the newly composited image for verification
+                final_generated_url: finalPublicUrl
             }
         });
         if (error) {
@@ -103,7 +95,7 @@ serve(async (req) => {
         const newQaReportObject = { 
             timestamp: new Date().toISOString(), 
             report: verificationResult,
-            failed_image_url: finalPublicUrl // Log the URL of the image that failed QA
+            failed_image_url: finalPublicUrl
         };
 
         await supabase.from(tableName).update({ 

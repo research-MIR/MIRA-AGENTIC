@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { createCanvas, loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
+import { Image } from 'https://deno.land/x/imagescript@1.2.15/mod.ts';
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
@@ -70,22 +70,15 @@ serve(async (req) => {
         downloadFromSupabase(supabase, final_mask_url)
     ]);
 
-    const sourceImage = await loadImage(await sourceBlob.arrayBuffer());
-    const maskImage = await loadImage(await maskBlob.arrayBuffer());
+    const sourceImage = await Image.decode(await sourceBlob.arrayBuffer());
+    const maskImage = await Image.decode(await maskBlob.arrayBuffer());
     const { width, height } = sourceImage;
 
     console.log(`${logPrefix} Calculating bounding box from mask...`);
-    const maskCanvas = createCanvas(width, height);
-    const maskCtx = maskCanvas.getContext('2d');
-    maskCtx.drawImage(maskImage, 0, 0);
-    const maskImageData = maskCtx.getImageData(0, 0, width, height);
-    const data = maskImageData.data;
     let minX = width, minY = height, maxX = 0, maxY = 0;
 
-    for (let i = 0; i < data.length; i += 4) {
-        if (data[i] > 128) { // Check if pixel is not black
-            const x = (i / 4) % width;
-            const y = Math.floor((i / 4) / width);
+    for (const [x, y, color] of maskImage.iterateWithAlpha()) {
+        if (color > 128) { // Check if pixel is not black (or transparent)
             if (x < minX) minX = x;
             if (x > maxX) maxX = x;
             if (y < minY) minY = y;
@@ -104,13 +97,11 @@ serve(async (req) => {
     };
     console.log(`${logPrefix} Bounding box calculated with 5% padding:`, bbox);
 
-    const croppedSourceCanvas = createCanvas(bbox.width, bbox.height);
-    croppedSourceCanvas.getContext('2d')!.drawImage(sourceImage, bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
-    const croppedSourceBase64 = encodeBase64(croppedSourceCanvas.toBuffer('image/png'));
+    const croppedSourceImage = sourceImage.clone().crop(bbox.x, bbox.y, bbox.width, bbox.height);
+    const croppedSourceBase64 = encodeBase64(await croppedSourceImage.encode(0)); // 0 for PNG
 
-    const croppedMaskCanvas = createCanvas(bbox.width, bbox.height);
-    croppedMaskCanvas.getContext('2d')!.drawImage(maskImage, bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
-    const croppedMaskBase64 = encodeBase64(croppedMaskCanvas.toBuffer('image/png'));
+    const croppedMaskImage = maskImage.clone().crop(bbox.x, bbox.y, bbox.width, bbox.height);
+    const croppedMaskBase64 = encodeBase64(await croppedMaskImage.encode(0));
     console.log(`${logPrefix} Source and mask images cropped and encoded.`);
 
     const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-prompt-helper', {
