@@ -74,13 +74,11 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack, engine, onEngin
   const [randomGarmentFiles, setRandomGarmentFiles] = useState<File[]>([]);
 
   const [precisePairs, setPrecisePairs] = useState<QueueItem[]>([]);
-  const [tempPairPersonFile, setTempPairPersonFile] = useState<File | null>(null);
   const [tempPairPersonUrl, setTempPairPersonUrl] = useState<string | null>(null);
   const [tempPairGarmentFile, setTempPairGarmentFile] = useState<File | null>(null);
   const [tempPairAppendix, setTempPairAppendix] = useState("");
 
   const garmentFileUrl = useMemo(() => garmentFile ? URL.createObjectURL(garmentFile) : null, [garmentFile]);
-  const tempPairPersonPreviewUrl = useMemo(() => tempPairPersonFile ? URL.createObjectURL(tempPairPersonFile) : tempPairPersonUrl, [tempPairPersonFile, tempPairPersonUrl]);
   const tempPairGarmentUrl = useMemo(() => tempPairGarmentFile ? URL.createObjectURL(tempPairGarmentFile) : null, [tempPairGarmentFile]);
 
   const handleMultiModelSelect = (poseUrls: string[]) => {
@@ -98,7 +96,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack, engine, onEngin
 
   const handleSingleModelSelect = (poseUrls: string[]) => {
     if (poseUrls.length > 0) {
-      setTempPairPersonUrl(poseUrls[0]); // For precise pairs, we only need one pose
+      setTempPairPersonUrl(poseUrls[0]);
     }
     setIsModelModalOpen(false);
   };
@@ -109,17 +107,15 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack, engine, onEngin
   };
 
   const addPrecisePair = () => {
-    const personUrl = tempPairPersonUrl || (tempPairPersonFile ? URL.createObjectURL(tempPairPersonFile) : null);
-    if (personUrl && tempPairGarmentFile) {
+    if (tempPairPersonUrl && tempPairGarmentFile) {
       const garmentUrl = URL.createObjectURL(tempPairGarmentFile);
       const newPair: QueueItem = {
-        person: { url: personUrl, file: tempPairPersonFile || undefined },
+        person: { url: tempPairPersonUrl },
         garment: { url: garmentUrl, file: tempPairGarmentFile },
         appendix: tempPairAppendix
       };
       setPrecisePairs(prev => [...prev, newPair]);
       setTempPairPersonUrl(null);
-      setTempPairPersonFile(null);
       setTempPairGarmentFile(null);
       setTempPairAppendix("");
     }
@@ -235,14 +231,26 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack, engine, onEngin
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-2 gap-2">
-            <ImageUploader onFileSelect={setTempPairPersonFile} title={t('person')} imageUrl={tempPairPersonPreviewUrl} onClear={() => { setTempPairPersonFile(null); setTempPairPersonUrl(null); }} />
+            <div className="space-y-2">
+                <Label>{t('person')}</Label>
+                <div className="aspect-square w-full bg-muted rounded-md flex items-center justify-center">
+                    {tempPairPersonUrl ? (
+                        <div className="relative w-full h-full">
+                            <SecureImageDisplay imageUrl={tempPairPersonUrl} alt="Selected Person" />
+                            <Button variant="destructive" size="icon" className="absolute top-2 right-2 h-6 w-6 z-10" onClick={() => setTempPairPersonUrl(null)}><X className="h-4 w-4" /></Button>
+                        </div>
+                    ) : (
+                        <Button variant="outline" onClick={() => setIsModelModalOpen(true)}>Select Model</Button>
+                    )}
+                </div>
+            </div>
             <ImageUploader onFileSelect={setTempPairGarmentFile} title={t('garment')} imageUrl={tempPairGarmentUrl} onClear={() => setTempPairGarmentFile(null)} />
           </div>
           <div>
             <Label htmlFor="pair-appendix">{t('promptAppendixPair')}</Label>
             <Input id="pair-appendix" value={tempPairAppendix} onChange={(e) => setTempPairAppendix(e.target.value)} placeholder={t('promptAppendixPairPlaceholder')} />
           </div>
-          <Button className="w-full" onClick={addPrecisePair} disabled={(!tempPairPersonUrl && !tempPairPersonFile) || !tempPairGarmentFile}>{t('addPairToQueue')}</Button>
+          <Button className="w-full" onClick={addPrecisePair} disabled={!tempPairPersonUrl || !tempPairGarmentFile}>{t('addPairToQueue')}</Button>
         </CardContent>
       </Card>
       <Card>
@@ -267,39 +275,41 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack, engine, onEngin
   );
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-      <div className="lg:col-span-2">
-        {mode === 'one-to-many' && renderOneToMany()}
-        {mode === 'random-pairs' && renderRandomPairs()}
-        {mode === 'precise-pairs' && renderPrecisePairs()}
-      </div>
-      <div className="lg:col-span-1 space-y-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>{t('selectEngine')}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <RadioGroup value={engine} onValueChange={(v) => onEngineChange(v as any)} className="space-y-2">
-              <Label htmlFor="bitstudio" className="flex items-start space-x-2 p-4 border rounded-md has-[:checked]:border-primary cursor-pointer">
-                <RadioGroupItem value="bitstudio" id="bitstudio" />
-                <div className="w-full">
-                  <span className="font-semibold">{t('bitstudioVTO')}</span>
-                  <p className="text-xs text-muted-foreground">{t('bitstudioVTODescription')}</p>
-                </div>
-              </Label>
-              <Label htmlFor="google" className="flex items-start space-x-2 p-4 border rounded-md has-[:checked]:border-primary cursor-pointer">
-                <RadioGroupItem value="google" id="google" />
-                <div className="w-full">
-                  <span className="font-semibold">{t('googleVTO')}</span>
-                  <p className="text-xs text-muted-foreground">{t('googleVTODescription')}</p>
-                </div>
-              </Label>
-            </RadioGroup>
-          </CardContent>
-        </Card>
-        <div className="flex flex-col gap-2">
-          <Button size="lg" onClick={handleProceed} disabled={isProceedDisabled}>{t('reviewQueue', { count: mode === 'precise-pairs' ? precisePairs.length : selectedModelUrls.size })}</Button>
-          <Button variant="outline" onClick={onGoBack}>{t('goBack')}</Button>
+    <>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="lg:col-span-2">
+          {mode === 'one-to-many' && renderOneToMany()}
+          {mode === 'random-pairs' && renderRandomPairs()}
+          {mode === 'precise-pairs' && renderPrecisePairs()}
+        </div>
+        <div className="lg:col-span-1 space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>{t('selectEngine')}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <RadioGroup value={engine} onValueChange={(v) => onEngineChange(v as any)} className="space-y-2">
+                <Label htmlFor="bitstudio" className="flex items-start space-x-2 p-4 border rounded-md has-[:checked]:border-primary cursor-pointer">
+                  <RadioGroupItem value="bitstudio" id="bitstudio" />
+                  <div className="w-full">
+                    <span className="font-semibold">{t('bitstudioVTO')}</span>
+                    <p className="text-xs text-muted-foreground">{t('bitstudioVTODescription')}</p>
+                  </div>
+                </Label>
+                <Label htmlFor="google" className="flex items-start space-x-2 p-4 border rounded-md has-[:checked]:border-primary cursor-pointer">
+                  <RadioGroupItem value="google" id="google" />
+                  <div className="w-full">
+                    <span className="font-semibold">{t('googleVTO')}</span>
+                    <p className="text-xs text-muted-foreground">{t('googleVTODescription')}</p>
+                  </div>
+                </Label>
+              </RadioGroup>
+            </CardContent>
+          </Card>
+          <div className="flex flex-col gap-2">
+            <Button size="lg" onClick={handleProceed} disabled={isProceedDisabled}>{t('reviewQueue', { count: mode === 'precise-pairs' ? precisePairs.length : selectedModelUrls.size })}</Button>
+            <Button variant="outline" onClick={onGoBack}>{t('goBack')}</Button>
+          </div>
         </div>
       </div>
       <Dialog open={isModelModalOpen} onOpenChange={setIsModelModalOpen}>
@@ -315,6 +325,6 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack, engine, onEngin
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   );
 };
