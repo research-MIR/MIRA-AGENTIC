@@ -143,6 +143,12 @@ serve(async (req) => {
         const finalPayload = { ...retryPayload };
         delete finalPayload.person_image_id;
 
+        // FIX: Map 'hd' to 'high' for the resolution parameter.
+        if (finalPayload.resolution === 'hd') {
+            console.log(`[BitStudioProxy][${requestId}] Mapping invalid resolution 'hd' to 'high'.`);
+            finalPayload.resolution = 'high';
+        }
+
         const inpaintUrl = `${BITSTUDIO_API_BASE}/images/${sourceIdForInpaint}/inpaint`;
         apiResponse = await fetch(inpaintUrl, {
             method: 'POST',
