@@ -17,11 +17,11 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  const { job_id, final_image_url, job_type = 'comfyui' } = await req.json();
+  const { job_id, final_image_url, job_type = 'bitstudio' } = await req.json();
   if (!job_id || !final_image_url) throw new Error("job_id and final_image_url are required.");
   
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-  const logPrefix = `[Compositor-Inpainting][${job_id}]`;
+  const logPrefix = `[Compositor-Inpaint][${job_id}]`;
   console.log(`${logPrefix} Job started. Type: ${job_type}`);
 
   const tableName = job_type === 'bitstudio' ? 'mira-agent-bitstudio-jobs' : 'mira-agent-inpainting-jobs';
@@ -34,7 +34,49 @@ serve(async (req) => {
       .single();
     if (fetchError) throw fetchError;
 
-    const finalPublicUrl = final_image_url; 
+    const metadata = job.metadata || {};
+    const { full_source_image_url, bbox } = metadata;
+
+    if (!full_source_image_url || !bbox) {
+        console.warn(`${logPrefix} Job is missing metadata for compositing (full_source_image_url or bbox). Assuming it's a legacy job and skipping composition.`);
+        // Fallback for old jobs that didn't have the crop/composite step
+        await supabase.from(tableName).update({ status: 'complete', final_image_url: final_image_url }).eq('id', job_id);
+        return new Response(JSON.stringify({ success: true, message: "Legacy job finalized without composition." }), { headers: corsHeaders });
+    }
+
+    console.log(`${logPrefix} Downloading assets for composition...`);
+    const [sourceImageResponse, inpaintedPatchResponse] = await Promise.all([
+        fetch(full_source_image_url),
+        fetch(final_image_url)
+    ]);
+
+    if (!sourceImageResponse.ok) throw new Error(`Failed to download full source image: ${sourceImageResponse.statusText}`);
+    if (!inpaintedPatchResponse.ok) throw new Error(`Failed to download inpainted patch: ${inpaintedPatchResponse.statusText}`);
+
+    const [sourceImage, inpaintedPatch] = await Promise.all([
+        loadImage(await sourceImageResponse.arrayBuffer()),
+        loadImage(await inpaintedPatchResponse.arrayBuffer())
+    ]);
+
+    console.log(`${logPrefix} Compositing final image...`);
+    const canvas = createCanvas(sourceImage.width(), sourceImage.height());
+    const ctx = canvas.getContext('2d');
+    
+    // 1. Draw the original full-res image
+    ctx.drawImage(sourceImage, 0, 0);
+    
+    // 2. Draw the inpainted patch on top at the correct location
+    ctx.drawImage(inpaintedPatch, bbox.x, bbox.y, bbox.width, bbox.height);
+
+    const finalImageBuffer = canvas.toBuffer('image/png');
+    const finalFilePath = `${job.user_id}/vto-final/${Date.now()}_final_composite.png`;
+    
+    const { error: uploadError } = await supabase.storage
+      .from(GENERATED_IMAGES_BUCKET)
+      .upload(finalFilePath, finalImageBuffer, { contentType: 'image/png', upsert: true });
+    if (uploadError) throw uploadError;
+
+    const { data: { publicUrl: finalPublicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(finalFilePath);
     console.log(`${logPrefix} Composition complete. Final URL: ${finalPublicUrl}`);
 
     let verificationResult = null;
@@ -43,7 +85,7 @@ serve(async (req) => {
         const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-verify-garment-match', {
             body: {
                 original_garment_url: job.metadata.reference_image_url,
-                final_generated_url: final_image_url
+                final_generated_url: finalPublicUrl // Use the newly composited image for verification
             }
         });
         if (error) {
@@ -61,7 +103,7 @@ serve(async (req) => {
         const newQaReportObject = { 
             timestamp: new Date().toISOString(), 
             report: verificationResult,
-            failed_image_url: final_image_url
+            failed_image_url: finalPublicUrl // Log the URL of the image that failed QA
         };
 
         await supabase.from(tableName).update({ 
