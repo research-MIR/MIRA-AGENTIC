@@ -93,16 +93,16 @@ export const optimizeImage = (file: File, options?: { quality?: number; forceOri
               return reject(new Error('Canvas toBlob failed'));
             }
             const originalName = file.name.substring(0, file.name.lastIndexOf('.')) || file.name;
-            const newFile = new File([blob], `${originalName}.webp`, {
-              type: 'image/webp',
+            const newFile = new File([blob], `${originalName}.png`, {
+              type: 'image/png',
               lastModified: Date.now(),
             });
             
-            console.log(`[ImageOptimizer] Optimized ${file.name} to WebP: ${formatBytes(originalSize)} -> ${formatBytes(newFile.size)}. Resized: ${!forceOriginalDimensions && scale < 1}`);
+            console.log(`[ImageOptimizer] Optimized ${file.name} to PNG: ${formatBytes(originalSize)} -> ${formatBytes(newFile.size)}. Resized: ${!forceOriginalDimensions && scale < 1}`);
 
             resolve(newFile);
           },
-          'image/webp',
+          'image/png',
           quality
         );
       };
