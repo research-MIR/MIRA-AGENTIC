@@ -24,6 +24,7 @@ import ModelPacks from "./pages/ModelPacks.tsx";
 import ModelPackDetail from "./pages/ModelPackDetail.tsx";
 import VirtualTryOnPacks from "./pages/VirtualTryOnPacks.tsx";
 import EditWithWords from "./pages/EditWithWords.tsx";
+import Experimental from "./pages/Experimental.tsx";
 import { GlobalModals } from "./components/GlobalModals.tsx";
 
 const App = () => {
@@ -107,6 +108,7 @@ const App = () => {
             <Route path="/developer/segmentation" element={<SegmentationTool />} />
             <Route path="/model-packs" element={<ModelPacks />} />
             <Route path="/model-packs/:packId" element={<ModelPackDetail />} />
+            <Route path="/experimental" element={<Experimental />} />
           </Route>
         </Route>
         <Route path="*" element={<NotFound />} />

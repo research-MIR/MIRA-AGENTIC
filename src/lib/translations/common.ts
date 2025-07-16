@@ -50,6 +50,7 @@ export const commonTranslations = {
     generateModels: "Genera Modelli",
     virtualTryOnPacks: "Camerino Virtuale (PACKS)",
     advancedTools: "Strumenti Avanzati",
+    experimentalTools: "Strumenti Sperimentali",
   },
   en: {
     greeting: "Hi! How can I help you today?",
@@ -102,5 +103,6 @@ export const commonTranslations = {
     generateModels: "Generate Models",
     virtualTryOnPacks: "Virtual Try-On (PACKS)",
     advancedTools: "Advanced Tools",
+    experimentalTools: "Experimental Tools",
   },
 };
