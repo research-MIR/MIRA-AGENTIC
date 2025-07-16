@@ -12,9 +12,6 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RecentVtoPacks } from "@/components/VTO/RecentVtoPacks";
 import { optimizeImage, sanitizeFilename } from "@/lib/utils";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Label } from "@/components/ui/label";
-import { Card, CardContent } from "@/components/ui/card";
 
 type WizardStep = 'select-mode' | 'provide-inputs' | 'review-queue';
 type VtoMode = 'one-to-many' | 'precise-pairs' | 'random-pairs';
@@ -123,44 +120,30 @@ const VirtualTryOnPacks = () => {
           </div>
         );
       case 'provide-inputs':
-        return <VtoInputProvider mode={mode!} onQueueReady={handleQueueReady} onGoBack={handleGoBack} />;
+        return <VtoInputProvider 
+                  mode={mode!} 
+                  onQueueReady={handleQueueReady} 
+                  onGoBack={handleGoBack}
+                  engine={engine}
+                  onEngineChange={setEngine}
+                />;
       case 'review-queue':
         return (
-          <div className="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-8">
-            <div className="md:col-span-2">
-              <VtoReviewQueue queue={queue} />
-            </div>
-            <div className="space-y-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle>{t('selectEngine')}</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <RadioGroup value={engine} onValueChange={(v) => setEngine(v as Engine)}>
-                    <div className="flex items-start space-x-2 p-4 border rounded-md has-[:checked]:border-primary">
-                      <RadioGroupItem value="bitstudio" id="bitstudio" />
-                      <Label htmlFor="bitstudio" className="w-full">
-                        <span className="font-semibold">{t('bitstudioVTO')}</span>
-                        <p className="text-xs text-muted-foreground">{t('bitstudioVTODescription')}</p>
-                      </Label>
-                    </div>
-                    <div className="flex items-start space-x-2 p-4 border rounded-md has-[:checked]:border-primary">
-                      <RadioGroupItem value="google" id="google" />
-                      <Label htmlFor="google" className="w-full">
-                        <span className="font-semibold">{t('googleVTO')}</span>
-                        <p className="text-xs text-muted-foreground">{t('googleVTODescription')}</p>
-                      </Label>
-                    </div>
-                  </RadioGroup>
-                </CardContent>
-              </Card>
-              <div className="flex flex-col gap-2">
-                <Button size="lg" onClick={handleGenerate} disabled={isLoading}>
-                  {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
-                  {t('generateNImages', { count: queue.length })}
-                </Button>
-                <Button variant="outline" onClick={handleGoBack}>{t('goBack')}</Button>
-              </div>
+          <div className="max-w-2xl mx-auto space-y-6">
+            <VtoReviewQueue queue={queue} />
+            <Alert>
+              <Info className="h-4 w-4" />
+              <AlertTitle>Ready to Generate</AlertTitle>
+              <AlertDescription>
+                You are about to generate {queue.length} images using the <strong>{engine}</strong> engine.
+              </AlertDescription>
+            </Alert>
+            <div className="flex justify-between items-center">
+              <Button variant="outline" onClick={handleGoBack}>{t('goBack')}</Button>
+              <Button size="lg" onClick={handleGenerate} disabled={isLoading}>
+                {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+                {t('generateNImages', { count: queue.length })}
+              </Button>
             </div>
           </div>
         );
