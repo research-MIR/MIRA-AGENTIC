@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { createCanvas, loadImage, Canvas, CanvasRenderingContext2D } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
+import { createCanvas, loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -149,9 +149,9 @@ serve(async (req) => {
         .eq('id', parent_pair_job_id);
 
     console.log(`[Expander][${requestId}] Triggering Step 2 worker for parent job ${parent_pair_job_id}.`);
-    await supabase.functions.invoke('MIRA-AGENT-worker-batch-inpaint-step2', {
+    supabase.functions.invoke('MIRA-AGENT-worker-batch-inpaint-step2', {
         body: { pair_job_id: parent_pair_job_id, final_mask_url: expandedMaskUrl }
-    });
+    }).catch(console.error);
 
     return new Response(JSON.stringify({ success: true, expandedMaskUrl }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
