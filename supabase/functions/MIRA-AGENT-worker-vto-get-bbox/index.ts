@@ -14,7 +14,17 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const systemPrompt = `You are a high-precision, automated image analysis tool. Your ONLY function is to detect the bounding box of the single, most prominent human subject in the image. The bounding box MUST enclose the entire person from the top of their head to the bottom of their feet. If the feet are not visible, the box must extend to the bottom of the image frame. If the head is cut off, the box must extend to the top of the image frame. Your entire response MUST be a single, valid JSON object and NOTHING ELSE. Do not include any text, explanations, or markdown formatting like \`\`\`json.`;
+const systemPrompt = `You are a high-precision, automated image analysis tool. Your ONLY function is to detect the bounding box of the single, most prominent human subject in the image. The bounding box MUST enclose the entire person from the top of their head to the bottom of their feet. If the feet are not visible, the box must extend to the bottom of the image frame. If the head is cut off, the box must extend to the top of the image frame. Your entire response MUST be a single, valid JSON object and NOTHING ELSE. Do not include any text, explanations, or markdown formatting like \`\`\`json.
+
+### Example Output Format:
+\`\`\`json
+[
+  {
+    "box_2d": [28, 362, 984, 624],
+    "label": "person"
+  }
+]
+\`\`\``;
 
 const boundingBoxSchema = {
   type: "array",
@@ -101,13 +111,28 @@ serve(async (req) => {
 
     let detectedBoxes = JSON.parse(result.text);
 
-    if (detectedBoxes && !Array.isArray(detectedBoxes) && detectedBoxes.box_2d) {
+    if (detectedBoxes && !Array.isArray(detectedBoxes)) {
         console.log("Model returned a single object, wrapping it in an array.");
         detectedBoxes = [detectedBoxes]; 
     }
 
     if (!detectedBoxes || !Array.isArray(detectedBoxes) || detectedBoxes.length === 0) {
         throw new Error("AI did not detect any bounding boxes.");
+    }
+
+    // Check for the alternative format {x, y, width, height} and convert it
+    if (detectedBoxes[0].x !== undefined && detectedBoxes[0].y !== undefined) {
+        console.log("Detected alternative {x, y, w, h} format. Converting to box_2d.");
+        const box = detectedBoxes[0];
+        const y_min_norm = (box.y / originalHeight) * 1000;
+        const x_min_norm = (box.x / originalWidth) * 1000;
+        const y_max_norm = ((box.y + box.height) / originalHeight) * 1000;
+        const x_max_norm = ((box.x + box.width) / originalWidth) * 1000;
+        detectedBoxes[0].box_2d = [y_min_norm, x_min_norm, y_max_norm, x_max_norm];
+    }
+
+    if (!detectedBoxes[0].box_2d) {
+        throw new Error("AI response did not contain a valid 'box_2d' field.");
     }
 
     const largestBox = detectedBoxes.reduce((prev, current) => {
@@ -123,7 +148,7 @@ serve(async (req) => {
     const abs_width = ((x_max - x_min) / 1000) * originalWidth;
     const abs_height = ((y_max - y_min) / 1000) * originalHeight;
 
-    const basePaddingPercentage = 0.15; // Increased base padding
+    const basePaddingPercentage = 0.15;
     const longerDim = Math.max(abs_width, abs_height);
     const basePaddingPixels = longerDim * basePaddingPercentage;
 
