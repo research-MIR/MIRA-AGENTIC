@@ -119,11 +119,28 @@ serve(async (req) => {
     const normalizedBox = largestBox.box_2d;
 
     const [y_min, x_min, y_max, x_max] = normalizedBox;
+    
+    // Calculate original absolute box
+    const abs_x = (x_min / 1000) * originalWidth;
+    const abs_y = (y_min / 1000) * originalHeight;
+    const abs_width = ((x_max - x_min) / 1000) * originalWidth;
+    const abs_height = ((y_max - y_min) / 1000) * originalHeight;
+
+    // Calculate 7% padding
+    const padding_x = abs_width * 0.07;
+    const padding_y = abs_height * 0.07;
+
+    // Apply padding and ensure it stays within image bounds
+    const dilated_x = Math.max(0, abs_x - padding_x / 2);
+    const dilated_y = Math.max(0, abs_y - padding_y / 2);
+    const dilated_width = Math.min(originalWidth - dilated_x, abs_width + padding_x);
+    const dilated_height = Math.min(originalHeight - dilated_y, abs_height + padding_y);
+
     const absolute_bounding_box = {
-        x: Math.round((x_min / 1000) * originalWidth),
-        y: Math.round((y_min / 1000) * originalHeight),
-        width: Math.round(((x_max - x_min) / 1000) * originalWidth),
-        height: Math.round(((y_max - y_min) / 1000) * originalHeight),
+        x: Math.round(dilated_x),
+        y: Math.round(dilated_y),
+        width: Math.round(dilated_width),
+        height: Math.round(dilated_height),
     };
 
     return new Response(JSON.stringify({
