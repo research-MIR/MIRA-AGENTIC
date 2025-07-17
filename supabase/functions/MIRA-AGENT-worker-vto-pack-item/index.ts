@@ -2,10 +2,10 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { Image as ISImage } from "https://deno.land/x/imagescript@1.2.15/mod.ts";
 import { decodeBase64, encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
+import imageSize from "https://esm.sh/image-size";
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-const GENERATED_IMAGES_BUCKET = 'mira-generations';
 const TEMP_UPLOAD_BUCKET = 'mira-agent-user-uploads';
 
 const corsHeaders = {
@@ -145,10 +145,16 @@ async function handleStart(supabase: SupabaseClient, job: any, logPrefix: string
 async function handleGenerateStep(supabase: SupabaseClient, job: any, sampleStep: number, nextStep: string, logPrefix: string) {
   console.log(`${logPrefix} Generating variation with ${sampleStep} steps.`);
   
+  console.log(`${logPrefix} Downloading public garment URL to create a temporary signed URL...`);
+  const garmentBlob = await downloadFromSupabase(supabase, job.source_garment_image_url);
+  const garmentBuffer = new Uint8Array(await garmentBlob.arrayBuffer());
+  const tempGarmentSignedUrl = await uploadBuffer(garmentBuffer, supabase, job.user_id, 'temp_garment.png');
+  console.log(`${logPrefix} Temporary signed URL for garment created.`);
+
   const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-virtual-try-on', {
     body: {
       person_image_url: job.metadata.cropped_person_url,
-      garment_image_url: job.source_garment_image_url,
+      garment_image_url: tempGarmentSignedUrl,
       sample_count: 1,
       sample_step: sampleStep
     }
