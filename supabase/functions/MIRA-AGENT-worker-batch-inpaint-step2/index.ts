@@ -95,7 +95,7 @@ serve(async (req) => {
 
     const { width, height } = sourceImage;
 
-    // --- CORRECTED & OPTIMIZED BOUNDING BOX CALCULATION ---
+    // --- OPTIMIZED BOUNDING BOX CALCULATION ---
     console.log(`[BBoxCalculator][${pair_job_id}] Starting bounding box calculation. Original mask dimensions: ${width}x${height}.`);
     const startTime = performance.now();
 
@@ -139,9 +139,9 @@ serve(async (req) => {
     };
     
     const endTime = performance.now();
-    console.log(`[BBoxCalculator][${pair_job_id}] Final bounding box calculated. Padded BBox:`, bbox);
+    console.log(`[BBoxCalculator][${pair_job_id}] Final bounding box calculated. Padded BBox: { x: ${bbox.x}, y: ${bbox.y}, w: ${bbox.width}, h: ${bbox.height} }`);
     console.log(`[BBoxCalculator][${pair_job_id}] Calculation finished. PERF: Total execution time: ${(endTime - startTime).toFixed(2)}ms.`);
-    // --- END OF CORRECTION ---
+    // --- END OF OPTIMIZATION ---
 
     const croppedSourceImage = sourceImage.clone().crop(bbox.x, bbox.y, bbox.width, bbox.height);
     const croppedSourceBuffer = await croppedSourceImage.encode(0);
