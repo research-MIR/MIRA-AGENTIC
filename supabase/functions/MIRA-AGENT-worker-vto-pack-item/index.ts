@@ -102,15 +102,31 @@ serve(async (req) => {
     // Step 4: Composite the result
     console.log(`${logPrefix} Step 4: Compositing result.`);
     const vtoPatchBuffer = decodeBase64(vtoResult.base64Image);
-    const vtoPatchImage = await ISImage.decode(vtoPatchBuffer);
+    let vtoPatchImage = await ISImage.decode(vtoPatchBuffer);
 
-    if (vtoPatchImage.width !== bbox.width || vtoPatchImage.height !== bbox.height) {
-        console.log(`${logPrefix} VTO result dimensions (${vtoPatchImage.width}x${vtoPatchImage.height}) differ from crop (${bbox.width}x${bbox.height}). Resizing patch...`);
-        vtoPatchImage.resize(bbox.width, bbox.height);
+    const cropAmount = 2; // Crop 2 pixels from each side to remove artifacts
+
+    vtoPatchImage.crop(
+        cropAmount,
+        cropAmount,
+        vtoPatchImage.width - (cropAmount * 2),
+        vtoPatchImage.height - (cropAmount * 2)
+    );
+    console.log(`${logPrefix} Cropped VTO patch by ${cropAmount}px on each side.`);
+
+    const targetWidth = bbox.width - (cropAmount * 2);
+    const targetHeight = bbox.height - (cropAmount * 2);
+
+    if (vtoPatchImage.width !== targetWidth || vtoPatchImage.height !== targetHeight) {
+        console.log(`${logPrefix} Resizing cropped patch to ${targetWidth}x${targetHeight}.`);
+        vtoPatchImage.resize(targetWidth, targetHeight);
     }
 
+    const pasteX = bbox.x + cropAmount;
+    const pasteY = bbox.y + cropAmount;
+
     const finalImage = personImage.clone();
-    finalImage.composite(vtoPatchImage, bbox.x, bbox.y);
+    finalImage.composite(vtoPatchImage, pasteX, pasteY);
     console.log(`${logPrefix} Composition complete.`);
 
     // Step 5: Finalize
