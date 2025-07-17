@@ -43,6 +43,9 @@ serve(async (req) => {
     }
 
     console.log(`${logPrefix} Downloading assets for composition...`);
+    console.log(`${logPrefix} Source URL to download: ${full_source_image_url}`);
+    console.log(`${logPrefix} Patch URL to download: ${final_image_url}`);
+
     const [sourceImageResponse, inpaintedPatchResponse] = await Promise.all([
         fetch(full_source_image_url),
         fetch(final_image_url)
@@ -146,6 +149,9 @@ serve(async (req) => {
             .eq('id', failedJob.metadata.batch_pair_job_id);
     }
 
-    return new Response(JSON.stringify({ error: error.message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
+    return new Response(JSON.stringify({ error: error.message }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      status: 500,
+    });
   }
 });
