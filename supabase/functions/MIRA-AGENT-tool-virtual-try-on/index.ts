@@ -12,16 +12,39 @@ const GOOGLE_VERTEX_AI_SA_KEY_JSON = Deno.env.get('GOOGLE_VERTEX_AI_SA_KEY_JSON'
 const GOOGLE_PROJECT_ID = Deno.env.get('GOOGLE_PROJECT_ID');
 const REGION = 'us-central1';
 const MODEL_ID = 'virtual-try-on-exp-05-31';
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 1500;
+
+const fetchWithRetry = async (url: string, options: RequestInit, maxRetries = MAX_RETRIES, delay = RETRY_DELAY_MS, requestId: string) => {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await fetch(url, options);
+      if (response.ok) {
+        return response;
+      }
+      console.warn(`[FetchRetry][${requestId}] Attempt ${attempt}/${maxRetries} failed for ${url}. Status: ${response.status}.`);
+      if (attempt === maxRetries) {
+        throw new Error(`API call failed with status ${response.status} after ${maxRetries} attempts: ${await response.text()}`);
+      }
+    } catch (error) {
+      console.warn(`[FetchRetry][${requestId}] Attempt ${attempt}/${maxRetries} failed for ${url} with network error: ${error.message}`);
+      if (attempt === maxRetries) {
+        throw new Error(`Network request failed after ${maxRetries} attempts: ${error.message}`);
+      }
+    }
+    await new Promise(resolve => setTimeout(resolve, delay * attempt)); // Exponential backoff
+  }
+  throw new Error("Fetch with retry failed unexpectedly."); // Should not be reached
+};
 
 const blobToBase64 = async (blob: Blob): Promise<string> => {
     const buffer = await blob.arrayBuffer();
     return encodeBase64(buffer);
 };
 
-async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
+async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string, requestId: string): Promise<Blob> {
     if (publicUrl.includes('/sign/')) {
-        const response = await fetch(publicUrl);
-        if (!response.ok) throw new Error(`Failed to download from signed URL: ${response.statusText}`);
+        const response = await fetchWithRetry(publicUrl, {}, MAX_RETRIES, RETRY_DELAY_MS, requestId);
         return await response.blob();
     }
     const url = new URL(publicUrl);
@@ -31,9 +54,15 @@ async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string)
     const bucketName = pathSegments[objectSegmentIndex + 2];
     const filePath = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
     if (!bucketName || !filePath) throw new Error(`Could not parse bucket or path from Supabase URL: ${publicUrl}`);
-    const { data, error } = await supabase.storage.from(bucketName).download(filePath);
-    if (error) throw new Error(`Failed to download from Supabase storage (${filePath}): ${error.message}`);
-    return data;
+    
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        const { data, error } = await supabase.storage.from(bucketName).download(filePath);
+        if (!error) return data;
+        console.warn(`[FetchRetry][${requestId}] Supabase download failed attempt ${attempt}/${MAX_RETRIES}: ${error.message}`);
+        if (attempt === MAX_RETRIES) throw new Error(`Failed to download from Supabase storage (${filePath}): ${error.message}`);
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS * attempt));
+    }
+    throw new Error("Supabase download failed unexpectedly."); // Should not be reached
 }
 
 serve(async (req) => {
@@ -66,7 +95,7 @@ serve(async (req) => {
         person_image_base64 = person_b64_input;
     } else if (person_image_url) {
         console.log(`[VirtualTryOnTool][${requestId}] Downloading person image from URL: ${person_image_url}`);
-        const personBlob = await downloadFromSupabase(supabase, person_image_url);
+        const personBlob = await downloadFromSupabase(supabase, person_image_url, requestId);
         person_image_base64 = await blobToBase64(personBlob);
     } else {
         throw new Error("Either person_image_url or person_image_base64 is required.");
@@ -76,7 +105,7 @@ serve(async (req) => {
         garment_image_base64 = garment_b64_input;
     } else if (garment_image_url) {
         console.log(`[VirtualTryOnTool][${requestId}] Downloading garment image from URL: ${garment_image_url}`);
-        const garmentBlob = await downloadFromSupabase(supabase, garment_image_url);
+        const garmentBlob = await downloadFromSupabase(supabase, garment_image_url, requestId);
         garment_image_base64 = await blobToBase64(garmentBlob);
     } else {
         throw new Error("Either garment_image_url or garment_image_base64 is required.");
@@ -105,23 +134,18 @@ serve(async (req) => {
     };
 
     console.log(`[VirtualTryOnTool][${requestId}] Calling Google Vertex AI. Payload details: Person Base64 length: ${person_image_base64.length}, Garment Base64 length: ${garment_image_base64.length}, Sample Count: ${sample_count}`);
-    const response = await fetch(apiUrl, {
+    const response = await fetchWithRetry(apiUrl, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json; charset=utf-8'
       },
       body: JSON.stringify(requestBody)
-    });
+    }, MAX_RETRIES, RETRY_DELAY_MS, requestId);
 
     const responseText = await response.text();
     console.log(`[VirtualTryOnTool][${requestId}] Received raw response from Google. Status: ${response.status}. Body length: ${responseText.length}.`);
     
-    if (!response.ok) {
-      console.error(`[VirtualTryOnTool][${requestId}] Google API Error Body:`, responseText);
-      throw new Error(`API call failed with status ${response.status}: ${responseText}`);
-    }
-
     const responseData = JSON.parse(responseText);
     const predictions = responseData.predictions;
 
