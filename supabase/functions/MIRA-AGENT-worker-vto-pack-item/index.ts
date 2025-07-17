@@ -154,6 +154,9 @@ serve(async (req) => {
     // Step 6: Finalize
     console.log(`${logPrefix} Step 6: Uploading final image and updating job.`);
     const finalImageBuffer = await finalImage.encode(0);
+    if (!finalImageBuffer || finalImageBuffer.length === 0) {
+        throw new Error("Failed to encode the final composite image.");
+    }
     const finalFilePath = `${job.user_id}/vto-packs/${Date.now()}_final_composite.png`;
     await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(finalFilePath, finalImageBuffer, { contentType: 'image/png', upsert: true });
     
