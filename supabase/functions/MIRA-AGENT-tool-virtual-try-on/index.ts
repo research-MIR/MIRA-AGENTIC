@@ -36,23 +36,6 @@ async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string)
     return data;
 }
 
-function parseStoragePathFromUrl(url: string): { bucket: string, path: string } | null {
-    try {
-        const urlObj = new URL(url);
-        const pathSegments = urlObj.pathname.split('/');
-        const objectSegmentIndex = pathSegments.indexOf('object');
-        if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) {
-            return null;
-        }
-        const bucket = pathSegments[objectSegmentIndex + 2];
-        const path = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
-        if (!bucket || !path) return null;
-        return { bucket, path };
-    } catch (e) {
-        return null;
-    }
-}
-
 serve(async (req) => {
   const requestId = `vto-tool-${Date.now()}`;
   console.log(`[VirtualTryOnTool][${requestId}] Function invoked.`);
@@ -62,33 +45,47 @@ serve(async (req) => {
   }
 
   const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
-  const { person_image_url, garment_image_url, sample_step } = await req.json();
   
   try {
     if (!GOOGLE_VERTEX_AI_SA_KEY_JSON || !GOOGLE_PROJECT_ID) {
       throw new Error("Server configuration error: Missing Google Cloud credentials.");
     }
 
-    if (!person_image_url || !garment_image_url) {
-      throw new Error("person_image_url and garment_image_url are required.");
+    const { 
+        person_image_url, garment_image_url, 
+        person_image_base64: person_b64_input, 
+        garment_image_base64: garment_b64_input,
+        sample_step 
+    } = await req.json();
+
+    let person_image_base64: string;
+    let garment_image_base64: string;
+
+    // Determine person image data
+    if (person_b64_input) {
+        console.log(`[VirtualTryOnTool][${requestId}] Using provided person_image_base64.`);
+        person_image_base64 = person_b64_input;
+    } else if (person_image_url) {
+        console.log(`[VirtualTryOnTool][${requestId}] Downloading person image from URL: ${person_image_url}`);
+        const personBlob = await downloadFromSupabase(supabase, person_image_url);
+        person_image_base64 = await blobToBase64(personBlob);
+    } else {
+        throw new Error("Either person_image_url or person_image_base64 is required.");
     }
-    console.log(`[VirtualTryOnTool][${requestId}] Received URLs. Person: ${person_image_url}, Garment: ${garment_image_url}`);
 
-    console.log(`[VirtualTryOnTool][${requestId}] Downloading images from storage...`);
-    const [personBlob, garmentBlob] = await Promise.all([
-        downloadFromSupabase(supabase, person_image_url),
-        downloadFromSupabase(supabase, garment_image_url)
-    ]);
-    console.log(`[VirtualTryOnTool][${requestId}] Images downloaded successfully.`);
+    // Determine garment image data
+    if (garment_b64_input) {
+        console.log(`[VirtualTryOnTool][${requestId}] Using provided garment_image_base64.`);
+        garment_image_base64 = garment_b64_input;
+    } else if (garment_image_url) {
+        console.log(`[VirtualTryOnTool][${requestId}] Downloading garment image from URL: ${garment_image_url}`);
+        const garmentBlob = await downloadFromSupabase(supabase, garment_image_url);
+        garment_image_base64 = await blobToBase64(garmentBlob);
+    } else {
+        throw new Error("Either garment_image_url or garment_image_base64 is required.");
+    }
 
-    console.log(`[VirtualTryOnTool][${requestId}] Encoding images to base64...`);
-    const [person_image_base64, garment_image_base64] = await Promise.all([
-        blobToBase64(personBlob),
-        blobToBase64(garmentBlob)
-    ]);
-    console.log(`[VirtualTryOnTool][${requestId}] Images encoded.`);
-
-    console.log(`[VirtualTryOnTool][${requestId}] Authenticating with Google...`);
+    console.log(`[VirtualTryOnTool][${requestId}] Images processed. Authenticating with Google...`);
     const auth = new GoogleAuth({
       credentials: JSON.parse(GOOGLE_VERTEX_AI_SA_KEY_JSON),
       scopes: 'https://www.googleapis.com/auth/cloud-platform'
@@ -157,31 +154,5 @@ serve(async (req) => {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500
     });
-  } finally {
-      // Clean up temporary files
-      try {
-        const pathsToRemove: string[] = [];
-        const personStorageInfo = parseStoragePathFromUrl(person_image_url);
-        const garmentStorageInfo = parseStoragePathFromUrl(garment_image_url);
-
-        if (personStorageInfo && personStorageInfo.bucket === 'mira-agent-user-uploads' && personStorageInfo.path.startsWith('tmp/')) {
-            pathsToRemove.push(personStorageInfo.path);
-        }
-        if (garmentStorageInfo && garmentStorageInfo.bucket === 'mira-agent-user-uploads' && garmentStorageInfo.path.startsWith('tmp/')) {
-            pathsToRemove.push(garmentStorageInfo.path);
-        }
-
-        if (pathsToRemove.length > 0) {
-            console.log(`[VirtualTryOnTool][${requestId}] Cleaning up temporary files:`, pathsToRemove);
-            const { error: cleanupError } = await supabase.storage.from('mira-agent-user-uploads').remove(pathsToRemove);
-            if (cleanupError) {
-                console.error(`[VirtualTryOnTool][${requestId}] Failed to clean up temporary files:`, cleanupError.message);
-            } else {
-                console.log(`[VirtualTryOnTool][${requestId}] Cleanup successful.`);
-            }
-        }
-      } catch (cleanupError) {
-          console.error(`[VirtualTryOnTool][${requestId}] Error during cleanup logic:`, cleanupError.message);
-      }
   }
 });
