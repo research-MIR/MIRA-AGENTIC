@@ -13,6 +13,7 @@ const STALLED_POLLER_THRESHOLD_SECONDS = 15;
 const STALLED_AGGREGATION_THRESHOLD_SECONDS = 20;
 const STALLED_PAIR_JOB_THRESHOLD_MINUTES = 2;
 const STALLED_GOOGLE_VTO_THRESHOLD_MINUTES = 2;
+const STALLED_QUEUED_VTO_THRESHOLD_SECONDS = 30; // New threshold for jobs that fail to start
 
 serve(async (req)=>{
   const requestId = `watchdog-bg-${Date.now()}`;
@@ -125,7 +126,7 @@ serve(async (req)=>{
     } else {
       console.log(`[Watchdog-BG][${requestId}] No stalled pair jobs found.`);
     }
-    // --- Task 5: Handle Stalled Google VTO Pack Jobs ---
+    // --- Task 5: Handle Stalled 'processing' Google VTO Pack Jobs ---
     const googleVtoThreshold = new Date(Date.now() - STALLED_GOOGLE_VTO_THRESHOLD_MINUTES * 60 * 1000).toISOString();
     const { data: stalledGoogleVtoJobs, error: googleVtoError } = await supabase
       .from('mira-agent-bitstudio-jobs')
@@ -144,7 +145,33 @@ serve(async (req)=>{
         await Promise.allSettled(workerPromises);
         actionsTaken.push(`Re-triggered ${stalledGoogleVtoJobs.length} stalled Google VTO workers.`);
     } else {
-        console.log(`[Watchdog-BG][${requestId}] No stalled Google VTO jobs found.`);
+        console.log(`[Watchdog-BG][${requestId}] No stalled 'processing' Google VTO jobs found.`);
+    }
+
+    // --- Task 6: Handle Stalled 'queued' Google VTO Pack Jobs (NEW) ---
+    const queuedVtoThreshold = new Date(Date.now() - STALLED_QUEUED_VTO_THRESHOLD_SECONDS * 1000).toISOString();
+    const { data: queuedGoogleVtoJobs, error: queuedVtoError } = await supabase
+      .from('mira-agent-bitstudio-jobs')
+      .select('id')
+      .eq('metadata->>engine', 'google')
+      .eq('status', 'queued')
+      .lt('updated_at', queuedVtoThreshold);
+
+    if (queuedVtoError) {
+        console.error(`[Watchdog-BG][${requestId}] Error querying for queued Google VTO jobs:`, queuedVtoError.message);
+    } else if (queuedGoogleVtoJobs && queuedGoogleVtoJobs.length > 0) {
+        console.log(`[Watchdog-BG][${requestId}] Found ${queuedGoogleVtoJobs.length} queued Google VTO job(s) that failed to start. Kicking them off...`);
+        const jobIdsToStart = queuedGoogleVtoJobs.map(j => j.id);
+        
+        await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'processing' }).in('id', jobIdsToStart);
+
+        const workerPromises = jobIdsToStart.map(jobId => 
+            supabase.functions.invoke('MIRA-AGENT-worker-vto-pack-item', { body: { pair_job_id: jobId } })
+        );
+        await Promise.allSettled(workerPromises);
+        actionsTaken.push(`Started ${queuedGoogleVtoJobs.length} stalled 'queued' Google VTO workers.`);
+    } else {
+        console.log(`[Watchdog-BG][${requestId}] No stalled 'queued' Google VTO jobs found.`);
     }
 
     const finalMessage = actionsTaken.length > 0 ? actionsTaken.join(' ') : "No actions required. All jobs are running normally.";
