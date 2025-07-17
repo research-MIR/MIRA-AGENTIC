@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { GoogleGenAI } from 'https://esm.sh/@google/genai@0.15.0';
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
-import imageSize from "https://esm.sh/image-size@1.1.1";
+import { loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
@@ -52,7 +52,10 @@ serve(async (req) => {
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
 
     const imageBuffer = await downloadFromSupabase(supabase, image_url);
-    const dimensions = imageSize(imageBuffer);
+    
+    const image = await loadImage(imageBuffer);
+    const dimensions = { width: image.width(), height: image.height() };
+
     if (!dimensions || !dimensions.width || !dimensions.height) {
         throw new Error("Could not determine image dimensions.");
     }
