@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { GoogleGenAI } from 'https://esm.sh/@google/genai@0.15.0';
+import { GoogleGenAI, HarmCategory, HarmBlockThreshold } from 'https://esm.sh/@google/genai@0.15.0';
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 import { loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
 
@@ -14,15 +14,35 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const systemPrompt = `You are a high-precision, automated image analysis tool. Your ONLY function is to detect the bounding box of the single, most prominent human subject in a given image. Your entire response MUST be a single, valid JSON object with one key, "normalized_bounding_box". The value for "normalized_bounding_box" MUST be an array of four numbers between 0 and 1000, representing the coordinates on a 1000x1000 grid in the format: [y_min, x_min, y_max, x_max]. Do NOT include any other text or explanations.`;
+const systemPrompt = `You are a high-precision, automated image analysis tool. Your function is to detect the bounding box of the single, most prominent human subject in a given image.`;
 
-function extractJson(text: string): any {
-    const match = text.match(/```json\s*([\s\S]*?)\s*```/);
-    if (match && match[1]) return JSON.parse(match[1]);
-    try { return JSON.parse(text); } catch (e) {
-        throw new Error("The model returned a response that could not be parsed as JSON.");
-    }
-}
+const boundingBoxSchema = {
+  type: "array",
+  items: {
+    type: "object",
+    properties: {
+      box_2d: {
+        type: "array",
+        items: { "type": "number" },
+        minItems: 4,
+        maxItems: 4,
+        description: "The 2D coordinates of the bounding box in [y_min, x_min, y_max, x_max] format."
+      },
+      label: { 
+        type: "string",
+        description: "A label for the detected object (e.g., 'person')."
+      }
+    },
+    required: ["box_2d", "label"]
+  }
+};
+
+const safetySettings = [
+    { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+    { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+    { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+    { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+];
 
 async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<Uint8Array> {
     const url = new URL(publicUrl);
@@ -65,17 +85,32 @@ serve(async (req) => {
 
     const result = await ai.models.generateContent({
         model: MODEL_NAME,
-        contents: [{ role: 'user', parts: [{ inlineData: { mimeType: 'image/png', data: imageBase64 } }] }],
-        generationConfig: { responseMimeType: "application/json" },
+        contents: [{ role: 'user', parts: [
+            { inlineData: { mimeType: 'image/png', data: imageBase64 } },
+            { text: "Output the position of the person in the image." }
+        ] }],
+        generationConfig: { 
+            responseMimeType: "application/json",
+            responseSchema: boundingBoxSchema,
+        },
+        safetySettings,
         config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
     });
 
-    const responseJson = extractJson(result.text);
-    const normalizedBox = responseJson.normalized_bounding_box;
+    const detectedBoxes = JSON.parse(result.text);
 
-    if (!normalizedBox || !Array.isArray(normalizedBox) || normalizedBox.length !== 4) {
-        throw new Error("AI did not return a valid bounding box.");
+    if (!detectedBoxes || !Array.isArray(detectedBoxes) || detectedBoxes.length === 0) {
+        throw new Error("AI did not detect any bounding boxes.");
     }
+
+    // Find the largest bounding box by area, as it's likely the main subject
+    const largestBox = detectedBoxes.reduce((prev, current) => {
+        const prevArea = (prev.box_2d[2] - prev.box_2d[0]) * (prev.box_2d[3] - prev.box_2d[1]);
+        const currentArea = (current.box_2d[2] - current.box_2d[0]) * (current.box_2d[3] - current.box_2d[1]);
+        return (currentArea > prevArea) ? current : prev;
+    });
+
+    const normalizedBox = largestBox.box_2d;
 
     const [y_min, x_min, y_max, x_max] = normalizedBox;
     const absolute_bounding_box = {
