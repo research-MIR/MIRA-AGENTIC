@@ -24,7 +24,7 @@ export const useVTOJobs = () => {
         .from('mira-agent-batch-inpaint-pair-jobs')
         .select('*')
         .eq('user_id', session.user.id)
-        .in('status', ['pending', 'segmenting', 'delegated', 'failed', 'permanently_failed']) // <-- THE FIX
+        .in('status', ['pending', 'processing', 'segmenting', 'delegated', 'failed', 'permanently_failed'])
         .order('created_at', { ascending: false })
         .limit(20);
 
