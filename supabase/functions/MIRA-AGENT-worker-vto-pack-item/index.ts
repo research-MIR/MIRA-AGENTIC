@@ -34,13 +34,13 @@ async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string)
 async function uploadBufferToTemp(supabase: SupabaseClient, buffer: Uint8Array, userId: string, filename: string): Promise<string> {
     const filePath = `tmp/${userId}/${Date.now()}-${filename}`;
     const { error } = await supabase.storage.from(TEMP_UPLOAD_BUCKET).upload(
-        path,
+        filePath,
         buffer,
         { contentType: "image/png" },
     );
     if (error) throw error;
     const { data } = await supabase.storage.from(TEMP_UPLOAD_BUCKET)
-        .createSignedUrl(path, 3600); // 1 hour TTL
+        .createSignedUrl(filePath, 3600); // 1 hour TTL
     if (!data || !data.signedUrl) throw new Error("Failed to create signed URL for temporary file.");
     return data.signedUrl;
 }
