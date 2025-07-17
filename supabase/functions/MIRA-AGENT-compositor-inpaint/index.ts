@@ -11,6 +11,33 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
 
+async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
+    const url = new URL(publicUrl);
+    const pathSegments = url.pathname.split('/');
+    
+    // Find the bucket name. It's usually after '/object/public/' or '/object/v1/'.
+    const objectSegmentIndex = pathSegments.indexOf('object');
+    if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) {
+        throw new Error(`Invalid Supabase storage URL format: ${publicUrl}`);
+    }
+    
+    const bucketName = pathSegments[objectSegmentIndex + 2];
+    const filePath = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
+
+    if (!bucketName || !filePath) {
+        throw new Error(`Could not parse bucket or path from Supabase URL: ${publicUrl}`);
+    }
+
+    console.log(`[Downloader] Attempting to download from bucket: '${bucketName}', path: '${filePath}'`);
+
+    const { data, error } = await supabase.storage.from(bucketName).download(filePath);
+    if (error) {
+        throw new Error(`Failed to download from Supabase storage (${filePath}): ${error.message}`);
+    }
+    return data;
+}
+
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -46,16 +73,15 @@ serve(async (req) => {
     console.log(`${logPrefix} Source URL to download: ${full_source_image_url}`);
     console.log(`${logPrefix} Patch URL to download: ${final_image_url}`);
 
-    const [sourceImageResponse, inpaintedPatchResponse] = await Promise.all([
-        fetch(full_source_image_url),
+    const [sourceBlob, inpaintedPatchResponse] = await Promise.all([
+        downloadFromSupabase(supabase, full_source_image_url),
         fetch(final_image_url)
     ]);
 
-    if (!sourceImageResponse.ok) throw new Error(`Failed to download full source image: ${sourceImageResponse.statusText}`);
     if (!inpaintedPatchResponse.ok) throw new Error(`Failed to download inpainted patch: ${inpaintedPatchResponse.statusText}`);
 
     const [sourceImage, inpaintedPatchImg] = await Promise.all([
-        ISImage.decode(await sourceImageResponse.arrayBuffer()),
+        ISImage.decode(await sourceBlob.arrayBuffer()),
         ISImage.decode(await inpaintedPatchResponse.arrayBuffer())
     ]);
 
