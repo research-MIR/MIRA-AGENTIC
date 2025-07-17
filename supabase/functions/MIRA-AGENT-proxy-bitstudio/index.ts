@@ -127,7 +127,6 @@ serve(async (req) => {
         const finalPayload = { ...retryPayload };
         delete finalPayload.person_image_id;
 
-        // FIX: Map 'hd' to 'high' for the resolution parameter.
         if (finalPayload.resolution === 'hd') {
             console.log(`[BitStudioProxy][${requestId}] Mapping invalid resolution 'hd' to 'high'.`);
             finalPayload.resolution = 'high';
@@ -178,11 +177,34 @@ serve(async (req) => {
       const jobIds: string[] = [];
 
       if (mode === 'inpaint') {
-        const { base64_image_data, base64_mask_data, reference_image_url, prompt, denoise, resolution, num_images } = body;
-        if (!base64_image_data || !base64_mask_data) throw new Error("base64_image_data and base64_mask_data are required for inpaint mode.");
+        const { base64_image_data, base64_mask_data, source_cropped_url, mask_url, reference_image_url, prompt, denoise, resolution, num_images } = body;
+        
+        let sourceBlob: Blob;
+        let maskBlob: Blob;
 
-        const sourceBlob = new Blob([decodeBase64(base64_image_data)], { type: 'image/png' });
-        const maskBlob = new Blob([decodeBase64(base64_mask_data)], { type: 'image/png' });
+        if (source_cropped_url) {
+            console.log(`[BitStudioProxy][${requestId}] Inpaint mode: Received source URL. Downloading...`);
+            const response = await fetch(source_cropped_url);
+            if (!response.ok) throw new Error(`Failed to download source image from URL: ${response.statusText}`);
+            sourceBlob = await response.blob();
+        } else if (base64_image_data) {
+            console.log(`[BitStudioProxy][${requestId}] Inpaint mode: Received source base64. Decoding...`);
+            sourceBlob = new Blob([decodeBase64(base64_image_data)], { type: 'image/png' });
+        } else {
+            throw new Error("Inpaint mode requires either 'source_cropped_url' or 'base64_image_data'.");
+        }
+
+        if (mask_url) {
+            console.log(`[BitStudioProxy][${requestId}] Inpaint mode: Received mask URL. Downloading...`);
+            const response = await fetch(mask_url);
+            if (!response.ok) throw new Error(`Failed to download mask image from URL: ${response.statusText}`);
+            maskBlob = await response.blob();
+        } else if (base64_mask_data) {
+            console.log(`[BitStudioProxy][${requestId}] Inpaint mode: Received mask base64. Decoding...`);
+            maskBlob = new Blob([decodeBase64(base64_mask_data)], { type: 'image/png' });
+        } else {
+            throw new Error("Inpaint mode requires either 'mask_url' or 'base64_mask_data'.");
+        }
 
         const [sourceImageId, maskImageId] = await Promise.all([
           uploadToBitStudio(sourceBlob, 'inpaint-base', 'source.png'),
