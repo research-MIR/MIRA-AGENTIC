@@ -77,20 +77,9 @@ serve(async (req) => {
     const abs_width = ((averageBox.x_max - averageBox.x_min) / 1000) * originalWidth;
     const abs_height = ((averageBox.y_max - averageBox.y_min) / 1000) * originalHeight;
 
-    const basePaddingPercentage = 0.20; // Increased base padding
-    const longerDim = Math.max(abs_width, abs_height);
-    const basePaddingPixels = longerDim * basePaddingPercentage;
-
-    let padding_x: number;
-    let padding_y: number;
-
-    if (abs_width < abs_height) {
-        padding_x = basePaddingPixels * 2;
-        padding_y = basePaddingPixels;
-    } else {
-        padding_y = basePaddingPixels * 2;
-        padding_x = basePaddingPixels;
-    }
+    const paddingPercentage = 0.20; // 20% padding
+    const padding_x = abs_width * paddingPercentage;
+    const padding_y = abs_height * paddingPercentage;
 
     const abs_x = (averageBox.x_min / 1000) * originalWidth;
     const abs_y = (averageBox.y_min / 1000) * originalHeight;
