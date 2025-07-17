@@ -13,180 +13,177 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-function parseStorageURL(url: string) {
-    const u = new URL(url);
-    const pathSegments = u.pathname.split('/');
-    const objectSegmentIndex = pathSegments.indexOf('object');
-    if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) {
-        throw new Error(`Invalid Supabase storage URL format: ${url}`);
-    }
-    const bucket = pathSegments[objectSegmentIndex + 2];
-    const path = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
-    return { bucket, path };
-}
-
 async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
-    const { bucket, path } = parseStorageURL(publicUrl);
-    const { data, error } = await supabase.storage.from(bucket).download(path);
-    if (error) throw new Error(`Failed to download from Supabase storage (${path}): ${error.message}`);
+    if (publicUrl.includes('/sign/')) {
+        const response = await fetch(publicUrl);
+        if (!response.ok) throw new Error(`Failed to download from signed URL: ${response.statusText}`);
+        return await response.blob();
+    }
+    const url = new URL(publicUrl);
+    const pathSegments = url.pathname.split('/');
+    const objectSegmentIndex = pathSegments.indexOf('object');
+    if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) throw new Error(`Could not parse bucket name from Supabase URL: ${publicUrl}`);
+    const bucketName = pathSegments[objectSegmentIndex + 2];
+    const filePath = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
+    if (!bucketName || !filePath) throw new Error(`Could not parse bucket or path from Supabase URL: ${publicUrl}`);
+    const { data, error } = await supabase.storage.from(bucketName).download(filePath);
+    if (error) throw new Error(`Failed to download from Supabase storage (${filePath}): ${error.message}`);
     return data;
 }
 
-async function uploadBuffer(buffer: Uint8Array, supabase: SupabaseClient) {
-  const path = `tmp/${crypto.randomUUID()}.png`;
-  const { error } = await supabase.storage.from(TMP_BUCKET).upload(
-    path,
-    buffer,
-    { contentType: "image/png" },
-  );
-  if (error) throw error;
-  const { data } = await supabase.storage.from(TMP_BUCKET)
-    .createSignedUrl(path, 3600); // 1 hour TTL
-  if (!data || !data.signedUrl) throw new Error("Failed to create signed URL for temporary file.");
-  return data.signedUrl;
+async function uploadBufferToTemp(supabase: SupabaseClient, buffer: Uint8Array, userId: string, filename: string): Promise<string> {
+    const filePath = `tmp/${userId}/${Date.now()}-${filename}`;
+    const { error } = await supabase.storage.from(TEMP_UPLOAD_BUCKET).upload(
+        filePath,
+        buffer,
+        { contentType: "image/png" },
+    );
+    if (error) throw error;
+    const { data } = await supabase.storage.from(TEMP_UPLOAD_BUCKET)
+        .createSignedUrl(filePath, 3600); // 1 hour TTL
+    if (!data || !data.signedUrl) throw new Error("Failed to create signed URL for temporary file.");
+    return data.signedUrl;
 }
 
+const blobToBase64 = async (blob: Blob): Promise<string> => {
+    const buffer = await blob.arrayBuffer();
+    return encodeBase64(buffer);
+};
+
 serve(async (req) => {
-  console.log(`[BatchInpaintWorker-Step2] Function invoked.`);
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
-  }
+  if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
 
-  const { pair_job_id, final_mask_url } = await req.json();
-  const logPrefix = `[BatchInpaintWorker-Step2][${pair_job_id}]`;
-  console.log(`${logPrefix} Received payload. pair_job_id: ${pair_job_id}, final_mask_url: ${final_mask_url}`);
-
-  if (!pair_job_id || !final_mask_url) {
-    console.error(`${logPrefix} Missing required parameters.`);
-    return new Response(JSON.stringify({ error: "pair_job_id and final_mask_url are required." }), { status: 400, headers: corsHeaders });
+  const { pair_job_id } = await req.json();
+  if (!pair_job_id) {
+    return new Response(JSON.stringify({ error: "pair_job_id is required." }), { status: 400, headers: corsHeaders });
   }
 
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
+  const logPrefix = `[VTO-Pack-Worker][${pair_job_id}]`;
 
   try {
-    const { data: pairJob, error: fetchError } = await supabase
-      .from('mira-agent-batch-inpaint-pair-jobs')
-      .select('*')
-      .eq('id', pair_job_id)
-      .single();
+    console.log(`${logPrefix} Starting job.`);
+    await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'processing' }).eq('id', pair_job_id);
 
-    if (fetchError) throw new Error(`Failed to fetch pair job: ${fetchError.message}`);
-    if (!pairJob) throw new Error(`Pair job with ID ${pair_job_id} not found.`);
+    const { data: job, error: fetchError } = await supabase.from('mira-agent-bitstudio-jobs').select('*').eq('id', pair_job_id).single();
+    if (fetchError) throw fetchError;
 
-    if (pairJob.inpainting_job_id) {
-        console.warn(`${logPrefix} Safety check triggered. Inpainting job already exists (${pairJob.inpainting_job_id}). This is a duplicate invocation. Exiting gracefully.`);
-        return new Response(JSON.stringify({ success: true, message: "Duplicate invocation detected, exiting." }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            status: 200,
-        });
-    }
-
-    const { user_id, source_person_image_url, source_garment_image_url, prompt_appendix, metadata } = pairJob;
+    // Step 1: Get Bounding Box
+    console.log(`${logPrefix} Step 1: Getting bounding box for person image.`);
+    const { data: bboxData, error: bboxError } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-bbox', {
+        body: { image_url: job.source_person_image_url }
+    });
+    if (bboxError) throw bboxError;
     
-    console.log(`${logPrefix} Downloading source and mask images...`);
-    const [sourceBlob, maskBlob] = await Promise.all([
-        downloadFromSupabase(supabase, source_person_image_url),
-        downloadFromSupabase(supabase, final_mask_url)
+    const personBox = bboxData.person;
+    if (!personBox || personBox.length !== 4) {
+        throw new Error("Orchestrator did not return a valid bounding box array.");
+    }
+    console.log(`${logPrefix} Bounding box received:`, personBox);
+
+    // Step 2: Crop Image
+    console.log(`${logPrefix} Step 2: Cropping person image.`);
+    const [personBlob, garmentBlob] = await Promise.all([
+        downloadFromSupabase(supabase, job.source_person_image_url),
+        downloadFromSupabase(supabase, job.source_garment_image_url)
     ]);
+    const personImage = await ISImage.decode(await personBlob.arrayBuffer());
+    const { width: originalWidth, height: originalHeight } = personImage;
 
-    console.log(`${logPrefix} Decoding images...`);
-    const [sourceImage, maskImage] = await Promise.all([
-        ISImage.decode(await sourceBlob.arrayBuffer()),
-        ISImage.decode(await maskBlob.arrayBuffer()),
-    ]);
+    const abs_x = Math.floor((personBox[1] / 1000) * originalWidth);
+    const abs_y = Math.floor((personBox[0] / 1000) * originalHeight);
+    const abs_width = Math.ceil(((personBox[3] - personBox[1]) / 1000) * originalWidth);
+    const abs_height = Math.ceil(((personBox[2] - personBox[0]) / 1000) * originalHeight);
 
-    const { width, height } = sourceImage;
-
-    // --- CORRECTED BOUNDING BOX CALCULATION (Full Resolution Scan) ---
-    console.log(`[BBoxCalculator][${pair_job_id}] Starting bounding box calculation. Original mask dimensions: ${width}x${height}.`);
-    const startTime = performance.now();
-
-    let minX = width, minY = height, maxX = 0, maxY = 0;
-    for (const [x, y, color] of maskImage.iterateWithColors()) {
-        const redChannel = ISImage.colorToRGBA(color)[0];
-        if (redChannel > 128) { // Check for white pixels
-            if (x < minX) minX = x;
-            if (x > maxX) maxX = x;
-            if (y < minY) minY = y;
-            if (y > maxY) maxY = y;
-        }
-    }
-
-    if (maxX < minX) {
-        console.warn(`[BBoxCalculator][${pair_job_id}] WARNING: Mask appears to be empty. No bounding box generated.`);
-        throw new Error("Mask is empty.");
-    }
+    const bbox = { x: abs_x, y: abs_y, width: abs_width, height: abs_height };
     
-    const padding = Math.round(Math.max(maxX - minX, maxY - minY) * 0.05);
-    const bbox = {
-      x: Math.max(0, minX - padding),
-      y: Math.max(0, minY - padding),
-      width:  Math.min(width,  (maxX + padding)) - Math.max(0, minX - padding),
-      height: Math.min(height, (maxY + padding)) - Math.max(0, minY - padding),
-    };
-    
-    const endTime = performance.now();
-    console.log(`[BBoxCalculator][${pair_job_id}] Final bounding box calculated. Padded BBox: { x: ${bbox.x}, y: ${bbox.y}, w: ${bbox.width}, h: ${bbox.height} }`);
-    console.log(`[BBoxCalculator][${pair_job_id}] Calculation finished. PERF: Total execution time: ${(endTime - startTime).toFixed(2)}ms.`);
-    // --- END OF CORRECTION ---
+    const croppedPersonImage = personImage.clone().crop(bbox.x, bbox.y, bbox.width, bbox.height);
+    const croppedPersonBuffer = await croppedPersonImage.encode(0); // PNG
+    const croppedPersonUrl = await uploadBufferToTemp(supabase, croppedPersonBuffer, job.user_id, 'cropped_person.png');
+    console.log(`${logPrefix} Cropped person image uploaded to temp storage: ${croppedPersonUrl}`);
 
-    const croppedSourceImage = sourceImage.clone().crop(bbox.x, bbox.y, bbox.width, bbox.height);
-    const croppedSourceBuffer = await croppedSourceImage.encode(0);
-    const source_cropped_url = await uploadBuffer(croppedSourceBuffer, supabase);
-
-    const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-prompt-helper', {
+    // Step 3: Run VTO on the cropped image to get 3 samples
+    console.log(`${logPrefix} Step 3: Running VTO on cropped image to get 3 samples.`);
+    const { data: vtoResult, error: vtoError } = await supabase.functions.invoke('MIRA-AGENT-tool-virtual-try-on', {
         body: {
-            person_image_url: source_cropped_url,
-            garment_image_url: source_garment_image_url,
-            prompt_appendix: prompt_appendix,
-            is_helper_enabled: metadata?.is_helper_enabled !== false,
-            is_garment_mode: true,
+            person_image_url: croppedPersonUrl,
+            garment_image_url: job.source_garment_image_url,
+            sample_count: 3
         }
     });
-    if (promptError) throw new Error(`Prompt generation failed: ${promptError.message}`);
-    const finalPrompt = promptData.final_prompt;
-    console.log(`${logPrefix} Prompt generated.`);
+    if (vtoError) throw vtoError;
+    const generatedImages = vtoResult.generatedImages;
+    if (!generatedImages || generatedImages.length === 0) throw new Error("VTO tool did not return any images.");
+    console.log(`${logPrefix} VTO successful, received ${generatedImages.length} samples.`);
 
-    const { data: proxyData, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
-        body: { 
-            mode: 'inpaint',
-            user_id: user_id,
-            source_cropped_url: source_cropped_url,
-            mask_url: final_mask_url,
-            prompt: finalPrompt,
-            reference_image_url: source_garment_image_url,
-            denoise: 0.99,
-            resolution: 'standard',
-            num_images: 1,
-            batch_pair_job_id: pair_job_id,
-            metadata: {
-                ...metadata,
-                bbox: bbox,
-                full_source_image_url: source_person_image_url,
-            }
+    // Step 4: Quality Check
+    console.log(`${logPrefix} Step 4: Invoking Quality Checker.`);
+    const { data: qaData, error: qaError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-quality-checker', {
+        body: {
+            original_person_image_base64: await blobToBase64(personBlob),
+            reference_garment_image_base64: await blobToBase64(garmentBlob),
+            generated_images_base64: generatedImages.map((img: any) => img.base64Image)
         }
     });
-    if (proxyError) throw new Error(`Job queuing failed: ${proxyError.message}`);
+    if (qaError) throw qaError;
+    const bestImageIndex = qaData.best_image_index;
+    console.log(`${logPrefix} Quality Checker selected best image at index: ${bestImageIndex}. Reasoning: "${qaData.reasoning}"`);
+
+    // Step 5: Composite the best result
+    console.log(`${logPrefix} Step 5: Compositing best result.`);
+    const bestVtoPatchBuffer = decodeBase64(generatedImages[bestImageIndex].base64Image);
+    let vtoPatchImage = await ISImage.decode(bestVtoPatchBuffer);
+
+    const cropAmount = 2;
+    vtoPatchImage.crop(cropAmount, cropAmount, vtoPatchImage.width - (cropAmount * 2), vtoPatchImage.height - (cropAmount * 2));
     
-    const inpaintingJobId = proxyData?.jobIds?.[0];
-    if (!inpaintingJobId) throw new Error('Delegation failed: Proxy did not return a valid job ID.');
+    const targetWidth = bbox.width - (cropAmount * 2);
+    const targetHeight = bbox.height - (cropAmount * 2);
 
-    await supabase.from('mira-agent-batch-inpaint-pair-jobs')
-        .update({ status: 'delegated', inpainting_job_id: inpaintingJobId, metadata: { ...metadata, prompt_used: finalPrompt } })
-        .eq('id', pair_job_id);
+    if (vtoPatchImage.width !== targetWidth || vtoPatchImage.height !== targetHeight) {
+        vtoPatchImage.resize(targetWidth, targetHeight);
+    }
 
-    console.log(`${logPrefix} Inpainting job queued successfully. Inpainting Job ID: ${inpaintingJobId}`);
+    const pasteX = bbox.x + cropAmount;
+    const pasteY = bbox.y + cropAmount;
 
-    return new Response(JSON.stringify({ success: true }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 200,
-    });
+    const finalImage = personImage.clone();
+    finalImage.composite(vtoPatchImage, pasteX, pasteY);
+    console.log(`${logPrefix} Composition complete.`);
+
+    // Step 6: Finalize with granular logging
+    console.log(`${logPrefix} Step 6.1: Encoding final image...`);
+    const finalImageBuffer = await finalImage.encode(0);
+    if (!finalImageBuffer || finalImageBuffer.length === 0) {
+        throw new Error("Failed to encode the final composite image. The buffer was empty.");
+    }
+    console.log(`${logPrefix} Step 6.2: Final image encoded successfully. Buffer length: ${finalImageBuffer.length}.`);
+
+    const finalFilePath = `${job.user_id}/vto-packs/${Date.now()}_final_composite.png`;
+    console.log(`${logPrefix} Step 6.3: Uploading to Supabase Storage at path: ${finalFilePath}`);
+    await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(finalFilePath, finalImageBuffer, { contentType: 'image/png', upsert: true });
+    console.log(`${logPrefix} Step 6.4: Upload complete. Retrieving public URL...`);
+    
+    const { data: urlData, error: urlError } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(finalFilePath);
+    console.log(`${logPrefix} Step 6.5: getPublicUrl returned. Error: ${urlError}, Data: ${JSON.stringify(urlData)}`);
+    if (urlError) throw new Error(`Failed to get public URL after upload: ${urlError.message}`);
+    if (!urlData || !urlData.publicUrl) throw new Error("Upload succeeded but did not return a public URL.");
+    const publicUrl = urlData.publicUrl;
+    console.log(`${logPrefix} Step 6.6: Public URL retrieved: ${publicUrl}. Updating job record...`);
+
+    await supabase.from('mira-agent-bitstudio-jobs').update({
+        status: 'complete',
+        final_image_url: publicUrl,
+        metadata: { ...job.metadata, bbox, cropped_person_url: croppedPersonUrl, qa_best_index: bestImageIndex, qa_reasoning: qaData.reasoning }
+    }).eq('id', pair_job_id);
+    console.log(`${logPrefix} Step 6.7: Job record updated successfully.`);
+
+    console.log(`${logPrefix} Job finished successfully. Final URL: ${publicUrl}`);
+    return new Response(JSON.stringify({ success: true, finalImageUrl: publicUrl }), { headers: corsHeaders });
 
   } catch (error) {
     console.error(`${logPrefix} Error:`, error);
-    await supabase.from('mira-agent-batch-inpaint-pair-jobs')
-      .update({ status: 'failed', error_message: error.message })
-      .eq('id', pair_job_id);
+    await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'failed', error_message: error.message }).eq('id', pair_job_id);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,

@@ -56,17 +56,11 @@ async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string,
     const url = new URL(publicUrl);
     const pathSegments = url.pathname.split('/');
     const objectSegmentIndex = pathSegments.indexOf('object');
-    if (objectSegmentIndex === -1 || objectSegmentIndex + 1 >= pathSegments.length) {
-        throw new Error(`Could not parse bucket name from public Supabase URL: ${publicUrl}`);
-    }
+    if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) throw new Error(`Could not parse bucket name from Supabase URL: ${publicUrl}`);
+    const bucketName = pathSegments[objectSegmentIndex + 2];
+    const filePath = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
+    if (!bucketName || !filePath) throw new Error(`Could not parse bucket or path from Supabase URL: ${publicUrl}`);
     
-    const bucketName = pathSegments[objectSegmentIndex + 1];
-    const filePath = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 2).join('/'));
-
-    if (!bucketName || !filePath) {
-        throw new Error(`Could not parse bucket or path from public Supabase URL: ${publicUrl}`);
-    }
-
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         const { data, error } = await supabase.storage.from(bucketName).download(filePath);
         if (!error && data instanceof Blob) {
@@ -195,7 +189,7 @@ serve(async (req) => {
     console.log(`[VirtualTryOnTool][${requestId}] Job complete. Returning ${generatedImages.length} results.`);
     return new Response(JSON.stringify({ generatedImages }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 200,
+      status: 200
     });
 
   } catch (error) {
