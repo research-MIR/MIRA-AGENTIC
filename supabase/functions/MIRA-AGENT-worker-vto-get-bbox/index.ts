@@ -7,7 +7,7 @@ import { loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-const MODEL_NAME = "gemini-1.5-flash-latest";
+const MODEL_NAME = "gemini-2.5-flash";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -101,7 +101,6 @@ serve(async (req) => {
 
     let detectedBoxes = JSON.parse(result.text);
 
-    // If the model returns a single object instead of an array of one, wrap it.
     if (detectedBoxes && !Array.isArray(detectedBoxes) && detectedBoxes.box_2d) {
         console.log("Model returned a single object, wrapping it in an array.");
         detectedBoxes = [detectedBoxes]; 
