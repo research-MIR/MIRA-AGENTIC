@@ -13,6 +13,8 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// --- Utility Functions ---
+
 function parseStorageURL(url: string) {
     const u = new URL(url);
     const pathSegments = u.pathname.split('/');
@@ -51,6 +53,8 @@ const blobToBase64 = async (blob: Blob): Promise<string> => {
     return encodeBase64(buffer);
 };
 
+// --- State Machine Logic ---
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
 
@@ -64,140 +68,178 @@ serve(async (req) => {
 
   try {
     console.log(`${logPrefix} Starting job.`);
-    await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'processing' }).eq('id', pair_job_id);
-
     const { data: job, error: fetchError } = await supabase.from('mira-agent-bitstudio-jobs').select('*').eq('id', pair_job_id).single();
     if (fetchError) throw fetchError;
 
-    // Step 1: Get Bounding Box
-    console.log(`${logPrefix} Step 1: Getting bounding box for person image.`);
-    const { data: bboxData, error: bboxError } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-bbox', {
-        body: { image_url: job.source_person_image_url }
-    });
-    if (bboxError) throw bboxError;
-    
-    const personBox = bboxData.person;
-    if (!personBox || personBox.length !== 4) {
-        throw new Error("Orchestrator did not return a valid bounding box array.");
-    }
-    console.log(`${logPrefix} Bounding box received:`, personBox);
+    const step = job.metadata?.google_vto_step || 'start';
+    console.log(`${logPrefix} Current step: ${step}`);
 
-    // Step 2: Crop Image
-    console.log(`${logPrefix} Step 2: Cropping person image.`);
-    const [personBlob, garmentBlob] = await Promise.all([
-        downloadFromSupabase(supabase, job.source_person_image_url),
-        downloadFromSupabase(supabase, job.source_garment_image_url)
-    ]);
-    const personImage = await ISImage.decode(await personBlob.arrayBuffer());
-    const { width: originalWidth, height: originalHeight } = personImage;
-
-    const abs_x = Math.floor((personBox[1] / 1000) * originalWidth);
-    const abs_y = Math.floor((personBox[0] / 1000) * originalHeight);
-    const abs_width = Math.ceil(((personBox[3] - personBox[1]) / 1000) * originalWidth);
-    const abs_height = Math.ceil(((personBox[2] - personBox[0]) / 1000) * originalHeight);
-
-    const bbox = { x: abs_x, y: abs_y, width: abs_width, height: abs_height };
-    
-    const croppedPersonImage = personImage.clone().crop(bbox.x, bbox.y, bbox.width, bbox.height);
-    const croppedPersonBuffer = await croppedPersonImage.encode(0); // PNG
-    const croppedPersonUrl = await uploadBuffer(croppedPersonBuffer, supabase, job.user_id, 'cropped_person.png');
-    console.log(`${logPrefix} Cropped person image uploaded to temp storage: ${croppedPersonUrl}`);
-
-    const { bucket: garmentBucket, path: garmentPath } = parseStorageURL(job.source_garment_image_url);
-    const { data: signedUrlData, error: signedUrlError } = await supabase.storage
-        .from(garmentBucket)
-        .createSignedUrl(garmentPath, 3600);
-    if (signedUrlError) throw signedUrlError;
-    const signedGarmentUrl = signedUrlData.signedUrl;
-    console.log(`${logPrefix} Garment signed URL generated successfully.`);
-
-    // Step 3: Run VTO with multiple step counts
-    const steps = [15, 30, 70];
-    console.log(`${logPrefix} Step 3: Running VTO for step counts: ${steps.join(', ')}.`);
-    
-    const vtoPromises = steps.map(step => 
-        supabase.functions.invoke('MIRA-AGENT-tool-virtual-try-on', {
-            body: {
-                person_image_url: croppedPersonUrl,
-                garment_image_url: signedGarmentUrl,
-                sample_count: 1,
-                sample_step: step
-            }
-        })
-    );
-
-    const vtoResults = await Promise.all(vtoPromises);
-    const generatedImages = vtoResults.map((res, index) => {
-        if (res.error) throw new Error(`VTO generation for step ${steps[index]} failed: ${res.error.message}`);
-        if (!res.data.generatedImages || res.data.generatedImages.length === 0) throw new Error(`VTO tool did not return an image for step ${steps[index]}`);
-        return res.data.generatedImages[0];
-    });
-    console.log(`${logPrefix} VTO successful, received ${generatedImages.length} samples.`);
-
-    // Step 4: Quality Check
-    console.log(`${logPrefix} Step 4: Invoking Quality Checker.`);
-    const { data: qaData, error: qaError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-quality-checker', {
-        body: {
-            original_person_image_base64: await blobToBase64(personBlob),
-            reference_garment_image_base64: await blobToBase64(garmentBlob),
-            generated_images_base64: generatedImages.map((img: any) => img.base64Image)
-        }
-    });
-    if (qaError) throw qaError;
-    const bestImageIndex = qaData.best_image_index;
-    console.log(`${logPrefix} Quality Checker selected best image at index: ${bestImageIndex} (steps: ${steps[bestImageIndex]}). Reasoning: "${qaData.reasoning}"`);
-
-    // Step 5: Composite the best result
-    console.log(`${logPrefix} Step 5: Compositing best result.`);
-    const bestVtoPatchBuffer = decodeBase64(generatedImages[bestImageIndex].base64Image);
-    let vtoPatchImage = await ISImage.decode(bestVtoPatchBuffer);
-
-    const cropAmount = 2;
-    vtoPatchImage.crop(cropAmount, cropAmount, vtoPatchImage.width - (cropAmount * 2), vtoPatchImage.height - (cropAmount * 2));
-    
-    const targetWidth = bbox.width - (cropAmount * 2);
-    const targetHeight = bbox.height - (cropAmount * 2);
-
-    if (vtoPatchImage.width !== targetWidth || vtoPatchImage.height !== targetHeight) {
-        vtoPatchImage.resize(targetWidth, targetHeight);
+    switch (step) {
+      case 'start':
+        await handleStart(supabase, job, logPrefix);
+        break;
+      case 'generate_step_1':
+        await handleGenerateStep(supabase, job, 15, 'generate_step_2', logPrefix);
+        break;
+      case 'generate_step_2':
+        await handleGenerateStep(supabase, job, 30, 'generate_step_3', logPrefix);
+        break;
+      case 'generate_step_3':
+        await handleGenerateStep(supabase, job, 70, 'quality_check', logPrefix);
+        break;
+      case 'quality_check':
+        await handleQualityCheck(supabase, job, logPrefix);
+        break;
+      case 'compositing':
+        await handleCompositing(supabase, job, logPrefix);
+        break;
+      default:
+        throw new Error(`Unknown step: ${step}`);
     }
 
-    const pasteX = bbox.x + cropAmount;
-    const pasteY = bbox.y + cropAmount;
-
-    const finalImage = personImage.clone();
-    finalImage.composite(vtoPatchImage, pasteX, pasteY);
-    console.log(`${logPrefix} Composition complete.`);
-
-    // Step 6: Finalize
-    console.log(`${logPrefix} Step 6: Uploading final image and updating job.`);
-    const finalImageBuffer = await finalImage.encode(0);
-    if (!finalImageBuffer || finalImageBuffer.length === 0) {
-        throw new Error("Failed to encode the final composite image.");
-    }
-    const finalFilePath = `${job.user_id}/vto-packs/${Date.now()}_final_composite.png`;
-    await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(finalFilePath, finalImageBuffer, { contentType: 'image/png', upsert: true });
-    
-    const { data: urlData, error: urlError } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(finalFilePath);
-    if (urlError) throw new Error(`Failed to get public URL after upload: ${urlError.message}`);
-    if (!urlData || !urlData.publicUrl) throw new Error("Upload succeeded but did not return a public URL.");
-    const publicUrl = urlData.publicUrl;
-
-    await supabase.from('mira-agent-bitstudio-jobs').update({
-        status: 'complete',
-        final_image_url: publicUrl,
-        metadata: { ...job.metadata, bbox, cropped_person_url: croppedPersonUrl, qa_best_index: bestImageIndex, qa_reasoning: qaData.reasoning, best_step_count: steps[bestImageIndex] }
-    }).eq('id', pair_job_id);
-
-    console.log(`${logPrefix} Job finished successfully. Final URL: ${publicUrl}`);
-    return new Response(JSON.stringify({ success: true, finalImageUrl: publicUrl }), { headers: corsHeaders });
+    return new Response(JSON.stringify({ success: true, message: `Step '${step}' processed.` }), { headers: corsHeaders });
 
   } catch (error) {
     console.error(`${logPrefix} Error:`, error);
     await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'failed', error_message: error.message }).eq('id', pair_job_id);
-    return new Response(JSON.stringify({ error: error.message }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 500,
-    });
+    return new Response(JSON.stringify({ error: error.message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
   }
 });
+
+async function handleStart(supabase: SupabaseClient, job: any, logPrefix: string) {
+  console.log(`${logPrefix} Step 1: Getting bounding box for person image.`);
+  const { data: bboxData, error: bboxError } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-bbox', {
+      body: { image_url: job.source_person_image_url }
+  });
+  if (bboxError) throw bboxError;
+  
+  const personBox = bboxData.person;
+  if (!personBox || personBox.length !== 4) {
+      throw new Error("Orchestrator did not return a valid bounding box array.");
+  }
+  console.log(`${logPrefix} Bounding box received.`);
+
+  const personBlob = await downloadFromSupabase(supabase, job.source_person_image_url);
+  const personImage = await ISImage.decode(await personBlob.arrayBuffer());
+  const { width: originalWidth, height: originalHeight } = personImage;
+
+  const abs_x = Math.floor((personBox[1] / 1000) * originalWidth);
+  const abs_y = Math.floor((personBox[0] / 1000) * originalHeight);
+  const abs_width = Math.ceil(((personBox[3] - personBox[1]) / 1000) * originalWidth);
+  const abs_height = Math.ceil(((personBox[2] - personBox[0]) / 1000) * originalHeight);
+  const bbox = { x: abs_x, y: abs_y, width: abs_width, height: abs_height };
+  
+  const croppedPersonImage = personImage.clone().crop(bbox.x, bbox.y, bbox.width, bbox.height);
+  const croppedPersonBuffer = await croppedPersonImage.encode(0);
+  const croppedPersonUrl = await uploadBuffer(croppedPersonBuffer, supabase, job.user_id, 'cropped_person.png');
+  console.log(`${logPrefix} Cropped person image uploaded to temp storage.`);
+
+  await supabase.from('mira-agent-bitstudio-jobs').update({
+    status: 'processing',
+    metadata: { ...job.metadata, bbox, cropped_person_url: croppedPersonUrl, google_vto_step: 'generate_step_1' }
+  }).eq('id', job.id);
+
+  supabase.functions.invoke('MIRA-AGENT-worker-vto-pack-item', { body: { pair_job_id: job.id } }).catch(console.error);
+}
+
+async function handleGenerateStep(supabase: SupabaseClient, job: any, sampleStep: number, nextStep: string, logPrefix: string) {
+  console.log(`${logPrefix} Generating variation with ${sampleStep} steps.`);
+  
+  const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-virtual-try-on', {
+    body: {
+      person_image_url: job.metadata.cropped_person_url,
+      garment_image_url: job.source_garment_image_url,
+      sample_count: 1,
+      sample_step: sampleStep
+    }
+  });
+  if (error) throw error;
+  if (!data.generatedImages || data.generatedImages.length === 0) throw new Error(`VTO tool did not return an image for step ${sampleStep}`);
+
+  const newVariation = data.generatedImages[0];
+  const currentVariations = job.metadata.generated_variations || [];
+
+  await supabase.from('mira-agent-bitstudio-jobs').update({
+    metadata: { ...job.metadata, generated_variations: [...currentVariations, newVariation], google_vto_step: nextStep }
+  }).eq('id', job.id);
+
+  console.log(`${logPrefix} Step ${sampleStep} complete. Advancing to ${nextStep}.`);
+  supabase.functions.invoke('MIRA-AGENT-worker-vto-pack-item', { body: { pair_job_id: job.id } }).catch(console.error);
+}
+
+async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix: string) {
+  console.log(`${logPrefix} Performing quality check on 3 variations.`);
+  const variations = job.metadata.generated_variations;
+  if (!variations || variations.length < 3) throw new Error("Not enough variations generated for quality check.");
+
+  const [personBlob, garmentBlob] = await Promise.all([
+    downloadFromSupabase(supabase, job.source_person_image_url),
+    downloadFromSupabase(supabase, job.source_garment_image_url)
+  ]);
+
+  const { data: qaData, error: qaError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-quality-checker', {
+    body: {
+      original_person_image_base64: await blobToBase64(personBlob),
+      reference_garment_image_base64: await blobToBase64(garmentBlob),
+      generated_images_base64: variations.map((img: any) => img.base64Image)
+    }
+  });
+  if (qaError) throw qaError;
+  
+  console.log(`${logPrefix} QA complete. Best image index: ${qaData.best_image_index}.`);
+
+  await supabase.from('mira-agent-bitstudio-jobs').update({
+    metadata: { ...job.metadata, qa_best_index: qaData.best_image_index, qa_reasoning: qaData.reasoning, google_vto_step: 'compositing' }
+  }).eq('id', job.id);
+
+  supabase.functions.invoke('MIRA-AGENT-worker-vto-pack-item', { body: { pair_job_id: job.id } }).catch(console.error);
+}
+
+async function handleCompositing(supabase: SupabaseClient, job: any, logPrefix: string) {
+  console.log(`${logPrefix} Compositing best result.`);
+  const { bbox, generated_variations, qa_best_index } = job.metadata;
+  if (!bbox || !generated_variations || qa_best_index === undefined) throw new Error("Missing data for compositing.");
+
+  const bestVtoPatchBase64 = generated_variations[qa_best_index].base64Image;
+  const vtoPatchBuffer = decodeBase64(bestVtoPatchBase64);
+  let vtoPatchImage = await ISImage.decode(vtoPatchBuffer);
+
+  const personBlob = await downloadFromSupabase(supabase, job.source_person_image_url);
+  const personImage = await ISImage.decode(await personBlob.arrayBuffer());
+
+  const cropAmount = 2;
+  vtoPatchImage.crop(cropAmount, cropAmount, vtoPatchImage.width - (cropAmount * 2), vtoPatchImage.height - (cropAmount * 2));
+  
+  const targetWidth = bbox.width - (cropAmount * 2);
+  const targetHeight = bbox.height - (cropAmount * 2);
+
+  if (vtoPatchImage.width !== targetWidth || vtoPatchImage.height !== targetHeight) {
+      vtoPatchImage.resize(targetWidth, targetHeight);
+  }
+
+  const pasteX = bbox.x + cropAmount;
+  const pasteY = bbox.y + cropAmount;
+
+  const finalImage = personImage.clone();
+  finalImage.composite(vtoPatchImage, pasteX, pasteY);
+  console.log(`${logPrefix} Composition complete.`);
+
+  const finalImageBuffer = await finalImage.encode(0);
+  if (!finalImageBuffer || finalImageBuffer.length === 0) {
+      throw new Error("Failed to encode the final composite image.");
+  }
+  const finalFilePath = `${job.user_id}/vto-packs/${Date.now()}_final_composite.png`;
+  await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(finalFilePath, finalImageBuffer, { contentType: 'image/png', upsert: true });
+  
+  const { data: urlData, error: urlError } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(finalFilePath);
+  if (urlError) throw new Error(`Failed to get public URL after upload: ${urlError.message}`);
+  const publicUrl = urlData.publicUrl;
+
+  await supabase.from('mira-agent-bitstudio-jobs').update({
+      status: 'complete',
+      final_image_url: publicUrl,
+      metadata: { ...job.metadata, google_vto_step: 'done' }
+  }).eq('id', job.id);
+
+  console.log(`${logPrefix} Job finished successfully. Final URL: ${publicUrl}`);
+}
