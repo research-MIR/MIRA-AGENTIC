@@ -57,9 +57,11 @@ async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string,
     
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         const { data, error } = await supabase.storage.from(bucketName).download(filePath);
-        if (!error) return data;
-        console.warn(`[FetchRetry][${requestId}] Supabase download failed attempt ${attempt}/${MAX_RETRIES}: ${error.message}`);
-        if (attempt === MAX_RETRIES) throw new Error(`Failed to download from Supabase storage (${filePath}): ${error.message}`);
+        if (!error && data instanceof Blob) { // Added explicit check for Blob
+            return data;
+        }
+        console.warn(`[FetchRetry][${requestId}] Supabase download failed attempt ${attempt}/${MAX_RETRIES}: ${error?.message || 'Returned data was not a Blob'}`);
+        if (attempt === MAX_RETRIES) throw new Error(`Failed to download from Supabase storage (${filePath}): ${error?.message || 'Returned data was not a Blob'}`);
         await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS * attempt));
     }
     throw new Error("Supabase download failed unexpectedly."); // Should not be reached
@@ -146,6 +148,11 @@ serve(async (req) => {
     const responseText = await response.text();
     console.log(`[VirtualTryOnTool][${requestId}] Received raw response from Google. Status: ${response.status}. Body length: ${responseText.length}.`);
     
+    if (!response.ok) {
+      console.error(`[VirtualTryOnTool][${requestId}] Google API Error Body:`, responseText);
+      throw new Error(`API call failed with status ${response.status}: ${responseText}`);
+    }
+
     const responseData = JSON.parse(responseText);
     const predictions = responseData.predictions;
 
@@ -175,7 +182,7 @@ serve(async (req) => {
     console.error(`[VirtualTryOnTool][${requestId}] Error:`, error);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 500
+      status: 500,
     });
   }
 });
