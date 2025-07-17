@@ -11,26 +11,41 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-async function downloadImageAsBase64(supabase: SupabaseClient, publicUrl: string): Promise<string> {
+async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
+    // Signed URLs can be fetched directly.
+    if (publicUrl.includes('/sign/')) {
+        const response = await fetch(publicUrl);
+        if (!response.ok) {
+            throw new Error(`Failed to download from signed URL: ${response.statusText}`);
+        }
+        return await response.blob();
+    }
+
+    // For public URLs, parse the path and use the storage client.
     const url = new URL(publicUrl);
     const pathSegments = url.pathname.split('/');
     
-    const publicSegmentIndex = pathSegments.indexOf('public');
-    if (publicSegmentIndex === -1 || publicSegmentIndex + 1 >= pathSegments.length) {
+    const objectSegmentIndex = pathSegments.indexOf('object');
+    if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) {
         throw new Error(`Could not parse bucket name from Supabase URL: ${publicUrl}`);
     }
     
-    const bucketName = pathSegments[publicSegmentIndex + 1];
-    const filePath = decodeURIComponent(pathSegments.slice(publicSegmentIndex + 2).join('/'));
+    const bucketName = pathSegments[objectSegmentIndex + 2];
+    const filePath = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
 
     if (!bucketName || !filePath) {
         throw new Error(`Could not parse bucket or path from Supabase URL: ${publicUrl}`);
     }
 
-    const { data: fileBlob, error: downloadError } = await supabase.storage.from(bucketName).download(filePath);
-    if (downloadError) {
-        throw new Error(`Failed to download from Supabase storage (${filePath}): ${downloadError.message}`);
+    const { data, error } = await supabase.storage.from(bucketName).download(filePath);
+    if (error) {
+        throw new Error(`Failed to download from Supabase storage (${filePath}): ${error.message}`);
     }
+    return data;
+}
+
+async function downloadImageAsBase64(supabase: SupabaseClient, publicUrl: string): Promise<string> {
+    const fileBlob = await downloadFromSupabase(supabase, publicUrl);
     const buffer = await fileBlob.arrayBuffer();
     return encodeBase64(buffer);
 }
