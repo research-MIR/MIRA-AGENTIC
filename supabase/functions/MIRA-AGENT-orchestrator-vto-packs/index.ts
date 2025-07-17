@@ -65,6 +65,7 @@ serve(async (req) => {
     const jobPromises = pairs.map(async (pair: any, index: number) => {
       const pairLogPrefix = `[VTO-Packs-Orchestrator][Pair ${index + 1}/${pairs.length}]`;
       try {
+        console.log(`${pairLogPrefix} Processing pair. Person: ${pair.person_url}, Garment: ${pair.garment_url}`);
         if (engine === 'google') {
           console.log(`${pairLogPrefix} Using Google VTO engine. Downloading assets...`);
           const [personBlob, garmentBlob] = await Promise.all([
@@ -92,17 +93,22 @@ serve(async (req) => {
           const filePath = `${user_id}/vto-packs/${Date.now()}_google_vto.png`;
           await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(filePath, imageBuffer, { contentType: vtoResult.mimeType, upsert: true });
           const { data: { publicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
-          console.log(`${pairLogPrefix} Result uploaded. Logging completed job record.`);
+          console.log(`${pairLogPrefix} Result uploaded. Logging completed job record to 'mira-agent-jobs'.`);
 
-          await supabase.from('mira-agent-bitstudio-jobs').insert({
+          await supabase.from('mira-agent-jobs').insert({
             user_id,
-            vto_pack_job_id: vtoPackJobId,
-            mode: 'base',
             status: 'complete',
-            source_person_image_url: pair.person_url,
-            source_garment_image_url: pair.garment_url,
-            final_image_url: publicUrl,
-            metadata: { engine: 'google' }
+            original_prompt: `VTO Pack: ${pair.person_url.split('/').pop()} + ${pair.garment_url.split('/').pop()}`,
+            final_result: {
+                isImageGeneration: true,
+                images: [{ publicUrl: publicUrl, storagePath: filePath }]
+            },
+            context: { 
+                source: 'vto_pack_google',
+                vto_pack_job_id: vtoPackJobId,
+                source_person_image_url: pair.person_url,
+                source_garment_image_url: pair.garment_url,
+            }
           });
           console.log(`${pairLogPrefix} Google VTO job logged successfully.`);
 
@@ -126,7 +132,9 @@ serve(async (req) => {
       }
     });
 
-    Promise.allSettled(jobPromises);
+    Promise.allSettled(jobPromises).then(() => {
+        console.log(`[VTO-Packs-Orchestrator] All ${pairs.length} job dispatches have been processed.`);
+    });
 
     return new Response(JSON.stringify({ success: true, message: `${pairs.length} jobs have been queued for processing.` }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
