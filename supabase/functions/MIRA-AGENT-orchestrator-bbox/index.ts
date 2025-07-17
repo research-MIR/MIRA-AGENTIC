@@ -38,25 +38,28 @@ serve(async (req) => {
 
     console.log(`Received ${successfulResults.length} successful bounding box results.`);
 
-    // Calculate the intersection of all returned boxes
-    const intersectionBox = successfulResults.reduce((acc, result) => {
+    // Calculate the average of all returned boxes for a more stable result
+    const numResults = successfulResults.length;
+    const sumBox = successfulResults.reduce((acc, result) => {
         const box = result.normalized_bounding_box;
-        return {
-            y_min: Math.max(acc.y_min, box[0]),
-            x_min: Math.max(acc.x_min, box[1]),
-            y_max: Math.min(acc.y_max, box[2]),
-            x_max: Math.min(acc.x_max, box[3]),
-        };
-    }, { y_min: 0, x_min: 0, y_max: 1000, x_max: 1000 });
+        acc.y_min += box[0];
+        acc.x_min += box[1];
+        acc.y_max += box[2];
+        acc.x_max += box[3];
+        return acc;
+    }, { y_min: 0, x_min: 0, y_max: 0, x_max: 0 });
 
-    if (intersectionBox.x_max <= intersectionBox.x_min || intersectionBox.y_max <= intersectionBox.y_min) {
-        throw new Error("No consensus found among bounding box predictions (no overlap).");
-    }
+    const averageBox = {
+        y_min: sumBox.y_min / numResults,
+        x_min: sumBox.x_min / numResults,
+        y_max: sumBox.y_max / numResults,
+        x_max: sumBox.x_max / numResults,
+    };
 
     const { width: originalWidth, height: originalHeight } = successfulResults[0].original_dimensions;
     
-    const abs_width = ((intersectionBox.x_max - intersectionBox.x_min) / 1000) * originalWidth;
-    const abs_height = ((intersectionBox.y_max - intersectionBox.y_min) / 1000) * originalHeight;
+    const abs_width = ((averageBox.x_max - averageBox.x_min) / 1000) * originalWidth;
+    const abs_height = ((averageBox.y_max - averageBox.y_min) / 1000) * originalHeight;
 
     const basePaddingPercentage = 0.15;
     const longerDim = Math.max(abs_width, abs_height);
@@ -73,8 +76,8 @@ serve(async (req) => {
         padding_x = basePaddingPixels;
     }
 
-    const abs_x = (intersectionBox.x_min / 1000) * originalWidth;
-    const abs_y = (intersectionBox.y_min / 1000) * originalHeight;
+    const abs_x = (averageBox.x_min / 1000) * originalWidth;
+    const abs_y = (averageBox.y_min / 1000) * originalHeight;
 
     const dilated_x = Math.max(0, abs_x - padding_x / 2);
     const dilated_y = Math.max(0, abs_y - padding_y / 2);
@@ -89,7 +92,7 @@ serve(async (req) => {
     };
 
     return new Response(JSON.stringify({
-        normalized_bounding_box: [intersectionBox.y_min, intersectionBox.x_min, intersectionBox.y_max, intersectionBox.x_max],
+        normalized_bounding_box: [averageBox.y_min, averageBox.x_min, averageBox.y_max, averageBox.x_max],
         absolute_bounding_box: absolute_bounding_box,
         original_dimensions: { width: originalWidth, height: originalHeight }
     }), {
