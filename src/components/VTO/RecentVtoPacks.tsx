@@ -138,17 +138,18 @@ export const RecentVtoPacks = ({ engine }: RecentVtoPacksProps) => {
             </AccordionTrigger>
             <AccordionContent className="p-4 pt-0">
               {isLoadingChildren ? <Loader2 className="h-6 w-6 animate-spin" /> : (
-                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
+                <div className="flex flex-wrap gap-2">
                   {jobsInPack.map(job => (
-                    <div key={job.id} className="aspect-square relative group">
+                    <div key={job.id} className="w-32 h-32 relative group">
                       <SecureImageDisplay 
                         imageUrl={job.final_image_url || job.source_person_image_url || null} 
                         alt="Job result" 
                         onClick={() => job.final_image_url && showImage({ images: [{ url: job.final_image_url }], currentIndex: 0 })}
+                        className="w-full h-full object-cover rounded-md"
                       />
                       {job.status === 'complete' && <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity" />}
-                      {job.status === 'failed' && <div className="absolute inset-0 bg-destructive/70 flex items-center justify-center"><XCircle className="h-8 w-8 text-destructive-foreground" /></div>}
-                      {(job.status === 'processing' || job.status === 'queued') && <div className="absolute inset-0 bg-black/70 flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-white" /></div>}
+                      {job.status === 'failed' && <div className="absolute inset-0 bg-destructive/70 flex items-center justify-center rounded-md"><XCircle className="h-8 w-8 text-destructive-foreground" /></div>}
+                      {(job.status === 'processing' || job.status === 'queued') && <div className="absolute inset-0 bg-black/70 flex items-center justify-center rounded-md"><Loader2 className="h-8 w-8 animate-spin text-white" /></div>}
                     </div>
                   ))}
                 </div>
