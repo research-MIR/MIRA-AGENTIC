@@ -44,25 +44,26 @@ serve(async (req) => {
     const requestId = `compositor-${aggregationJobId}`;
     console.log(`[Compositor][${requestId}] Function invoked.`);
 
-    // --- FIX: Check job status before proceeding ---
-    const { data: jobStatusCheck, error: statusCheckError } = await supabase
+    // --- ATOMIC UPDATE TO CLAIM THE JOB ---
+    const { count, error: updateError } = await supabase
       .from('mira-agent-mask-aggregation-jobs')
-      .select('status')
+      .update({ status: 'compositing' })
       .eq('id', aggregationJobId)
-      .single();
+      .eq('status', 'aggregating'); // Only update if it's in the correct state
 
-    if (statusCheckError && statusCheckError.code !== 'PGRST116') { // Ignore 'not found' errors for now
-        console.error(`[Compositor][${requestId}] Error checking job status:`, statusCheckError.message);
+    if (updateError) {
+        console.error(`[Compositor][${requestId}] Error trying to claim job:`, updateError.message);
+        throw updateError;
     }
 
-    if (jobStatusCheck && (jobStatusCheck.status === 'complete' || jobStatusCheck.status === 'failed')) {
-        console.log(`[Compositor][${requestId}] Job status is already '${jobStatusCheck.status}'. Exiting to prevent re-processing.`);
-        return new Response(JSON.stringify({ success: true, message: "Job already processed." }), {
+    if (count === 0) {
+        console.log(`[Compositor][${requestId}] Job was already claimed by another instance or is not in 'aggregating' state. Exiting gracefully.`);
+        return new Response(JSON.stringify({ success: true, message: "Job already claimed or not in a valid state for composition." }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
             status: 200,
         });
     }
-    // --- END OF FIX ---
+    // --- END OF ATOMIC UPDATE ---
 
     const { data: job, error: fetchError } = await supabase
       .from('mira-agent-mask-aggregation-jobs')
