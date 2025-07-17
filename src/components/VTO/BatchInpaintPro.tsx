@@ -56,7 +56,7 @@ export const BatchInpaintPro = () => {
 
     const uploadFile = async (file: File, type: 'person' | 'garment') => {
         if (!session?.user) throw new Error("User session not found.");
-        const optimizedFile = await optimizeImage(file);
+        const optimizedFile = await optimizeImage(file, { forceOriginalDimensions: true });
         const sanitizedName = sanitizeFilename(optimizedFile.name);
         const filePath = `${session.user.id}/vto-source/${type}-${Date.now()}-${sanitizedName}`;
         
