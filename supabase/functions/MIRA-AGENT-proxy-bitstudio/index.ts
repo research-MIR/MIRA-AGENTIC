@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
+import { Image as ISImage } from "https://deno.land/x/imagescript@1.2.15/mod.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -198,7 +199,16 @@ serve(async (req) => {
             console.log(`[BitStudioProxy][${requestId}] Inpaint mode: Received mask URL. Downloading...`);
             const response = await fetch(mask_url);
             if (!response.ok) throw new Error(`Failed to download mask image from URL: ${response.statusText}`);
-            maskBlob = await response.blob();
+            const fullMaskBlob = await response.blob();
+            
+            // Crop the downloaded full mask
+            const fullMaskImg = await ISImage.decode(await fullMaskBlob.arrayBuffer());
+            const { bbox } = metadata;
+            if (!bbox) throw new Error("Bbox metadata is required when providing a full mask URL.");
+            const croppedMaskImg = fullMaskImg.clone().crop(bbox.x, bbox.y, bbox.width, bbox.height);
+            const croppedMaskBuffer = await croppedMaskImg.encode(0);
+            maskBlob = new Blob([croppedMaskBuffer], { type: 'image/png' });
+
         } else if (base64_mask_data) {
             console.log(`[BitStudioProxy][${requestId}] Inpaint mode: Received mask base64. Decoding...`);
             maskBlob = new Blob([decodeBase64(base64_mask_data)], { type: 'image/png' });

@@ -1,10 +1,10 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { Image as ISImage } from "https://deno.land/x/imagescript@1.2.15/mod.ts";
-import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
+import { loadImage, createCanvas, Canvas } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+const TMP_BUCKET = 'mira-agent-user-uploads';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -28,6 +28,21 @@ async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string)
     const { data, error } = await supabase.storage.from(bucket).download(path);
     if (error) throw new Error(`Failed to download from Supabase storage (${path}): ${error.message}`);
     return data;
+}
+
+async function uploadPNGStream(canvas: Canvas, supabase: SupabaseClient) {
+  const path = `tmp/${crypto.randomUUID()}.png`;
+  const stream = canvas.createPNGStream();
+  const { error } = await supabase.storage.from(TMP_BUCKET).upload(
+    path,
+    stream as any,
+    { contentType: "image/png", duplex: "half" },
+  );
+  if (error) throw error;
+  const { data } = await supabase.storage.from(TMP_BUCKET)
+    .createSignedUrl(path, 3600); // 1 hour TTL
+  if (!data || !data.signedUrl) throw new Error("Failed to create signed URL for temporary file.");
+  return data.signedUrl;
 }
 
 serve(async (req) => {
@@ -73,52 +88,51 @@ serve(async (req) => {
         downloadFromSupabase(supabase, final_mask_url)
     ]);
 
-    console.log(`${logPrefix} Decoding images... Source type: ${sourceBlob.type}, Mask type: ${maskBlob.type}`);
+    console.log(`${logPrefix} Decoding images...`);
     const [sourceImage, maskImage] = await Promise.all([
-        ISImage.decode(await sourceBlob.arrayBuffer()),
-        ISImage.decode(await maskBlob.arrayBuffer()),
+        loadImage(await sourceBlob.arrayBuffer()),
+        loadImage(await maskBlob.arrayBuffer()),
     ]);
 
     const { width, height } = sourceImage;
 
-    console.log(`${logPrefix} Calculating bounding box from mask...`);
-    let minX = width, minY = height, maxX = 0, maxY = 0;
-    const maskData = maskImage.bitmap; // Access raw pixel data
+    console.log(`${logPrefix} Scanning mask at 1/4 resolution...`);
+    const tW = Math.ceil(width / 4), tH = Math.ceil(height / 4);
+    const thumb = createCanvas(tW, tH);
+    thumb.getContext("2d")!.drawImage(maskImage, 0, 0, tW, tH);
+    const tData = thumb.getContext("2d")!.getImageData(0, 0, tW, tH).data;
 
-    for (let i = 0; i < maskData.length; i += 4) {
-        // The bitmap is RGBA, so the alpha channel is at i + 3
-        if (maskData[i + 3] > 128) { 
-            const pixelIndex = i / 4;
-            const x = pixelIndex % width;
-            const y = Math.floor(pixelIndex / width);
-            if (x < minX) minX = x;
-            if (x > maxX) maxX = x;
-            if (y < minY) minY = y;
-            if (y > maxY) maxY = y;
-        }
+    let minX = tW, minY = tH, maxX = 0, maxY = 0;
+    for (let i = 0; i < tData.length; i += 4) {
+      if (tData[i + 3] > 128) {
+        const x = (i >> 2) % tW, y = Math.floor((i >> 2) / tW);
+        if (x < minX) minX = x; if (x > maxX) maxX = x;
+        if (y < minY) minY = y; if (y > maxY) maxY = y;
+      }
     }
+    if (maxX < minX) throw new Error("Mask empty.");
+    
+    const scale = 4;
+    const padding = Math.round(Math.max(maxX - minX, maxY - minY) * scale * 0.05);
 
-    if (maxX < minX) throw new Error("The provided mask is empty or invalid.");
-
-    const padding = Math.round(Math.max(maxX - minX, maxY - minY) * 0.05);
     const bbox = {
-      x: Math.max(0, minX - padding),
-      y: Math.max(0, minY - padding),
-      width: Math.min(width, maxX + padding) - Math.max(0, minX - padding),
-      height: Math.min(height, maxY + padding) - Math.max(0, minY - padding),
+      x: Math.max(0, minX * scale - padding),
+      y: Math.max(0, minY * scale - padding),
+      width:  Math.min(width,  (maxX * scale + padding)) - Math.max(0, minX * scale - padding),
+      height: Math.min(height, (maxY * scale + padding)) - Math.max(0, minY * scale - padding),
     };
-    console.log(`${logPrefix} Bounding box calculated with 5% padding:`, bbox);
+    console.log(`${logPrefix} Bounding box calculated:`, bbox);
 
-    const croppedSourceImage = sourceImage.clone().crop(bbox.x, bbox.y, bbox.width, bbox.height);
-    const croppedSourceBase64 = encodeBase64(await croppedSourceImage.encode(0));
-
-    const croppedMaskImage = maskImage.clone().crop(bbox.x, bbox.y, bbox.width, bbox.height);
-    const croppedMaskBase64 = encodeBase64(await croppedMaskImage.encode(0));
-    console.log(`${logPrefix} Source and mask images cropped and encoded.`);
+    const workCv = createCanvas(bbox.width, bbox.height);
+    workCv.getContext("2d")!.drawImage(sourceImage, bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
+    
+    console.log(`${logPrefix} Cropped source image. Streaming to storage...`);
+    const source_cropped_url = await uploadPNGStream(workCv, supabase);
+    console.log(`${logPrefix} Cropped source uploaded. Signed URL: ${source_cropped_url}`);
 
     const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-prompt-helper', {
         body: {
-            person_image_base64: croppedSourceBase64,
+            person_image_url: source_cropped_url,
             garment_image_url: source_garment_image_url,
             prompt_appendix: prompt_appendix,
             is_helper_enabled: metadata?.is_helper_enabled !== false,
@@ -127,14 +141,14 @@ serve(async (req) => {
     });
     if (promptError) throw new Error(`Prompt generation failed: ${promptError.message}`);
     const finalPrompt = promptData.final_prompt;
-    console.log(`${logPrefix} Prompt generated: "${finalPrompt.substring(0, 50)}..."`);
+    console.log(`${logPrefix} Prompt generated.`);
 
     const { data: proxyData, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
         body: { 
             mode: 'inpaint',
             user_id: user_id,
-            base64_image_data: croppedSourceBase64,
-            base64_mask_data: croppedMaskBase64,
+            source_cropped_url: source_cropped_url,
+            mask_url: final_mask_url,
             prompt: finalPrompt,
             reference_image_url: source_garment_image_url,
             denoise: 0.99,
