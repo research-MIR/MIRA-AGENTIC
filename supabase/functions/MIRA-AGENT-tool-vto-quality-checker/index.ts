@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { GoogleGenAI, Content, Part, HarmCategory, HarmBlockThreshold } from 'https://esm.sh/@google/genai@0.15.0';
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-const MODEL_NAME = "gemini-1.5-flash-latest";
+const MODEL_NAME = "gemini-1.5-flash-latest"; // Using the latest flash model for this visual task
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -18,21 +18,29 @@ const safetySettings = [
 
 const systemPrompt = `You are a "VTO Quality Assurance AI". You will be given a reference garment image, an original person image, and three generated "try-on" images labeled "Image 0", "Image 1", and "Image 2". Your sole task is to evaluate the three generated images and choose the single best one.
 
+### Your Internal Thought Process (Chain-of-Thought)
+Before providing your final JSON output, you MUST follow these steps internally to construct your 'reasoning' string:
+1.  **Analyze REFERENCE Garment:** Briefly describe the key features of the reference garment (e.g., "a blue denim jacket with silver buttons").
+2.  **Analyze Each Generated Image:** For each of the three generated images, perform a quick evaluation based on the core criteria.
+    -   **Image 0:** How well does the garment match? How well is the pose preserved? Are there any major artifacts?
+    -   **Image 1:** How well does the garment match? How well is the pose preserved? Are there any major artifacts?
+    -   **Image 2:** How well does the garment match? How well is the pose preserved? Are there any major artifacts?
+3.  **Make a Decision:** Compare your notes for the three images.
+4.  **State Your Final Choice & Justification:** Clearly state which image you chose and why it is superior to the others based on the evaluation criteria. For example: "I chose Image 1 because the denim texture is the most realistic and the model's original pose is perfectly preserved, unlike Image 2 where the arm is distorted."
+
 ### Evaluation Criteria (in order of importance):
 1.  **Garment Similarity (Highest Priority):** The garment on the model must be the most accurate reproduction of the reference garment. Check for color, texture, pattern, and details like logos or buttons.
 2.  **Pose Preservation (Secondary Priority):** The model's pose in the generated image should be as close as possible to their pose in the original person image. The garment should look natural on the existing pose.
 3.  **Image Quality & Artifacts (Tertiary Priority):** The image should be free of obvious AI artifacts, distortions, or unnatural blending.
 
-### Your Input:
-You will receive the reference images and the three generated images to evaluate.
-
 ### Your Output:
-Your entire response MUST be a single, valid JSON object with ONE key, "best_image_index". The value must be the integer index (0, 1, or 2) of the image you have selected as the best according to the criteria.
+Your entire response MUST be a single, valid JSON object with TWO keys: "best_image_index" and "reasoning".
 
 **Example Output:**
 \`\`\`json
 {
-  "best_image_index": 1
+  "best_image_index": 1,
+  "reasoning": "The reference is a blue denim jacket. Image 0 had an incorrect, darker color. Image 2 had a distorted left arm. Image 1 is the best choice because it accurately reproduces the color and texture of the denim jacket while perfectly preserving the model's original pose."
 }
 \`\`\``;
 
@@ -87,7 +95,9 @@ serve(async (req) => {
         throw new Error("AI did not return a valid index for the best image.");
     }
 
-    return new Response(JSON.stringify({ best_image_index: bestIndex }), {
+    console.log("[VTO-QualityChecker] Full AI Response:", JSON.stringify(responseJson, null, 2));
+
+    return new Response(JSON.stringify(responseJson), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });

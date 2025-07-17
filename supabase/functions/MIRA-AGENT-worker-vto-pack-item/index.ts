@@ -121,7 +121,7 @@ serve(async (req) => {
     });
     if (qaError) throw qaError;
     const bestImageIndex = qaData.best_image_index;
-    console.log(`${logPrefix} Quality Checker selected best image at index: ${bestImageIndex}`);
+    console.log(`${logPrefix} Quality Checker selected best image at index: ${bestImageIndex}. Reasoning: "${qaData.reasoning}"`);
 
     // Step 5: Composite the best result
     console.log(`${logPrefix} Step 5: Compositing best result.`);
@@ -155,7 +155,7 @@ serve(async (req) => {
     await supabase.from('mira-agent-bitstudio-jobs').update({
         status: 'complete',
         final_image_url: publicUrl,
-        metadata: { ...job.metadata, bbox, cropped_person_url: croppedPersonUrl, qa_best_index: bestImageIndex }
+        metadata: { ...job.metadata, bbox, cropped_person_url: croppedPersonUrl, qa_best_index: bestImageIndex, qa_reasoning: qaData.reasoning }
     }).eq('id', pair_job_id);
 
     console.log(`${logPrefix} Job finished successfully. Final URL: ${publicUrl}`);
