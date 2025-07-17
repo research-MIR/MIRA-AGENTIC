@@ -95,54 +95,32 @@ serve(async (req) => {
 
     const { width, height } = sourceImage;
 
-    // --- OPTIMIZED BOUNDING BOX CALCULATION ---
-    console.log(`[BBoxCalculator][${pair_job_id}] Starting bounding box calculation. Original mask dimensions: ${width}x${height}.`);
-    const startTime = performance.now();
+    console.log(`${logPrefix} Calculating bounding box from mask...`);
+    let minX = width, minY = height, maxX = 0, maxY = 0;
+    const maskData = maskImage.bitmap;
 
-    const THUMBNAIL_SIZE = 200;
-    const scaleFactor = Math.max(width, height) / THUMBNAIL_SIZE;
-    const thumbWidth = Math.round(width / scaleFactor);
-    const thumbHeight = Math.round(height / scaleFactor);
-
-    console.log(`[BBoxCalculator][${pair_job_id}] Using 'Thumbnail-First' method. Down-scaling mask to ${thumbWidth}x${thumbHeight}.`);
-    const thumbnail = maskImage.clone().resize(thumbWidth, ISImage.RESIZE_NEAREST_NEIGHBOR);
-
-    let minX = thumbWidth, minY = thumbHeight, maxX = 0, maxY = 0;
-    for (const [x, y, color] of thumbnail.iterateWithColors()) {
-        const alpha = ISImage.colorToRGBA(color)[3];
-        if (alpha > 128) { // Check for non-transparent pixels
+    for (let i = 0; i < maskData.length; i += 4) {
+        if (maskData[i + 3] > 128) {
+            const pixelIndex = i / 4;
+            const x = pixelIndex % width;
+            const y = Math.floor(pixelIndex / width);
             if (x < minX) minX = x;
             if (x > maxX) maxX = x;
             if (y < minY) minY = y;
             if (y > maxY) maxY = y;
         }
     }
-    
-    console.log(`[BBoxCalculator][${pair_job_id}] Thumbnail scan complete. Found thumbnail BBox at { x: ${minX}, y: ${minY}, w: ${maxX - minX}, h: ${maxY - minY} }.`);
 
-    if (maxX < minX) {
-        console.warn(`[BBoxCalculator][${pair_job_id}] WARNING: Mask appears to be empty. No bounding box generated.`);
-        throw new Error("Mask is empty.");
-    }
-
-    // Scale coordinates back to original dimensions
-    const scaledMinX = Math.floor(minX * scaleFactor);
-    const scaledMinY = Math.floor(minY * scaleFactor);
-    const scaledMaxX = Math.ceil(maxX * scaleFactor);
-    const scaledMaxY = Math.ceil(maxY * scaleFactor);
+    if (maxX < minX) throw new Error("Mask is empty.");
     
-    const padding = Math.round(Math.max(scaledMaxX - scaledMinX, scaledMaxY - scaledMinY) * 0.05);
+    const padding = Math.round(Math.max(maxX - minX, maxY - minY) * 0.05);
     const bbox = {
-      x: Math.max(0, scaledMinX - padding),
-      y: Math.max(0, scaledMinY - padding),
-      width:  Math.min(width,  (scaledMaxX + padding)) - Math.max(0, scaledMinX - padding),
-      height: Math.min(height, (scaledMaxY + padding)) - Math.max(0, minY - padding),
+      x: Math.max(0, minX - padding),
+      y: Math.max(0, minY - padding),
+      width:  Math.min(width,  (maxX + padding)) - Math.max(0, minX - padding),
+      height: Math.min(height, (maxY + padding)) - Math.max(0, minY - padding),
     };
-    
-    const endTime = performance.now();
-    console.log(`[BBoxCalculator][${pair_job_id}] Final bounding box calculated. Padded BBox:`, bbox);
-    console.log(`[BBoxCalculator][${pair_job_id}] Calculation finished. PERF: Total execution time: ${(endTime - startTime).toFixed(2)}ms.`);
-    // --- END OF OPTIMIZATION ---
+    console.log(`${logPrefix} Bounding box calculated:`, bbox);
 
     const croppedSourceImage = sourceImage.clone().crop(bbox.x, bbox.y, bbox.width, bbox.height);
     const croppedSourceBuffer = await croppedSourceImage.encode(0);
