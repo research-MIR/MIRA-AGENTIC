@@ -9,9 +9,9 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Reduced thresholds for faster response times.
 const STALLED_POLLER_THRESHOLD_SECONDS = 15;
 const STALLED_AGGREGATION_THRESHOLD_SECONDS = 20;
+const STALLED_PAIR_JOB_THRESHOLD_MINUTES = 2;
 
 serve(async (req) => {
   const requestId = `watchdog-bg-${Date.now()}`;
@@ -51,7 +51,7 @@ serve(async (req) => {
       .from('mira-agent-batch-inpaint-pair-jobs')
       .select('id')
       .eq('status', 'pending')
-      .limit(5); // Process up to 5 new jobs per run to avoid overwhelming the system
+      .limit(5);
 
     if (pendingError) {
         console.error(`[Watchdog-BG][${requestId}] Error querying for pending batch jobs:`, pendingError.message);
@@ -60,7 +60,6 @@ serve(async (req) => {
       
       const jobIdsToProcess = pendingPairs.map(p => p.id);
       
-      // Lock the jobs to prevent them from being picked up again
       await supabase
         .from('mira-agent-batch-inpaint-pair-jobs')
         .update({ status: 'processing' })
@@ -96,6 +95,34 @@ serve(async (req) => {
         actionsTaken.push(`Forced composition for ${stalledAggregationJobs.length} stalled aggregation jobs.`);
     } else {
       console.log(`[Watchdog-BG][${requestId}] No stalled aggregation jobs found.`);
+    }
+
+    // --- Task 4: Handle Stalled Batch Inpainting Pair Jobs ---
+    const pairJobThreshold = new Date(Date.now() - STALLED_PAIR_JOB_THRESHOLD_MINUTES * 60 * 1000).toISOString();
+    const { data: stalledPairJobs, error: stalledPairError } = await supabase
+      .from('mira-agent-batch-inpaint-pair-jobs')
+      .select('id, status, metadata')
+      .in('status', ['segmenting', 'delegated'])
+      .lt('updated_at', pairJobThreshold);
+
+    if (stalledPairError) {
+        console.error(`[Watchdog-BG][${requestId}] Error querying for stalled pair jobs:`, stalledPairError.message);
+    } else if (stalledPairJobs && stalledPairJobs.length > 0) {
+        console.log(`[Watchdog-BG][${requestId}] Found ${stalledPairJobs.length} stalled pair job(s). Re-triggering appropriate workers...`);
+        const retryPromises = stalledPairJobs.map(job => {
+            if (job.status === 'segmenting') {
+                console.log(`[Watchdog-BG][${requestId}] Re-triggering Step 1 (segmentation) for job ${job.id}`);
+                return supabase.functions.invoke('MIRA-AGENT-worker-batch-inpaint', { body: { pair_job_id: job.id } });
+            } else if (job.status === 'delegated' && job.metadata?.debug_assets?.expanded_mask_url) {
+                console.log(`[Watchdog-BG][${requestId}] Re-triggering Step 2 (inpainting) for job ${job.id}`);
+                return supabase.functions.invoke('MIRA-AGENT-worker-batch-inpaint-step2', { body: { pair_job_id: job.id, final_mask_url: job.metadata.debug_assets.expanded_mask_url } });
+            }
+            return Promise.resolve();
+        });
+        await Promise.allSettled(retryPromises);
+        actionsTaken.push(`Re-triggered ${stalledPairJobs.length} stalled pair jobs.`);
+    } else {
+        console.log(`[Watchdog-BG][${requestId}] No stalled pair jobs found.`);
     }
 
     const finalMessage = actionsTaken.length > 0 ? actionsTaken.join(' ') : "No actions required. All jobs are running normally.";
