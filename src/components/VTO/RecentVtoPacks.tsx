@@ -1,5 +1,5 @@
-import { useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMemo, useEffect } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSession } from '@/components/Auth/SessionContextProvider';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -8,6 +8,7 @@ import { AlertTriangle, CheckCircle, Loader2, XCircle } from 'lucide-react';
 import { useImagePreview } from '@/context/ImagePreviewContext';
 import { SecureImageDisplay } from './SecureImageDisplay';
 import { BitStudioJob } from '@/types/vto';
+import { RealtimeChannel } from '@supabase/supabase-js';
 
 interface VtoPackJob {
   id: string;
@@ -25,6 +26,7 @@ interface RecentVtoPacksProps {
 export const RecentVtoPacks = ({ engine }: RecentVtoPacksProps) => {
   const { supabase, session } = useSession();
   const { showImage } = useImagePreview();
+  const queryClient = useQueryClient();
 
   const { data: packs, isLoading: isLoadingPacks, error: packsError } = useQuery<VtoPackJob[]>({
     queryKey: ['recentVtoPacks', session?.user?.id],
@@ -57,6 +59,28 @@ export const RecentVtoPacks = ({ engine }: RecentVtoPacksProps) => {
     },
     enabled: packIds.length > 0,
   });
+
+  useEffect(() => {
+    if (!session?.user?.id) return;
+
+    const channel: RealtimeChannel = supabase
+      .channel(`vto-pack-child-jobs-tracker-${session.user.id}`)
+      .on<BitStudioJob>(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'mira-agent-bitstudio-jobs', filter: `user_id=eq.${session.user.id}` },
+        (payload) => {
+          if (payload.new.vto_pack_job_id) {
+            console.log('[RecentVtoPacks] Realtime update received for child job:', payload.new.id);
+            queryClient.invalidateQueries({ queryKey: ['vtoPackChildJobs', packIds] });
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [session?.user?.id, supabase, queryClient, packIds]);
 
   const groupedJobs = useMemo(() => {
     if (!childJobs) return {};
