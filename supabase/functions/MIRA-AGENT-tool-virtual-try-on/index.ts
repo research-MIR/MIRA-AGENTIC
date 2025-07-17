@@ -17,7 +17,6 @@ const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1500;
 
 // --- DIAGNOSTIC: Global Error Handlers ---
-// These will catch errors that might otherwise crash the event loop.
 addEventListener('unhandledrejection', (event) => {
   console.error(`[GLOBAL UNHANDLED REJECTION] Reason:`, event.reason);
 });
@@ -54,51 +53,15 @@ const blobToBase64 = async (blob: Blob): Promise<string> => {
     return encodeBase64(new Uint8Array(buffer)); // Use Uint8Array for safety
 };
 
-async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string, requestId: string): Promise<Blob> {
-    if (publicUrl.includes('/sign/')) {
-        console.log(`[Downloader][${requestId}] Downloading from signed URL.`);
-        const response = await fetchWithRetry(publicUrl, {}, MAX_RETRIES, RETRY_DELAY_MS, requestId);
-        const blob = await response.blob();
-        console.log(`[Downloader][${requestId}] Signed URL download successful. Blob size: ${blob.size}`);
-        return blob;
+async function downloadFromSignedUrl(url: string, requestId: string): Promise<Blob> {
+    if (!url.includes('/sign/')) {
+        throw new Error(`[Downloader][${requestId}] Received a non-signed URL, which is not supported. Please provide a signed URL.`);
     }
-
-    console.log(`[Downloader][${requestId}] Downloading from public URL.`);
-    const url = new URL(publicUrl);
-    const pathSegments = url.pathname.split('/');
-    
-    const objectSegmentIndex = pathSegments.indexOf('object');
-    if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) {
-        throw new Error(`Could not parse bucket name from Supabase URL: ${publicUrl}`);
-    }
-    
-    const bucketName = pathSegments[objectSegmentIndex + 2];
-    const filePath = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
-
-    if (!bucketName || !filePath) {
-        throw new Error(`Could not parse bucket or path from Supabase URL: ${publicUrl}`);
-    }
-
-    // --- DIAGNOSTIC: Detailed logging and isolated try/catch ---
-    console.log(`[Downloader][${requestId}] Attempting Supabase download. Bucket: [${bucketName}], Path: [${filePath}]`);
-    try {
-        for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-            const { data, error } = await supabase.storage.from(bucketName).download(filePath);
-            if (!error) {
-                console.log(`[Downloader][${requestId}] Public URL download successful. Blob size: ${data.size}`);
-                return data;
-            }
-            console.warn(`[Downloader][${requestId}] Supabase download failed attempt ${attempt}/${MAX_RETRIES}: ${error.message}`);
-            if (attempt === MAX_RETRIES) throw new Error(`Failed to download from Supabase storage (${filePath}): ${error.message}`);
-            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS * attempt));
-        }
-    } catch (e) {
-        console.error(`[Downloader][${requestId}] CRITICAL FAILURE in Supabase download call. Caught value:`, e);
-        console.error(`[Downloader][${requestId}] Type of caught value: ${typeof e}`);
-        throw new Error(`A low-level error occurred during file download: ${e?.message || e}`);
-    }
-    // --- END DIAGNOSTIC ---
-    throw new Error("Supabase download failed unexpectedly."); // Should not be reached
+    console.log(`[Downloader][${requestId}] Downloading from signed URL.`);
+    const response = await fetchWithRetry(url, {}, MAX_RETRIES, RETRY_DELAY_MS, requestId);
+    const blob = await response.blob();
+    console.log(`[Downloader][${requestId}] Signed URL download successful. Blob size: ${blob.size}`);
+    return blob;
 }
 
 serve(async (req) => {
@@ -108,8 +71,6 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
-
-  const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
   
   try {
     if (!GOOGLE_VERTEX_AI_SA_KEY_JSON || !GOOGLE_PROJECT_ID) {
@@ -132,7 +93,7 @@ serve(async (req) => {
         person_image_base64 = person_b64_input;
     } else if (person_image_url) {
         console.log(`[VirtualTryOnTool][${requestId}] Downloading person image from URL: ${person_image_url}`);
-        const personBlob = await downloadFromSupabase(supabase, person_image_url, requestId);
+        const personBlob = await downloadFromSignedUrl(person_image_url, requestId);
         person_image_base64 = await blobToBase64(personBlob);
         console.log(`[VirtualTryOnTool][${requestId}] Person image processed. Base64 length: ${person_image_base64.length}`);
     } else {
@@ -143,7 +104,7 @@ serve(async (req) => {
         garment_image_base64 = garment_b64_input;
     } else if (garment_image_url) {
         console.log(`[VirtualTryOnTool][${requestId}] Downloading garment image from URL: ${garment_image_url}`);
-        const garmentBlob = await downloadFromSupabase(supabase, garment_image_url, requestId);
+        const garmentBlob = await downloadFromSignedUrl(garment_image_url, requestId);
         garment_image_base64 = await blobToBase64(garmentBlob);
         console.log(`[VirtualTryOnTool][${requestId}] Garment image processed. Base64 length: ${garment_image_base64.length}`);
     } else {

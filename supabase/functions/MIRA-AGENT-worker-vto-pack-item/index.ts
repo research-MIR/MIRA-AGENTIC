@@ -13,36 +13,37 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
-    if (publicUrl.includes('/sign/')) {
-        const response = await fetch(publicUrl);
-        if (!response.ok) throw new Error(`Failed to download from signed URL: ${response.statusText}`);
-        return await response.blob();
-    }
-    const url = new URL(publicUrl);
-    const pathSegments = url.pathname.split('/');
+function parseStorageURL(url: string) {
+    const u = new URL(url);
+    const pathSegments = u.pathname.split('/');
     const objectSegmentIndex = pathSegments.indexOf('object');
-    if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) throw new Error(`Could not parse bucket name from Supabase URL: ${publicUrl}`);
-    const bucketName = pathSegments[objectSegmentIndex + 2];
-    const filePath = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
-    if (!bucketName || !filePath) throw new Error(`Could not parse bucket or path from Supabase URL: ${publicUrl}`);
-    const { data, error } = await supabase.storage.from(bucketName).download(filePath);
-    if (error) throw new Error(`Failed to download from Supabase storage (${filePath}): ${error.message}`);
+    if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) {
+        throw new Error(`Invalid Supabase storage URL format: ${url}`);
+    }
+    const bucket = pathSegments[objectSegmentIndex + 2];
+    const path = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
+    return { bucket, path };
+}
+
+async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
+    const { bucket, path } = parseStorageURL(publicUrl);
+    const { data, error } = await supabase.storage.from(bucket).download(path);
+    if (error) throw new Error(`Failed to download from Supabase storage (${path}): ${error.message}`);
     return data;
 }
 
-async function uploadBufferToTemp(supabase: SupabaseClient, buffer: Uint8Array, userId: string, filename: string): Promise<string> {
-    const filePath = `tmp/${userId}/${Date.now()}-${filename}`;
-    const { error } = await supabase.storage.from(TEMP_UPLOAD_BUCKET).upload(
-        filePath,
-        buffer,
-        { contentType: "image/png" },
-    );
-    if (error) throw error;
-    const { data } = await supabase.storage.from(TEMP_UPLOAD_BUCKET)
-        .createSignedUrl(filePath, 3600); // 1 hour TTL
-    if (!data || !data.signedUrl) throw new Error("Failed to create signed URL for temporary file.");
-    return data.signedUrl;
+async function uploadBuffer(buffer: Uint8Array, supabase: SupabaseClient, userId: string, filename: string) {
+  const path = `tmp/${userId}/${Date.now()}-${filename}`;
+  const { error } = await supabase.storage.from(TEMP_UPLOAD_BUCKET).upload(
+    path,
+    buffer,
+    { contentType: "image/png" },
+  );
+  if (error) throw error;
+  const { data } = await supabase.storage.from(TEMP_UPLOAD_BUCKET)
+    .createSignedUrl(path, 3600); // 1 hour TTL
+  if (!data || !data.signedUrl) throw new Error("Failed to create signed URL for temporary file.");
+  return data.signedUrl;
 }
 
 const blobToBase64 = async (blob: Blob): Promise<string> => {
@@ -99,15 +100,26 @@ serve(async (req) => {
     
     const croppedPersonImage = personImage.clone().crop(bbox.x, bbox.y, bbox.width, bbox.height);
     const croppedPersonBuffer = await croppedPersonImage.encode(0); // PNG
-    const croppedPersonUrl = await uploadBufferToTemp(supabase, croppedPersonBuffer, job.user_id, 'cropped_person.png');
+    const croppedPersonUrl = await uploadBuffer(croppedPersonBuffer, supabase, job.user_id, 'cropped_person.png');
     console.log(`${logPrefix} Cropped person image uploaded to temp storage: ${croppedPersonUrl}`);
+
+    // --- STRATEGIC FIX: Generate Signed URL for Garment ---
+    console.log(`${logPrefix} Generating signed URL for garment image.`);
+    const { bucket: garmentBucket, path: garmentPath } = parseStorageURL(job.source_garment_image_url);
+    const { data: signedUrlData, error: signedUrlError } = await supabase.storage
+        .from(garmentBucket)
+        .createSignedUrl(garmentPath, 3600); // 1 hour expiry
+    if (signedUrlError) throw signedUrlError;
+    const signedGarmentUrl = signedUrlData.signedUrl;
+    console.log(`${logPrefix} Garment signed URL generated successfully.`);
+    // --- END OF FIX ---
 
     // Step 3: Run VTO on the cropped image to get 3 samples
     console.log(`${logPrefix} Step 3: Running VTO on cropped image to get 3 samples.`);
     const { data: vtoResult, error: vtoError } = await supabase.functions.invoke('MIRA-AGENT-tool-virtual-try-on', {
         body: {
             person_image_url: croppedPersonUrl,
-            garment_image_url: job.source_garment_image_url,
+            garment_image_url: signedGarmentUrl, // Use the new signed URL
             sample_count: 3
         }
     });
