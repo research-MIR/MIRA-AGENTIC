@@ -33,10 +33,16 @@ async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string)
 
 async function uploadBufferToTemp(supabase: SupabaseClient, buffer: Uint8Array, userId: string, filename: string): Promise<string> {
     const filePath = `tmp/${userId}/${Date.now()}-${filename}`;
-    const { error } = await supabase.storage.from(TEMP_UPLOAD_BUCKET).upload(filePath, buffer, { contentType: 'image/png', upsert: true });
+    const { error } = await supabase.storage.from(TEMP_UPLOAD_BUCKET).upload(
+        path,
+        buffer,
+        { contentType: "image/png" },
+    );
     if (error) throw error;
-    const { data: { publicUrl } } = supabase.storage.from(TEMP_UPLOAD_BUCKET).getPublicUrl(filePath);
-    return publicUrl;
+    const { data } = await supabase.storage.from(TEMP_UPLOAD_BUCKET)
+        .createSignedUrl(path, 3600); // 1 hour TTL
+    if (!data || !data.signedUrl) throw new Error("Failed to create signed URL for temporary file.");
+    return data.signedUrl;
 }
 
 const blobToBase64 = async (blob: Blob): Promise<string> => {
@@ -150,7 +156,11 @@ serve(async (req) => {
     const finalImageBuffer = await finalImage.encode(0);
     const finalFilePath = `${job.user_id}/vto-packs/${Date.now()}_final_composite.png`;
     await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(finalFilePath, finalImageBuffer, { contentType: 'image/png', upsert: true });
-    const { data: { publicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(finalFilePath);
+    
+    const { data: urlData, error: urlError } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(finalFilePath);
+    if (urlError) throw new Error(`Failed to get public URL after upload: ${urlError.message}`);
+    if (!urlData || !urlData.publicUrl) throw new Error("Upload succeeded but did not return a public URL.");
+    const publicUrl = urlData.publicUrl;
 
     await supabase.from('mira-agent-bitstudio-jobs').update({
         status: 'complete',
