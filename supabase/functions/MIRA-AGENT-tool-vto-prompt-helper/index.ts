@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { GoogleGenAI, Content, Part, HarmCategory, HarmBlockThreshold } from 'https://esm.sh/@google/genai@0.15.0';
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
@@ -93,28 +93,40 @@ Your entire response MUST be a single, valid JSON object with ONE key, "final_pr
 \`\`\`
 `;
 
-async function downloadImageAsPart(imageUrl: string, label: string): Promise<Part[]> {
-    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-        throw new Error("Supabase URL or Service Role Key are not set in environment variables.");
+async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
+    if (publicUrl.includes('/sign/')) {
+        const response = await fetch(publicUrl);
+        if (!response.ok) {
+            throw new Error(`Failed to download from signed URL: ${response.statusText}`);
+        }
+        return await response.blob();
     }
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-    const url = new URL(imageUrl);
+
+    const url = new URL(publicUrl);
     const pathSegments = url.pathname.split('/');
     
-    const objectSegmentIndex = pathSegments.indexOf('object');
-    if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) {
-        throw new Error(`Could not parse bucket name from Supabase URL: ${imageUrl}`);
+    const publicSegmentIndex = pathSegments.indexOf('public');
+    if (publicSegmentIndex === -1 || publicSegmentIndex + 1 >= pathSegments.length) {
+        throw new Error(`Could not parse bucket name from public Supabase URL: ${publicUrl}`);
     }
     
-    const bucketName = pathSegments[objectSegmentIndex + 2];
-    const filePath = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
+    const bucketName = pathSegments[publicSegmentIndex + 1];
+    const filePath = decodeURIComponent(pathSegments.slice(publicSegmentIndex + 2).join('/'));
 
     if (!bucketName || !filePath) {
-        throw new Error(`Could not parse bucket or path from Supabase URL: ${imageUrl}`);
+        throw new Error(`Could not parse bucket or path from public Supabase URL: ${publicUrl}`);
     }
 
-    const { data: fileBlob, error: downloadError } = await supabase.storage.from(bucketName).download(filePath);
-    if (downloadError) throw new Error(`Supabase download failed: ${downloadError.message}`);
+    const { data, error } = await supabase.storage.from(bucketName).download(filePath);
+    if (error) {
+        throw new Error(`Failed to download from Supabase storage (${filePath}): ${error.message}`);
+    }
+    return data;
+}
+
+async function downloadImageAsPart(imageUrl: string, label: string): Promise<Part[]> {
+    const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
+    const fileBlob = await downloadFromSupabase(supabase, imageUrl);
 
     const mimeType = fileBlob.type;
     const buffer = await fileBlob.arrayBuffer();
