@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { GoogleGenAI, Content, Part, HarmCategory, HarmBlockThreshold } from 'https://esm.sh/@google/genai@0.15.0';
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-const MODEL_NAME = "gemini-1.5-flash-latest"; // Using the latest flash model for this visual task
+const MODEL_NAME = "gemini-2.5-flash";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
