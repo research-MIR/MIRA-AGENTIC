@@ -66,7 +66,7 @@ async function downloadFromSignedUrl(url: string, requestId: string): Promise<Bl
 
 serve(async (req) => {
   const requestId = `vto-tool-${Date.now()}`;
-  console.log(`[VirtualTryOnTool][${requestId}] Function invoked.`);
+  console.log(`[VirtualTryOnTool][${requestId}] Function invoked. Running version 2.0 with logging fix.`);
 
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -77,14 +77,16 @@ serve(async (req) => {
       throw new Error("Server configuration error: Missing Google Cloud credentials.");
     }
 
+    const body = await req.json();
+    console.log(`[VirtualTryOnTool][${requestId}] Request body successfully parsed. Keys found: ${Object.keys(body).join(', ')}`);
+
     const { 
         person_image_url, garment_image_url, 
         person_image_base64: person_b64_input, 
         garment_image_base64: garment_b64_input,
         sample_step,
         sample_count = 1
-    } = await req.json();
-    console.log(`[VirtualTryOnTool][${requestId}] Received request body with keys: ${Object.keys(req.json()).join(', ')}`);
+    } = body;
 
     let person_image_base64: string;
     let garment_image_base64: string;
