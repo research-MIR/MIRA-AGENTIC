@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { GoogleGenAI, HarmCategory, HarmBlockThreshold } from 'https://esm.sh/@google/genai@0.15.0';
+import { GoogleGenAI, HarmCategory, HarmBlockThreshold, Type } from 'https://esm.sh/@google/genai@0.15.0';
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 import { loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
 
@@ -25,13 +25,32 @@ Your entire response MUST be a single, valid JSON object and NOTHING ELSE. Do no
 
 ### Example Output Format:
 \`\`\`json
-[
-  {
-    "box_2d": [28, 362, 984, 624],
-    "label": "person"
+{
+  "person": {
+    "y_min": 28,
+    "x_min": 362,
+    "y_max": 984,
+    "x_max": 624
   }
-]
+}
 \`\`\``;
+
+const boundingBoxSchema = {
+  type: Type.OBJECT,
+  properties: {
+    person: {
+      type: Type.OBJECT,
+      properties: {
+        y_min: { type: Type.NUMBER },
+        x_min: { type: Type.NUMBER },
+        y_max: { type: Type.NUMBER },
+        x_max: { type: Type.NUMBER },
+      },
+      required: ["y_min", "x_min", "y_max", "x_max"]
+    }
+  },
+  required: ["person"]
+};
 
 const safetySettings = [
     { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
@@ -86,53 +105,20 @@ serve(async (req) => {
         ] }],
         generationConfig: { 
             responseMimeType: "application/json",
+            responseSchema: boundingBoxSchema,
         },
         safetySettings,
         config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
     });
 
-    let detectedBoxes = JSON.parse(result.text);
+    const detectedBox = JSON.parse(result.text).person;
 
-    if (detectedBoxes && !Array.isArray(detectedBoxes) && detectedBoxes.box_2d) {
-        detectedBoxes = [detectedBoxes]; 
-    }
-
-    if (!detectedBoxes || !Array.isArray(detectedBoxes) || detectedBoxes.length === 0) {
-        throw new Error("AI did not detect any bounding boxes.");
-    }
-
-    if (detectedBoxes[0].x !== undefined && detectedBoxes[0].y !== undefined) {
-        const box = detectedBoxes[0];
-        const y_min_norm = (box.y / dimensions.height) * 1000;
-        const x_min_norm = (box.x / dimensions.width) * 1000;
-        const y_max_norm = ((box.y + box.height) / dimensions.height) * 1000;
-        const x_max_norm = ((box.x + box.width) / dimensions.width) * 1000;
-        detectedBoxes[0].box_2d = [y_min_norm, x_min_norm, y_max_norm, x_max_norm];
-    }
-
-    if (!detectedBoxes[0].box_2d) {
-        throw new Error("AI response did not contain a valid 'box_2d' field.");
-    }
-
-    const largestBox = detectedBoxes.reduce((prev, current) => {
-        const prevArea = (prev.box_2d[2] - prev.box_2d[0]) * (prev.box_2d[3] - prev.box_2d[1]);
-        const currentArea = (current.box_2d[2] - current.box_2d[0]) * (current.box_2d[3] - current.box_2d[1]);
-        return (currentArea > prevArea) ? current : prev;
-    });
-
-    let [y_min, x_min, y_max, x_max] = largestBox.box_2d;
-    const width = x_max - x_min;
-    const height = y_max - y_min;
-
-    // Sanity check: A person's bounding box should be taller than it is wide.
-    // If not, the model likely returned the coordinates in [x_min, y_min, x_max, y_max] format.
-    if (width > height) {
-        console.warn(`[BBox-Worker] Detected wide bounding box (${width}x${height}). Assuming swapped coordinates and correcting.`);
-        [y_min, x_min, y_max, x_max] = [x_min, y_min, x_max, y_max];
+    if (!detectedBox || detectedBox.y_min === undefined) {
+        throw new Error("AI response did not contain a valid 'person' object with coordinates.");
     }
 
     return new Response(JSON.stringify({
-        normalized_bounding_box: [y_min, x_min, y_max, x_max],
+        normalized_bounding_box: detectedBox,
         original_dimensions: dimensions
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

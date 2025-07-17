@@ -36,6 +36,8 @@ serve(async (req) => {
         throw new Error("All bounding box detection workers failed.");
     }
 
+    console.log(`Received ${successfulResults.length} successful bounding box results.`);
+
     const getRobustAverage = (values: number[]): number => {
         if (values.length === 0) return 0;
         if (values.length <= 2) return values.reduce((a, b) => a + b, 0) / values.length;
@@ -54,10 +56,10 @@ serve(async (req) => {
         return filteredValues.reduce((a, b) => a + b, 0) / filteredValues.length;
     };
 
-    const yMins = successfulResults.map(r => r.normalized_bounding_box[0]);
-    const xMins = successfulResults.map(r => r.normalized_bounding_box[1]);
-    const yMaxs = successfulResults.map(r => r.normalized_bounding_box[2]);
-    const xMaxs = successfulResults.map(r => r.normalized_bounding_box[3]);
+    const yMins = successfulResults.map(r => r.normalized_bounding_box.y_min);
+    const xMins = successfulResults.map(r => r.normalized_bounding_box.x_min);
+    const yMaxs = successfulResults.map(r => r.normalized_bounding_box.y_max);
+    const xMaxs = successfulResults.map(r => r.normalized_bounding_box.x_max);
 
     const averageBox = {
         y_min: getRobustAverage(yMins),
