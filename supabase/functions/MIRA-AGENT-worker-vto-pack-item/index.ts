@@ -103,29 +103,35 @@ serve(async (req) => {
     const croppedPersonUrl = await uploadBuffer(croppedPersonBuffer, supabase, job.user_id, 'cropped_person.png');
     console.log(`${logPrefix} Cropped person image uploaded to temp storage: ${croppedPersonUrl}`);
 
-    // --- STRATEGIC FIX: Generate Signed URL for Garment ---
-    console.log(`${logPrefix} Generating signed URL for garment image.`);
     const { bucket: garmentBucket, path: garmentPath } = parseStorageURL(job.source_garment_image_url);
     const { data: signedUrlData, error: signedUrlError } = await supabase.storage
         .from(garmentBucket)
-        .createSignedUrl(garmentPath, 3600); // 1 hour expiry
+        .createSignedUrl(garmentPath, 3600);
     if (signedUrlError) throw signedUrlError;
     const signedGarmentUrl = signedUrlData.signedUrl;
     console.log(`${logPrefix} Garment signed URL generated successfully.`);
-    // --- END OF FIX ---
 
-    // Step 3: Run VTO on the cropped image to get 3 samples
-    console.log(`${logPrefix} Step 3: Running VTO on cropped image to get 3 samples.`);
-    const { data: vtoResult, error: vtoError } = await supabase.functions.invoke('MIRA-AGENT-tool-virtual-try-on', {
-        body: {
-            person_image_url: croppedPersonUrl,
-            garment_image_url: signedGarmentUrl, // Use the new signed URL
-            sample_count: 3
-        }
+    // Step 3: Run VTO with multiple step counts
+    const steps = [15, 30, 70];
+    console.log(`${logPrefix} Step 3: Running VTO for step counts: ${steps.join(', ')}.`);
+    
+    const vtoPromises = steps.map(step => 
+        supabase.functions.invoke('MIRA-AGENT-tool-virtual-try-on', {
+            body: {
+                person_image_url: croppedPersonUrl,
+                garment_image_url: signedGarmentUrl,
+                sample_count: 1,
+                sample_step: step
+            }
+        })
+    );
+
+    const vtoResults = await Promise.all(vtoPromises);
+    const generatedImages = vtoResults.map((res, index) => {
+        if (res.error) throw new Error(`VTO generation for step ${steps[index]} failed: ${res.error.message}`);
+        if (!res.data.generatedImages || res.data.generatedImages.length === 0) throw new Error(`VTO tool did not return an image for step ${steps[index]}`);
+        return res.data.generatedImages[0];
     });
-    if (vtoError) throw vtoError;
-    const generatedImages = vtoResult.generatedImages;
-    if (!generatedImages || generatedImages.length === 0) throw new Error("VTO tool did not return any images.");
     console.log(`${logPrefix} VTO successful, received ${generatedImages.length} samples.`);
 
     // Step 4: Quality Check
@@ -139,7 +145,7 @@ serve(async (req) => {
     });
     if (qaError) throw qaError;
     const bestImageIndex = qaData.best_image_index;
-    console.log(`${logPrefix} Quality Checker selected best image at index: ${bestImageIndex}. Reasoning: "${qaData.reasoning}"`);
+    console.log(`${logPrefix} Quality Checker selected best image at index: ${bestImageIndex} (steps: ${steps[bestImageIndex]}). Reasoning: "${qaData.reasoning}"`);
 
     // Step 5: Composite the best result
     console.log(`${logPrefix} Step 5: Compositing best result.`);
@@ -180,7 +186,7 @@ serve(async (req) => {
     await supabase.from('mira-agent-bitstudio-jobs').update({
         status: 'complete',
         final_image_url: publicUrl,
-        metadata: { ...job.metadata, bbox, cropped_person_url: croppedPersonUrl, qa_best_index: bestImageIndex, qa_reasoning: qaData.reasoning }
+        metadata: { ...job.metadata, bbox, cropped_person_url: croppedPersonUrl, qa_best_index: bestImageIndex, qa_reasoning: qaData.reasoning, best_step_count: steps[bestImageIndex] }
     }).eq('id', pair_job_id);
 
     console.log(`${logPrefix} Job finished successfully. Final URL: ${publicUrl}`);
