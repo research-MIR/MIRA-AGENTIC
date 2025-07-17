@@ -43,16 +43,10 @@ const blobToBase64 = async (blob: Blob): Promise<string> => {
 };
 
 async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string, requestId: string): Promise<Blob> {
-    const logPrefix = `[Downloader][${requestId}]`;
     if (publicUrl.includes('/sign/')) {
-        console.log(`${logPrefix} Downloading from signed URL.`);
         const response = await fetchWithRetry(publicUrl, {}, MAX_RETRIES, RETRY_DELAY_MS, requestId);
-        const blob = await response.blob();
-        console.log(`${logPrefix} Signed URL download successful. Blob size: ${blob.size}`);
-        return blob;
+        return await response.blob();
     }
-    
-    console.log(`${logPrefix} Downloading from public URL.`);
     const url = new URL(publicUrl);
     const pathSegments = url.pathname.split('/');
     const objectSegmentIndex = pathSegments.indexOf('object');
@@ -63,15 +57,14 @@ async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string,
     
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         const { data, error } = await supabase.storage.from(bucketName).download(filePath);
-        if (!error && data instanceof Blob) {
-            console.log(`${logPrefix} Public URL download successful. Blob size: ${data.size}`);
+        if (!error && data instanceof Blob) { // Added explicit check for Blob
             return data;
         }
         console.warn(`[FetchRetry][${requestId}] Supabase download failed attempt ${attempt}/${MAX_RETRIES}: ${error?.message || 'Returned data was not a Blob'}`);
         if (attempt === MAX_RETRIES) throw new Error(`Failed to download from Supabase storage (${filePath}): ${error?.message || 'Returned data was not a Blob'}`);
         await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS * attempt));
     }
-    throw new Error("Supabase download failed unexpectedly.");
+    throw new Error("Supabase download failed unexpectedly."); // Should not be reached
 }
 
 serve(async (req) => {
@@ -89,39 +82,33 @@ serve(async (req) => {
       throw new Error("Server configuration error: Missing Google Cloud credentials.");
     }
 
-    const body = await req.json();
-    console.log(`[VirtualTryOnTool][${requestId}] Received request body with keys: ${Object.keys(body).join(', ')}`);
     const { 
         person_image_url, garment_image_url, 
         person_image_base64: person_b64_input, 
         garment_image_base64: garment_b64_input,
         sample_step,
         sample_count = 1
-    } = body;
+    } = await req.json();
 
     let person_image_base64: string;
     let garment_image_base64: string;
 
     if (person_b64_input) {
         person_image_base64 = person_b64_input;
-        console.log(`[VirtualTryOnTool][${requestId}] Using provided base64 for person image. Length: ${person_image_base64.length}`);
     } else if (person_image_url) {
         console.log(`[VirtualTryOnTool][${requestId}] Downloading person image from URL: ${person_image_url}`);
         const personBlob = await downloadFromSupabase(supabase, person_image_url, requestId);
         person_image_base64 = await blobToBase64(personBlob);
-        console.log(`[VirtualTryOnTool][${requestId}] Person image processed. Base64 length: ${person_image_base64.length}`);
     } else {
         throw new Error("Either person_image_url or person_image_base64 is required.");
     }
 
     if (garment_b64_input) {
         garment_image_base64 = garment_b64_input;
-        console.log(`[VirtualTryOnTool][${requestId}] Using provided base64 for garment image. Length: ${garment_image_base64.length}`);
     } else if (garment_image_url) {
         console.log(`[VirtualTryOnTool][${requestId}] Downloading garment image from URL: ${garment_image_url}`);
         const garmentBlob = await downloadFromSupabase(supabase, garment_image_url, requestId);
         garment_image_base64 = await blobToBase64(garmentBlob);
-        console.log(`[VirtualTryOnTool][${requestId}] Garment image processed. Base64 length: ${garment_image_base64.length}`);
     } else {
         throw new Error("Either garment_image_url or garment_image_base64 is required.");
     }
@@ -167,7 +154,6 @@ serve(async (req) => {
     }
 
     const responseData = JSON.parse(responseText);
-    console.log(`[VirtualTryOnTool][${requestId}] Successfully parsed JSON response.`);
     const predictions = responseData.predictions;
 
     if (!predictions || !Array.isArray(predictions) || predictions.length === 0) {
