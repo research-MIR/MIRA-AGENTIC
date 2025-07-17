@@ -8,6 +8,7 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const TEMP_UPLOAD_BUCKET = 'mira-agent-user-uploads';
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
+const MAX_IMAGE_DIMENSION = 1024;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -53,6 +54,8 @@ const blobToBase64 = async (blob: Blob): Promise<string> => {
     const buffer = await blob.arrayBuffer();
     return encodeBase64(buffer);
 };
+
+const bufferToBase64 = (buffer: Uint8Array): string => encodeBase64(buffer);
 
 // --- State Machine Logic ---
 
@@ -139,7 +142,12 @@ async function handleStart(supabase: SupabaseClient, job: any, logPrefix: string
   const croppedPersonUrl = await uploadBuffer(croppedPersonBuffer, supabase, job.user_id, 'cropped_person.png');
   console.log(`${logPrefix} Cropped person image uploaded to temp storage.`);
 
-  const garmentBase64 = await blobToBase64(garmentBlob);
+  let garmentImage = await ISImage.decode(await garmentBlob.arrayBuffer());
+  if (garmentImage.width > MAX_IMAGE_DIMENSION || garmentImage.height > MAX_IMAGE_DIMENSION) {
+    garmentImage.resize(garmentImage.width > garmentImage.height ? MAX_IMAGE_DIMENSION : ISImage.RESIZE_AUTO, garmentImage.height > garmentImage.width ? MAX_IMAGE_DIMENSION : ISImage.RESIZE_AUTO);
+    console.log(`${logPrefix} Garment image resized.`);
+  }
+  const garmentBase64 = bufferToBase64(await garmentImage.encode(0));
   console.log(`${logPrefix} Garment image encoded and will be stored in metadata.`);
 
   await supabase.from('mira-agent-bitstudio-jobs').update({
@@ -165,7 +173,12 @@ async function handleGenerateStep(supabase: SupabaseClient, job: any, sampleStep
   }
 
   const personBlob = await downloadFromSupabase(supabase, cropped_person_url);
-  const personBase64 = await blobToBase64(personBlob);
+  let personImage = await ISImage.decode(await personBlob.arrayBuffer());
+  if (personImage.width > MAX_IMAGE_DIMENSION || personImage.height > MAX_IMAGE_DIMENSION) {
+    personImage.resize(personImage.width > personImage.height ? MAX_IMAGE_DIMENSION : ISImage.RESIZE_AUTO, personImage.height > personImage.width ? MAX_IMAGE_DIMENSION : ISImage.RESIZE_AUTO);
+    console.log(`${logPrefix} Person image resized for this step.`);
+  }
+  const personBase64 = bufferToBase64(await personImage.encode(0));
 
   const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-virtual-try-on', {
     body: {
