@@ -36,9 +36,6 @@ serve(async (req) => {
         throw new Error("All bounding box detection workers failed.");
     }
 
-    console.log(`Received ${successfulResults.length} successful bounding box results.`);
-
-    // Function to calculate average after removing outliers using IQR method
     const getRobustAverage = (values: number[]): number => {
         if (values.length === 0) return 0;
         if (values.length <= 2) return values.reduce((a, b) => a + b, 0) / values.length;
@@ -53,10 +50,7 @@ serve(async (req) => {
 
         const filteredValues = sorted.filter(v => v >= lowerBound && v <= upperBound);
         
-        if (filteredValues.length === 0) {
-            return sorted.reduce((a, b) => a + b, 0) / sorted.length;
-        }
-
+        if (filteredValues.length === 0) return sorted.reduce((a, b) => a + b, 0) / sorted.length;
         return filteredValues.reduce((a, b) => a + b, 0) / filteredValues.length;
     };
 
@@ -77,30 +71,30 @@ serve(async (req) => {
     const abs_width = ((averageBox.x_max - averageBox.x_min) / 1000) * originalWidth;
     const abs_height = ((averageBox.y_max - averageBox.y_min) / 1000) * originalHeight;
 
-    const paddingPercentage = 0.20; // 20% padding
+    const paddingPercentage = 0.20;
     const padding_x = abs_width * paddingPercentage;
     const padding_y = abs_height * paddingPercentage;
 
-    const abs_x = (averageBox.x_min / 1000) * originalWidth;
-    const abs_y = (averageBox.y_min / 1000) * originalHeight;
+    const dilated_x_abs = Math.max(0, ((averageBox.x_min / 1000) * originalWidth) - padding_x / 2);
+    const dilated_y_abs = Math.max(0, ((averageBox.y_min / 1000) * originalHeight) - padding_y / 2);
+    const dilated_width_abs = Math.min(originalWidth - dilated_x_abs, abs_width + padding_x);
+    const dilated_height_abs = Math.min(originalHeight - dilated_y_abs, abs_height + padding_y);
 
-    const dilated_x = Math.max(0, abs_x - padding_x / 2);
-    const dilated_y = Math.max(0, abs_y - padding_y / 2);
-    const dilated_width = Math.min(originalWidth - dilated_x, abs_width + padding_x);
-    const dilated_height = Math.min(originalHeight - dilated_y, abs_height + padding_y);
+    const final_y_min = (dilated_y_abs / originalHeight) * 1000;
+    const final_x_min = (dilated_x_abs / originalWidth) * 1000;
+    const final_y_max = ((dilated_y_abs + dilated_height_abs) / originalHeight) * 1000;
+    const final_x_max = ((dilated_x_abs + dilated_width_abs) / originalWidth) * 1000;
 
-    const absolute_bounding_box = {
-        x: Math.round(dilated_x),
-        y: Math.round(dilated_y),
-        width: Math.round(dilated_width),
-        height: Math.round(dilated_height),
+    const finalResponse = {
+        "person": [
+            Math.round(final_y_min),
+            Math.round(final_x_min),
+            Math.round(final_y_max),
+            Math.round(final_x_max)
+        ]
     };
 
-    return new Response(JSON.stringify({
-        normalized_bounding_box: [averageBox.y_min, averageBox.x_min, averageBox.y_max, averageBox.x_max],
-        absolute_bounding_box: absolute_bounding_box,
-        original_dimensions: { width: originalWidth, height: originalHeight }
-    }), {
+    return new Response(JSON.stringify(finalResponse), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });
