@@ -218,7 +218,7 @@ async function handleCompositing(supabase: SupabaseClient, job: any, logPrefix: 
   const personBlob = await downloadFromSupabase(supabase, job.source_person_image_url);
   const personImage = await ISImage.decode(await personBlob.arrayBuffer());
 
-  const cropAmount = 2;
+  const cropAmount = 4; // Increased from 2 to 4
   vtoPatchImage.crop(cropAmount, cropAmount, vtoPatchImage.width - (cropAmount * 2), vtoPatchImage.height - (cropAmount * 2));
   
   const targetWidth = bbox.width - (cropAmount * 2);
@@ -227,6 +227,29 @@ async function handleCompositing(supabase: SupabaseClient, job: any, logPrefix: 
   if (vtoPatchImage.width !== targetWidth || vtoPatchImage.height !== targetHeight) {
       vtoPatchImage.resize(targetWidth, targetHeight);
   }
+
+  // --- NEW FEATHERING LOGIC ---
+  const featherWidth = 20; // Feathering width in pixels.
+  const mask = new ISImage(vtoPatchImage.width, vtoPatchImage.height);
+
+  for (let y = 0; y < mask.height; y++) {
+      for (let x = 0; x < mask.width; x++) {
+          const distToEdgeX = Math.min(x, mask.width - 1 - x);
+          const distToEdgeY = Math.min(y, mask.height - 1 - y);
+          const distToEdge = Math.min(distToEdgeX, distToEdgeY);
+
+          let alpha = 255;
+          if (distToEdge < featherWidth) {
+              alpha = (distToEdge / featherWidth) * 255;
+          }
+          
+          const color = ISImage.rgbaToColor(alpha, alpha, alpha, 255);
+          mask.setPixelAt(x, y, color);
+      }
+  }
+  
+  vtoPatchImage.mask(mask, true);
+  // --- END OF FEATHERING LOGIC ---
 
   const pasteX = bbox.x + cropAmount;
   const pasteY = bbox.y + cropAmount;
