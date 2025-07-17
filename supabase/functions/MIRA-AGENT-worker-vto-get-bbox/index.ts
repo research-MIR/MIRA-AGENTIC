@@ -123,18 +123,21 @@ serve(async (req) => {
     const abs_width = ((x_max - x_min) / 1000) * originalWidth;
     const abs_height = ((y_max - y_min) / 1000) * originalHeight;
 
+    const basePaddingPercentage = 0.07;
+    const longerDim = Math.max(abs_width, abs_height);
+    const basePaddingPixels = longerDim * basePaddingPercentage;
+
     let padding_x: number;
     let padding_y: number;
-    const basePaddingPercentage = 0.07;
 
     if (abs_width < abs_height) {
-        // Shorter side is width, double its padding
-        padding_x = abs_width * (basePaddingPercentage * 2);
-        padding_y = abs_height * basePaddingPercentage;
+        // Width is the shorter side, give it double padding
+        padding_x = basePaddingPixels * 2;
+        padding_y = basePaddingPixels;
     } else {
-        // Shorter side is height (or they are equal), double its padding
-        padding_y = abs_height * (basePaddingPercentage * 2);
-        padding_x = abs_width * basePaddingPercentage;
+        // Height is the shorter side (or they are equal), give it double padding
+        padding_y = basePaddingPixels * 2;
+        padding_x = basePaddingPixels;
     }
 
     const abs_x = (x_min / 1000) * originalWidth;
