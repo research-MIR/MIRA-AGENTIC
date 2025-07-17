@@ -83,13 +83,13 @@ async function downloadImageAsPart(imageUrl: string, label: string): Promise<Par
     const url = new URL(imageUrl);
     const pathSegments = url.pathname.split('/');
     
-    const publicSegmentIndex = pathSegments.indexOf('public');
-    if (publicSegmentIndex === -1 || publicSegmentIndex + 1 >= pathSegments.length) {
+    const objectSegmentIndex = pathSegments.indexOf('object');
+    if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) {
         throw new Error(`Could not parse bucket name from Supabase URL: ${imageUrl}`);
     }
     
-    const bucketName = pathSegments[publicSegmentIndex + 1];
-    const filePath = decodeURIComponent(pathSegments.slice(publicSegmentIndex + 2).join('/'));
+    const bucketName = pathSegments[objectSegmentIndex + 2];
+    const filePath = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
 
     if (!bucketName || !filePath) {
         throw new Error(`Could not parse bucket or path from Supabase URL: ${imageUrl}`);
