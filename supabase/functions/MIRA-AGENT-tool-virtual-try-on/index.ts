@@ -36,7 +36,27 @@ async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string)
     return data;
 }
 
+function parseStoragePathFromUrl(url: string): { bucket: string, path: string } | null {
+    try {
+        const urlObj = new URL(url);
+        const pathSegments = urlObj.pathname.split('/');
+        const objectSegmentIndex = pathSegments.indexOf('object');
+        if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) {
+            return null;
+        }
+        const bucket = pathSegments[objectSegmentIndex + 2];
+        const path = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
+        if (!bucket || !path) return null;
+        return { bucket, path };
+    } catch (e) {
+        return null;
+    }
+}
+
 serve(async (req) => {
+  const requestId = `vto-tool-${Date.now()}`;
+  console.log(`[VirtualTryOnTool][${requestId}] Function invoked.`);
+
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
@@ -52,22 +72,29 @@ serve(async (req) => {
     if (!person_image_url || !garment_image_url) {
       throw new Error("person_image_url and garment_image_url are required.");
     }
+    console.log(`[VirtualTryOnTool][${requestId}] Received URLs. Person: ${person_image_url}, Garment: ${garment_image_url}`);
 
+    console.log(`[VirtualTryOnTool][${requestId}] Downloading images from storage...`);
     const [personBlob, garmentBlob] = await Promise.all([
         downloadFromSupabase(supabase, person_image_url),
         downloadFromSupabase(supabase, garment_image_url)
     ]);
+    console.log(`[VirtualTryOnTool][${requestId}] Images downloaded successfully.`);
 
+    console.log(`[VirtualTryOnTool][${requestId}] Encoding images to base64...`);
     const [person_image_base64, garment_image_base64] = await Promise.all([
         blobToBase64(personBlob),
         blobToBase64(garmentBlob)
     ]);
+    console.log(`[VirtualTryOnTool][${requestId}] Images encoded.`);
 
+    console.log(`[VirtualTryOnTool][${requestId}] Authenticating with Google...`);
     const auth = new GoogleAuth({
       credentials: JSON.parse(GOOGLE_VERTEX_AI_SA_KEY_JSON),
       scopes: 'https://www.googleapis.com/auth/cloud-platform'
     });
     const accessToken = await auth.getAccessToken();
+    console.log(`[VirtualTryOnTool][${requestId}] Google authentication successful.`);
 
     const apiUrl = `https://${REGION}-aiplatform.googleapis.com/v1/projects/${GOOGLE_PROJECT_ID}/locations/${REGION}/publishers/google/models/${MODEL_ID}:predict`;
 
@@ -91,6 +118,7 @@ serve(async (req) => {
       }
     };
 
+    console.log(`[VirtualTryOnTool][${requestId}] Calling Google Vertex AI at ${apiUrl}...`);
     const response = await fetch(apiUrl, {
       method: 'POST',
       headers: {
@@ -102,17 +130,19 @@ serve(async (req) => {
 
     if (!response.ok) {
       const errorBody = await response.text();
-      console.error("Google API Error:", errorBody);
+      console.error(`[VirtualTryOnTool][${requestId}] Google API Error:`, errorBody);
       throw new Error(`API call failed with status ${response.status}: ${errorBody}`);
     }
 
     const responseData = await response.json();
     const prediction = responseData.predictions?.[0];
+    console.log(`[VirtualTryOnTool][${requestId}] Received successful response from Google.`);
 
     if (!prediction || !prediction.bytesBase64Encoded) {
       throw new Error("API response did not contain a valid image prediction.");
     }
 
+    console.log(`[VirtualTryOnTool][${requestId}] Job complete. Returning result.`);
     return new Response(JSON.stringify({
       base64Image: prediction.bytesBase64Encoded,
       mimeType: prediction.mimeType || 'image/png'
@@ -122,23 +152,36 @@ serve(async (req) => {
     });
 
   } catch (error) {
-    console.error("[VirtualTryOnTool] Error:", error);
+    console.error(`[VirtualTryOnTool][${requestId}] Error:`, error);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 500,
+      status: 500
     });
   } finally {
       // Clean up temporary files
       try {
-        const personPath = new URL(person_image_url).pathname.split('/mira-agent-user-uploads/')[1];
-        const garmentPath = new URL(garment_image_url).pathname.split('/mira-agent-user-uploads/')[1];
-        const pathsToRemove = [personPath, garmentPath].filter(Boolean);
+        const pathsToRemove: string[] = [];
+        const personStorageInfo = parseStoragePathFromUrl(person_image_url);
+        const garmentStorageInfo = parseStoragePathFromUrl(garment_image_url);
+
+        if (personStorageInfo && personStorageInfo.bucket === 'mira-agent-user-uploads' && personStorageInfo.path.startsWith('tmp/')) {
+            pathsToRemove.push(personStorageInfo.path);
+        }
+        if (garmentStorageInfo && garmentStorageInfo.bucket === 'mira-agent-user-uploads' && garmentStorageInfo.path.startsWith('tmp/')) {
+            pathsToRemove.push(garmentStorageInfo.path);
+        }
+
         if (pathsToRemove.length > 0) {
-            await supabase.storage.from('mira-agent-user-uploads').remove(pathsToRemove);
-            console.log(`[VirtualTryOnTool] Cleaned up temporary files:`, pathsToRemove);
+            console.log(`[VirtualTryOnTool][${requestId}] Cleaning up temporary files:`, pathsToRemove);
+            const { error: cleanupError } = await supabase.storage.from('mira-agent-user-uploads').remove(pathsToRemove);
+            if (cleanupError) {
+                console.error(`[VirtualTryOnTool][${requestId}] Failed to clean up temporary files:`, cleanupError.message);
+            } else {
+                console.log(`[VirtualTryOnTool][${requestId}] Cleanup successful.`);
+            }
         }
       } catch (cleanupError) {
-          console.error("[VirtualTryOnTool] Failed to clean up temporary files:", cleanupError.message);
+          console.error(`[VirtualTryOnTool][${requestId}] Error during cleanup logic:`, cleanupError.message);
       }
   }
 });
