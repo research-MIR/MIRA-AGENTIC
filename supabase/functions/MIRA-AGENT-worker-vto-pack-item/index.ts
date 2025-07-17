@@ -50,6 +50,36 @@ const blobToBase64 = async (blob: Blob): Promise<string> => {
     return encodeBase64(buffer);
 };
 
+// Helper to calculate mean and standard deviation for each color channel
+function calculateChannelStats(image: ISImage): { means: number[], stds: number[] } {
+    const means = [0, 0, 0];
+    const n = image.width * image.height;
+    if (n === 0) return { means: [0,0,0], stds: [0,0,0] };
+
+    for (const color of image.pixels()) {
+        const [r, g, b] = ISImage.colorToRGBA(color);
+        means[0] += r;
+        means[1] += g;
+        means[2] += b;
+    }
+    means[0] /= n;
+    means[1] /= n;
+    means[2] /= n;
+
+    const stds = [0, 0, 0];
+    for (const color of image.pixels()) {
+        const [r, g, b] = ISImage.colorToRGBA(color);
+        stds[0] += (r - means[0]) ** 2;
+        stds[1] += (g - means[1]) ** 2;
+        stds[2] += (b - means[2]) ** 2;
+    }
+    stds[0] = Math.sqrt(stds[0] / n);
+    stds[1] = Math.sqrt(stds[1] / n);
+    stds[2] = Math.sqrt(stds[2] / n);
+
+    return { means, stds };
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
 
@@ -134,7 +164,31 @@ serve(async (req) => {
     const bestVtoPatchBuffer = decodeBase64(generatedImages[bestImageIndex].base64Image);
     let vtoPatchImage = await ISImage.decode(bestVtoPatchBuffer);
 
-    const cropAmount = 2;
+    // --- NEW: COLOR MATCHING STEP ---
+    console.log(`${logPrefix} Step 5.1: Performing color matching...`);
+    const sourceStats = calculateChannelStats(croppedPersonImage);
+    const patchStats = calculateChannelStats(vtoPatchImage);
+    const colorCorrectedPatch = new ISImage(vtoPatchImage.width, vtoPatchImage.height);
+
+    for (const [x, y, color] of vtoPatchImage.iterateWithColors()) {
+        const [r, g, b, a] = ISImage.colorToRGBA(color);
+        let newR = r, newG = g, newB = b;
+
+        if (patchStats.stds[0] > 0) newR = (r - patchStats.means[0]) * (sourceStats.stds[0] / patchStats.stds[0]) + sourceStats.means[0];
+        if (patchStats.stds[1] > 0) newG = (g - patchStats.means[1]) * (sourceStats.stds[1] / patchStats.stds[1]) + sourceStats.means[1];
+        if (patchStats.stds[2] > 0) newB = (b - patchStats.means[2]) * (sourceStats.stds[2] / patchStats.stds[2]) + sourceStats.means[2];
+        
+        newR = Math.max(0, Math.min(255, newR));
+        newG = Math.max(0, Math.min(255, newG));
+        newB = Math.max(0, Math.min(255, newB));
+
+        colorCorrectedPatch.setPixelAt(x, y, ISImage.rgbaToColor(newR, newG, newB, a));
+    }
+    vtoPatchImage = colorCorrectedPatch;
+    console.log(`${logPrefix} Color matching complete.`);
+    // --- END OF COLOR MATCHING STEP ---
+
+    const cropAmount = 4; // Increased from 2 to 4
     vtoPatchImage.crop(cropAmount, cropAmount, vtoPatchImage.width - (cropAmount * 2), vtoPatchImage.height - (cropAmount * 2));
     
     const targetWidth = bbox.width - (cropAmount * 2);
@@ -151,32 +205,18 @@ serve(async (req) => {
     finalImage.composite(vtoPatchImage, pasteX, pasteY);
     console.log(`${logPrefix} Composition complete.`);
 
-    // Step 6: Finalize with granular logging
-    console.log(`${logPrefix} Step 6.1: Encoding final image...`);
+    // Step 6: Finalize
+    console.log(`${logPrefix} Step 6: Finalizing job.`);
     const finalImageBuffer = await finalImage.encode(0);
-    if (!finalImageBuffer || finalImageBuffer.length === 0) {
-        throw new Error("Failed to encode the final composite image. The buffer was empty.");
-    }
-    console.log(`${logPrefix} Step 6.2: Final image encoded successfully. Buffer length: ${finalImageBuffer.length}.`);
-
     const finalFilePath = `${job.user_id}/vto-packs/${Date.now()}_final_composite.png`;
-    console.log(`${logPrefix} Step 6.3: Uploading to Supabase Storage at path: ${finalFilePath}`);
     await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(finalFilePath, finalImageBuffer, { contentType: 'image/png', upsert: true });
-    console.log(`${logPrefix} Step 6.4: Upload complete. Retrieving public URL...`);
-    
-    const { data: urlData, error: urlError } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(finalFilePath);
-    console.log(`${logPrefix} Step 6.5: getPublicUrl returned. Error: ${urlError}, Data: ${JSON.stringify(urlData)}`);
-    if (urlError) throw new Error(`Failed to get public URL after upload: ${urlError.message}`);
-    if (!urlData || !urlData.publicUrl) throw new Error("Upload succeeded but did not return a public URL.");
-    const publicUrl = urlData.publicUrl;
-    console.log(`${logPrefix} Step 6.6: Public URL retrieved: ${publicUrl}. Updating job record...`);
+    const { data: { publicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(finalFilePath);
 
     await supabase.from('mira-agent-bitstudio-jobs').update({
         status: 'complete',
         final_image_url: publicUrl,
         metadata: { ...job.metadata, bbox, cropped_person_url: croppedPersonUrl, qa_best_index: bestImageIndex, qa_reasoning: qaData.reasoning }
     }).eq('id', pair_job_id);
-    console.log(`${logPrefix} Step 6.7: Job record updated successfully.`);
 
     console.log(`${logPrefix} Job finished successfully. Final URL: ${publicUrl}`);
     return new Response(JSON.stringify({ success: true, finalImageUrl: publicUrl }), { headers: corsHeaders });
