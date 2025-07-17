@@ -1,0 +1,123 @@
+import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
+import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { Image as ISImage } from "https://deno.land/x/imagescript@1.2.15/mod.ts";
+import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
+
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+const GENERATED_IMAGES_BUCKET = 'mira-generations';
+const TEMP_UPLOAD_BUCKET = 'mira-agent-user-uploads';
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+
+async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
+    const url = new URL(publicUrl);
+    const pathSegments = url.pathname.split('/');
+    const objectSegmentIndex = pathSegments.indexOf('object');
+    if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) {
+        throw new Error(`Could not parse bucket name from Supabase URL: ${publicUrl}`);
+    }
+    const bucketName = pathSegments[objectSegmentIndex + 2];
+    const filePath = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
+    if (!bucketName || !filePath) {
+        throw new Error(`Could not parse bucket or path from Supabase URL: ${publicUrl}`);
+    }
+    const { data, error } = await supabase.storage.from(bucketName).download(filePath);
+    if (error) throw new Error(`Failed to download from Supabase storage (${filePath}): ${error.message}`);
+    return data;
+}
+
+async function uploadBufferToTemp(supabase: SupabaseClient, buffer: Uint8Array, userId: string, filename: string): Promise<string> {
+    const filePath = `tmp/${userId}/${Date.now()}-${filename}`;
+    const { error } = await supabase.storage.from(TEMP_UPLOAD_BUCKET).upload(filePath, buffer, { contentType: 'image/png', upsert: true });
+    if (error) throw error;
+    const { data: { publicUrl } } = supabase.storage.from(TEMP_UPLOAD_BUCKET).getPublicUrl(filePath);
+    return publicUrl;
+}
+
+serve(async (req) => {
+  if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
+
+  const { pair_job_id } = await req.json();
+  if (!pair_job_id) {
+    return new Response(JSON.stringify({ error: "pair_job_id is required." }), { status: 400, headers: corsHeaders });
+  }
+
+  const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
+  const logPrefix = `[VTO-Pack-Worker][${pair_job_id}]`;
+
+  try {
+    console.log(`${logPrefix} Starting job.`);
+    await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'processing' }).eq('id', pair_job_id);
+
+    const { data: job, error: fetchError } = await supabase.from('mira-agent-bitstudio-jobs').select('*').eq('id', pair_job_id).single();
+    if (fetchError) throw fetchError;
+
+    // Step 1: Get Bounding Box
+    console.log(`${logPrefix} Step 1: Getting bounding box for person image.`);
+    const { data: bboxData, error: bboxError } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-bbox', {
+        body: { image_url: job.source_person_image_url }
+    });
+    if (bboxError) throw bboxError;
+    const bbox = bboxData.absolute_bounding_box;
+    console.log(`${logPrefix} Bounding box received:`, bbox);
+
+    // Step 2: Crop Image
+    console.log(`${logPrefix} Step 2: Cropping person image.`);
+    const personBlob = await downloadFromSupabase(supabase, job.source_person_image_url);
+    const personImage = await ISImage.decode(await personBlob.arrayBuffer());
+    const croppedPersonImage = personImage.clone().crop(bbox.x, bbox.y, bbox.width, bbox.height);
+    const croppedPersonBuffer = await croppedPersonImage.encode(0); // PNG
+    const croppedPersonUrl = await uploadBufferToTemp(supabase, croppedPersonBuffer, job.user_id, 'cropped_person.png');
+    console.log(`${logPrefix} Cropped person image uploaded to temp storage: ${croppedPersonUrl}`);
+
+    // Step 3: Run VTO on the cropped image
+    console.log(`${logPrefix} Step 3: Running VTO on cropped image.`);
+    const { data: vtoResult, error: vtoError } = await supabase.functions.invoke('MIRA-AGENT-tool-virtual-try-on', {
+        body: {
+            person_image_url: croppedPersonUrl,
+            garment_image_url: job.source_garment_image_url
+        }
+    });
+    if (vtoError) throw vtoError;
+    console.log(`${logPrefix} VTO successful.`);
+
+    // Step 4: Composite the result
+    console.log(`${logPrefix} Step 4: Compositing result.`);
+    const vtoPatchBuffer = decodeBase64(vtoResult.base64Image);
+    const vtoPatchImage = await ISImage.decode(vtoPatchBuffer);
+
+    if (vtoPatchImage.width !== bbox.width || vtoPatchImage.height !== bbox.height) {
+        console.log(`${logPrefix} VTO result dimensions (${vtoPatchImage.width}x${vtoPatchImage.height}) differ from crop (${bbox.width}x${bbox.height}). Resizing patch...`);
+        vtoPatchImage.resize(bbox.width, bbox.height);
+    }
+
+    const finalImage = personImage.clone();
+    finalImage.composite(vtoPatchImage, bbox.x, bbox.y);
+    console.log(`${logPrefix} Composition complete.`);
+
+    // Step 5: Finalize
+    console.log(`${logPrefix} Step 5: Uploading final image and updating job.`);
+    const finalImageBuffer = await finalImage.encode(0);
+    const finalFilePath = `${job.user_id}/vto-packs/${Date.now()}_final_composite.png`;
+    await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(finalFilePath, finalImageBuffer, { contentType: 'image/png', upsert: true });
+    const { data: { publicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(finalFilePath);
+
+    await supabase.from('mira-agent-bitstudio-jobs').update({
+        status: 'complete',
+        final_image_url: publicUrl,
+        metadata: { ...job.metadata, bbox, cropped_person_url: croppedPersonUrl }
+    }).eq('id', pair_job_id);
+
+    console.log(`${logPrefix} Job finished successfully. Final URL: ${publicUrl}`);
+    return new Response(JSON.stringify({ success: true, finalImageUrl: publicUrl }), { headers: corsHeaders });
+
+  } catch (error) {
+    console.error(`${logPrefix} Error:`, error);
+    await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'failed', error_message: error.message }).eq('id', pair_job_id);
+    return new Response(JSON.stringify({ error: error.message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
+  }
+});

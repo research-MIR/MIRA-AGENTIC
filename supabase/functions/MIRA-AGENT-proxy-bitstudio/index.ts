@@ -52,7 +52,7 @@ async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string)
     }
 
     const bucketName = pathSegments[publicSegmentIndex + 1];
-    const filePath = pathSegments.slice(publicSegmentIndex + 2).join('/');
+    const filePath = decodeURIComponent(pathSegments.slice(publicSegmentIndex + 2).join('/'));
 
     if (!bucketName || !filePath) {
         throw new Error(`Could not parse bucket or path from Supabase URL: ${publicUrl}`);
@@ -104,7 +104,7 @@ serve(async (req) => {
         originalFilename = 'agent_history_image.png';
       }
     }
-    const { retry_job_id, payload: retryPayload, new_source_image_id } = body;
+    const { retry_job_id, payload: retryPayload, new_source_image_id, existing_job_id } = body;
 
     if (retry_job_id) {
       // --- RETRY LOGIC ---
@@ -171,7 +171,6 @@ serve(async (req) => {
 
     } else {
       // --- NEW JOB LOGIC ---
-      console.log(`[BitStudioProxy][${requestId}] Handling new job creation.`);
       const { user_id, mode, batch_pair_job_id, vto_pack_job_id, metadata } = body;
       if (!user_id || !mode) throw new Error("user_id and mode are required for new jobs.");
 
@@ -201,7 +200,6 @@ serve(async (req) => {
             if (!response.ok) throw new Error(`Failed to download mask image from URL: ${response.statusText}`);
             const fullMaskBlob = await response.blob();
             
-            // Crop the downloaded full mask
             const fullMaskImg = await ISImage.decode(await fullMaskBlob.arrayBuffer());
             const { bbox } = metadata;
             if (!bbox) throw new Error("Bbox metadata is required when providing a full mask URL.");
@@ -294,17 +292,33 @@ serve(async (req) => {
         const taskId = vtoResult[0]?.id;
         if (!taskId) throw new Error("BitStudio did not return a task ID for the VTO job.");
 
-        const { data: newJob, error: insertError } = await supabase.from('mira-agent-bitstudio-jobs').insert({
-          user_id, mode, status: 'queued', source_person_image_url: person_image_url, source_garment_image_url: garment_image_url,
-          bitstudio_person_image_id: personImageId, bitstudio_garment_image_id: outfitImageId, bitstudio_task_id: taskId,
-          batch_pair_job_id: batch_pair_job_id,
-          vto_pack_job_id: vto_pack_job_id,
-          metadata: {
-            original_request_payload: vtoPayload
-          }
-        }).select('id').single();
-        if (insertError) throw insertError;
-        jobIds.push(newJob.id);
+        if (existing_job_id) {
+            console.log(`[BitStudioProxy][${requestId}] Updating existing job record: ${existing_job_id}`);
+            const { error: updateError } = await supabase.from('mira-agent-bitstudio-jobs').update({
+                status: 'queued',
+                bitstudio_person_image_id: personImageId, 
+                bitstudio_garment_image_id: outfitImageId, 
+                bitstudio_task_id: taskId,
+                metadata: {
+                  ...metadata,
+                  original_request_payload: vtoPayload
+                }
+            }).eq('id', existing_job_id);
+            if (updateError) throw updateError;
+            jobIds.push(existing_job_id);
+        } else {
+            const { data: newJob, error: insertError } = await supabase.from('mira-agent-bitstudio-jobs').insert({
+              user_id, mode, status: 'queued', source_person_image_url: person_image_url, source_garment_image_url: garment_image_url,
+              bitstudio_person_image_id: personImageId, bitstudio_garment_image_id: outfitImageId, bitstudio_task_id: taskId,
+              batch_pair_job_id: batch_pair_job_id,
+              vto_pack_job_id: vto_pack_job_id,
+              metadata: {
+                original_request_payload: vtoPayload
+              }
+            }).select('id').single();
+            if (insertError) throw insertError;
+            jobIds.push(newJob.id);
+        }
       }
 
       jobIds.forEach(jobId => {
