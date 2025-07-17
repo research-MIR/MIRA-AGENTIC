@@ -10,17 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 interface BboxResult {
-  normalized_bounding_box: number[];
-  absolute_bounding_box: {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  };
-  original_dimensions: {
-    width: number;
-    height: number;
-  };
+  person: number[];
 }
 
 const BoundingBoxTester = () => {
@@ -89,6 +79,13 @@ const BoundingBoxTester = () => {
     }
   };
 
+  const boxCoords = result?.person ? {
+    y: result.person[0] / 1000,
+    x: result.person[1] / 1000,
+    height: (result.person[2] - result.person[0]) / 1000,
+    width: (result.person[3] - result.person[1]) / 1000,
+  } : null;
+
   return (
     <div className="p-4 md:p-8 h-full overflow-y-auto">
       <header className="pb-4 mb-8 border-b">
@@ -124,14 +121,14 @@ const BoundingBoxTester = () => {
                 ) : (
                   <div className="aspect-square bg-muted rounded-md flex items-center justify-center text-muted-foreground">Upload an image to see results</div>
                 )}
-                {result && (
+                {boxCoords && (
                   <div
                     className="absolute border-2 border-red-500"
                     style={{
-                      left: `${(result.absolute_bounding_box.x / result.original_dimensions.width) * 100}%`,
-                      top: `${(result.absolute_bounding_box.y / result.original_dimensions.height) * 100}%`,
-                      width: `${(result.absolute_bounding_box.width / result.original_dimensions.width) * 100}%`,
-                      height: `${(result.absolute_bounding_box.height / result.original_dimensions.height) * 100}%`,
+                      left: `${boxCoords.x * 100}%`,
+                      top: `${boxCoords.y * 100}%`,
+                      width: `${boxCoords.width * 100}%`,
+                      height: `${boxCoords.height * 100}%`,
                     }}
                   />
                 )}
