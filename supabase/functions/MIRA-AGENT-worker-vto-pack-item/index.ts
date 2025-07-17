@@ -128,7 +128,17 @@ async function handleStart(supabase: SupabaseClient, job: any, logPrefix: string
   const abs_y = Math.floor((personBox[0] / 1000) * originalHeight);
   const abs_width = Math.ceil(((personBox[3] - personBox[1]) / 1000) * originalWidth);
   const abs_height = Math.ceil(((personBox[2] - personBox[0]) / 1000) * originalHeight);
-  const bbox = { x: abs_x, y: abs_y, width: abs_width, height: abs_height };
+  
+  const paddingPercentage = 0.10; // Increased padding to 10%
+  const padding_x = abs_width * paddingPercentage;
+  const padding_y = abs_height * paddingPercentage;
+
+  const bbox = {
+    x: Math.max(0, abs_x - padding_x),
+    y: Math.max(0, abs_y - padding_y),
+    width: Math.min(originalWidth - Math.max(0, abs_x - padding_x), abs_width + (padding_x * 2)),
+    height: Math.min(originalHeight - Math.max(0, abs_y - padding_y), abs_height + (padding_y * 2)),
+  };
   
   const croppedPersonImage = personImage.clone().crop(bbox.x, bbox.y, bbox.width, bbox.height);
   const croppedPersonBuffer = await croppedPersonImage.encode(0);
@@ -218,7 +228,7 @@ async function handleCompositing(supabase: SupabaseClient, job: any, logPrefix: 
   const personBlob = await downloadFromSupabase(supabase, job.source_person_image_url);
   const personImage = await ISImage.decode(await personBlob.arrayBuffer());
 
-  const cropAmount = 2;
+  const cropAmount = 4; // Increased crop amount
   vtoPatchImage.crop(cropAmount, cropAmount, vtoPatchImage.width - (cropAmount * 2), vtoPatchImage.height - (cropAmount * 2));
   
   const targetWidth = bbox.width - (cropAmount * 2);
