@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { NavLink, useNavigate, useParams } from "react-router-dom";
 import { Button } from "./ui/button";
-import { MessageSquare, Image, GalleryHorizontal, LogOut, HelpCircle, LogIn, Shirt, Code, Wand2, PencilRuler, Pencil, Trash2, Settings, FolderPlus, LayoutGrid, Cog, Brush, Users, MessageSquareQuote, ChevronRight, FlaskConical, Shapes } from "lucide-react";
+import { MessageSquare, Image, GalleryHorizontal, LogOut, HelpCircle, LogIn, Shirt, Code, Wand2, PencilRuler, Pencil, Trash2, Settings, FolderPlus, LayoutGrid, Cog, Brush, Users, MessageSquareQuote, ChevronRight, FlaskConical, Shapes, BoxSelect } from "lucide-react";
 import { useSession } from "./Auth/SessionContextProvider";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -192,10 +192,6 @@ export const Sidebar = () => {
               <NavLink id="model-packs-nav-link" to="/model-packs" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
                 <Users size={20} />
                 {t('modelPacks')}
-              </NavLink>
-              <NavLink id="experimental-nav-link" to="/experimental" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-                <FlaskConical size={20} />
-                {t('experimentalTools')}
               </NavLink>
               <NavLink id="developer-nav-link" to="/developer" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
                 <Code size={20} />
