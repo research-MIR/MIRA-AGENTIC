@@ -74,23 +74,29 @@ serve(async (req) => {
     const vtoPackJobId = batchJob.id;
     console.log(`[VTO-Packs-Orchestrator] Main batch job ${vtoPackJobId} created.`);
 
-    const jobPromises = pairs.map(async (pair: any) => {
+    const jobPromises = pairs.map(async (pair: any, index: number) => {
+      const pairLogPrefix = `[VTO-Packs-Orchestrator][Pair ${index + 1}/${pairs.length}]`;
       try {
+        console.log(`${pairLogPrefix} Processing pair. Person: ${pair.person_url}, Garment: ${pair.garment_url}`);
         if (engine === 'google') {
+          console.log(`${pairLogPrefix} Using Google VTO engine. Downloading assets...`);
           const [person_image_base64, garment_image_base64] = await Promise.all([
             downloadImageAsBase64(supabase, pair.person_url),
             downloadImageAsBase64(supabase, pair.garment_url)
           ]);
+          console.log(`${pairLogPrefix} Assets downloaded. Invoking Google VTO tool...`);
 
           const { data: vtoResult, error: vtoError } = await supabase.functions.invoke('MIRA-AGENT-tool-virtual-try-on', {
             body: { person_image_base64, garment_image_base64 }
           });
           if (vtoError) throw vtoError;
+          console.log(`${pairLogPrefix} Google VTO tool successful. Uploading result...`);
 
           const imageBuffer = decodeBase64(vtoResult.base64Image);
           const filePath = `${user_id}/vto-packs/${Date.now()}_google_vto.png`;
           await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(filePath, imageBuffer, { contentType: vtoResult.mimeType, upsert: true });
           const { data: { publicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
+          console.log(`${pairLogPrefix} Result uploaded. Logging completed job record.`);
 
           await supabase.from('mira-agent-bitstudio-jobs').insert({
             user_id,
@@ -102,8 +108,10 @@ serve(async (req) => {
             final_image_url: publicUrl,
             metadata: { engine: 'google' }
           });
+          console.log(`${pairLogPrefix} Google VTO job logged successfully.`);
 
         } else { // Default to bitstudio
+          console.log(`${pairLogPrefix} Using BitStudio engine. Invoking proxy...`);
           const { error } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
               body: { 
                   person_image_url: pair.person_url, 
@@ -115,13 +123,17 @@ serve(async (req) => {
               }
           });
           if (error) throw error;
+          console.log(`${pairLogPrefix} BitStudio proxy invoked successfully.`);
         }
       } catch (err) {
-        console.error(`[VTO-Packs-Orchestrator] Failed to queue job for person ${pair.person_url}:`, err);
+        console.error(`${pairLogPrefix} Failed to queue job for person ${pair.person_url}:`, err);
       }
     });
 
-    Promise.allSettled(jobPromises);
+    // We don't await this so the function can return immediately
+    Promise.allSettled(jobPromises).then(() => {
+        console.log(`[VTO-Packs-Orchestrator] All ${pairs.length} job dispatches have been processed.`);
+    });
 
     return new Response(JSON.stringify({ success: true, message: `${pairs.length} jobs have been queued for processing.` }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
