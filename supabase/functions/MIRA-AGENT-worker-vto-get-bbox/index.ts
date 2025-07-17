@@ -89,7 +89,6 @@ serve(async (req) => {
     if (!dimensions || !dimensions.width || !dimensions.height) {
         throw new Error("Could not determine image dimensions.");
     }
-    const { width: originalWidth, height: originalHeight } = dimensions;
 
     const imageBase64 = encodeBase64(imageBuffer);
 
@@ -107,12 +106,9 @@ serve(async (req) => {
         config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
     });
 
-    console.log("Raw response from Gemini:", result.text);
-
     let detectedBoxes = JSON.parse(result.text);
 
-    if (detectedBoxes && !Array.isArray(detectedBoxes)) {
-        console.log("Model returned a single object, wrapping it in an array.");
+    if (detectedBoxes && !Array.isArray(detectedBoxes) && detectedBoxes.box_2d) {
         detectedBoxes = [detectedBoxes]; 
     }
 
@@ -120,14 +116,12 @@ serve(async (req) => {
         throw new Error("AI did not detect any bounding boxes.");
     }
 
-    // Check for the alternative format {x, y, width, height} and convert it
     if (detectedBoxes[0].x !== undefined && detectedBoxes[0].y !== undefined) {
-        console.log("Detected alternative {x, y, w, h} format. Converting to box_2d.");
         const box = detectedBoxes[0];
-        const y_min_norm = (box.y / originalHeight) * 1000;
-        const x_min_norm = (box.x / originalWidth) * 1000;
-        const y_max_norm = ((box.y + box.height) / originalHeight) * 1000;
-        const x_max_norm = ((box.x + box.width) / originalWidth) * 1000;
+        const y_min_norm = (box.y / dimensions.height) * 1000;
+        const x_min_norm = (box.x / dimensions.width) * 1000;
+        const y_max_norm = ((box.y + box.height) / dimensions.height) * 1000;
+        const x_max_norm = ((box.x + box.width) / dimensions.width) * 1000;
         detectedBoxes[0].box_2d = [y_min_norm, x_min_norm, y_max_norm, x_max_norm];
     }
 
@@ -141,47 +135,9 @@ serve(async (req) => {
         return (currentArea > prevArea) ? current : prev;
     });
 
-    const normalizedBox = largestBox.box_2d;
-
-    const [y_min, x_min, y_max, x_max] = normalizedBox;
-    
-    const abs_width = ((x_max - x_min) / 1000) * originalWidth;
-    const abs_height = ((y_max - y_min) / 1000) * originalHeight;
-
-    const basePaddingPercentage = 0.15;
-    const longerDim = Math.max(abs_width, abs_height);
-    const basePaddingPixels = longerDim * basePaddingPercentage;
-
-    let padding_x: number;
-    let padding_y: number;
-
-    if (abs_width < abs_height) {
-        padding_x = basePaddingPixels * 2;
-        padding_y = basePaddingPixels;
-    } else {
-        padding_y = basePaddingPixels * 2;
-        padding_x = basePaddingPixels;
-    }
-
-    const abs_x = (x_min / 1000) * originalWidth;
-    const abs_y = (y_min / 1000) * originalHeight;
-
-    const dilated_x = Math.max(0, abs_x - padding_x / 2);
-    const dilated_y = Math.max(0, abs_y - padding_y / 2);
-    const dilated_width = Math.min(originalWidth - dilated_x, abs_width + padding_x);
-    const dilated_height = Math.min(originalHeight - dilated_y, abs_height + padding_y);
-
-    const absolute_bounding_box = {
-        x: Math.round(dilated_x),
-        y: Math.round(dilated_y),
-        width: Math.round(dilated_width),
-        height: Math.round(dilated_height),
-    };
-
     return new Response(JSON.stringify({
-        normalized_bounding_box: normalizedBox,
-        absolute_bounding_box: absolute_bounding_box,
-        original_dimensions: { width: originalWidth, height: originalHeight }
+        normalized_bounding_box: largestBox.box_2d,
+        original_dimensions: dimensions
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,

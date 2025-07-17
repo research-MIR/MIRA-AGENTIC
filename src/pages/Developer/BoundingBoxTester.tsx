@@ -72,7 +72,7 @@ const BoundingBoxTester = () => {
       dismissToast(toastId);
       showLoading("Image uploaded. Detecting bounding box...");
 
-      const { data, error: functionError } = await supabase.functions.invoke('MIRA-AGENT-worker-vto-get-bbox', {
+      const { data, error: functionError } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-bbox', {
         body: { image_url: publicUrl }
       });
 
