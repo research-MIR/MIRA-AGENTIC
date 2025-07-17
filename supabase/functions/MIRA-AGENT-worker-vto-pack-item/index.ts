@@ -7,6 +7,7 @@ import imageSize from "https://esm.sh/image-size";
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const TEMP_UPLOAD_BUCKET = 'mira-agent-user-uploads';
+const GENERATED_IMAGES_BUCKET = 'mira-generations';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -85,7 +86,7 @@ serve(async (req) => {
         await handleGenerateStep(supabase, job, 30, 'generate_step_3', logPrefix);
         break;
       case 'generate_step_3':
-        await handleGenerateStep(supabase, job, 70, 'quality_check', logPrefix);
+        await handleGenerateStep(supabase, job, 55, 'quality_check', logPrefix);
         break;
       case 'quality_check':
         await handleQualityCheck(supabase, job, logPrefix);
@@ -145,16 +146,20 @@ async function handleStart(supabase: SupabaseClient, job: any, logPrefix: string
 async function handleGenerateStep(supabase: SupabaseClient, job: any, sampleStep: number, nextStep: string, logPrefix: string) {
   console.log(`${logPrefix} Generating variation with ${sampleStep} steps.`);
   
-  console.log(`${logPrefix} Downloading public garment URL to create a temporary signed URL...`);
-  const garmentBlob = await downloadFromSupabase(supabase, job.source_garment_image_url);
-  const garmentBuffer = new Uint8Array(await garmentBlob.arrayBuffer());
-  const tempGarmentSignedUrl = await uploadBuffer(garmentBuffer, supabase, job.user_id, 'temp_garment.png');
-  console.log(`${logPrefix} Temporary signed URL for garment created.`);
+  const [personBlob, garmentBlob] = await Promise.all([
+    downloadFromSupabase(supabase, job.metadata.cropped_person_url),
+    downloadFromSupabase(supabase, job.source_garment_image_url)
+  ]);
+
+  const [personBase64, garmentBase64] = await Promise.all([
+    blobToBase64(personBlob),
+    blobToBase64(garmentBlob)
+  ]);
 
   const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-virtual-try-on', {
     body: {
-      person_image_url: job.metadata.cropped_person_url,
-      garment_image_url: tempGarmentSignedUrl,
+      person_image_base64: personBase64,
+      garment_image_base64: garmentBase64,
       sample_count: 1,
       sample_step: sampleStep
     }
