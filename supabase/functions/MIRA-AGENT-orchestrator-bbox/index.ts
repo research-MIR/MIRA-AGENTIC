@@ -38,22 +38,38 @@ serve(async (req) => {
 
     console.log(`Received ${successfulResults.length} successful bounding box results.`);
 
-    // Calculate the average of all returned boxes for a more stable result
-    const numResults = successfulResults.length;
-    const sumBox = successfulResults.reduce((acc, result) => {
-        const box = result.normalized_bounding_box;
-        acc.y_min += box[0];
-        acc.x_min += box[1];
-        acc.y_max += box[2];
-        acc.x_max += box[3];
-        return acc;
-    }, { y_min: 0, x_min: 0, y_max: 0, x_max: 0 });
+    // Function to calculate average after removing outliers using IQR method
+    const getRobustAverage = (values: number[]): number => {
+        if (values.length === 0) return 0;
+        if (values.length <= 2) return values.reduce((a, b) => a + b, 0) / values.length;
+
+        const sorted = [...values].sort((a, b) => a - b);
+        const q1 = sorted[Math.floor(sorted.length / 4)];
+        const q3 = sorted[Math.floor((sorted.length * 3) / 4)];
+        const iqr = q3 - q1;
+        
+        const lowerBound = q1 - 1.5 * iqr;
+        const upperBound = q3 + 1.5 * iqr;
+
+        const filteredValues = sorted.filter(v => v >= lowerBound && v <= upperBound);
+        
+        if (filteredValues.length === 0) {
+            return sorted.reduce((a, b) => a + b, 0) / sorted.length;
+        }
+
+        return filteredValues.reduce((a, b) => a + b, 0) / filteredValues.length;
+    };
+
+    const yMins = successfulResults.map(r => r.normalized_bounding_box[0]);
+    const xMins = successfulResults.map(r => r.normalized_bounding_box[1]);
+    const yMaxs = successfulResults.map(r => r.normalized_bounding_box[2]);
+    const xMaxs = successfulResults.map(r => r.normalized_bounding_box[3]);
 
     const averageBox = {
-        y_min: sumBox.y_min / numResults,
-        x_min: sumBox.x_min / numResults,
-        y_max: sumBox.y_max / numResults,
-        x_max: sumBox.x_max / numResults,
+        y_min: getRobustAverage(yMins),
+        x_min: getRobustAverage(xMins),
+        y_max: getRobustAverage(yMaxs),
+        x_max: getRobustAverage(xMaxs),
     };
 
     const { width: originalWidth, height: originalHeight } = successfulResults[0].original_dimensions;
