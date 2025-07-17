@@ -62,13 +62,27 @@ serve(async (req) => {
         body: { image_url: job.source_person_image_url }
     });
     if (bboxError) throw bboxError;
-    const bbox = bboxData.absolute_bounding_box;
-    console.log(`${logPrefix} Bounding box received:`, bbox);
+    
+    const personBox = bboxData.person;
+    if (!personBox || personBox.length !== 4) {
+        throw new Error("Orchestrator did not return a valid bounding box array.");
+    }
+    console.log(`${logPrefix} Bounding box received:`, personBox);
 
     // Step 2: Crop Image
     console.log(`${logPrefix} Step 2: Cropping person image.`);
     const personBlob = await downloadFromSupabase(supabase, job.source_person_image_url);
     const personImage = await ISImage.decode(await personBlob.arrayBuffer());
+    const { width: originalWidth, height: originalHeight } = personImage;
+
+    // Convert normalized coordinates to absolute pixel values
+    const abs_x = Math.floor((personBox[1] / 1000) * originalWidth);
+    const abs_y = Math.floor((personBox[0] / 1000) * originalHeight);
+    const abs_width = Math.ceil(((personBox[3] - personBox[1]) / 1000) * originalWidth);
+    const abs_height = Math.ceil(((personBox[2] - personBox[0]) / 1000) * originalHeight);
+
+    const bbox = { x: abs_x, y: abs_y, width: abs_width, height: abs_height };
+    
     const croppedPersonImage = personImage.clone().crop(bbox.x, bbox.y, bbox.width, bbox.height);
     const croppedPersonBuffer = await croppedPersonImage.encode(0); // PNG
     const croppedPersonUrl = await uploadBufferToTemp(supabase, croppedPersonBuffer, job.user_id, 'cropped_person.png');
