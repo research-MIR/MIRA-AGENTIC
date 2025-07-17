@@ -139,7 +139,7 @@ async function handleStart(supabase: SupabaseClient, job: any, logPrefix: string
     metadata: { ...job.metadata, bbox, cropped_person_url: croppedPersonUrl, google_vto_step: 'generate_step_1' }
   }).eq('id', job.id);
 
-  supabase.functions.invoke('MIRA-AGENT-worker-vto-pack-item', { body: { pair_job_id: job.id } }).catch(console.error);
+  await supabase.functions.invoke('MIRA-AGENT-worker-vto-pack-item', { body: { pair_job_id: job.id } });
 }
 
 async function handleGenerateStep(supabase: SupabaseClient, job: any, sampleStep: number, nextStep: string, logPrefix: string) {
@@ -164,7 +164,7 @@ async function handleGenerateStep(supabase: SupabaseClient, job: any, sampleStep
   }).eq('id', job.id);
 
   console.log(`${logPrefix} Step ${sampleStep} complete. Advancing to ${nextStep}.`);
-  supabase.functions.invoke('MIRA-AGENT-worker-vto-pack-item', { body: { pair_job_id: job.id } }).catch(console.error);
+  await supabase.functions.invoke('MIRA-AGENT-worker-vto-pack-item', { body: { pair_job_id: job.id } });
 }
 
 async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix: string) {
@@ -192,7 +192,7 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
     metadata: { ...job.metadata, qa_best_index: qaData.best_image_index, qa_reasoning: qaData.reasoning, google_vto_step: 'compositing' }
   }).eq('id', job.id);
 
-  supabase.functions.invoke('MIRA-AGENT-worker-vto-pack-item', { body: { pair_job_id: job.id } }).catch(console.error);
+  await supabase.functions.invoke('MIRA-AGENT-worker-vto-pack-item', { body: { pair_job_id: job.id } });
 }
 
 async function handleCompositing(supabase: SupabaseClient, job: any, logPrefix: string) {
