@@ -140,11 +140,14 @@ export const RecentVtoPacks = ({ engine }: RecentVtoPacksProps) => {
               {isLoadingChildren ? <Loader2 className="h-6 w-6 animate-spin" /> : (
                 <div className="flex flex-wrap gap-2">
                   {jobsInPack.map(job => (
-                    <div key={job.id} className="w-32 h-32 relative group">
+                    <div 
+                      key={job.id} 
+                      className="w-32 h-32 relative group cursor-pointer"
+                      onClick={() => job.final_image_url && showImage({ images: [{ url: job.final_image_url }], currentIndex: 0 })}
+                    >
                       <SecureImageDisplay 
                         imageUrl={job.final_image_url || job.source_person_image_url || null} 
                         alt="Job result" 
-                        onClick={() => job.final_image_url && showImage({ images: [{ url: job.final_image_url }], currentIndex: 0 })}
                         className="w-full h-full object-cover rounded-md"
                       />
                       {job.status === 'complete' && <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity" />}
