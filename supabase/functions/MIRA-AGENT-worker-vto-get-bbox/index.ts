@@ -7,14 +7,14 @@ import { loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-const MODEL_NAME = "gemini-1.5-flash-latest";
+const MODEL_NAME = "gemini-2.5-flash"; // Using the exact model name as requested
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const systemPrompt = `You are a high-precision, automated image analysis tool. Your function is to detect the bounding box of the single, most prominent human subject in a given image.`;
+const systemPrompt = `You are a high-precision, automated image analysis tool. Your ONLY function is to detect the bounding box of the single, most prominent human subject in a given image. Your entire response MUST be a single, valid JSON object and NOTHING ELSE. Do not include any text, explanations, or markdown formatting like \`\`\`json.`;
 
 const boundingBoxSchema = {
   type: "array",
@@ -103,7 +103,6 @@ serve(async (req) => {
         throw new Error("AI did not detect any bounding boxes.");
     }
 
-    // Find the largest bounding box by area, as it's likely the main subject
     const largestBox = detectedBoxes.reduce((prev, current) => {
         const prevArea = (prev.box_2d[2] - prev.box_2d[0]) * (prev.box_2d[3] - prev.box_2d[1]);
         const currentArea = (current.box_2d[2] - current.box_2d[0]) * (current.box_2d[3] - current.box_2d[1]);
