@@ -93,21 +93,19 @@ serve(async (req) => {
           const filePath = `${user_id}/vto-packs/${Date.now()}_google_vto.png`;
           await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(filePath, imageBuffer, { contentType: vtoResult.mimeType, upsert: true });
           const { data: { publicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
-          console.log(`${pairLogPrefix} Result uploaded. Logging completed job record to 'mira-agent-jobs'.`);
+          console.log(`${pairLogPrefix} Result uploaded. Logging completed job record to 'mira-agent-bitstudio-jobs'.`);
 
-          await supabase.from('mira-agent-jobs').insert({
+          await supabase.from('mira-agent-bitstudio-jobs').insert({
             user_id,
+            vto_pack_job_id: vtoPackJobId,
+            mode: 'base',
             status: 'complete',
-            original_prompt: `VTO Pack: ${pair.person_url.split('/').pop()} + ${pair.garment_url.split('/').pop()}`,
-            final_result: {
-                isImageGeneration: true,
-                images: [{ publicUrl: publicUrl, storagePath: filePath }]
-            },
-            context: { 
-                source: 'vto_pack_google',
-                vto_pack_job_id: vtoPackJobId,
-                source_person_image_url: pair.person_url,
-                source_garment_image_url: pair.garment_url,
+            source_person_image_url: pair.person_url,
+            source_garment_image_url: pair.garment_url,
+            final_image_url: publicUrl,
+            metadata: { 
+                engine: 'google',
+                storage_path: filePath
             }
           });
           console.log(`${pairLogPrefix} Google VTO job logged successfully.`);

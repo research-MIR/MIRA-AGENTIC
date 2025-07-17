@@ -15,7 +15,7 @@ export const useVTOJobs = () => {
 
       const bitstudioPromise = supabase
         .from('mira-agent-bitstudio-jobs')
-        .select('*, batch_pair_job_id')
+        .select('*')
         .eq('user_id', session.user.id)
         .order('created_at', { ascending: false })
         .limit(50);
@@ -66,8 +66,8 @@ export const useVTOJobs = () => {
   useEffect(() => {
     if (!session?.user?.id) return;
 
-    const handleUpdate = () => {
-      console.log('[useVTOJobs] Realtime event received, invalidating queries.');
+    const handleUpdate = (payload: any) => {
+      console.log(`[useVTOJobs] Realtime event received from table: ${payload.table}. Invalidating queries.`);
       queryClient.invalidateQueries({ queryKey: ['bitstudioJobs', session.user.id] });
     };
 
