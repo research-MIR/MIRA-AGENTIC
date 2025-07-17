@@ -6,6 +6,7 @@ import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS"
 };
 
 const GOOGLE_VERTEX_AI_SA_KEY_JSON = Deno.env.get('GOOGLE_VERTEX_AI_SA_KEY_JSON');
@@ -14,6 +15,17 @@ const REGION = 'us-central1';
 const MODEL_ID = 'virtual-try-on-exp-05-31';
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1500;
+
+// --- DIAGNOSTIC: Global Error Handlers ---
+// These will catch errors that might otherwise crash the event loop.
+addEventListener('unhandledrejection', (event) => {
+  console.error(`[GLOBAL UNHANDLED REJECTION] Reason:`, event.reason);
+});
+
+addEventListener('error', (event) => {
+  console.error(`[GLOBAL ERROR] Message: ${event.message}, Filename: ${event.filename}, Lineno: ${event.lineno}, Error:`, event.error);
+});
+// --- END DIAGNOSTIC ---
 
 const fetchWithRetry = async (url: string, options: RequestInit, maxRetries = MAX_RETRIES, delay = RETRY_DELAY_MS, requestId: string) => {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -39,29 +51,53 @@ const fetchWithRetry = async (url: string, options: RequestInit, maxRetries = MA
 
 const blobToBase64 = async (blob: Blob): Promise<string> => {
     const buffer = await blob.arrayBuffer();
-    return encodeBase64(buffer);
+    return encodeBase64(new Uint8Array(buffer)); // Use Uint8Array for safety
 };
 
 async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string, requestId: string): Promise<Blob> {
     if (publicUrl.includes('/sign/')) {
+        console.log(`[Downloader][${requestId}] Downloading from signed URL.`);
         const response = await fetchWithRetry(publicUrl, {}, MAX_RETRIES, RETRY_DELAY_MS, requestId);
-        return await response.blob();
+        const blob = await response.blob();
+        console.log(`[Downloader][${requestId}] Signed URL download successful. Blob size: ${blob.size}`);
+        return blob;
     }
+
+    console.log(`[Downloader][${requestId}] Downloading from public URL.`);
     const url = new URL(publicUrl);
     const pathSegments = url.pathname.split('/');
+    
     const objectSegmentIndex = pathSegments.indexOf('object');
-    if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) throw new Error(`Could not parse bucket name from Supabase URL: ${publicUrl}`);
+    if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) {
+        throw new Error(`Could not parse bucket name from Supabase URL: ${publicUrl}`);
+    }
+    
     const bucketName = pathSegments[objectSegmentIndex + 2];
     const filePath = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
-    if (!bucketName || !filePath) throw new Error(`Could not parse bucket or path from Supabase URL: ${publicUrl}`);
-    
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-        const { data, error } = await supabase.storage.from(bucketName).download(filePath);
-        if (!error) return data;
-        console.warn(`[FetchRetry][${requestId}] Supabase download failed attempt ${attempt}/${MAX_RETRIES}: ${error.message}`);
-        if (attempt === MAX_RETRIES) throw new Error(`Failed to download from Supabase storage (${filePath}): ${error.message}`);
-        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS * attempt));
+
+    if (!bucketName || !filePath) {
+        throw new Error(`Could not parse bucket or path from Supabase URL: ${publicUrl}`);
     }
+
+    // --- DIAGNOSTIC: Detailed logging and isolated try/catch ---
+    console.log(`[Downloader][${requestId}] Attempting Supabase download. Bucket: [${bucketName}], Path: [${filePath}]`);
+    try {
+        for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+            const { data, error } = await supabase.storage.from(bucketName).download(filePath);
+            if (!error) {
+                console.log(`[Downloader][${requestId}] Public URL download successful. Blob size: ${data.size}`);
+                return data;
+            }
+            console.warn(`[Downloader][${requestId}] Supabase download failed attempt ${attempt}/${MAX_RETRIES}: ${error.message}`);
+            if (attempt === MAX_RETRIES) throw new Error(`Failed to download from Supabase storage (${filePath}): ${error.message}`);
+            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS * attempt));
+        }
+    } catch (e) {
+        console.error(`[Downloader][${requestId}] CRITICAL FAILURE in Supabase download call. Caught value:`, e);
+        console.error(`[Downloader][${requestId}] Type of caught value: ${typeof e}`);
+        throw new Error(`A low-level error occurred during file download: ${e?.message || e}`);
+    }
+    // --- END DIAGNOSTIC ---
     throw new Error("Supabase download failed unexpectedly."); // Should not be reached
 }
 
@@ -87,6 +123,7 @@ serve(async (req) => {
         sample_step,
         sample_count = 1
     } = await req.json();
+    console.log(`[VirtualTryOnTool][${requestId}] Received request body with keys: ${Object.keys(req.json()).join(', ')}`);
 
     let person_image_base64: string;
     let garment_image_base64: string;
@@ -97,6 +134,7 @@ serve(async (req) => {
         console.log(`[VirtualTryOnTool][${requestId}] Downloading person image from URL: ${person_image_url}`);
         const personBlob = await downloadFromSupabase(supabase, person_image_url, requestId);
         person_image_base64 = await blobToBase64(personBlob);
+        console.log(`[VirtualTryOnTool][${requestId}] Person image processed. Base64 length: ${person_image_base64.length}`);
     } else {
         throw new Error("Either person_image_url or person_image_base64 is required.");
     }
@@ -107,6 +145,7 @@ serve(async (req) => {
         console.log(`[VirtualTryOnTool][${requestId}] Downloading garment image from URL: ${garment_image_url}`);
         const garmentBlob = await downloadFromSupabase(supabase, garment_image_url, requestId);
         garment_image_base64 = await blobToBase64(garmentBlob);
+        console.log(`[VirtualTryOnTool][${requestId}] Garment image processed. Base64 length: ${garment_image_base64.length}`);
     } else {
         throw new Error("Either garment_image_url or garment_image_base64 is required.");
     }
@@ -175,7 +214,7 @@ serve(async (req) => {
     console.error(`[VirtualTryOnTool][${requestId}] Error:`, error);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 500
+      status: 500,
     });
   }
 });
