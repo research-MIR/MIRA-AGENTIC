@@ -151,25 +151,32 @@ serve(async (req) => {
     finalImage.composite(vtoPatchImage, pasteX, pasteY);
     console.log(`${logPrefix} Composition complete.`);
 
-    // Step 6: Finalize
-    console.log(`${logPrefix} Step 6: Uploading final image and updating job.`);
+    // Step 6: Finalize with granular logging
+    console.log(`${logPrefix} Step 6.1: Encoding final image...`);
     const finalImageBuffer = await finalImage.encode(0);
     if (!finalImageBuffer || finalImageBuffer.length === 0) {
-        throw new Error("Failed to encode the final composite image.");
+        throw new Error("Failed to encode the final composite image. The buffer was empty.");
     }
+    console.log(`${logPrefix} Step 6.2: Final image encoded successfully. Buffer length: ${finalImageBuffer.length}.`);
+
     const finalFilePath = `${job.user_id}/vto-packs/${Date.now()}_final_composite.png`;
+    console.log(`${logPrefix} Step 6.3: Uploading to Supabase Storage at path: ${finalFilePath}`);
     await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(finalFilePath, finalImageBuffer, { contentType: 'image/png', upsert: true });
+    console.log(`${logPrefix} Step 6.4: Upload complete. Retrieving public URL...`);
     
     const { data: urlData, error: urlError } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(finalFilePath);
+    console.log(`${logPrefix} Step 6.5: getPublicUrl returned. Error: ${urlError}, Data: ${JSON.stringify(urlData)}`);
     if (urlError) throw new Error(`Failed to get public URL after upload: ${urlError.message}`);
     if (!urlData || !urlData.publicUrl) throw new Error("Upload succeeded but did not return a public URL.");
     const publicUrl = urlData.publicUrl;
+    console.log(`${logPrefix} Step 6.6: Public URL retrieved: ${publicUrl}. Updating job record...`);
 
     await supabase.from('mira-agent-bitstudio-jobs').update({
         status: 'complete',
         final_image_url: publicUrl,
         metadata: { ...job.metadata, bbox, cropped_person_url: croppedPersonUrl, qa_best_index: bestImageIndex, qa_reasoning: qaData.reasoning }
     }).eq('id', pair_job_id);
+    console.log(`${logPrefix} Step 6.7: Job record updated successfully.`);
 
     console.log(`${logPrefix} Job finished successfully. Final URL: ${publicUrl}`);
     return new Response(JSON.stringify({ success: true, finalImageUrl: publicUrl }), { headers: corsHeaders });
