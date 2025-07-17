@@ -55,7 +55,8 @@ serve(async (req) => {
         person_image_url, garment_image_url, 
         person_image_base64: person_b64_input, 
         garment_image_base64: garment_b64_input,
-        sample_step 
+        sample_step,
+        sample_count = 1 // New parameter with default
     } = await req.json();
 
     let person_image_base64: string;
@@ -109,13 +110,13 @@ serve(async (req) => {
         }]
       }],
       parameters: {
-        sampleCount: 1,
+        sampleCount: sample_count, // Use the new parameter
         addWatermark: false,
         ...(sample_step && { sampleStep: sample_step })
       }
     };
 
-    console.log(`[VirtualTryOnTool][${requestId}] Calling Google Vertex AI at ${apiUrl}...`);
+    console.log(`[VirtualTryOnTool][${requestId}] Calling Google Vertex AI at ${apiUrl} to generate ${sample_count} images...`);
     const response = await fetch(apiUrl, {
       method: 'POST',
       headers: {
@@ -132,18 +133,20 @@ serve(async (req) => {
     }
 
     const responseData = await response.json();
-    const prediction = responseData.predictions?.[0];
-    console.log(`[VirtualTryOnTool][${requestId}] Received successful response from Google.`);
+    const predictions = responseData.predictions;
+    console.log(`[VirtualTryOnTool][${requestId}] Received successful response from Google with ${predictions?.length || 0} predictions.`);
 
-    if (!prediction || !prediction.bytesBase64Encoded) {
-      throw new Error("API response did not contain a valid image prediction.");
+    if (!predictions || !Array.isArray(predictions) || predictions.length === 0) {
+      throw new Error("API response did not contain valid image predictions.");
     }
 
-    console.log(`[VirtualTryOnTool][${requestId}] Job complete. Returning result.`);
-    return new Response(JSON.stringify({
-      base64Image: prediction.bytesBase64Encoded,
-      mimeType: prediction.mimeType || 'image/png'
-    }), {
+    const generatedImages = predictions.map(p => ({
+        base64Image: p.bytesBase64Encoded,
+        mimeType: p.mimeType || 'image/png'
+    }));
+
+    console.log(`[VirtualTryOnTool][${requestId}] Job complete. Returning ${generatedImages.length} results.`);
+    return new Response(JSON.stringify({ generatedImages }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200
     });

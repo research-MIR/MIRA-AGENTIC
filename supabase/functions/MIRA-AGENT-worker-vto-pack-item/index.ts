@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { Image as ISImage } from "https://deno.land/x/imagescript@1.2.15/mod.ts";
-import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
+import { decodeBase64, encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
@@ -14,17 +14,18 @@ const corsHeaders = {
 };
 
 async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
+    if (publicUrl.includes('/sign/')) {
+        const response = await fetch(publicUrl);
+        if (!response.ok) throw new Error(`Failed to download from signed URL: ${response.statusText}`);
+        return await response.blob();
+    }
     const url = new URL(publicUrl);
     const pathSegments = url.pathname.split('/');
     const objectSegmentIndex = pathSegments.indexOf('object');
-    if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) {
-        throw new Error(`Could not parse bucket name from Supabase URL: ${publicUrl}`);
-    }
+    if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) throw new Error(`Could not parse bucket name from Supabase URL: ${publicUrl}`);
     const bucketName = pathSegments[objectSegmentIndex + 2];
     const filePath = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
-    if (!bucketName || !filePath) {
-        throw new Error(`Could not parse bucket or path from Supabase URL: ${publicUrl}`);
-    }
+    if (!bucketName || !filePath) throw new Error(`Could not parse bucket or path from Supabase URL: ${publicUrl}`);
     const { data, error } = await supabase.storage.from(bucketName).download(filePath);
     if (error) throw new Error(`Failed to download from Supabase storage (${filePath}): ${error.message}`);
     return data;
@@ -37,6 +38,11 @@ async function uploadBufferToTemp(supabase: SupabaseClient, buffer: Uint8Array, 
     const { data: { publicUrl } } = supabase.storage.from(TEMP_UPLOAD_BUCKET).getPublicUrl(filePath);
     return publicUrl;
 }
+
+const blobToBase64 = async (blob: Blob): Promise<string> => {
+    const buffer = await blob.arrayBuffer();
+    return encodeBase64(buffer);
+};
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
@@ -71,11 +77,13 @@ serve(async (req) => {
 
     // Step 2: Crop Image
     console.log(`${logPrefix} Step 2: Cropping person image.`);
-    const personBlob = await downloadFromSupabase(supabase, job.source_person_image_url);
+    const [personBlob, garmentBlob] = await Promise.all([
+        downloadFromSupabase(supabase, job.source_person_image_url),
+        downloadFromSupabase(supabase, job.source_garment_image_url)
+    ]);
     const personImage = await ISImage.decode(await personBlob.arrayBuffer());
     const { width: originalWidth, height: originalHeight } = personImage;
 
-    // Convert normalized coordinates to absolute pixel values
     const abs_x = Math.floor((personBox[1] / 1000) * originalWidth);
     const abs_y = Math.floor((personBox[0] / 1000) * originalHeight);
     const abs_width = Math.ceil(((personBox[3] - personBox[1]) / 1000) * originalWidth);
@@ -88,37 +96,45 @@ serve(async (req) => {
     const croppedPersonUrl = await uploadBufferToTemp(supabase, croppedPersonBuffer, job.user_id, 'cropped_person.png');
     console.log(`${logPrefix} Cropped person image uploaded to temp storage: ${croppedPersonUrl}`);
 
-    // Step 3: Run VTO on the cropped image
-    console.log(`${logPrefix} Step 3: Running VTO on cropped image.`);
+    // Step 3: Run VTO on the cropped image to get 3 samples
+    console.log(`${logPrefix} Step 3: Running VTO on cropped image to get 3 samples.`);
     const { data: vtoResult, error: vtoError } = await supabase.functions.invoke('MIRA-AGENT-tool-virtual-try-on', {
         body: {
             person_image_url: croppedPersonUrl,
-            garment_image_url: job.source_garment_image_url
+            garment_image_url: job.source_garment_image_url,
+            sample_count: 3
         }
     });
     if (vtoError) throw vtoError;
-    console.log(`${logPrefix} VTO successful.`);
+    const generatedImages = vtoResult.generatedImages;
+    if (!generatedImages || generatedImages.length === 0) throw new Error("VTO tool did not return any images.");
+    console.log(`${logPrefix} VTO successful, received ${generatedImages.length} samples.`);
 
-    // Step 4: Composite the result
-    console.log(`${logPrefix} Step 4: Compositing result.`);
-    const vtoPatchBuffer = decodeBase64(vtoResult.base64Image);
-    let vtoPatchImage = await ISImage.decode(vtoPatchBuffer);
+    // Step 4: Quality Check
+    console.log(`${logPrefix} Step 4: Invoking Quality Checker.`);
+    const { data: qaData, error: qaError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-quality-checker', {
+        body: {
+            original_person_image_base64: await blobToBase64(personBlob),
+            reference_garment_image_base64: await blobToBase64(garmentBlob),
+            generated_images_base64: generatedImages.map((img: any) => img.base64Image)
+        }
+    });
+    if (qaError) throw qaError;
+    const bestImageIndex = qaData.best_image_index;
+    console.log(`${logPrefix} Quality Checker selected best image at index: ${bestImageIndex}`);
 
-    const cropAmount = 2; // Crop 2 pixels from each side to remove artifacts
+    // Step 5: Composite the best result
+    console.log(`${logPrefix} Step 5: Compositing best result.`);
+    const bestVtoPatchBuffer = decodeBase64(generatedImages[bestImageIndex].base64Image);
+    let vtoPatchImage = await ISImage.decode(bestVtoPatchBuffer);
 
-    vtoPatchImage.crop(
-        cropAmount,
-        cropAmount,
-        vtoPatchImage.width - (cropAmount * 2),
-        vtoPatchImage.height - (cropAmount * 2)
-    );
-    console.log(`${logPrefix} Cropped VTO patch by ${cropAmount}px on each side.`);
-
+    const cropAmount = 2;
+    vtoPatchImage.crop(cropAmount, cropAmount, vtoPatchImage.width - (cropAmount * 2), vtoPatchImage.height - (cropAmount * 2));
+    
     const targetWidth = bbox.width - (cropAmount * 2);
     const targetHeight = bbox.height - (cropAmount * 2);
 
     if (vtoPatchImage.width !== targetWidth || vtoPatchImage.height !== targetHeight) {
-        console.log(`${logPrefix} Resizing cropped patch to ${targetWidth}x${targetHeight}.`);
         vtoPatchImage.resize(targetWidth, targetHeight);
     }
 
@@ -129,8 +145,8 @@ serve(async (req) => {
     finalImage.composite(vtoPatchImage, pasteX, pasteY);
     console.log(`${logPrefix} Composition complete.`);
 
-    // Step 5: Finalize
-    console.log(`${logPrefix} Step 5: Uploading final image and updating job.`);
+    // Step 6: Finalize
+    console.log(`${logPrefix} Step 6: Uploading final image and updating job.`);
     const finalImageBuffer = await finalImage.encode(0);
     const finalFilePath = `${job.user_id}/vto-packs/${Date.now()}_final_composite.png`;
     await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(finalFilePath, finalImageBuffer, { contentType: 'image/png', upsert: true });
@@ -139,7 +155,7 @@ serve(async (req) => {
     await supabase.from('mira-agent-bitstudio-jobs').update({
         status: 'complete',
         final_image_url: publicUrl,
-        metadata: { ...job.metadata, bbox, cropped_person_url: croppedPersonUrl }
+        metadata: { ...job.metadata, bbox, cropped_person_url: croppedPersonUrl, qa_best_index: bestImageIndex }
     }).eq('id', pair_job_id);
 
     console.log(`${logPrefix} Job finished successfully. Final URL: ${publicUrl}`);
@@ -148,6 +164,9 @@ serve(async (req) => {
   } catch (error) {
     console.error(`${logPrefix} Error:`, error);
     await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'failed', error_message: error.message }).eq('id', pair_job_id);
-    return new Response(JSON.stringify({ error: error.message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
+    return new Response(JSON.stringify({ error: error.message }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      status: 500,
+    });
   }
 });
