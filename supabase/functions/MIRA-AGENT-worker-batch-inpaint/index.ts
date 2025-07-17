@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
-import { imageSize } from "https://deno.land/x/imagesize@v1.1.0/mod.ts";
+import imageSize from "https://esm.sh/image-size";
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
@@ -47,8 +47,9 @@ async function getDimensionsFromSupabase(supabase: SupabaseClient, publicUrl: st
     const { data: fileHead, error } = await supabase.storage.from(UPLOAD_BUCKET).download(filePath, { range: '0-65535' });
     if (error) throw new Error(`Failed to download image header: ${error.message}`);
 
-    const size = imageSize(await fileHead.arrayBuffer());
-    if (!size) throw new Error("Could not determine image dimensions from file header.");
+    const buffer = new Uint8Array(await fileHead.arrayBuffer());
+    const size = imageSize(buffer);
+    if (!size || !size.width || !size.height) throw new Error("Could not determine image dimensions from file header.");
     
     return { width: size.width, height: size.height };
 }
