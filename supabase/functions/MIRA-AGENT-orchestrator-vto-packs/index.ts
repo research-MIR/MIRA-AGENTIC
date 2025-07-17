@@ -5,6 +5,7 @@ import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
+const TEMP_UPLOAD_BUCKET = 'mira-agent-user-uploads';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -12,42 +13,29 @@ const corsHeaders = {
 };
 
 async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
-    // Signed URLs can be fetched directly.
     if (publicUrl.includes('/sign/')) {
         const response = await fetch(publicUrl);
-        if (!response.ok) {
-            throw new Error(`Failed to download from signed URL: ${response.statusText}`);
-        }
+        if (!response.ok) throw new Error(`Failed to download from signed URL: ${response.statusText}`);
         return await response.blob();
     }
-
-    // For public URLs, parse the path and use the storage client.
     const url = new URL(publicUrl);
     const pathSegments = url.pathname.split('/');
-    
     const objectSegmentIndex = pathSegments.indexOf('object');
-    if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) {
-        throw new Error(`Could not parse bucket name from Supabase URL: ${publicUrl}`);
-    }
-    
+    if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) throw new Error(`Could not parse bucket name from Supabase URL: ${publicUrl}`);
     const bucketName = pathSegments[objectSegmentIndex + 2];
     const filePath = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
-
-    if (!bucketName || !filePath) {
-        throw new Error(`Could not parse bucket or path from Supabase URL: ${publicUrl}`);
-    }
-
+    if (!bucketName || !filePath) throw new Error(`Could not parse bucket or path from Supabase URL: ${publicUrl}`);
     const { data, error } = await supabase.storage.from(bucketName).download(filePath);
-    if (error) {
-        throw new Error(`Failed to download from Supabase storage (${filePath}): ${error.message}`);
-    }
+    if (error) throw new Error(`Failed to download from Supabase storage (${filePath}): ${error.message}`);
     return data;
 }
 
-async function downloadImageAsBase64(supabase: SupabaseClient, publicUrl: string): Promise<string> {
-    const fileBlob = await downloadFromSupabase(supabase, publicUrl);
-    const buffer = await fileBlob.arrayBuffer();
-    return encodeBase64(buffer);
+async function uploadBlobToTemp(supabase: SupabaseClient, blob: Blob, userId: string, type: 'person' | 'garment'): Promise<string> {
+    const filePath = `tmp/${userId}/${type}-${Date.now()}.png`;
+    const { error } = await supabase.storage.from(TEMP_UPLOAD_BUCKET).upload(filePath, blob, { contentType: 'image/png', upsert: true });
+    if (error) throw error;
+    const { data: { publicUrl } } = supabase.storage.from(TEMP_UPLOAD_BUCKET).getPublicUrl(filePath);
+    return publicUrl;
 }
 
 serve(async (req) => {
@@ -77,17 +65,25 @@ serve(async (req) => {
     const jobPromises = pairs.map(async (pair: any, index: number) => {
       const pairLogPrefix = `[VTO-Packs-Orchestrator][Pair ${index + 1}/${pairs.length}]`;
       try {
-        console.log(`${pairLogPrefix} Processing pair. Person: ${pair.person_url}, Garment: ${pair.garment_url}`);
         if (engine === 'google') {
           console.log(`${pairLogPrefix} Using Google VTO engine. Downloading assets...`);
-          const [person_image_base64, garment_image_base64] = await Promise.all([
-            downloadImageAsBase64(supabase, pair.person_url),
-            downloadImageAsBase64(supabase, pair.garment_url)
+          const [personBlob, garmentBlob] = await Promise.all([
+            downloadFromSupabase(supabase, pair.person_url),
+            downloadFromSupabase(supabase, pair.garment_url)
           ]);
-          console.log(`${pairLogPrefix} Assets downloaded. Invoking Google VTO tool...`);
+          console.log(`${pairLogPrefix} Assets downloaded. Uploading to temp storage...`);
+
+          const [temp_person_url, temp_garment_url] = await Promise.all([
+              uploadBlobToTemp(supabase, personBlob, user_id, 'person'),
+              uploadBlobToTemp(supabase, garmentBlob, user_id, 'garment')
+          ]);
+          console.log(`${pairLogPrefix} Assets uploaded to temp storage. Invoking Google VTO tool...`);
 
           const { data: vtoResult, error: vtoError } = await supabase.functions.invoke('MIRA-AGENT-tool-virtual-try-on', {
-            body: { person_image_base64, garment_image_base64 }
+            body: { 
+                person_image_url: temp_person_url, 
+                garment_image_url: temp_garment_url 
+            }
           });
           if (vtoError) throw vtoError;
           console.log(`${pairLogPrefix} Google VTO tool successful. Uploading result...`);
@@ -130,10 +126,7 @@ serve(async (req) => {
       }
     });
 
-    // We don't await this so the function can return immediately
-    Promise.allSettled(jobPromises).then(() => {
-        console.log(`[VTO-Packs-Orchestrator] All ${pairs.length} job dispatches have been processed.`);
-    });
+    Promise.allSettled(jobPromises);
 
     return new Response(JSON.stringify({ success: true, message: `${pairs.length} jobs have been queued for processing.` }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

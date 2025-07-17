@@ -1,5 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { GoogleAuth } from "npm:google-auth-library";
+import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -11,20 +13,55 @@ const GOOGLE_PROJECT_ID = Deno.env.get('GOOGLE_PROJECT_ID');
 const REGION = 'us-central1';
 const MODEL_ID = 'virtual-try-on-exp-05-31';
 
+const blobToBase64 = async (blob: Blob): Promise<string> => {
+    const buffer = await blob.arrayBuffer();
+    return encodeBase64(buffer);
+};
+
+async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
+    if (publicUrl.includes('/sign/')) {
+        const response = await fetch(publicUrl);
+        if (!response.ok) throw new Error(`Failed to download from signed URL: ${response.statusText}`);
+        return await response.blob();
+    }
+    const url = new URL(publicUrl);
+    const pathSegments = url.pathname.split('/');
+    const objectSegmentIndex = pathSegments.indexOf('object');
+    if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) throw new Error(`Could not parse bucket name from Supabase URL: ${publicUrl}`);
+    const bucketName = pathSegments[objectSegmentIndex + 2];
+    const filePath = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
+    if (!bucketName || !filePath) throw new Error(`Could not parse bucket or path from Supabase URL: ${publicUrl}`);
+    const { data, error } = await supabase.storage.from(bucketName).download(filePath);
+    if (error) throw new Error(`Failed to download from Supabase storage (${filePath}): ${error.message}`);
+    return data;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
 
+  const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+  const { person_image_url, garment_image_url, sample_step } = await req.json();
+  
   try {
     if (!GOOGLE_VERTEX_AI_SA_KEY_JSON || !GOOGLE_PROJECT_ID) {
       throw new Error("Server configuration error: Missing Google Cloud credentials.");
     }
 
-    const { person_image_base64, garment_image_base64, sample_step } = await req.json();
-    if (!person_image_base64 || !garment_image_base64) {
-      throw new Error("person_image_base64 and garment_image_base64 are required.");
+    if (!person_image_url || !garment_image_url) {
+      throw new Error("person_image_url and garment_image_url are required.");
     }
+
+    const [personBlob, garmentBlob] = await Promise.all([
+        downloadFromSupabase(supabase, person_image_url),
+        downloadFromSupabase(supabase, garment_image_url)
+    ]);
+
+    const [person_image_base64, garment_image_base64] = await Promise.all([
+        blobToBase64(personBlob),
+        blobToBase64(garmentBlob)
+    ]);
 
     const auth = new GoogleAuth({
       credentials: JSON.parse(GOOGLE_VERTEX_AI_SA_KEY_JSON),
@@ -88,7 +125,20 @@ serve(async (req) => {
     console.error("[VirtualTryOnTool] Error:", error);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 500
+      status: 500,
     });
+  } finally {
+      // Clean up temporary files
+      try {
+        const personPath = new URL(person_image_url).pathname.split('/mira-agent-user-uploads/')[1];
+        const garmentPath = new URL(garment_image_url).pathname.split('/mira-agent-user-uploads/')[1];
+        const pathsToRemove = [personPath, garmentPath].filter(Boolean);
+        if (pathsToRemove.length > 0) {
+            await supabase.storage.from('mira-agent-user-uploads').remove(pathsToRemove);
+            console.log(`[VirtualTryOnTool] Cleaned up temporary files:`, pathsToRemove);
+        }
+      } catch (cleanupError) {
+          console.error("[VirtualTryOnTool] Failed to clean up temporary files:", cleanupError.message);
+      }
   }
 });
