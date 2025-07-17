@@ -5,7 +5,6 @@ import imageSize from "https://esm.sh/image-size";
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-const UPLOAD_BUCKET = 'mira-agent-user-uploads';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -19,32 +18,45 @@ const blobToBase64 = async (blob: Blob): Promise<string> => {
 
 async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
     const url = new URL(publicUrl);
-    const pathStartIndex = url.pathname.indexOf(UPLOAD_BUCKET);
-    if (pathStartIndex === -1) {
-        throw new Error(`Could not find bucket name '${UPLOAD_BUCKET}' in URL path: ${publicUrl}`);
+    const pathSegments = url.pathname.split('/');
+    
+    const publicSegmentIndex = pathSegments.indexOf('public');
+    if (publicSegmentIndex === -1 || publicSegmentIndex + 1 >= pathSegments.length) {
+        throw new Error(`Could not parse bucket name from Supabase URL: ${publicUrl}`);
     }
-    const filePath = decodeURIComponent(url.pathname.substring(pathStartIndex + UPLOAD_BUCKET.length + 1));
+    
+    const bucketName = pathSegments[publicSegmentIndex + 1];
+    const filePath = decodeURIComponent(pathSegments.slice(publicSegmentIndex + 2).join('/'));
 
-    if (!filePath) {
-        throw new Error(`Could not parse file path from URL: ${publicUrl}`);
+    if (!bucketName || !filePath) {
+        throw new Error(`Could not parse bucket or path from Supabase URL: ${publicUrl}`);
     }
 
-    const { data, error } = await supabase.storage.from(UPLOAD_BUCKET).download(filePath);
-
+    const { data, error } = await supabase.storage.from(bucketName).download(filePath);
     if (error) {
-        throw new Error(`Failed to download from Supabase storage: ${error.message}`);
+        throw new Error(`Failed to download from Supabase storage (${filePath}): ${error.message}`);
     }
     return data;
 }
 
 async function getDimensionsFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<{width: number, height: number}> {
     const url = new URL(publicUrl);
-    const pathStartIndex = url.pathname.indexOf(UPLOAD_BUCKET);
-    if (pathStartIndex === -1) throw new Error(`Could not find bucket name '${UPLOAD_BUCKET}' in URL path.`);
-    const filePath = decodeURIComponent(url.pathname.substring(pathStartIndex + UPLOAD_BUCKET.length + 1));
+    const pathSegments = url.pathname.split('/');
+    
+    const publicSegmentIndex = pathSegments.indexOf('public');
+    if (publicSegmentIndex === -1 || publicSegmentIndex + 1 >= pathSegments.length) {
+        throw new Error(`Could not parse bucket name from Supabase URL: ${publicUrl}`);
+    }
+    
+    const bucketName = pathSegments[publicSegmentIndex + 1];
+    const filePath = decodeURIComponent(pathSegments.slice(publicSegmentIndex + 2).join('/'));
+
+    if (!bucketName || !filePath) {
+        throw new Error(`Could not parse bucket or path from Supabase URL: ${publicUrl}`);
+    }
 
     // Download only the first 64KB, which is more than enough for image headers.
-    const { data: fileHead, error } = await supabase.storage.from(UPLOAD_BUCKET).download(filePath, { range: '0-65535' });
+    const { data: fileHead, error } = await supabase.storage.from(bucketName).download(filePath, { range: '0-65535' });
     if (error) throw new Error(`Failed to download image header: ${error.message}`);
 
     const buffer = new Uint8Array(await fileHead.arrayBuffer());

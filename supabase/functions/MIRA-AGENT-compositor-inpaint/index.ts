@@ -15,14 +15,13 @@ async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string)
     const url = new URL(publicUrl);
     const pathSegments = url.pathname.split('/');
     
-    // Find the bucket name. It's usually after '/object/public/' or '/object/v1/'.
-    const objectSegmentIndex = pathSegments.indexOf('object');
-    if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) {
-        throw new Error(`Invalid Supabase storage URL format: ${publicUrl}`);
+    const publicSegmentIndex = pathSegments.indexOf('public');
+    if (publicSegmentIndex === -1 || publicSegmentIndex + 1 >= pathSegments.length) {
+        throw new Error(`Could not parse bucket name from Supabase URL: ${publicUrl}`);
     }
     
-    const bucketName = pathSegments[objectSegmentIndex + 2];
-    const filePath = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
+    const bucketName = pathSegments[publicSegmentIndex + 1];
+    const filePath = decodeURIComponent(pathSegments.slice(publicSegmentIndex + 2).join('/'));
 
     if (!bucketName || !filePath) {
         throw new Error(`Could not parse bucket or path from Supabase URL: ${publicUrl}`);

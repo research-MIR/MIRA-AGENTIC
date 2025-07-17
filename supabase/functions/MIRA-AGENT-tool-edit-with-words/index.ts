@@ -1,4 +1,4 @@
-import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { GoogleGenAI, Content, Part } from 'https://esm.sh/@google/genai@0.15.0';
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
@@ -8,7 +8,6 @@ const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const FAL_KEY = Deno.env.get('FAL_KEY');
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-const UPLOAD_BUCKET = 'mira-agent-user-uploads';
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
 const GEMINI_MODEL_NAME = "gemini-1.5-flash-latest";
 const FAL_MODEL_NAME = "fal-ai/flux-pro/kontext/max/multi";
@@ -76,14 +75,28 @@ Your Optimized Prompt: "For the man on the left, who has a short fade haircut, l
 Summary of Your Task:
 Your output is NOT a conversation; it is ONLY the final, optimized prompt. Analyze the request and the provided images. Apply all relevant principles, especially the Hyper-Detailed Identity Lockdown and the Golden Rule of Reference Handling, to construct a single, precise, and explicit instruction. Describe what to change, but describe what to keep in even greater detail.`;
 
-async function downloadImageAsPart(publicUrl: string, label: string): Promise<Part[]> {
-    const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-    const url = new URL(publicUrl);
-    const filePath = url.pathname.split(`/${UPLOAD_BUCKET}/`)[1];
-    if (!filePath) throw new Error(`Could not parse file path from URL: ${publicUrl}`);
+async function downloadImageAsPart(imageUrl: string, label: string): Promise<Part[]> {
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+        throw new Error("Supabase URL or Service Role Key are not set in environment variables.");
+    }
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    const url = new URL(imageUrl);
+    const pathSegments = url.pathname.split('/');
+    
+    const publicSegmentIndex = pathSegments.indexOf('public');
+    if (publicSegmentIndex === -1 || publicSegmentIndex + 1 >= pathSegments.length) {
+        throw new Error(`Could not parse bucket name from Supabase URL: ${imageUrl}`);
+    }
+    
+    const bucketName = pathSegments[publicSegmentIndex + 1];
+    const filePath = decodeURIComponent(pathSegments.slice(publicSegmentIndex + 2).join('/'));
 
-    const { data: fileBlob, error: downloadError } = await supabase.storage.from(UPLOAD_BUCKET).download(filePath);
-    if (downloadError) throw new Error(`Supabase download failed for ${label}: ${downloadError.message}`);
+    if (!bucketName || !filePath) {
+        throw new Error(`Could not parse bucket or path from Supabase URL: ${imageUrl}`);
+    }
+
+    const { data: fileBlob, error: downloadError } = await supabase.storage.from(bucketName).download(filePath);
+    if (downloadError) throw new Error(`Supabase download failed: ${downloadError.message}`);
 
     const mimeType = fileBlob.type;
     const buffer = await fileBlob.arrayBuffer();
@@ -93,14 +106,6 @@ async function downloadImageAsPart(publicUrl: string, label: string): Promise<Pa
         { text: `--- ${label} ---` },
         { inlineData: { mimeType, data: base64 } }
     ];
-}
-
-function extractJson(text: string): any {
-    const match = text.match(/```json\s*([\s\S]*?)\s*```/);
-    if (match && match[1]) return JSON.parse(match[1]);
-    try { return JSON.parse(text); } catch (e) {
-        throw new Error("The model returned a response that could not be parsed as JSON.");
-    }
 }
 
 serve(async (req) => {

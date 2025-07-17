@@ -7,7 +7,6 @@ const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const MODEL_NAME = "gemini-2.5-flash-lite-preview-06-17";
-const UPLOAD_BUCKET = 'mira-agent-user-uploads';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -94,17 +93,28 @@ Your entire response MUST be a single, valid JSON object with ONE key, "final_pr
 \`\`\`
 `;
 
-async function downloadImageAsPart(publicUrl: string, label: string): Promise<Part[]> {
+async function downloadImageAsPart(imageUrl: string, label: string): Promise<Part[]> {
     if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
         throw new Error("Supabase URL or Service Role Key are not set in environment variables.");
     }
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-    const url = new URL(publicUrl);
-    const filePath = url.pathname.split(`/${UPLOAD_BUCKET}/`)[1];
-    if (!filePath) throw new Error(`Could not parse file path from URL: ${publicUrl}`);
+    const url = new URL(imageUrl);
+    const pathSegments = url.pathname.split('/');
+    
+    const publicSegmentIndex = pathSegments.indexOf('public');
+    if (publicSegmentIndex === -1 || publicSegmentIndex + 1 >= pathSegments.length) {
+        throw new Error(`Could not parse bucket name from Supabase URL: ${imageUrl}`);
+    }
+    
+    const bucketName = pathSegments[publicSegmentIndex + 1];
+    const filePath = decodeURIComponent(pathSegments.slice(publicSegmentIndex + 2).join('/'));
 
-    const { data: fileBlob, error: downloadError } = await supabase.storage.from(UPLOAD_BUCKET).download(filePath);
-    if (downloadError) throw new Error(`Supabase download failed for ${label}: ${downloadError.message}`);
+    if (!bucketName || !filePath) {
+        throw new Error(`Could not parse bucket or path from Supabase URL: ${imageUrl}`);
+    }
+
+    const { data: fileBlob, error: downloadError } = await supabase.storage.from(bucketName).download(filePath);
+    if (downloadError) throw new Error(`Supabase download failed: ${downloadError.message}`);
 
     const mimeType = fileBlob.type;
     const buffer = await fileBlob.arrayBuffer();
