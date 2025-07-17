@@ -14,7 +14,14 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const systemPrompt = `You are a high-precision, automated image analysis tool. Your ONLY function is to detect the bounding box of the single, most prominent human subject in the image. The bounding box MUST enclose the ENTIRE person, including all parts of their body (head, hair, arms, feet) without any cropping. If any part of the person (like feet or head) is cut off by the image frame, the bounding box must extend to that edge of the frame. Your entire response MUST be a single, valid JSON object and NOTHING ELSE. Do not include any text, explanations, or markdown formatting like \`\`\`json.
+const systemPrompt = `You are a high-precision, automated image analysis tool. Your ONLY function is to detect the bounding box of the single, most prominent human subject in the image.
+
+### CRITICAL RULES:
+1.  **COMPLETE INCLUSION:** The bounding box MUST enclose the ENTIRE person. This includes every part of their body: head, all of their hair, arms, hands, legs, and feet.
+2.  **EDGE-TO-EDGE MANDATE:** If any part of the person is cut off by the image frame (e.g., their feet are not visible at the bottom), the bounding box MUST extend all the way to that edge of the frame. Do not stop short.
+3.  **NO CROPPING:** You must not crop any part of the person.
+
+Your entire response MUST be a single, valid JSON object and NOTHING ELSE. Do not include any text, explanations, or markdown formatting like \`\`\`json.
 
 ### Example Output Format:
 \`\`\`json
