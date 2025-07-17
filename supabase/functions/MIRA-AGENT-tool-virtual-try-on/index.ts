@@ -56,15 +56,13 @@ serve(async (req) => {
         person_image_base64: person_b64_input, 
         garment_image_base64: garment_b64_input,
         sample_step,
-        sample_count = 1 // New parameter with default
+        sample_count = 1
     } = await req.json();
 
     let person_image_base64: string;
     let garment_image_base64: string;
 
-    // Determine person image data
     if (person_b64_input) {
-        console.log(`[VirtualTryOnTool][${requestId}] Using provided person_image_base64.`);
         person_image_base64 = person_b64_input;
     } else if (person_image_url) {
         console.log(`[VirtualTryOnTool][${requestId}] Downloading person image from URL: ${person_image_url}`);
@@ -74,9 +72,7 @@ serve(async (req) => {
         throw new Error("Either person_image_url or person_image_base64 is required.");
     }
 
-    // Determine garment image data
     if (garment_b64_input) {
-        console.log(`[VirtualTryOnTool][${requestId}] Using provided garment_image_base64.`);
         garment_image_base64 = garment_b64_input;
     } else if (garment_image_url) {
         console.log(`[VirtualTryOnTool][${requestId}] Downloading garment image from URL: ${garment_image_url}`);
@@ -98,25 +94,17 @@ serve(async (req) => {
 
     const requestBody = {
       instances: [{
-        personImage: {
-          image: {
-            bytesBase64Encoded: person_image_base64
-          }
-        },
-        productImages: [{
-          image: {
-            bytesBase64Encoded: garment_image_base64
-          }
-        }]
+        personImage: { image: { bytesBase64Encoded: person_image_base64 } },
+        productImages: [{ image: { bytesBase64Encoded: garment_image_base64 } }]
       }],
       parameters: {
-        sampleCount: sample_count, // Use the new parameter
+        sampleCount: sample_count,
         addWatermark: false,
         ...(sample_step && { sampleStep: sample_step })
       }
     };
 
-    console.log(`[VirtualTryOnTool][${requestId}] Calling Google Vertex AI at ${apiUrl} to generate ${sample_count} images...`);
+    console.log(`[VirtualTryOnTool][${requestId}] Calling Google Vertex AI. Payload details: Person Base64 length: ${person_image_base64.length}, Garment Base64 length: ${garment_image_base64.length}, Sample Count: ${sample_count}`);
     const response = await fetch(apiUrl, {
       method: 'POST',
       headers: {
@@ -126,24 +114,32 @@ serve(async (req) => {
       body: JSON.stringify(requestBody)
     });
 
+    const responseText = await response.text();
+    console.log(`[VirtualTryOnTool][${requestId}] Received raw response from Google. Status: ${response.status}. Body length: ${responseText.length}.`);
+    
     if (!response.ok) {
-      const errorBody = await response.text();
-      console.error(`[VirtualTryOnTool][${requestId}] Google API Error:`, errorBody);
-      throw new Error(`API call failed with status ${response.status}: ${errorBody}`);
+      console.error(`[VirtualTryOnTool][${requestId}] Google API Error Body:`, responseText);
+      throw new Error(`API call failed with status ${response.status}: ${responseText}`);
     }
 
-    const responseData = await response.json();
+    const responseData = JSON.parse(responseText);
     const predictions = responseData.predictions;
-    console.log(`[VirtualTryOnTool][${requestId}] Received successful response from Google with ${predictions?.length || 0} predictions.`);
 
     if (!predictions || !Array.isArray(predictions) || predictions.length === 0) {
+      console.error(`[VirtualTryOnTool][${requestId}] Parsed response did not contain a valid 'predictions' array. Full response:`, JSON.stringify(responseData, null, 2));
       throw new Error("API response did not contain valid image predictions.");
     }
 
-    const generatedImages = predictions.map(p => ({
-        base64Image: p.bytesBase64Encoded,
-        mimeType: p.mimeType || 'image/png'
-    }));
+    const generatedImages = predictions.map(p => {
+        if (!p.bytesBase64Encoded) {
+            console.error(`[VirtualTryOnTool][${requestId}] A prediction object was missing the 'bytesBase64Encoded' field.`);
+            throw new Error("An image prediction was returned in an invalid format.");
+        }
+        return {
+            base64Image: p.bytesBase64Encoded,
+            mimeType: p.mimeType || 'image/png'
+        };
+    });
 
     console.log(`[VirtualTryOnTool][${requestId}] Job complete. Returning ${generatedImages.length} results.`);
     return new Response(JSON.stringify({ generatedImages }), {
