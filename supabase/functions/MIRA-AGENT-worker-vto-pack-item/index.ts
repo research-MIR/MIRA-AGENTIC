@@ -1,64 +1,34 @@
-import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { GoogleAuth } from "npm:google-auth-library";
-import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
+import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { Image as ISImage } from "https://deno.land/x/imagescript@1.2.15/mod.ts";
 import { decodeBase64, encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
-import { delay } from "https://deno.land/std@0.224.0/async/delay.ts";
 
-// --- Environment Variable Validation ---
-const requiredEnv = <const>[
-  "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY",
-  "GOOGLE_VERTEX_AI_SA_KEY_JSON", "GOOGLE_PROJECT_ID"
-];
-for (const key of requiredEnv) {
-  if (!Deno.env.get(key)) throw new Error(`FATAL: Missing required env var ${key}`);
-}
-const {
-  SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
-  GOOGLE_VERTEX_AI_SA_KEY_JSON, GOOGLE_PROJECT_ID,
-} = Object.fromEntries(requiredEnv.map((k) => [k, Deno.env.get(k)!]));
-
-const REGION = "us-central1";
-const MODEL_ID = "virtual-try-on-exp-05-31";
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
 const TEMP_UPLOAD_BUCKET = 'mira-agent-user-uploads';
 
-// --- Utility Functions ---
-const corsHeaders = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type" };
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
 
-async function retry<T>(fn: () => Promise<T>, attempts = 3, baseDelay = 500, label = "operation"): Promise<T> {
-  let lastErr: unknown;
-  for (let i = 0; i < attempts; i++) {
-    try { return await fn(); }
-    catch (err) {
-      lastErr = err;
-      if (i < attempts - 1) {
-        const wait = baseDelay * 2 ** i + Math.random() * baseDelay;
-        console.warn(`[retry] ${label} attempt ${i + 1}/${attempts} failed. Retrying in ${wait.toFixed(0)}ms...`, err);
-        await delay(wait);
-      }
+async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
+    if (publicUrl.includes('/sign/')) {
+        const response = await fetch(publicUrl);
+        if (!response.ok) throw new Error(`Failed to download from signed URL: ${response.statusText}`);
+        return await response.blob();
     }
-  }
-  throw lastErr;
-}
-
-async function downloadFromSupabase(sb: SupabaseClient, publicUrl: string): Promise<Blob> {
-  if (publicUrl.includes('/sign/')) {
-    const response = await fetch(publicUrl);
-    if (!response.ok) throw new Error(`Failed to download from signed URL: ${response.statusText}`);
-    return await response.blob();
-  }
-  const url = new URL(publicUrl);
-  const pathSegments = url.pathname.split('/');
-  const objectSegmentIndex = pathSegments.indexOf('object');
-  if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) throw new Error(`Could not parse bucket name from URL: ${publicUrl}`);
-  const bucketName = pathSegments[objectSegmentIndex + 2];
-  const filePath = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
-  if (!bucketName || !filePath) throw new Error(`Could not parse bucket or path from URL: ${publicUrl}`);
-  const { data, error } = await sb.storage.from(bucketName).download(filePath);
-  if (error) throw new Error(`Supabase download error (${filePath}): ${error.message}`);
-  if (!data) throw new Error(`Supabase storage returned no data for file: ${filePath}`);
-  return data;
+    const url = new URL(publicUrl);
+    const pathSegments = url.pathname.split('/');
+    const objectSegmentIndex = pathSegments.indexOf('object');
+    if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) throw new Error(`Could not parse bucket name from Supabase URL: ${publicUrl}`);
+    const bucketName = pathSegments[objectSegmentIndex + 2];
+    const filePath = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
+    if (!bucketName || !filePath) throw new Error(`Could not parse bucket or path from Supabase URL: ${publicUrl}`);
+    const { data, error } = await supabase.storage.from(bucketName).download(filePath);
+    if (error) throw new Error(`Failed to download from Supabase storage (${filePath}): ${error.message}`);
+    return data;
 }
 
 async function uploadBufferToTemp(supabase: SupabaseClient, buffer: Uint8Array, userId: string, filename: string): Promise<string> {
@@ -79,35 +49,6 @@ const blobToBase64 = async (blob: Blob): Promise<string> => {
     const buffer = await blob.arrayBuffer();
     return encodeBase64(buffer);
 };
-
-function calculateChannelStats(image: ISImage): { means: number[], stds: number[] } {
-    const means = [0, 0, 0];
-    const n = image.width * image.height;
-    if (n === 0) return { means: [0,0,0], stds: [0,0,0] };
-
-    for (const color of image.pixels()) {
-        const [r, g, b] = ISImage.colorToRGBA(color);
-        means[0] += r;
-        means[1] += g;
-        means[2] += b;
-    }
-    means[0] /= n;
-    means[1] /= n;
-    means[2] /= n;
-
-    const stds = [0, 0, 0];
-    for (const color of image.pixels()) {
-        const [r, g, b] = ISImage.colorToRGBA(color);
-        stds[0] += (r - means[0]) ** 2;
-        stds[1] += (g - means[1]) ** 2;
-        stds[2] += (b - means[2]) ** 2;
-    }
-    stds[0] = Math.sqrt(stds[0] / n);
-    stds[1] = Math.sqrt(stds[1] / n);
-    stds[2] = Math.sqrt(stds[2] / n);
-
-    return { means, stds };
-}
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
@@ -163,43 +104,16 @@ serve(async (req) => {
 
     // Step 3: Run VTO on the cropped image to get 3 samples
     console.log(`${logPrefix} Step 3: Running VTO on cropped image to get 3 samples.`);
-    const [person_image_base64, garment_image_base64] = await Promise.all([
-        blobToBase64(await downloadFromSupabase(supabase, croppedPersonUrl)),
-        blobToBase64(garmentBlob)
-    ]);
-
-    const auth = new GoogleAuth({ credentials: JSON.parse(GOOGLE_VERTEX_AI_SA_KEY_JSON), scopes: "https://www.googleapis.com/auth/cloud-platform" });
-    const accessToken = await retry(() => auth.getAccessToken(), 3, 500, 'get-google-token');
-    if (!accessToken) throw new Error("Failed to get Google Auth token after retries.");
-
-    const apiUrl = `https://${REGION}-aiplatform.googleapis.com/v1/projects/${GOOGLE_PROJECT_ID}/locations/${REGION}/publishers/google/models/${MODEL_ID}:predict`;
-    const requestBody = {
-      instances: [{
-        personImage: { image: { bytesBase64Encoded: person_image_base64 } },
-        productImages: [{ image: { bytesBase64Encoded: garment_image_base64 } }]
-      }],
-      parameters: {
-        sampleCount: 3,
-        addWatermark: false,
-      }
-    };
-
-    const responseText = await retry(async () => {
-        const ctrl = new AbortController();
-        const timeout = setTimeout(() => ctrl.abort(), 60_000);
-        const r = await fetch(apiUrl, {
-          method: "POST", signal: ctrl.signal,
-          headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json; charset=utf-8" },
-          body: JSON.stringify(requestBody),
-        }).finally(() => clearTimeout(timeout));
-        const txt = await r.text();
-        if (!r.ok) throw new Error(`Vertex ${r.status}: ${txt.slice(0, 200)}`);
-        return txt;
-    }, 3, 1000, 'vertex-predict');
-
-    const { predictions } = JSON.parse(responseText);
-    if (!Array.isArray(predictions) || predictions.length === 0) throw new Error("Vertex response missing valid predictions.");
-    const generatedImages = predictions.map(p => ({ base64Image: p.bytesBase64Encoded, mimeType: p.mimeType || 'image/png' }));
+    const { data: vtoResult, error: vtoError } = await supabase.functions.invoke('MIRA-AGENT-tool-virtual-try-on', {
+        body: {
+            person_image_url: croppedPersonUrl,
+            garment_image_url: job.source_garment_image_url,
+            sample_count: 3
+        }
+    });
+    if (vtoError) throw vtoError;
+    const generatedImages = vtoResult.generatedImages;
+    if (!generatedImages || generatedImages.length === 0) throw new Error("VTO tool did not return any images.");
     console.log(`${logPrefix} VTO successful, received ${generatedImages.length} samples.`);
 
     // Step 4: Quality Check
@@ -220,26 +134,7 @@ serve(async (req) => {
     const bestVtoPatchBuffer = decodeBase64(generatedImages[bestImageIndex].base64Image);
     let vtoPatchImage = await ISImage.decode(bestVtoPatchBuffer);
 
-    console.log(`${logPrefix} Step 5.1: Performing color matching...`);
-    const sourceStats = calculateChannelStats(croppedPersonImage);
-    const patchStats = calculateChannelStats(vtoPatchImage);
-    const colorCorrectedPatch = new ISImage(vtoPatchImage.width, vtoPatchImage.height);
-
-    for (const [x, y, color] of vtoPatchImage.iterateWithColors()) {
-        const [r, g, b, a] = ISImage.colorToRGBA(color);
-        let newR = r, newG = g, newB = b;
-        if (patchStats.stds[0] > 0) newR = (r - patchStats.means[0]) * (sourceStats.stds[0] / patchStats.stds[0]) + sourceStats.means[0];
-        if (patchStats.stds[1] > 0) newG = (g - patchStats.means[1]) * (sourceStats.stds[1] / patchStats.stds[1]) + sourceStats.means[1];
-        if (patchStats.stds[2] > 0) newB = (b - patchStats.means[2]) * (sourceStats.stds[2] / patchStats.stds[2]) + sourceStats.means[2];
-        newR = Math.max(0, Math.min(255, newR));
-        newG = Math.max(0, Math.min(255, newG));
-        newB = Math.max(0, Math.min(255, newB));
-        colorCorrectedPatch.setPixelAt(x, y, ISImage.rgbaToColor(newR, newG, newB, a));
-    }
-    vtoPatchImage = colorCorrectedPatch;
-    console.log(`${logPrefix} Color matching complete.`);
-
-    const cropAmount = 4;
+    const cropAmount = 2;
     vtoPatchImage.crop(cropAmount, cropAmount, vtoPatchImage.width - (cropAmount * 2), vtoPatchImage.height - (cropAmount * 2));
     
     const targetWidth = bbox.width - (cropAmount * 2);
@@ -256,18 +151,32 @@ serve(async (req) => {
     finalImage.composite(vtoPatchImage, pasteX, pasteY);
     console.log(`${logPrefix} Composition complete.`);
 
-    // Step 6: Finalize
-    console.log(`${logPrefix} Step 6: Finalizing job.`);
+    // Step 6: Finalize with granular logging
+    console.log(`${logPrefix} Step 6.1: Encoding final image...`);
     const finalImageBuffer = await finalImage.encode(0);
+    if (!finalImageBuffer || finalImageBuffer.length === 0) {
+        throw new Error("Failed to encode the final composite image. The buffer was empty.");
+    }
+    console.log(`${logPrefix} Step 6.2: Final image encoded successfully. Buffer length: ${finalImageBuffer.length}.`);
+
     const finalFilePath = `${job.user_id}/vto-packs/${Date.now()}_final_composite.png`;
+    console.log(`${logPrefix} Step 6.3: Uploading to Supabase Storage at path: ${finalFilePath}`);
     await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(finalFilePath, finalImageBuffer, { contentType: 'image/png', upsert: true });
-    const { data: { publicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(finalFilePath);
+    console.log(`${logPrefix} Step 6.4: Upload complete. Retrieving public URL...`);
+    
+    const { data: urlData, error: urlError } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(finalFilePath);
+    console.log(`${logPrefix} Step 6.5: getPublicUrl returned. Error: ${urlError}, Data: ${JSON.stringify(urlData)}`);
+    if (urlError) throw new Error(`Failed to get public URL after upload: ${urlError.message}`);
+    if (!urlData || !urlData.publicUrl) throw new Error("Upload succeeded but did not return a public URL.");
+    const publicUrl = urlData.publicUrl;
+    console.log(`${logPrefix} Step 6.6: Public URL retrieved: ${publicUrl}. Updating job record...`);
 
     await supabase.from('mira-agent-bitstudio-jobs').update({
         status: 'complete',
         final_image_url: publicUrl,
         metadata: { ...job.metadata, bbox, cropped_person_url: croppedPersonUrl, qa_best_index: bestImageIndex, qa_reasoning: qaData.reasoning }
     }).eq('id', pair_job_id);
+    console.log(`${logPrefix} Step 6.7: Job record updated successfully.`);
 
     console.log(`${logPrefix} Job finished successfully. Final URL: ${publicUrl}`);
     return new Response(JSON.stringify({ success: true, finalImageUrl: publicUrl }), { headers: corsHeaders });

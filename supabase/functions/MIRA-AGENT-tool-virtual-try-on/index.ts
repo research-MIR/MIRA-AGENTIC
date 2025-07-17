@@ -1,69 +1,202 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { GoogleAuth } from "npm:google-auth-library";
+import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+const GOOGLE_VERTEX_AI_SA_KEY_JSON = Deno.env.get('GOOGLE_VERTEX_AI_SA_KEY_JSON');
+const GOOGLE_PROJECT_ID = Deno.env.get('GOOGLE_PROJECT_ID');
+const REGION = 'us-central1';
+const MODEL_ID = 'virtual-try-on-exp-05-31';
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 1500;
+
+const fetchWithRetry = async (url: string, options: RequestInit, maxRetries = MAX_RETRIES, delay = RETRY_DELAY_MS, requestId: string) => {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await fetch(url, options);
+      if (response.ok) {
+        return response;
+      }
+      console.warn(`[FetchRetry][${requestId}] Attempt ${attempt}/${maxRetries} failed for ${url}. Status: ${response.status}.`);
+      if (attempt === maxRetries) {
+        throw new Error(`API call failed with status ${response.status} after ${maxRetries} attempts: ${await response.text()}`);
+      }
+    } catch (error) {
+      console.warn(`[FetchRetry][${requestId}] Attempt ${attempt}/${maxRetries} failed for ${url} with network error: ${error.message}`);
+      if (attempt === maxRetries) {
+        throw new Error(`Network request failed after ${maxRetries} attempts: ${error.message}`);
+      }
+    }
+    await new Promise(resolve => setTimeout(resolve, delay * attempt)); // Exponential backoff
+  }
+  throw new Error("Fetch with retry failed unexpectedly."); // Should not be reached
+};
+
+const blobToBase64 = async (blob: Blob): Promise<string> => {
+    const buffer = await blob.arrayBuffer();
+    return encodeBase64(buffer);
+};
+
+async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string, requestId: string): Promise<Blob> {
+    const logPrefix = `[Downloader][${requestId}]`;
+    if (publicUrl.includes('/sign/')) {
+        console.log(`${logPrefix} Downloading from signed URL.`);
+        const response = await fetchWithRetry(publicUrl, {}, MAX_RETRIES, RETRY_DELAY_MS, requestId);
+        const blob = await response.blob();
+        console.log(`${logPrefix} Signed URL download successful. Blob size: ${blob.size}`);
+        return blob;
+    }
+    
+    console.log(`${logPrefix} Downloading from public URL.`);
+    const url = new URL(publicUrl);
+    const pathSegments = url.pathname.split('/');
+    const objectSegmentIndex = pathSegments.indexOf('object');
+    if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) throw new Error(`Could not parse bucket name from Supabase URL: ${publicUrl}`);
+    const bucketName = pathSegments[objectSegmentIndex + 2];
+    const filePath = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
+    if (!bucketName || !filePath) throw new Error(`Could not parse bucket or path from Supabase URL: ${publicUrl}`);
+    
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        const { data, error } = await supabase.storage.from(bucketName).download(filePath);
+        if (!error && data instanceof Blob) {
+            console.log(`${logPrefix} Public URL download successful. Blob size: ${data.size}`);
+            return data;
+        }
+        console.warn(`[FetchRetry][${requestId}] Supabase download failed attempt ${attempt}/${MAX_RETRIES}: ${error?.message || 'Returned data was not a Blob'}`);
+        if (attempt === MAX_RETRIES) throw new Error(`Failed to download from Supabase storage (${filePath}): ${error?.message || 'Returned data was not a Blob'}`);
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS * attempt));
+    }
+    throw new Error("Supabase download failed unexpectedly.");
+}
 
 serve(async (req) => {
-  const requestId = `vto-submitter-${Date.now()}`;
-  console.log(`[VTOSubmitter][${requestId}] Function invoked.`);
+  const requestId = `vto-tool-${Date.now()}`;
+  console.log(`[VirtualTryOnTool][${requestId}] Function invoked.`);
 
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
 
+  const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+  
   try {
+    if (!GOOGLE_VERTEX_AI_SA_KEY_JSON || !GOOGLE_PROJECT_ID) {
+      throw new Error("Server configuration error: Missing Google Cloud credentials.");
+    }
+
+    const body = await req.json();
+    console.log(`[VirtualTryOnTool][${requestId}] Received request body with keys: ${Object.keys(body).join(', ')}`);
     const { 
-        person_image_url, 
-        garment_image_url, 
-        user_id,
+        person_image_url, garment_image_url, 
+        person_image_base64: person_b64_input, 
+        garment_image_base64: garment_b64_input,
         sample_step,
         sample_count = 1
-    } = await req.json();
+    } = body;
 
-    if (!person_image_url || !garment_image_url || !user_id) {
-      throw new Error("person_image_url, garment_image_url, and user_id are required.");
+    let person_image_base64: string;
+    let garment_image_base64: string;
+
+    if (person_b64_input) {
+        person_image_base64 = person_b64_input;
+        console.log(`[VirtualTryOnTool][${requestId}] Using provided base64 for person image. Length: ${person_image_base64.length}`);
+    } else if (person_image_url) {
+        console.log(`[VirtualTryOnTool][${requestId}] Downloading person image from URL: ${person_image_url}`);
+        const personBlob = await downloadFromSupabase(supabase, person_image_url, requestId);
+        person_image_base64 = await blobToBase64(personBlob);
+        console.log(`[VirtualTryOnTool][${requestId}] Person image processed. Base64 length: ${person_image_base64.length}`);
+    } else {
+        throw new Error("Either person_image_url or person_image_base64 is required.");
     }
 
-    const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
+    if (garment_b64_input) {
+        garment_image_base64 = garment_b64_input;
+        console.log(`[VirtualTryOnTool][${requestId}] Using provided base64 for garment image. Length: ${garment_image_base64.length}`);
+    } else if (garment_image_url) {
+        console.log(`[VirtualTryOnTool][${requestId}] Downloading garment image from URL: ${garment_image_url}`);
+        const garmentBlob = await downloadFromSupabase(supabase, garment_image_url, requestId);
+        garment_image_base64 = await blobToBase64(garmentBlob);
+        console.log(`[VirtualTryOnTool][${requestId}] Garment image processed. Base64 length: ${garment_image_base64.length}`);
+    } else {
+        throw new Error("Either garment_image_url or garment_image_base64 is required.");
+    }
 
-    const { data: newJob, error: insertError } = await supabase
-      .from('mira-agent-vto-jobs')
-      .insert({
-        user_id: user_id,
-        person_image_url: person_image_url,
-        garment_image_url: garment_image_url,
-        status: 'pending',
-        metadata: {
-            sample_step: sample_step,
-            sample_count: sample_count
+    console.log(`[VirtualTryOnTool][${requestId}] Images processed. Authenticating with Google...`);
+    const auth = new GoogleAuth({
+      credentials: JSON.parse(GOOGLE_VERTEX_AI_SA_KEY_JSON),
+      scopes: 'https://www.googleapis.com/auth/cloud-platform'
+    });
+    const accessToken = await auth.getAccessToken();
+    console.log(`[VirtualTryOnTool][${requestId}] Google authentication successful.`);
+
+    const apiUrl = `https://${REGION}-aiplatform.googleapis.com/v1/projects/${GOOGLE_PROJECT_ID}/locations/${REGION}/publishers/google/models/${MODEL_ID}:predict`;
+
+    const requestBody = {
+      instances: [{
+        personImage: { image: { bytesBase64Encoded: person_image_base64 } },
+        productImages: [{ image: { bytesBase64Encoded: garment_image_base64 } }]
+      }],
+      parameters: {
+        sampleCount: sample_count,
+        addWatermark: false,
+        ...(sample_step && { sampleStep: sample_step })
+      }
+    };
+
+    console.log(`[VirtualTryOnTool][${requestId}] Calling Google Vertex AI. Payload details: Person Base64 length: ${person_image_base64.length}, Garment Base64 length: ${garment_image_base64.length}, Sample Count: ${sample_count}`);
+    const response = await fetchWithRetry(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json; charset=utf-8'
+      },
+      body: JSON.stringify(requestBody)
+    }, MAX_RETRIES, RETRY_DELAY_MS, requestId);
+
+    const responseText = await response.text();
+    console.log(`[VirtualTryOnTool][${requestId}] Received raw response from Google. Status: ${response.status}. Body length: ${responseText.length}.`);
+    
+    if (!response.ok) {
+      console.error(`[VirtualTryOnTool][${requestId}] Google API Error Body:`, responseText);
+      throw new Error(`API call failed with status ${response.status}: ${responseText}`);
+    }
+
+    const responseData = JSON.parse(responseText);
+    console.log(`[VirtualTryOnTool][${requestId}] Successfully parsed JSON response.`);
+    const predictions = responseData.predictions;
+
+    if (!predictions || !Array.isArray(predictions) || predictions.length === 0) {
+      console.error(`[VirtualTryOnTool][${requestId}] Parsed response did not contain a valid 'predictions' array. Full response:`, JSON.stringify(responseData, null, 2));
+      throw new Error("API response did not contain valid image predictions.");
+    }
+
+    const generatedImages = predictions.map(p => {
+        if (!p.bytesBase64Encoded) {
+            console.error(`[VirtualTryOnTool][${requestId}] A prediction object was missing the 'bytesBase64Encoded' field.`);
+            throw new Error("An image prediction was returned in an invalid format.");
         }
-      })
-      .select('id')
-      .single();
+        return {
+            base64Image: p.bytesBase64Encoded,
+            mimeType: p.mimeType || 'image/png'
+        };
+    });
 
-    if (insertError) {
-      console.error(`[VTOSubmitter][${requestId}] Error creating job record:`, insertError);
-      throw insertError;
-    }
-
-    console.log(`[VTOSubmitter][${requestId}] Successfully created job ${newJob.id}. The database trigger will now invoke the worker.`);
-
-    return new Response(JSON.stringify({ success: true, jobId: newJob.id }), {
+    console.log(`[VirtualTryOnTool][${requestId}] Job complete. Returning ${generatedImages.length} results.`);
+    return new Response(JSON.stringify({ generatedImages }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 202, // 202 Accepted: The request has been accepted for processing, but the processing has not been completed.
+      status: 200
     });
 
   } catch (error) {
-    console.error(`[VTOSubmitter][${requestId}] Error:`, error);
+    console.error(`[VirtualTryOnTool][${requestId}] Error:`, error);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 400,
+      status: 500,
     });
   }
 });
