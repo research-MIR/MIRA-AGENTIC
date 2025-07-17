@@ -33,27 +33,6 @@ Your entire response MUST be a single, valid JSON object and NOTHING ELSE. Do no
 ]
 \`\`\``;
 
-const boundingBoxSchema = {
-  type: "array",
-  items: {
-    type: "object",
-    properties: {
-      box_2d: {
-        type: "array",
-        items: { "type": "number" },
-        minItems: 4,
-        maxItems: 4,
-        description: "The 2D coordinates of the bounding box in [y_min, x_min, y_max, x_max] format."
-      },
-      label: { 
-        type: "string",
-        description: "A label for the detected object (e.g., 'person')."
-      }
-    },
-    required: ["box_2d", "label"]
-  }
-};
-
 const safetySettings = [
     { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
     { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
@@ -107,7 +86,6 @@ serve(async (req) => {
         ] }],
         generationConfig: { 
             responseMimeType: "application/json",
-            responseSchema: boundingBoxSchema,
         },
         safetySettings,
         config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
@@ -142,8 +120,19 @@ serve(async (req) => {
         return (currentArea > prevArea) ? current : prev;
     });
 
+    let [y_min, x_min, y_max, x_max] = largestBox.box_2d;
+    const width = x_max - x_min;
+    const height = y_max - y_min;
+
+    // Sanity check: A person's bounding box should be taller than it is wide.
+    // If not, the model likely returned the coordinates in [x_min, y_min, x_max, y_max] format.
+    if (width > height) {
+        console.warn(`[BBox-Worker] Detected wide bounding box (${width}x${height}). Assuming swapped coordinates and correcting.`);
+        [y_min, x_min, y_max, x_max] = [x_min, y_min, x_max, y_max];
+    }
+
     return new Response(JSON.stringify({
-        normalized_bounding_box: largestBox.box_2d,
+        normalized_bounding_box: [y_min, x_min, y_max, x_max],
         original_dimensions: dimensions
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
