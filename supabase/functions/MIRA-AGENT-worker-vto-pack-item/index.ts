@@ -265,44 +265,88 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
 }
 
 async function handleCompositing(supabase: SupabaseClient, job: any, logPrefix: string) {
-    console.log(`${logPrefix} Compositing best result (simplified bulldozer approach).`);
-    const { bbox, generated_variations, qa_best_index } = job.metadata;
+    console.log(`${logPrefix} Compositing best result.`);
+    const {
+        bbox,
+        generated_variations,
+        qa_best_index
+    } = job.metadata;
     if (!bbox || !generated_variations || qa_best_index === undefined) {
-        throw new Error("Missing data for compositing.");
+        throw new Error("Missing data for compositing (bbox, variations, or qa_best_index).");
     }
 
     const bestVtoPatchBase64 = generated_variations[qa_best_index].base64Image;
     const vtoPatchBuffer = decodeBase64(bestVtoPatchBase64);
     let vtoPatchImage = await ISImage.decode(vtoPatchBuffer);
-
+    
     const personBlob = await safeDownload(supabase, job.source_person_image_url);
     const personImage = await ISImage.decode(await personBlob.arrayBuffer());
-
+    
     const finalImage = personImage.clone();
 
-    // --- SIMPLIFIED LOGIC ---
-    // Resize the patch to the exact dimensions of the bounding box
-    vtoPatchImage.resize(bbox.width, bbox.height);
-    console.log(`${logPrefix} [BULLDOZER] Resized patch to bbox dimensions: ${bbox.width}x${bbox.height}`);
+    const cropAmount = 4;
+    
+    vtoPatchImage = vtoPatchImage.crop(cropAmount, cropAmount, vtoPatchImage.width - cropAmount * 2, vtoPatchImage.height - cropAmount * 2);
+    
+    const targetWidth = bbox.width - cropAmount * 2;
+    const targetHeight = bbox.height - cropAmount * 2;
+    
+    if (targetWidth <= 0 || targetHeight <= 0) {
+        throw new Error(`Invalid target dimensions after cropping: ${targetWidth}x${targetHeight}. BBox may be too small.`);
+    }
 
-    // Composite directly at the bbox coordinates
-    finalImage.composite(vtoPatchImage, bbox.x, bbox.y);
-    console.log(`${logPrefix} [BULLDOZER] Composited patch at (${bbox.x}, ${bbox.y})`);
-    // --- END SIMPLIFIED LOGIC ---
+    if (vtoPatchImage.width !== targetWidth || vtoPatchImage.height !== targetHeight) {
+        vtoPatchImage = vtoPatchImage.resize(targetWidth, targetHeight);
+    }
 
-    const finalImageBuffer = await finalImage.encode(0); // Encode as PNG
+    const featherWidth = 20;
+    const mask = new ISImage(vtoPatchImage.width, vtoPatchImage.height);
+    for (let y = 0; y < mask.height; y++) {
+        for (let x = 0; x < mask.width; x++) {
+            const distToEdge = Math.min(x, mask.width - 1 - x, y, mask.height - 1 - y);
+            const alpha = distToEdge < featherWidth ? (distToEdge / featherWidth) * 255 : 255;
+            const color = ISImage.rgbaToColor(alpha, alpha, alpha, 255);
+            mask.setPixelAt(x, y, color);
+        }
+    }
+    
+    // Apply the mask to the patch's alpha channel
+    for (let y = 0; y < vtoPatchImage.height; y++) {
+        for (let x = 0; x < vtoPatchImage.width; x++) {
+            const maskColor = mask.getPixelAt(x, y);
+            const [maskAlpha] = ISImage.colorToRGBA(maskColor);
+            
+            const patchColor = vtoPatchImage.getPixelAt(x, y);
+            const [r, g, b] = ISImage.colorToRGBA(patchColor);
+            
+            vtoPatchImage.setPixelAt(x, y, ISImage.rgbaToColor(r, g, b, maskAlpha));
+        }
+    }
+
+    const pasteX = bbox.x + cropAmount;
+    const pasteY = bbox.y + cropAmount;
+
+    if (pasteX + vtoPatchImage.width > finalImage.width || pasteY + vtoPatchImage.height > finalImage.height) {
+        throw new Error(
+            `Composite boundary error. Aborting. Canvas: ${finalImage.width}x${finalImage.height}, Patch: ${vtoPatchImage.width}x${vtoPatchImage.height}, Paste At: (${pasteX}, ${pasteY}).`
+        );
+    }
+    
+    finalImage.composite(vtoPatchImage, pasteX, pasteY);
+    console.log(`${logPrefix} Composition complete.`);
+
+    const finalImageBuffer = await finalImage.encode(0);
     if (!finalImageBuffer || finalImageBuffer.length === 0) {
         throw new Error("Failed to encode the final composite image.");
     }
 
     const finalFilePath = `${job.user_id}/vto-packs/${Date.now()}_final_composite.png`;
-    await safeUpload(supabase, GENERATED_IMAGES_BUCKET, new Blob([finalImageBuffer], { type: 'image/png' }), {
+    await safeUpload(supabase, GENERATED_IMAGES_BUCKET, finalImageBuffer, {
         contentType: 'image/png',
         upsert: true
     });
 
     const publicUrl = await safeGetPublicUrl(supabase, GENERATED_IMAGES_BUCKET, finalFilePath);
-    
     await supabase.from('mira-agent-bitstudio-jobs').update({
         status: 'complete',
         final_image_url: publicUrl,
@@ -311,6 +355,5 @@ async function handleCompositing(supabase: SupabaseClient, job: any, logPrefix: 
             google_vto_step: 'done'
         }
     }).eq('id', job.id);
-    
     console.log(`${logPrefix} Job finished successfully. Final URL: ${publicUrl}`);
 }
