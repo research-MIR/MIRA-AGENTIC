@@ -22,6 +22,8 @@ export const reframeTranslations = {
     generatedImage: "Immagine Generata",
     compareResults: "Confronta Risultati",
     uploadAnImageToStart: "Carica un'immagine di base e una maschera per iniziare.",
+    invertMask: "Inverti Maschera",
+    invertMaskDescription: "Abilita per usare maschere standard (bianco = genera). Lo strumento la invertirà automaticamente per l'IA."
   },
   en: {
     reframe: "Reframe",
@@ -46,5 +48,7 @@ export const reframeTranslations = {
     generatedImage: "Generated Image",
     compareResults: "Compare Results",
     uploadAnImageToStart: "Upload a base image and a mask to get started.",
+    invertMask: "Invert Mask",
+    invertMaskDescription: "Enable this to use standard masks (white = generate). The tool will automatically invert it for the AI."
   },
 };

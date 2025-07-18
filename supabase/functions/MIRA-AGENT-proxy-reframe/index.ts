@@ -22,7 +22,8 @@ serve(async (req) => {
         prompt, 
         dilation, 
         steps, 
-        count 
+        count,
+        invert_mask
     } = await req.json();
 
     if (!user_id || !base_image_base64 || !mask_image_base64) {
@@ -57,7 +58,8 @@ serve(async (req) => {
           prompt,
           dilation,
           steps,
-          count
+          count,
+          invert_mask
         }
       })
       .select('id')

@@ -3,6 +3,7 @@ import { GoogleAuth } from "npm:google-auth-library";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
+import { createCanvas, loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -15,7 +16,7 @@ const GOOGLE_LOCATION = 'us-central1';
 const MODEL_ID = 'imagen-3.0-capability-001';
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
 
-async function downloadImageAsBase64(supabase: SupabaseClient, publicUrl: string): Promise<string> {
+async function downloadImageAsBlob(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
     const url = new URL(publicUrl);
     const pathSegments = url.pathname.split('/');
     const bucketName = pathSegments[pathSegments.indexOf('public') + 1];
@@ -23,10 +24,17 @@ async function downloadImageAsBase64(supabase: SupabaseClient, publicUrl: string
     
     const { data, error } = await supabase.storage.from(bucketName).download(filePath);
     if (error) throw new Error(`Failed to download image from storage: ${error.message}`);
-    
-    const buffer = await data.arrayBuffer();
-    return encodeBase64(buffer);
+    return data;
 }
+
+const blobToBase64 = (blob: Blob): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(blob);
+    reader.onload = () => resolve((reader.result as string).split(',')[1]);
+    reader.onerror = (error) => reject(error);
+  });
+};
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response('ok', { headers: corsHeaders }); }
@@ -44,15 +52,54 @@ serve(async (req) => {
     const { data: job, error: fetchError } = await supabase.from('mira-agent-jobs').select('context, user_id').eq('id', job_id).single();
     if (fetchError) throw fetchError;
 
-    const { base_image_url, mask_image_url, prompt, dilation, steps, count } = job.context;
+    const { base_image_url, mask_image_url, prompt, dilation, steps, count, invert_mask } = job.context;
     if (!base_image_url || !mask_image_url) throw new Error("Missing image URLs in job context.");
 
     console.log(`${logPrefix} Downloading images...`);
-    const [base_image_b64, mask_image_b64] = await Promise.all([
-        downloadImageAsBase64(supabase, base_image_url),
-        downloadImageAsBase64(supabase, mask_image_url)
+    const [baseImageBlob, maskImageBlob] = await Promise.all([
+        downloadImageAsBlob(supabase, base_image_url),
+        downloadImageAsBlob(supabase, mask_image_url)
     ]);
-    console.log(`${logPrefix} Images downloaded and encoded.`);
+
+    const baseImage = await loadImage(await baseImageBlob.arrayBuffer());
+    const maskImage = await loadImage(await maskImageBlob.arrayBuffer());
+
+    let finalBaseImageB64: string;
+    let finalMaskImageB64: string;
+
+    // Step 1: Handle dimension mismatch by creating a new canvas
+    if (baseImage.width() !== maskImage.width() || baseImage.height() !== maskImage.height()) {
+        console.log(`${logPrefix} Dimension mismatch detected (${baseImage.width()}x${baseImage.height()} vs ${maskImage.width()}x${maskImage.height()}). Creating new canvas.`);
+        const newCanvas = createCanvas(maskImage.width(), maskImage.height());
+        const ctx = newCanvas.getContext('2d');
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, newCanvas.width, newCanvas.height);
+        const x = (newCanvas.width - baseImage.width()) / 2;
+        const y = (newCanvas.height - baseImage.height()) / 2;
+        ctx.drawImage(baseImage, x, y);
+        finalBaseImageB64 = newCanvas.toDataURL('image/png').split(',')[1];
+    } else {
+        finalBaseImageB64 = await blobToBase64(baseImageBlob);
+    }
+
+    // Step 2: Handle mask inversion if requested
+    if (invert_mask) {
+        console.log(`${logPrefix} Inverting mask as requested.`);
+        const maskCanvas = createCanvas(maskImage.width(), maskImage.height());
+        const ctx = maskCanvas.getContext('2d');
+        ctx.drawImage(maskImage, 0, 0);
+        const imageData = ctx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
+        const data = imageData.data;
+        for (let i = 0; i < data.length; i += 4) {
+            data[i] = 255 - data[i];
+            data[i + 1] = 255 - data[i + 1];
+            data[i + 2] = 255 - data[i + 2];
+        }
+        ctx.putImageData(imageData, 0, 0);
+        finalMaskImageB64 = maskCanvas.toDataURL('image/png').split(',')[1];
+    } else {
+        finalMaskImageB64 = await blobToBase64(maskImageBlob);
+    }
 
     const auth = new GoogleAuth({
       credentials: JSON.parse(GOOGLE_VERTEX_AI_SA_KEY_JSON!),
@@ -65,8 +112,8 @@ serve(async (req) => {
       instances: [{
         prompt: prompt || "",
         referenceImages: [
-          { referenceType: "REFERENCE_TYPE_RAW", referenceId: 1, referenceImage: { bytesBase64Encoded: base_image_b64 } },
-          { referenceType: "REFERENCE_TYPE_MASK", referenceId: 2, referenceImage: { bytesBase64Encoded: mask_image_b64 }, maskImageConfig: { maskMode: "MASK_MODE_USER_PROVIDED", dilation: dilation || 0.03 } }
+          { referenceType: "REFERENCE_TYPE_RAW", referenceId: 1, referenceImage: { bytesBase64Encoded: finalBaseImageB64 } },
+          { referenceType: "REFERENCE_TYPE_MASK", referenceId: 2, referenceImage: { bytesBase64Encoded: finalMaskImageB64 }, maskImageConfig: { maskMode: "MASK_MODE_USER_PROVIDED", dilation: dilation || 0.03 } }
         ]
       }],
       parameters: {

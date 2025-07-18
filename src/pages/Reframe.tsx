@@ -19,6 +19,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { SecureImageDisplay } from "@/components/VTO/SecureImageDisplay";
+import { Switch } from "@/components/ui/switch";
 
 interface ReframeJob {
   id: string;
@@ -74,6 +75,7 @@ const Reframe = () => {
   const [dilation, setDilation] = useState(0.03);
   const [steps, setSteps] = useState(35);
   const [count, setCount] = useState(1);
+  const [invertMask, setInvertMask] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [isCompareModalOpen, setIsCompareModalOpen] = useState(false);
@@ -127,7 +129,8 @@ const Reframe = () => {
           prompt,
           dilation,
           steps,
-          count
+          count,
+          invert_mask: invertMask
         }
       });
 
@@ -210,6 +213,13 @@ const Reframe = () => {
                       {[1, 2, 3, 4].map(n => <SelectItem key={n} value={String(n)}>{n}</SelectItem>)}
                     </SelectContent>
                   </Select>
+                </div>
+                <div className="space-y-2 pt-2">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="invert-mask">{t('invertMask')}</Label>
+                    <Switch id="invert-mask" checked={invertMask} onCheckedChange={setInvertMask} />
+                  </div>
+                  <p className="text-xs text-muted-foreground">{t('invertMaskDescription')}</p>
                 </div>
               </CardContent>
             </Card>
