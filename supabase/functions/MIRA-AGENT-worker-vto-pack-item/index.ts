@@ -106,6 +106,9 @@ serve(async (req) => {
     console.error(`${logPrefix} Error:`, error);
     await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'failed', error_message: error.message }).eq('id', pair_job_id);
     return new Response(JSON.stringify({ error: error.message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
+  } finally {
+    console.log(`${logPrefix} Releasing processing lock.`);
+    await supabase.from('mira-agent-bitstudio-jobs').update({ processing_lock: false }).eq('id', pair_job_id);
   }
 });
 
@@ -186,8 +189,6 @@ async function handleGenerateStep(supabase: SupabaseClient, job: any, sampleStep
   await supabase.from('mira-agent-bitstudio-jobs').update({
     metadata: { ...job.metadata, generated_variations: [...currentVariations, newVariation], google_vto_step: nextStep }
   }).eq('id', job.id);
-
-  console.log(`${logPrefix} Step ${sampleStep} complete. Advancing to ${nextStep}.`);
 }
 
 async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix: string) {

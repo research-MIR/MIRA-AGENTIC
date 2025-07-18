@@ -12,7 +12,7 @@ const corsHeaders = {
 const STALLED_POLLER_THRESHOLD_SECONDS = 15;
 const STALLED_AGGREGATION_THRESHOLD_SECONDS = 20;
 const STALLED_PAIR_JOB_THRESHOLD_MINUTES = 2;
-const STALLED_GOOGLE_VTO_STEP_THRESHOLD_SECONDS = 30;
+const STALLED_GOOGLE_VTO_STEP_THRESHOLD_SECONDS = 60; // Increased threshold for safety
 
 serve(async (req)=>{
   const requestId = `watchdog-bg-${Date.now()}`;
@@ -127,47 +127,40 @@ serve(async (req)=>{
       console.log(`[Watchdog-BG][${requestId}] No stalled pair jobs found.`);
     }
     
-    // --- Task 5: Handle all Google VTO Pack Jobs (queued and stalled) ---
-    const stepVtoThreshold = new Date(Date.now() - STALLED_GOOGLE_VTO_STEP_THRESHOLD_SECONDS * 1000).toISOString();
+    // --- Task 5: Handle Google VTO Pack Jobs (Queue Processing) ---
+    console.log(`[Watchdog-BG][${requestId}] Checking for a new Google VTO job to process...`);
 
-    // Check if any job is currently processing
-    const { count: processingCount } = await supabase
+    // Atomically find and lock the next available job
+    const { data: nextJob, error: claimError } = await supabase
       .from('mira-agent-bitstudio-jobs')
-      .select('*', { count: 'exact', head: true })
+      .update({ processing_lock: true, status: 'processing' })
       .eq('metadata->>engine', 'google')
-      .eq('status', 'processing');
+      .eq('status', 'queued')
+      .eq('processing_lock', false)
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .select('id')
+      .single();
 
-    if (processingCount === 0) {
-        // If nothing is processing, pick up the next queued job
-        const { data: nextJob, error: nextJobError } = await supabase
-            .from('mira-agent-bitstudio-jobs')
-            .select('id')
-            .eq('metadata->>engine', 'google')
-            .eq('status', 'queued')
-            .order('created_at', { ascending: true })
-            .limit(1)
-            .single();
-
-        if (nextJobError && nextJobError.code !== 'PGRST116') { // Ignore "No rows found" error
-            console.error(`[Watchdog-BG][${requestId}] Error fetching next queued Google VTO job:`, nextJobError.message);
-        } else if (nextJob) {
-            console.log(`[Watchdog-BG][${requestId}] Found new queued Google VTO job ${nextJob.id}. Triggering worker...`);
-            await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'processing' }).eq('id', nextJob.id);
-            supabase.functions.invoke('MIRA-AGENT-worker-vto-pack-item', { body: { pair_job_id: nextJob.id } }).catch(console.error);
-            actionsTaken.push(`Started new Google VTO job: ${nextJob.id}.`);
-        } else {
-            console.log(`[Watchdog-BG][${requestId}] No queued Google VTO jobs to start.`);
-        }
+    if (claimError && claimError.code !== 'PGRST116') { // Ignore "No rows found"
+        console.error(`[Watchdog-BG][${requestId}] Error claiming Google VTO job:`, claimError.message);
+    } else if (nextJob) {
+        console.log(`[Watchdog-BG][${requestId}] Claimed Google VTO job ${nextJob.id}. Triggering worker...`);
+        // Asynchronously invoke the worker. Don't await it.
+        supabase.functions.invoke('MIRA-AGENT-worker-vto-pack-item', { body: { pair_job_id: nextJob.id } }).catch(console.error);
+        actionsTaken.push(`Started new Google VTO job: ${nextJob.id}.`);
     } else {
-        console.log(`[Watchdog-BG][${requestId}] A Google VTO job is already processing. Skipping queue check.`);
+        console.log(`[Watchdog-BG][${requestId}] No available Google VTO jobs in queue or all are locked.`);
     }
 
-    // Check for stalled processing jobs
+    // --- Task 6: Handle Stalled/Timed-out Google VTO Jobs ---
+    const stepVtoThreshold = new Date(Date.now() - STALLED_GOOGLE_VTO_STEP_THRESHOLD_SECONDS * 1000).toISOString();
     const { data: stalledGoogleVtoJobs, error: stalledGoogleVtoError } = await supabase
       .from('mira-agent-bitstudio-jobs')
       .select('id')
       .eq('metadata->>engine', 'google')
-      .eq('status', 'processing')
+      .eq('status', 'processing') // Only check jobs that are already processing
+      .eq('processing_lock', true) // And are locked
       .lt('updated_at', stepVtoThreshold);
 
     if (stalledGoogleVtoError) {
