@@ -267,80 +267,76 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
 async function handleCompositing(supabase: SupabaseClient, job: any, logPrefix: string) {
   console.log(`${logPrefix} Compositing best result.`);
   const { bbox, generated_variations, qa_best_index } = job.metadata;
-  
-  console.log(`${logPrefix} [COMPOSITE_DEBUG] BBox from metadata:`, JSON.stringify(bbox));
-  console.log(`${logPrefix} [COMPOSITE_DEBUG] Total generated variations: ${generated_variations?.length || 0}`);
-  console.log(`${logPrefix} [COMPOSITE_DEBUG] QA selected index: ${qa_best_index}`);
-
   if (!bbox || !generated_variations || qa_best_index === undefined) throw new Error("Missing data for compositing.");
-
+  
   const bestVtoPatchBase64 = generated_variations[qa_best_index].base64Image;
-  if (!bestVtoPatchBase64) throw new Error("Best VTO patch is missing base64 data.");
   const vtoPatchBuffer = decodeBase64(bestVtoPatchBase64);
-  if (vtoPatchBuffer.byteLength === 0) throw new Error("Decoded VTO patch buffer is empty.");
+  let vtoPatchImage = await ISImage.decode(vtoPatchBuffer);
   
-  const standardizedVtoPatchBuffer = await standardizeImageBuffer(vtoPatchBuffer);
-  let vtoPatchImage = await ISImage.decode(standardizedVtoPatchBuffer);
-  if (!vtoPatchImage || vtoPatchImage.width <= 0 || vtoPatchImage.height <= 0) {
-    throw new Error("Failed to decode standardized VTO patch image into a valid image.");
-  }
-  console.log(`${logPrefix} [COMPOSITE_DEBUG] Decoded VTO patch. Dimensions: ${vtoPatchImage.width}x${vtoPatchImage.height}`);
-
-  let personBlob: Blob | null = await safeDownload(supabase, job.source_person_image_url);
+  const personBlob = await safeDownload(supabase, job.source_person_image_url);
   const personImage = await ISImage.decode(await personBlob.arrayBuffer());
-  personBlob = null; // GC
-  if (!personImage) throw new Error("Failed to decode source person image.");
-  console.log(`${logPrefix} [COMPOSITE_DEBUG] Decoded source person image. Dimensions: ${personImage.width}x${personImage.height}`);
-
-  // Create a full-size canvas for the final image
-  const finalImage = new ISImage(personImage.width, personImage.height);
-  finalImage.composite(personImage, 0, 0);
-  console.log(`${logPrefix} [COMPOSITE_DEBUG] Final canvas created with source image.`);
-
-  // Create a temporary canvas for the patch to apply the feathered mask
-  const patchCanvas = new ISImage(vtoPatchImage.width, vtoPatchImage.height);
-  patchCanvas.composite(vtoPatchImage, 0, 0);
-  console.log(`${logPrefix} [COMPOSITE_DEBUG] Temporary patch canvas created.`);
-
-  // Create the feathered mask
-  const featherWidth = Math.min(20, Math.floor(Math.min(patchCanvas.width, patchCanvas.height) / 4));
-  console.log(`${logPrefix} [COMPOSITE_DEBUG] Feather width for mask: ${featherWidth}px`);
-  const mask = new ISImage(patchCanvas.width, patchCanvas.height);
-  for (let y = 0; y < mask.height; y++) {
-      for (let x = 0; x < mask.width; x++) {
-          const distToEdge = Math.min(x, mask.width - 1 - x, y, mask.height - 1 - y);
-          const alpha = distToEdge < featherWidth ? (distToEdge / featherWidth) * 255 : 255;
-          mask.setPixelAt(x, y, ISImage.rgbaToColor(alpha, alpha, alpha, 255));
-      }
-  }
-  console.log(`${logPrefix} [COMPOSITE_DEBUG] Feather mask generated.`);
-
-  // Apply the mask to the patch
-  patchCanvas.mask(mask, true);
-  console.log(`${logPrefix} [COMPOSITE_DEBUG] Feathering mask applied to VTO patch.`);
-
-  // Composite the feathered patch onto the final image
-  const pasteX = bbox.x;
-  const pasteY = bbox.y;
-  console.log(`${logPrefix} [COMPOSITE_DEBUG] Final paste coordinates: x=${pasteX}, y=${pasteY}`);
-  finalImage.composite(patchCanvas, pasteX, pasteY);
-  console.log(`${logPrefix} Composition complete.`);
-
-  const finalImageBuffer = await finalImage.encodeJPEG(95);
-  if (!finalImageBuffer || finalImageBuffer.length === 0) {
-      throw new Error("Failed to encode the final composite image.");
-  }
-  console.log(`${logPrefix} [COMPOSITE_DEBUG] Final image encoded to JPEG. Buffer size: ${finalImageBuffer.length} bytes.`);
   
-  const finalFilePath = `${job.user_id}/vto-packs/${Date.now()}_final_composite.jpeg`;
-  await safeUpload(supabase, GENERATED_IMAGES_BUCKET, finalFilePath, finalImageBuffer, { contentType: 'image/jpeg', upsert: true });
+  const cropAmount = 4;
+  
+  // FIX: Reassign the result of .crop()
+  vtoPatchImage = vtoPatchImage.crop(cropAmount, cropAmount, vtoPatchImage.width - cropAmount * 2, vtoPatchImage.height - cropAmount * 2);
+  
+  const targetWidth = bbox.width - cropAmount * 2;
+  const targetHeight = bbox.height - cropAmount * 2;
+  
+  if (vtoPatchImage.width !== targetWidth || vtoPatchImage.height !== targetHeight) {
+    // FIX: Reassign the result of .resize()
+    vtoPatchImage = vtoPatchImage.resize(targetWidth, targetHeight);
+  }
+  
+  // --- NEW FEATHERING LOGIC ---
+  const featherWidth = 20; // Feathering width in pixels.
+  const mask = new ISImage(vtoPatchImage.width, vtoPatchImage.height);
+  for(let y = 0; y < mask.height; y++){
+    for(let x = 0; x < mask.width; x++){
+      const distToEdgeX = Math.min(x, mask.width - 1 - x);
+      const distToEdgeY = Math.min(y, mask.height - 1 - y);
+      const distToEdge = Math.min(distToEdgeX, distToEdgeY);
+      let alpha = 255;
+      if (distToEdge < featherWidth) {
+        alpha = (distToEdge / featherWidth) * 255;
+      }
+      const color = ISImage.rgbaToColor(alpha, alpha, alpha, 255);
+      mask.setPixelAt(x, y, color);
+    }
+  }
+  vtoPatchImage.mask(mask, true);
+  // --- END OF FEATHERING LOGIC ---
+  
+  const pasteX = bbox.x + cropAmount;
+  const pasteY = bbox.y + cropAmount;
+  
+  const finalImage = personImage.clone();
+  finalImage.composite(vtoPatchImage, pasteX, pasteY);
+  
+  console.log(`${logPrefix} Composition complete.`);
+  
+  const finalImageBuffer = await finalImage.encode(0); // Encode as PNG
+  if (!finalImageBuffer || finalImageBuffer.length === 0) {
+    throw new Error("Failed to encode the final composite image.");
+  }
+  
+  const finalFilePath = `${job.user_id}/vto-packs/${Date.now()}_final_composite.png`;
+  await safeUpload(supabase, GENERATED_IMAGES_BUCKET, finalFilePath, new Blob([finalImageBuffer], { type: 'image/png' }), {
+    contentType: 'image/png',
+    upsert: true
+  });
+  
   const publicUrl = await safeGetPublicUrl(supabase, GENERATED_IMAGES_BUCKET, finalFilePath);
-
+  
   await supabase.from('mira-agent-bitstudio-jobs').update({
-      status: 'complete',
-      final_image_url: publicUrl,
-      metadata: { ...job.metadata, google_vto_step: 'done' }
+    status: 'complete',
+    final_image_url: publicUrl,
+    metadata: {
+      ...job.metadata,
+      google_vto_step: 'done'
+    }
   }).eq('id', job.id);
-
+  
   console.log(`${logPrefix} Job finished successfully. Final URL: ${publicUrl}`);
 }
