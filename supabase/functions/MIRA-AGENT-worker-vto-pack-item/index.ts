@@ -143,6 +143,8 @@ async function handleStart(supabase: SupabaseClient, job: any, logPrefix: string
     safeDownload(supabase, job.source_garment_image_url)
   ]);
 
+  console.log(`${logPrefix} Original blob sizes - Person: ${personBlob.size} bytes, Garment: ${garmentBlob.size} bytes.`);
+
   const personImage = await ISImage.decode(await personBlob.arrayBuffer());
   personBlob = null; // GC
   const { width: originalWidth, height: originalHeight } = personImage;
@@ -161,9 +163,10 @@ async function handleStart(supabase: SupabaseClient, job: any, logPrefix: string
   
   const croppedPersonImage = personImage.clone().crop(bbox.x, bbox.y, bbox.width, bbox.height);
   const croppedPersonBuffer = await croppedPersonImage.encode('jpeg', 90);
+  console.log(`${logPrefix} Cropped person JPEG buffer size: ${croppedPersonBuffer.length} bytes.`);
   
   const tempPersonPath = `tmp/${job.user_id}/${Date.now()}-cropped_person.jpeg`;
-  await safeUpload(supabase, TEMP_UPLOAD_BUCKET, tempPersonPath, croppedPersonBuffer, { contentType: "image/jpeg" });
+  await safeUpload(supabase, TEMP_UPLOAD_BUCKET, croppedPersonBuffer, { contentType: "image/jpeg" });
   const croppedPersonUrl = await safeGetPublicUrl(supabase, TEMP_UPLOAD_BUCKET, tempPersonPath);
   console.log(`${logPrefix} Cropped person image uploaded to temp storage.`);
 
@@ -177,6 +180,7 @@ async function handleStart(supabase: SupabaseClient, job: any, logPrefix: string
       );
   }
   const optimizedGarmentBuffer = await garmentImage.encode('jpeg', 90);
+  console.log(`${logPrefix} Optimized garment JPEG buffer size: ${optimizedGarmentBuffer.length} bytes.`);
   const tempGarmentPath = `tmp/${job.user_id}/${Date.now()}-optimized_garment.jpeg`;
   await safeUpload(supabase, TEMP_UPLOAD_BUCKET, tempGarmentPath, optimizedGarmentBuffer, { contentType: "image/jpeg" });
   const optimizedGarmentUrl = await safeGetPublicUrl(supabase, TEMP_UPLOAD_BUCKET, tempGarmentPath);
