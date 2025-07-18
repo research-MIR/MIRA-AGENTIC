@@ -291,7 +291,6 @@ async function handleCompositing(supabase: SupabaseClient, job: any, logPrefix: 
 
     const cropAmount = 4;
     
-    // --- FIX 1: REASSIGN THE RESULT OF .crop() ---
     vtoPatchImage = vtoPatchImage.crop(cropAmount, cropAmount, vtoPatchImage.width - cropAmount * 2, vtoPatchImage.height - cropAmount * 2);
     console.log(`${logPrefix} [COMPOSITE_DEBUG] Cropped VTO patch. New dimensions: ${vtoPatchImage.width}x${vtoPatchImage.height}`);
 
@@ -300,57 +299,73 @@ async function handleCompositing(supabase: SupabaseClient, job: any, logPrefix: 
     const targetHeight = bbox.height - cropAmount * 2;
     console.log(`${logPrefix} [COMPOSITE_DEBUG] Calculated target dimensions for patch: ${targetWidth}x${targetHeight}`);
 
-    // --- NEW CHECK 1: VALIDATE TARGET DIMENSIONS ---
     if (targetWidth <= 0 || targetHeight <= 0) {
         throw new Error(`Invalid target dimensions after cropping: ${targetWidth}x${targetHeight}. BBox may be too small.`);
     }
 
     if (vtoPatchImage.width !== targetWidth || vtoPatchImage.height !== targetHeight) {
         console.log(`${logPrefix} [COMPOSITE_DEBUG] Resizing patch from ${vtoPatchImage.width}x${vtoPatchImage.height} to ${targetWidth}x${targetHeight}`);
-        // --- FIX 2: REASSIGN THE RESULT OF .resize() ---
         vtoPatchImage = vtoPatchImage.resize(targetWidth, targetHeight);
         console.log(`${logPrefix} [COMPOSITE_DEBUG] Resized VTO patch. Final dimensions: ${vtoPatchImage.width}x${vtoPatchImage.height}`);
     }
 
 
-    // --- FEATHERING LOGIC (DIAGNOSTIC VERSION) ---
-    console.log(`${logPrefix} [COMPOSITE_DEBUG] Preparing to create mask for patch with dimensions: ${vtoPatchImage.width}x${vtoPatchImage.height}`);
-
-    if (!(vtoPatchImage.width > 0 && vtoPatchImage.height > 0)) {
-        throw new Error(`Invalid vtoPatchImage dimensions before mask creation: ${vtoPatchImage.width}x${vtoPatchImage.height}`);
-    }
+    // --- FEATHERING LOGIC (CORRECTED) ---
+    const featherWidth = 20;
+    console.log(`${logPrefix} [COMPOSITE_DEBUG] Feather width for mask: ${featherWidth}px`);
 
     const mask = new ISImage(vtoPatchImage.width, vtoPatchImage.height);
     console.log(`${logPrefix} [COMPOSITE_DEBUG] Mask canvas created with dimensions: ${mask.width}x${mask.height}.`);
 
-    try {
-        console.log(`${logPrefix} [COMPOSITE_DEBUG] Attempting to fill the mask with a solid color (diagnostic).`);
-        // We replace the complex loop with a simple fill command.
-        // This will tell us if the 'mask' object is fundamentally valid.
-        const white = ISImage.rgbaToColor(255, 255, 255, 255);
-        mask.fill(white);
-        console.log(`${logPrefix} [COMPOSITE_DEBUG] Mask fill successful.`);
-    } catch (e) {
-        console.error(`${logPrefix} [COMPOSITE_DEBUG] CRASH during mask.fill(). Error: ${e.stack}`);
-        throw e; // re-throw
+    for (let y = 0; y < mask.height; y++) {
+        for (let x = 0; x < mask.width; x++) {
+            const distToEdgeX = Math.min(x, mask.width - 1 - x);
+            const distToEdgeY = Math.min(y, mask.height - 1 - y);
+            const distToEdge = Math.min(distToEdgeX, distToEdgeY);
+            let alpha = 255;
+            if (distToEdge < featherWidth) {
+                alpha = (distToEdge / featherWidth) * 255;
+            }
+            const color = ISImage.rgbaToColor(alpha, alpha, alpha, 255);
+            mask.setPixelAt(x, y, color);
+        }
     }
+    console.log(`${logPrefix} [COMPOSITE_DEBUG] Feathering loop complete.`);
 
-    vtoPatchImage.mask(mask, true);
-    console.log(`${logPrefix} [COMPOSITE_DEBUG] Patch masked successfully.`);
+    // Apply the mask to the patch's alpha channel
+    for (let y = 0; y < vtoPatchImage.height; y++) {
+        for (let x = 0; x < vtoPatchImage.width; x++) {
+            const maskColor = mask.getPixelAt(x, y);
+            const [maskAlpha] = ISImage.colorToRGBA(maskColor); // Grayscale value is our alpha
+            
+            const patchColor = vtoPatchImage.getPixelAt(x, y);
+            const [r, g, b] = ISImage.colorToRGBA(patchColor);
+            
+            vtoPatchImage.setPixelAt(x, y, ISImage.rgbaToColor(r, g, b, maskAlpha));
+        }
+    }
+    console.log(`${logPrefix} [COMPOSITE_DEBUG] Patch masked successfully by manipulating alpha channel.`);
     // --- END OF FEATHERING LOGIC ---
+
 
     const pasteX = bbox.x + cropAmount;
     const pasteY = bbox.y + cropAmount;
     console.log(`${logPrefix} [COMPOSITE_DEBUG] Final paste coordinates: (${pasteX}, ${pasteY})`);
 
+
     if (pasteX + vtoPatchImage.width > finalImage.width || pasteY + vtoPatchImage.height > finalImage.height) {
         throw new Error(
-            `Composite boundary error. Aborting. Canvas: ${finalImage.width}x${finalImage.height}, Patch: ${vtoPatchImage.width}x${vtoPatchImage.height}, Paste At: (${pasteX}, ${pasteY}).`
+            `Composite boundary error. Aborting. ` +
+            `Canvas: ${finalImage.width}x${finalImage.height}. ` +
+            `Patch: ${vtoPatchImage.width}x${vtoPatchImage.height}. ` +
+            `Paste At: (${pasteX}, ${pasteY}). ` +
+            `Needed Width: ${pasteX + vtoPatchImage.width}, Needed Height: ${pasteY + vtoPatchImage.height}`
         );
     }
     
     finalImage.composite(vtoPatchImage, pasteX, pasteY);
     console.log(`${logPrefix} Composition complete.`);
+
 
     const finalImageBuffer = await finalImage.encode(0);
     if (!finalImageBuffer || finalImageBuffer.length === 0) {
