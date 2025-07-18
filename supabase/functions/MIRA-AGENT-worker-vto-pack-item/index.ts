@@ -23,25 +23,6 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// --- Utility Functions ---
-
-function parseStorageURL(url: string) {
-    const u = new URL(url);
-    const pathSegments = u.pathname.split('/');
-    const objectSegmentIndex = pathSegments.indexOf('object');
-    if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) {
-        throw new Error(`Invalid Supabase storage URL format: ${url}`);
-    }
-    const bucket = pathSegments[objectSegmentIndex + 2];
-    const path = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
-    return { bucket, path };
-}
-
-const blobToBase64 = async (blob: Blob): Promise<string> => {
-    const buffer = await blob.arrayBuffer();
-    return encodeBase64(buffer);
-};
-
 // --- Hardened Safe Wrapper Functions ---
 
 async function safeInvoke(supabase: SupabaseClient, functionName: string, payload: object) {
@@ -74,6 +55,25 @@ async function safeGetPublicUrl(supabase: SupabaseClient, bucket: string, path: 
     if (!data || !data.publicUrl) throw new Error(`[safeGetPublicUrl:${path}] Failed to create public URL.`);
     return data.publicUrl;
 }
+
+// --- Utility Functions ---
+
+function parseStorageURL(url: string) {
+    const u = new URL(url);
+    const pathSegments = u.pathname.split('/');
+    const objectSegmentIndex = pathSegments.indexOf('object');
+    if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) {
+        throw new Error(`Invalid Supabase storage URL format: ${url}`);
+    }
+    const bucket = pathSegments[objectSegmentIndex + 2];
+    const path = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
+    return { bucket, path };
+}
+
+const blobToBase64 = async (blob: Blob): Promise<string> => {
+    const buffer = await blob.arrayBuffer();
+    return encodeBase64(buffer);
+};
 
 // --- State Machine Logic ---
 
@@ -133,7 +133,7 @@ async function handleStart(supabase: SupabaseClient, job: any, logPrefix: string
   const bboxData = await safeInvoke(supabase, 'MIRA-AGENT-orchestrator-bbox', { image_url: job.source_person_image_url });
   
   const personBox = bboxData?.person;
-  if (!personBox || !Array.isArray(personBox) || personBox.length !== 4 || personBox.some(v => typeof v !== 'number')) {
+  if (!personBox || !Array.isArray(personBox) || personBox.length !== 4 || personBox.some((v: any) => typeof v !== 'number')) {
     throw new Error("Orchestrator did not return a valid bounding box array.");
   }
   console.log(`${logPrefix} Bounding box received.`);
@@ -256,8 +256,16 @@ async function handleCompositing(supabase: SupabaseClient, job: any, logPrefix: 
   personBlob = null; // GC
   if (!personImage) throw new Error("Failed to decode source person image.");
 
-  const cropAmount = 4;
-  vtoPatchImage.crop(cropAmount, cropAmount, vtoPatchImage.width - (cropAmount * 2), vtoPatchImage.height - (cropAmount * 2));
+  let cropAmount = 4;
+  cropAmount = Math.min(cropAmount, Math.floor(Math.min(vtoPatchImage.width, vtoPatchImage.height) / 2) - 1);
+
+  if (cropAmount > 0) {
+    vtoPatchImage.crop(cropAmount, cropAmount, vtoPatchImage.width - cropAmount * 2, vtoPatchImage.height - cropAmount * 2);
+  }
+
+  if (vtoPatchImage.width < 2 || vtoPatchImage.height < 2) {
+    throw new Error(`VTO patch too small after crop: ${vtoPatchImage.width}×${vtoPatchImage.height}px`);
+  }
   
   const targetWidth = bbox.width - (cropAmount * 2);
   const targetHeight = bbox.height - (cropAmount * 2);
@@ -266,7 +274,7 @@ async function handleCompositing(supabase: SupabaseClient, job: any, logPrefix: 
       vtoPatchImage.resize(targetWidth, targetHeight);
   }
 
-  const featherWidth = 20;
+  const featherWidth = Math.min(20, Math.floor(Math.min(vtoPatchImage.width, vtoPatchImage.height) / 2));
   const mask = new ISImage(vtoPatchImage.width, vtoPatchImage.height);
   for (let y = 0; y < mask.height; y++) {
       for (let x = 0; x < mask.width; x++) {
