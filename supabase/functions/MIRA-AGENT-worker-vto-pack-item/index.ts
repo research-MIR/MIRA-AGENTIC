@@ -267,6 +267,11 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
 async function handleCompositing(supabase: SupabaseClient, job: any, logPrefix: string) {
   console.log(`${logPrefix} Compositing best result.`);
   const { bbox, generated_variations, qa_best_index } = job.metadata;
+  
+  console.log(`${logPrefix} [COMPOSITE_DEBUG] BBox from metadata:`, JSON.stringify(bbox));
+  console.log(`${logPrefix} [COMPOSITE_DEBUG] Total generated variations: ${generated_variations?.length || 0}`);
+  console.log(`${logPrefix} [COMPOSITE_DEBUG] QA selected index: ${qa_best_index}`);
+
   if (!bbox || !generated_variations || qa_best_index === undefined) throw new Error("Missing data for compositing.");
 
   const bestVtoPatchBase64 = generated_variations[qa_best_index].base64Image;
@@ -279,27 +284,34 @@ async function handleCompositing(supabase: SupabaseClient, job: any, logPrefix: 
   if (!vtoPatchImage || vtoPatchImage.width <= 1 || vtoPatchImage.height <= 1) {
     throw new Error("Failed to decode standardized VTO patch image into a valid image.");
   }
+  console.log(`${logPrefix} [COMPOSITE_DEBUG] Decoded VTO patch. Dimensions: ${vtoPatchImage.width}x${vtoPatchImage.height}`);
 
   let personBlob: Blob | null = await safeDownload(supabase, job.source_person_image_url);
   const personImage = await ISImage.decode(await personBlob.arrayBuffer());
   personBlob = null; // GC
   if (!personImage) throw new Error("Failed to decode source person image.");
+  console.log(`${logPrefix} [COMPOSITE_DEBUG] Decoded source person image. Dimensions: ${personImage.width}x${personImage.height}`);
 
   let cropAmount = 4;
   cropAmount = Math.min(cropAmount, Math.floor(Math.min(vtoPatchImage.width, vtoPatchImage.height) / 2) - 1);
+  console.log(`${logPrefix} [COMPOSITE_DEBUG] Calculated crop amount: ${cropAmount}px`);
 
   if (cropAmount > 0) {
     vtoPatchImage = vtoPatchImage.crop(cropAmount, cropAmount, vtoPatchImage.width - cropAmount * 2, vtoPatchImage.height - cropAmount * 2);
+    console.log(`${logPrefix} [COMPOSITE_DEBUG] Cropped VTO patch. New dimensions: ${vtoPatchImage.width}x${vtoPatchImage.height}`);
   }
 
   const targetWidth = bbox.width - (cropAmount > 0 ? cropAmount * 2 : 0);
   const targetHeight = bbox.height - (cropAmount > 0 ? cropAmount * 2 : 0);
+  console.log(`${logPrefix} [COMPOSITE_DEBUG] Target dimensions for resize: ${targetWidth}x${targetHeight}`);
 
   if (vtoPatchImage.width !== targetWidth || vtoPatchImage.height !== targetHeight) {
       vtoPatchImage = vtoPatchImage.resize(targetWidth, targetHeight);
+      console.log(`${logPrefix} [COMPOSITE_DEBUG] Resized VTO patch. New dimensions: ${vtoPatchImage.width}x${vtoPatchImage.height}`);
   }
 
   const featherWidth = Math.min(20, Math.floor(Math.min(vtoPatchImage.width, vtoPatchImage.height) / 2));
+  console.log(`${logPrefix} [COMPOSITE_DEBUG] Feather width for mask: ${featherWidth}px`);
   const mask = new ISImage(vtoPatchImage.width, vtoPatchImage.height);
   for (let y = 0; y < mask.height; y++) {
       for (let x = 0; x < mask.width; x++) {
@@ -309,9 +321,11 @@ async function handleCompositing(supabase: SupabaseClient, job: any, logPrefix: 
       }
   }
   vtoPatchImage.mask(mask, true);
+  console.log(`${logPrefix} [COMPOSITE_DEBUG] Feathering mask applied to VTO patch.`);
 
   const pasteX = bbox.x + (cropAmount > 0 ? cropAmount : 0);
   const pasteY = bbox.y + (cropAmount > 0 ? cropAmount : 0);
+  console.log(`${logPrefix} [COMPOSITE_DEBUG] Final paste coordinates: x=${pasteX}, y=${pasteY}`);
 
   const finalImage = personImage.clone();
   finalImage.composite(vtoPatchImage, pasteX, pasteY);
@@ -321,6 +335,7 @@ async function handleCompositing(supabase: SupabaseClient, job: any, logPrefix: 
   if (!finalImageBuffer || finalImageBuffer.length === 0) {
       throw new Error("Failed to encode the final composite image.");
   }
+  console.log(`${logPrefix} [COMPOSITE_DEBUG] Final image encoded to JPEG. Buffer size: ${finalImageBuffer.length} bytes.`);
   
   const finalFilePath = `${job.user_id}/vto-packs/${Date.now()}_final_composite.jpeg`;
   await safeUpload(supabase, GENERATED_IMAGES_BUCKET, finalFilePath, finalImageBuffer, { contentType: 'image/jpeg', upsert: true });
