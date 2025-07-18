@@ -54,7 +54,6 @@ export const downloadImage = async (url: string, filename: string) => {
 export const optimizeImage = (file: File, options?: { quality?: number }): Promise<File> => {
   return new Promise((resolve, reject) => {
     const originalSize = file.size;
-    const quality = options?.quality || 0.8; // Good default for WebP
 
     if (!file.type.startsWith('image/')) {
       console.log(`[ImageOptimizer] Skipped optimization for non-image file: ${file.type}. Passing through original file.`);
@@ -86,17 +85,16 @@ export const optimizeImage = (file: File, options?: { quality?: number }): Promi
               return reject(new Error('Canvas toBlob failed'));
             }
             const originalName = file.name.substring(0, file.name.lastIndexOf('.')) || file.name;
-            const newFile = new File([blob], `${originalName}.webp`, {
-              type: 'image/webp',
+            const newFile = new File([blob], `${originalName}.png`, {
+              type: 'image/png',
               lastModified: Date.now(),
             });
             
-            console.log(`[ImageOptimizer] Compressed ${file.name} to WebP: ${formatBytes(originalSize)} -> ${formatBytes(newFile.size)}. Dimensions preserved.`);
+            console.log(`[ImageOptimizer] Converted ${file.name} to PNG: ${formatBytes(originalSize)} -> ${formatBytes(newFile.size)}. Dimensions preserved.`);
 
             resolve(newFile);
           },
-          'image/webp',
-          quality
+          'image/png'
         );
       };
       img.onerror = (error) => reject(error);
