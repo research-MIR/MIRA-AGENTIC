@@ -17,11 +17,11 @@ const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1500;
 
 // --- DIAGNOSTIC: Global Error Handlers ---
-addEventListener('unhandledrejection', (event) => {
+self.addEventListener('unhandledrejection', (event) => {
   console.error(`[GLOBAL UNHANDLED REJECTION] Reason:`, event.reason);
 });
 
-addEventListener('error', (event) => {
+self.addEventListener('error', (event) => {
   console.error(`[GLOBAL ERROR] Message: ${event.message}, Filename: ${event.filename}, Lineno: ${event.lineno}, Error:`, event.error);
 });
 // --- END DIAGNOSTIC ---
@@ -88,8 +88,8 @@ serve(async (req) => {
         sample_count = 1
     } = body;
 
-    let person_image_base64: string;
-    let garment_image_base64: string;
+    let person_image_base64: string | null;
+    let garment_image_base64: string | null;
 
     if (person_b64_input) {
         person_image_base64 = person_b64_input;
@@ -134,8 +134,12 @@ serve(async (req) => {
         ...(sample_step && { sampleStep: sample_step })
       }
     };
+    
+    // Nullify large objects to free up memory before the large network request
+    person_image_base64 = null;
+    garment_image_base64 = null;
 
-    console.log(`[VirtualTryOnTool][${requestId}] Calling Google Vertex AI. Payload details: Person Base64 length: ${person_image_base64.length}, Garment Base64 length: ${garment_image_base64.length}, Sample Count: ${sample_count}`);
+    console.log(`[VirtualTryOnTool][${requestId}] Calling Google Vertex AI. Payload details: Sample Count: ${sample_count}`);
     const response = await fetchWithRetry(apiUrl, {
       method: 'POST',
       headers: {
@@ -170,7 +174,7 @@ serve(async (req) => {
     console.log(`[VirtualTryOnTool][${requestId}] Job complete. Returning ${generatedImages.length} results.`);
     return new Response(JSON.stringify({ generatedImages }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 200
+      status: 200,
     });
 
   } catch (error) {
