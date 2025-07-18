@@ -8,7 +8,6 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const TEMP_UPLOAD_BUCKET = 'mira-agent-user-uploads';
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
-const MAX_IMAGE_DIMENSION = 1024;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -142,11 +141,7 @@ async function handleStart(supabase: SupabaseClient, job: any, logPrefix: string
   const croppedPersonUrl = await uploadBuffer(croppedPersonBuffer, supabase, job.user_id, 'cropped_person.png');
   console.log(`${logPrefix} Cropped person image uploaded to temp storage.`);
 
-  let garmentImage = await ISImage.decode(await garmentBlob.arrayBuffer());
-  if (garmentImage.width > MAX_IMAGE_DIMENSION || garmentImage.height > MAX_IMAGE_DIMENSION) {
-    garmentImage.resize(garmentImage.width > garmentImage.height ? MAX_IMAGE_DIMENSION : ISImage.RESIZE_AUTO, garmentImage.height > garmentImage.width ? MAX_IMAGE_DIMENSION : ISImage.RESIZE_AUTO);
-    console.log(`${logPrefix} Garment image resized.`);
-  }
+  const garmentImage = await ISImage.decode(await garmentBlob.arrayBuffer());
   const garmentBase64 = bufferToBase64(await garmentImage.encode(0));
   console.log(`${logPrefix} Garment image encoded and will be stored in metadata.`);
 
@@ -160,8 +155,6 @@ async function handleStart(supabase: SupabaseClient, job: any, logPrefix: string
         google_vto_step: 'generate_step_1' 
     }
   }).eq('id', job.id);
-
-  await supabase.functions.invoke('MIRA-AGENT-worker-vto-pack-item', { body: { pair_job_id: job.id } });
 }
 
 async function handleGenerateStep(supabase: SupabaseClient, job: any, sampleStep: number, nextStep: string, logPrefix: string) {
@@ -173,11 +166,7 @@ async function handleGenerateStep(supabase: SupabaseClient, job: any, sampleStep
   }
 
   const personBlob = await downloadFromSupabase(supabase, cropped_person_url);
-  let personImage = await ISImage.decode(await personBlob.arrayBuffer());
-  if (personImage.width > MAX_IMAGE_DIMENSION || personImage.height > MAX_IMAGE_DIMENSION) {
-    personImage.resize(personImage.width > personImage.height ? MAX_IMAGE_DIMENSION : ISImage.RESIZE_AUTO, personImage.height > personImage.width ? MAX_IMAGE_DIMENSION : ISImage.RESIZE_AUTO);
-    console.log(`${logPrefix} Person image resized for this step.`);
-  }
+  const personImage = await ISImage.decode(await personBlob.arrayBuffer());
   const personBase64 = bufferToBase64(await personImage.encode(0));
 
   const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-virtual-try-on', {
@@ -199,7 +188,6 @@ async function handleGenerateStep(supabase: SupabaseClient, job: any, sampleStep
   }).eq('id', job.id);
 
   console.log(`${logPrefix} Step ${sampleStep} complete. Advancing to ${nextStep}.`);
-  await supabase.functions.invoke('MIRA-AGENT-worker-vto-pack-item', { body: { pair_job_id: job.id } });
 }
 
 async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix: string) {
@@ -224,8 +212,6 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
   await supabase.from('mira-agent-bitstudio-jobs').update({
     metadata: { ...job.metadata, qa_best_index: qaData.best_image_index, qa_reasoning: qaData.reasoning, google_vto_step: 'compositing' }
   }).eq('id', job.id);
-
-  await supabase.functions.invoke('MIRA-AGENT-worker-vto-pack-item', { body: { pair_job_id: job.id } });
 }
 
 async function handleCompositing(supabase: SupabaseClient, job: any, logPrefix: string) {
