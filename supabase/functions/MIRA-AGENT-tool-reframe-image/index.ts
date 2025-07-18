@@ -39,7 +39,7 @@ const blobToBase64 = (blob: Blob): Promise<string> => {
 serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response('ok', { headers: corsHeaders }); }
 
-  const { job_id } = await req.json();
+  const { job_id, prompt: providedPrompt } = await req.json();
   if (!job_id) throw new Error("job_id is required.");
 
   const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
@@ -52,7 +52,8 @@ serve(async (req) => {
     const { data: job, error: fetchError } = await supabase.from('mira-agent-jobs').select('context, user_id').eq('id', job_id).single();
     if (fetchError) throw fetchError;
 
-    const { base_image_url, mask_image_url, prompt, dilation, steps, count, invert_mask } = job.context;
+    const { base_image_url, mask_image_url, dilation, steps, count, invert_mask } = job.context;
+    const prompt = providedPrompt || job.context.prompt || "";
     if (!base_image_url || !mask_image_url) throw new Error("Missing image URLs in job context.");
 
     console.log(`${logPrefix} Downloading images...`);
@@ -67,9 +68,8 @@ serve(async (req) => {
     let finalBaseImageB64: string;
     let finalMaskImageB64: string;
 
-    // Step 1: Handle dimension mismatch by creating a new canvas
     if (baseImage.width() !== maskImage.width() || baseImage.height() !== maskImage.height()) {
-        console.log(`${logPrefix} Dimension mismatch detected (${baseImage.width()}x${baseImage.height()} vs ${maskImage.width()}x${maskImage.height()}). Creating new canvas.`);
+        console.log(`${logPrefix} Dimension mismatch detected. Creating new canvas.`);
         const newCanvas = createCanvas(maskImage.width(), maskImage.height());
         const ctx = newCanvas.getContext('2d');
         ctx.fillStyle = 'white';
@@ -82,7 +82,6 @@ serve(async (req) => {
         finalBaseImageB64 = await blobToBase64(baseImageBlob);
     }
 
-    // Step 2: Handle mask inversion if requested
     if (invert_mask) {
         console.log(`${logPrefix} Inverting mask as requested.`);
         const maskCanvas = createCanvas(maskImage.width(), maskImage.height());
@@ -110,7 +109,7 @@ serve(async (req) => {
 
     const requestBody = {
       instances: [{
-        prompt: prompt || "",
+        prompt: prompt,
         referenceImages: [
           { referenceType: "REFERENCE_TYPE_RAW", referenceId: 1, referenceImage: { bytesBase64Encoded: finalBaseImageB64 } },
           { referenceType: "REFERENCE_TYPE_MASK", referenceId: 2, referenceImage: { bytesBase64Encoded: finalMaskImageB64 }, maskImageConfig: { maskMode: "MASK_MODE_USER_PROVIDED", dilation: dilation || 0.03 } }
