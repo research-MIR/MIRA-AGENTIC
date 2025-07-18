@@ -72,8 +72,13 @@ function parseStorageURL(url: string) {
 
 const blobToBase64 = async (blob: Blob): Promise<string> => {
     const buffer = await blob.arrayBuffer();
-    return encodeBase64(buffer);
+    return encodeBase64(new Uint8Array(buffer)); // Use Uint8Array for safety
 };
+
+async function standardizeImageBuffer(buffer: Uint8Array): Promise<Uint8Array> {
+    const image = await ISImage.decode(buffer);
+    return await image.encode(0); // 0 for PNG
+}
 
 // --- State Machine Logic ---
 
@@ -268,8 +273,12 @@ async function handleCompositing(supabase: SupabaseClient, job: any, logPrefix: 
   if (!bestVtoPatchBase64) throw new Error("Best VTO patch is missing base64 data.");
   const vtoPatchBuffer = decodeBase64(bestVtoPatchBase64);
   if (vtoPatchBuffer.byteLength === 0) throw new Error("Decoded VTO patch buffer is empty.");
-  let vtoPatchImage = await ISImage.decode(vtoPatchBuffer);
-  if (!vtoPatchImage) throw new Error("Failed to decode VTO patch image.");
+  
+  const standardizedVtoPatchBuffer = await standardizeImageBuffer(vtoPatchBuffer);
+  let vtoPatchImage = await ISImage.decode(standardizedVtoPatchBuffer);
+  if (!vtoPatchImage || vtoPatchImage.width <= 1 || vtoPatchImage.height <= 1) {
+    throw new Error("Failed to decode standardized VTO patch image into a valid image.");
+  }
 
   let personBlob: Blob | null = await safeDownload(supabase, job.source_person_image_url);
   const personImage = await ISImage.decode(await personBlob.arrayBuffer());
@@ -280,18 +289,14 @@ async function handleCompositing(supabase: SupabaseClient, job: any, logPrefix: 
   cropAmount = Math.min(cropAmount, Math.floor(Math.min(vtoPatchImage.width, vtoPatchImage.height) / 2) - 1);
 
   if (cropAmount > 0) {
-    vtoPatchImage.crop(cropAmount, cropAmount, vtoPatchImage.width - cropAmount * 2, vtoPatchImage.height - cropAmount * 2);
+    vtoPatchImage = vtoPatchImage.crop(cropAmount, cropAmount, vtoPatchImage.width - cropAmount * 2, vtoPatchImage.height - cropAmount * 2);
   }
 
-  if (vtoPatchImage.width < 2 || vtoPatchImage.height < 2) {
-    throw new Error(`VTO patch too small after crop: ${vtoPatchImage.width}×${vtoPatchImage.height}px`);
-  }
-  
-  const targetWidth = bbox.width - (cropAmount * 2);
-  const targetHeight = bbox.height - (cropAmount * 2);
+  const targetWidth = bbox.width - (cropAmount > 0 ? cropAmount * 2 : 0);
+  const targetHeight = bbox.height - (cropAmount > 0 ? cropAmount * 2 : 0);
 
   if (vtoPatchImage.width !== targetWidth || vtoPatchImage.height !== targetHeight) {
-      vtoPatchImage.resize(targetWidth, targetHeight);
+      vtoPatchImage = vtoPatchImage.resize(targetWidth, targetHeight);
   }
 
   const featherWidth = Math.min(20, Math.floor(Math.min(vtoPatchImage.width, vtoPatchImage.height) / 2));
@@ -305,8 +310,8 @@ async function handleCompositing(supabase: SupabaseClient, job: any, logPrefix: 
   }
   vtoPatchImage.mask(mask, true);
 
-  const pasteX = bbox.x + cropAmount;
-  const pasteY = bbox.y + cropAmount;
+  const pasteX = bbox.x + (cropAmount > 0 ? cropAmount : 0);
+  const pasteY = bbox.y + (cropAmount > 0 ? cropAmount : 0);
 
   const finalImage = personImage.clone();
   finalImage.composite(vtoPatchImage, pasteX, pasteY);
