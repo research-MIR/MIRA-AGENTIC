@@ -156,10 +156,10 @@ async function handleStart(supabase: SupabaseClient, job: any, logPrefix: string
   };
   
   const croppedPersonImage = personImage.clone().crop(bbox.x, bbox.y, bbox.width, bbox.height);
-  const croppedPersonBuffer = await croppedPersonImage.encode(0);
+  const croppedPersonBuffer = await croppedPersonImage.encode('jpeg', 90);
   
-  const tempPath = `tmp/${job.user_id}/${Date.now()}-cropped_person.png`;
-  await safeUpload(supabase, TEMP_UPLOAD_BUCKET, tempPath, croppedPersonBuffer, { contentType: "image/png" });
+  const tempPath = `tmp/${job.user_id}/${Date.now()}-cropped_person.jpeg`;
+  await safeUpload(supabase, TEMP_UPLOAD_BUCKET, tempPath, croppedPersonBuffer, { contentType: "image/jpeg" });
   const croppedPersonUrl = await safeGetPublicUrl(supabase, TEMP_UPLOAD_BUCKET, tempPath);
   console.log(`${logPrefix} Cropped person image uploaded to temp storage.`);
 
@@ -174,7 +174,6 @@ async function handleStart(supabase: SupabaseClient, job: any, logPrefix: string
 async function handleGenerateStep(supabase: SupabaseClient, job: any, sampleStep: number, nextStep: string, logPrefix: string) {
   console.log(`${logPrefix} Generating variation with ${sampleStep} steps.`);
   
-  // Pass URLs directly instead of base64 to avoid hitting payload size limits.
   const data = await safeInvoke(supabase, 'MIRA-AGENT-tool-virtual-try-on', {
     person_image_url: job.metadata.cropped_person_url,
     garment_image_url: job.source_garment_image_url,
@@ -282,13 +281,13 @@ async function handleCompositing(supabase: SupabaseClient, job: any, logPrefix: 
   finalImage.composite(vtoPatchImage, pasteX, pasteY);
   console.log(`${logPrefix} Composition complete.`);
 
-  const finalImageBuffer = await finalImage.encode(0);
+  const finalImageBuffer = await finalImage.encode('jpeg', 95);
   if (!finalImageBuffer || finalImageBuffer.length === 0) {
       throw new Error("Failed to encode the final composite image.");
   }
   
-  const finalFilePath = `${job.user_id}/vto-packs/${Date.now()}_final_composite.png`;
-  await safeUpload(supabase, GENERATED_IMAGES_BUCKET, finalFilePath, finalImageBuffer, { contentType: 'image/png', upsert: true });
+  const finalFilePath = `${job.user_id}/vto-packs/${Date.now()}_final_composite.jpeg`;
+  await safeUpload(supabase, GENERATED_IMAGES_BUCKET, finalFilePath, finalImageBuffer, { contentType: 'image/jpeg', upsert: true });
   const publicUrl = await safeGetPublicUrl(supabase, GENERATED_IMAGES_BUCKET, finalFilePath);
 
   await supabase.from('mira-agent-bitstudio-jobs').update({
