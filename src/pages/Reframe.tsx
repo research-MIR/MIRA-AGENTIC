@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Loader2, Image as ImageIcon, Wand2, UploadCloud, X, PlusCircle, Sparkles } from "lucide-react";
+import { Loader2, Image as ImageIcon, Wand2, UploadCloud, X, PlusCircle } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { ImageCompareModal } from "@/components/ImageCompareModal";
@@ -77,7 +77,6 @@ const Reframe = () => {
   const [count, setCount] = useState(1);
   const [invertMask, setInvertMask] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [isCompareModalOpen, setIsCompareModalOpen] = useState(false);
 
@@ -108,30 +107,6 @@ const Reframe = () => {
     setBaseFile(null);
     setMaskFile(null);
     setPrompt("");
-  };
-
-  const handleGeneratePrompt = async () => {
-    if (!baseFile) {
-      showError("Please upload a base image first to generate a prompt.");
-      return;
-    }
-    setIsGeneratingPrompt(true);
-    const toastId = showLoading("AI is analyzing the scene...");
-    try {
-      const base_image_base64 = await fileToBase64(baseFile);
-      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-auto-describe-scene', {
-        body: { base_image_base64, user_hint: prompt }
-      });
-      if (error) throw error;
-      setPrompt(data.scene_prompt);
-      dismissToast(toastId);
-      showSuccess("Prompt generated!");
-    } catch (err: any) {
-      dismissToast(toastId);
-      showError(`Failed to generate prompt: ${err.message}`);
-    } finally {
-      setIsGeneratingPrompt(false);
-    }
   };
 
   const handleSubmit = async () => {
@@ -214,13 +189,7 @@ const Reframe = () => {
                   <ImageUploader onFileSelect={setMaskFile} title={t('maskImage')} imageUrl={maskPreviewUrl} onClear={() => setMaskFile(null)} />
                 </div>
                 <div>
-                  <div className="flex justify-between items-center mb-1">
-                    <Label htmlFor="prompt">{t('prompt')}</Label>
-                    <Button variant="ghost" size="sm" onClick={handleGeneratePrompt} disabled={isGeneratingPrompt || !baseFile}>
-                      {isGeneratingPrompt ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-                      Generate
-                    </Button>
-                  </div>
+                  <Label htmlFor="prompt">{t('prompt')}</Label>
                   <Textarea id="prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t('promptPlaceholder')} rows={3} />
                 </div>
               </CardContent>
