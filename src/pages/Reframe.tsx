@@ -19,6 +19,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { SecureImageDisplay } from "@/components/VTO/SecureImageDisplay";
+import { Badge } from "@/components/ui/badge";
 
 interface ReframeJob {
   id: string;
@@ -76,6 +77,8 @@ const ImageUploader = ({ onFileSelect, title, imageUrl, onClear }: { onFileSelec
     );
 };
 
+const commonRatios = ["1:1", "9:16", "16:9", "4:3", "3:4"];
+
 const Reframe = () => {
   const { supabase, session } = useSession();
   const { t } = useLanguage();
@@ -84,10 +87,11 @@ const Reframe = () => {
 
   const [baseFile, setBaseFile] = useState<File | null>(null);
   const [prompt, setPrompt] = useState("");
-  const [dilation, setDilation] = useState(0.03);
-  const [steps, setSteps] = useState(35);
+  const [dilation, setDilation] = useState(0.05);
+  const [steps, setSteps] = useState(55);
   const [count, setCount] = useState(1);
-  const [aspectRatio, setAspectRatio] = useState("1:1");
+  const [aspectRatios, setAspectRatios] = useState<string[]>(["1:1"]);
+  const [customRatio, setCustomRatio] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [isCompareModalOpen, setIsCompareModalOpen] = useState(false);
@@ -117,36 +121,79 @@ const Reframe = () => {
     setSelectedJobId(null);
     setBaseFile(null);
     setPrompt("");
+    setAspectRatios(["1:1"]);
+  };
+
+  const handlePresetChange = (preset: 'subtle' | 'standard' | 'artistic') => {
+    if (preset === 'subtle') {
+        setDilation(0.03);
+        setSteps(35);
+    } else if (preset === 'standard') {
+        setDilation(0.05);
+        setSteps(55);
+    } else if (preset === 'artistic') {
+        setDilation(0.15);
+        setSteps(75);
+    }
+  };
+
+  const addAspectRatio = (ratio: string) => {
+    if (ratio && /^\d+:\d+$/.test(ratio) && !aspectRatios.includes(ratio)) {
+      setAspectRatios(prev => [...prev, ratio]);
+    }
+  };
+
+  const removeAspectRatio = (ratioToRemove: string) => {
+    setAspectRatios(prev => prev.filter(r => r !== ratioToRemove));
+  };
+
+  const handleAddCustomRatio = () => {
+    addAspectRatio(customRatio);
+    setCustomRatio("");
   };
 
   const handleSubmit = async () => {
     if (!baseFile) return showError("Please upload a base image.");
+    if (aspectRatios.length === 0) return showError("Please select at least one aspect ratio.");
     
     setIsSubmitting(true);
-    const toastId = showLoading("Uploading image and queuing job...");
+    const toastId = showLoading(`Queuing ${aspectRatios.length} reframe job(s)...`);
 
     try {
       const base_image_base64 = await fileToJpegBase64(baseFile);
 
-      const { error } = await supabase.functions.invoke('MIRA-AGENT-proxy-reframe', {
-        body: {
-          user_id: session?.user?.id,
-          base_image_base64,
-          prompt,
-          dilation,
-          steps,
-          count,
-          aspect_ratio: aspectRatio,
-        }
+      const jobPromises = aspectRatios.map(ratio => {
+          return supabase.functions.invoke('MIRA-AGENT-proxy-reframe', {
+              body: {
+                  user_id: session?.user?.id,
+                  base_image_base64,
+                  prompt,
+                  dilation,
+                  steps,
+                  count,
+                  aspect_ratio: ratio,
+              }
+          });
       });
 
-      if (error) throw error;
-      
+      const results = await Promise.allSettled(jobPromises);
+      const failedCount = results.filter(r => r.status === 'rejected').length;
+
       dismissToast(toastId);
-      showSuccess("Reframe job started! You can track its progress in the sidebar.");
+      if (failedCount > 0) {
+          showError(`${failedCount} jobs failed to queue. Please check the console for details.`);
+          results.forEach(r => {
+              if (r.status === 'rejected') console.error("Reframe job failed:", r.reason);
+          });
+      }
+      if (failedCount < aspectRatios.length) {
+          showSuccess(`${aspectRatios.length - failedCount} reframe job(s) started successfully!`);
+      }
+      
       queryClient.invalidateQueries({ queryKey: ['activeJobs'] });
       queryClient.invalidateQueries({ queryKey: ['recentReframeJobs'] });
       startNew();
+
     } catch (err: any) {
       dismissToast(toastId);
       showError(`Job submission failed: ${err.message}`);
@@ -203,40 +250,51 @@ const Reframe = () => {
               <CardHeader><CardTitle>2. Settings</CardTitle></CardHeader>
               <CardContent className="space-y-4">
                 <div>
-                  <Label>{t('aspectRatio')}</Label>
-                  <Select value={aspectRatio} onValueChange={setAspectRatio}>
+                  <Label>{t('generationPreset')}</Label>
+                  <Select defaultValue="standard" onValueChange={(v) => handlePresetChange(v as any)}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="1:1">Square (1:1)</SelectItem>
-                      <SelectItem value="9:16">Portrait (9:16)</SelectItem>
-                      <SelectItem value="16:9">Widescreen (16:9)</SelectItem>
-                      <SelectItem value="4:3">Landscape (4:3)</SelectItem>
-                      <SelectItem value="3:4">Portrait (3:4)</SelectItem>
+                      <SelectItem value="subtle">{t('presetSubtle')}</SelectItem>
+                      <SelectItem value="standard">{t('presetStandard')}</SelectItem>
+                      <SelectItem value="artistic">{t('presetArtistic')}</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+                <div>
+                  <Label>{t('aspectRatio')}</Label>
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap gap-2">
+                      {aspectRatios.map(r => (
+                        <Badge key={r} variant="secondary" className="flex items-center gap-1">
+                          {r}
+                          <button onClick={() => removeAspectRatio(r)} className="rounded-full hover:bg-muted-foreground/20"><X className="h-3 w-3" /></button>
+                        </Badge>
+                      ))}
+                    </div>
+                    <div className="flex gap-2">
+                      <Input value={customRatio} onChange={(e) => setCustomRatio(e.target.value)} placeholder={t('customRatio')} onKeyDown={(e) => e.key === 'Enter' && handleAddCustomRatio()} />
+                      <Button onClick={handleAddCustomRatio}>{t('addRatio')}</Button>
+                    </div>
+                    <div className="flex flex-wrap gap-1 pt-1">
+                      {commonRatios.filter(r => !aspectRatios.includes(r)).map(r => (
+                        <Button key={r} size="xs" variant="outline" onClick={() => addAspectRatio(r)}>{r}</Button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
                 <div>
                   <Label>{t('maskDilation')}: {dilation.toFixed(3)}</Label>
-                  <Slider value={[dilation]} onValueChange={(v) => setDilation(v[0])} min={0} max={0.1} step={0.005} />
+                  <Slider value={[dilation]} onValueChange={(v) => setDilation(v[0])} min={0} max={0.2} step={0.005} />
                 </div>
                 <div>
                   <Label>{t('editSteps')}: {steps}</Label>
-                  <Slider value={[steps]} onValueChange={(v) => setSteps(v[0])} min={10} max={75} step={1} />
-                </div>
-                <div>
-                  <Label>{t('imageCount')}</Label>
-                  <Select value={String(count)} onValueChange={(v) => setCount(Number(v))}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {[1, 2, 3, 4].map(n => <SelectItem key={n} value={String(n)}>{n}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
+                  <Slider value={[steps]} onValueChange={(v) => setSteps(v[0])} min={10} max={100} step={1} />
                 </div>
               </CardContent>
             </Card>
-            <Button size="lg" className="w-full" onClick={handleSubmit} disabled={isSubmitting || !baseFile}>
+            <Button size="lg" className="w-full" onClick={handleSubmit} disabled={isSubmitting || !baseFile || aspectRatios.length === 0}>
               {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
-              {t('generate')}
+              {t('generateNImages', { count: aspectRatios.length })}
             </Button>
           </div>
           <div className="lg:col-span-2 space-y-6">
