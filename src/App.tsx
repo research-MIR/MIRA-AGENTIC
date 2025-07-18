@@ -27,6 +27,7 @@ import VirtualTryOnPacks from "./pages/VirtualTryOnPacks.tsx";
 import EditWithWords from "./pages/EditWithWords.tsx";
 import Experimental from "./pages/Experimental.tsx";
 import ProductRecontext from "./pages/ProductRecontext.tsx";
+import Reframe from "./pages/Reframe.tsx";
 import { GlobalModals } from "./components/GlobalModals.tsx";
 
 const App = () => {
@@ -101,6 +102,7 @@ const App = () => {
             <Route path="/inpainting" element={<Inpainting />} />
             <Route path="/edit-with-words" element={<EditWithWords />} />
             <Route path="/product-recontext" element={<ProductRecontext />} />
+            <Route path="/reframe" element={<Reframe />} />
             <Route path="/editor" element={<Editor />} />
             <Route path="/projects" element={<Projects />} />
             <Route path="/projects/:projectId" element={<ProjectDetail />} />

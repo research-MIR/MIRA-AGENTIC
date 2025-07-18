@@ -1,0 +1,121 @@
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { GoogleAuth } from "npm:google-auth-library";
+import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
+import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
+const GOOGLE_VERTEX_AI_SA_KEY_JSON = Deno.env.get('GOOGLE_VERTEX_AI_SA_KEY_JSON');
+const GOOGLE_PROJECT_ID = Deno.env.get('GOOGLE_PROJECT_ID');
+const GOOGLE_LOCATION = 'us-central1';
+const MODEL_ID = 'imagen-3.0-capability-001';
+const GENERATED_IMAGES_BUCKET = 'mira-generations';
+
+async function downloadImageAsBase64(supabase: SupabaseClient, publicUrl: string): Promise<string> {
+    const url = new URL(publicUrl);
+    const pathSegments = url.pathname.split('/');
+    const bucketName = pathSegments[pathSegments.indexOf('public') + 1];
+    const filePath = pathSegments.slice(pathSegments.indexOf(bucketName) + 1).join('/');
+    
+    const { data, error } = await supabase.storage.from(bucketName).download(filePath);
+    if (error) throw new Error(`Failed to download image from storage: ${error.message}`);
+    
+    const buffer = await data.arrayBuffer();
+    return encodeBase64(buffer);
+}
+
+serve(async (req) => {
+  if (req.method === 'OPTIONS') { return new Response('ok', { headers: corsHeaders }); }
+
+  const { job_id } = await req.json();
+  if (!job_id) throw new Error("job_id is required.");
+
+  const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+  const logPrefix = `[ReframeWorker][${job_id}]`;
+
+  try {
+    console.log(`${logPrefix} Starting job.`);
+    await supabase.from('mira-agent-jobs').update({ status: 'processing' }).eq('id', job_id);
+
+    const { data: job, error: fetchError } = await supabase.from('mira-agent-jobs').select('context, user_id').eq('id', job_id).single();
+    if (fetchError) throw fetchError;
+
+    const { base_image_url, mask_image_url, prompt, dilation, steps, count } = job.context;
+    if (!base_image_url || !mask_image_url) throw new Error("Missing image URLs in job context.");
+
+    console.log(`${logPrefix} Downloading images...`);
+    const [base_image_b64, mask_image_b64] = await Promise.all([
+        downloadImageAsBase64(supabase, base_image_url),
+        downloadImageAsBase64(supabase, mask_image_url)
+    ]);
+    console.log(`${logPrefix} Images downloaded and encoded.`);
+
+    const auth = new GoogleAuth({
+      credentials: JSON.parse(GOOGLE_VERTEX_AI_SA_KEY_JSON!),
+      scopes: 'https://www.googleapis.com/auth/cloud-platform'
+    });
+    const accessToken = await auth.getAccessToken();
+    const apiUrl = `https://${GOOGLE_LOCATION}-aiplatform.googleapis.com/v1/projects/${GOOGLE_PROJECT_ID}/locations/${GOOGLE_LOCATION}/publishers/google/models/${MODEL_ID}:predict`;
+
+    const requestBody = {
+      instances: [{
+        prompt: prompt || "",
+        referenceImages: [
+          { referenceType: "REFERENCE_TYPE_RAW", referenceId: 1, referenceImage: { bytesBase64Encoded: base_image_b64 } },
+          { referenceType: "REFERENCE_TYPE_MASK", referenceId: 2, referenceImage: { bytesBase64Encoded: mask_image_b64 }, maskImageConfig: { maskMode: "MASK_MODE_USER_PROVIDED", dilation: dilation || 0.03 } }
+        ]
+      }],
+      parameters: {
+        editConfig: { baseSteps: steps || 35 },
+        editMode: "EDIT_MODE_OUTPAINT",
+        sampleCount: count || 1
+      }
+    };
+
+    console.log(`${logPrefix} Calling Google Vertex AI...`);
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json; charset=utf-8' },
+      body: JSON.stringify(requestBody)
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      throw new Error(`API call failed with status ${response.status}: ${errorBody}`);
+    }
+
+    const responseData = await response.json();
+    const predictions = responseData.predictions;
+    if (!predictions || !Array.isArray(predictions) || predictions.length === 0) {
+      throw new Error("API response did not contain valid image predictions.");
+    }
+    console.log(`${logPrefix} Received ${predictions.length} predictions.`);
+
+    const uploadPromises = predictions.map(async (prediction: any, index: number) => {
+      const imageBuffer = decodeBase64(prediction.bytesBase64Encoded);
+      const filePath = `${job.user_id}/reframe/${Date.now()}_${index}.png`;
+      await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(filePath, imageBuffer, { contentType: 'image/png', upsert: true });
+      const { data: { publicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
+      return { publicUrl, storagePath: filePath };
+    });
+
+    const finalImages = await Promise.all(uploadPromises);
+    console.log(`${logPrefix} Uploaded ${finalImages.length} images to storage.`);
+
+    await supabase.from('mira-agent-jobs').update({
+      status: 'complete',
+      final_result: { images: finalImages }
+    }).eq('id', job_id);
+
+    return new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+
+  } catch (error) {
+    console.error(`${logPrefix} Error:`, error);
+    await supabase.from('mira-agent-jobs').update({ status: 'failed', error_message: error.message }).eq('id', job_id);
+    return new Response(JSON.stringify({ error: error.message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
+  }
+});

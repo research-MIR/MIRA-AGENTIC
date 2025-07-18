@@ -6,8 +6,8 @@ import { useSession } from "./Auth/SessionContextProvider";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Skeleton } from "./ui/skeleton";
-import { useLanguage } from "@/context/LanguageContext";
-import { useOnboardingTour } from "@/context/OnboardingTourContext";
+import { useLanguage } from "./context/LanguageContext";
+import { useOnboardingTour } from "./context/OnboardingTourContext";
 import { ActiveJobsTracker } from "@/components/Jobs/ActiveJobsTracker";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
@@ -180,6 +180,10 @@ export const Sidebar = () => {
               <NavLink id="recontext-nav-link" to="/product-recontext" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
                 <Shapes size={20} />
                 {t('productRecontextualization')}
+              </NavLink>
+              <NavLink id="reframe-nav-link" to="/reframe" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
+                <BoxSelect size={20} />
+                {t('reframe')}
               </NavLink>
               <NavLink id="editor-nav-link" to="/editor" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
                 <PencilRuler size={20} />
