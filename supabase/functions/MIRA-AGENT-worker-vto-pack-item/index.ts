@@ -3,6 +3,7 @@ import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-
 import { Image as ISImage } from "https://deno.land/x/imagescript@1.2.15/mod.ts";
 import { decodeBase64, encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 import imageSize from "https://esm.sh/image-size";
+import { createCanvas, loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
 
 // --- Global Error Handlers for Observability ---
 self.addEventListener("error", (evt) => {
@@ -260,7 +261,7 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
 }
 
 async function handleCompositing(supabase: SupabaseClient, job: any, logPrefix: string) {
-    console.log(`${logPrefix} Compositing best result (simplified bulldozer approach).`);
+    console.log(`${logPrefix} Compositing best result with feathering.`);
     const { bbox, generated_variations, qa_best_index } = job.metadata;
     if (!bbox || !generated_variations || qa_best_index === undefined) {
         throw new Error("Missing data for compositing.");
@@ -268,24 +269,43 @@ async function handleCompositing(supabase: SupabaseClient, job: any, logPrefix: 
 
     const bestVtoPatchBase64 = generated_variations[qa_best_index].base64Image;
     const vtoPatchBuffer = decodeBase64(bestVtoPatchBase64);
-    let vtoPatchImage = await ISImage.decode(vtoPatchBuffer);
+    const vtoPatchImage = await loadImage(vtoPatchBuffer);
 
     const personBlob = await safeDownload(supabase, job.source_person_image_url);
-    const personImage = await ISImage.decode(await personBlob.arrayBuffer());
+    const personImage = await loadImage(await personBlob.arrayBuffer());
 
-    const finalImage = personImage.clone();
+    // Main canvas for the final image
+    const finalCanvas = createCanvas(personImage.width(), personImage.height());
+    const finalCtx = finalCanvas.getContext('2d');
 
-    // --- SIMPLIFIED LOGIC ---
-    // Resize the patch to the exact dimensions of the bounding box
-    vtoPatchImage = vtoPatchImage.resize(bbox.width, bbox.height);
-    console.log(`${logPrefix} [BULLDOZER] Resized patch to bbox dimensions: ${bbox.width}x${bbox.height}`);
+    // 1. Draw the original image as the base layer
+    finalCtx.drawImage(personImage, 0, 0);
 
-    // Composite directly at the bbox coordinates
-    finalImage.composite(vtoPatchImage, bbox.x, bbox.y);
-    console.log(`${logPrefix} [BULLDOZER] Composited patch at (${bbox.x}, ${bbox.y})`);
-    // --- END SIMPLIFIED LOGIC ---
+    // 2. Create a temporary canvas for the feathered patch
+    const patchCanvas = createCanvas(bbox.width, bbox.height);
+    const patchCtx = patchCanvas.getContext('2d');
 
-    const finalImageBuffer = await finalImage.encode(0); // Encode as PNG
+    // 3. Draw the VTO patch onto the temp canvas
+    patchCtx.drawImage(vtoPatchImage, 0, 0, bbox.width, bbox.height);
+
+    // 4. Apply a feathered alpha mask
+    patchCtx.globalCompositeOperation = 'destination-in';
+    const featherSize = Math.max(8, Math.round(Math.min(bbox.width, bbox.height) * 0.05)); // Feather by 5%, min 8px
+    
+    // Create a blurred rectangle as the mask
+    const maskCanvas = createCanvas(bbox.width, bbox.height);
+    const maskCtx = maskCanvas.getContext('2d');
+    maskCtx.fillStyle = 'white';
+    maskCtx.fillRect(featherSize, featherSize, bbox.width - featherSize * 2, bbox.height - featherSize * 2);
+    maskCtx.filter = `blur(${featherSize}px)`;
+    maskCtx.drawImage(maskCanvas, 0, 0); // Draw itself to apply the blur
+    
+    patchCtx.drawImage(maskCanvas, 0, 0);
+
+    // 5. Composite the feathered patch onto the main canvas
+    finalCtx.drawImage(patchCanvas, bbox.x, bbox.y);
+
+    const finalImageBuffer = finalCanvas.toBuffer('image/png');
     if (!finalImageBuffer || finalImageBuffer.length === 0) {
         throw new Error("Failed to encode the final composite image.");
     }
