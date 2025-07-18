@@ -3,6 +3,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+const UPLOAD_BUCKET = 'mira-agent-user-uploads';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -23,12 +24,17 @@ serve(async (req) => {
     const { data: job, error: fetchError } = await supabase.from('mira-agent-jobs').select('context, user_id').eq('id', job_id).single();
     if (fetchError) throw fetchError;
 
-    const { base_image_url, mask_image_url, prompt, user_id } = job.context;
+    const { base_image_url, prompt } = job.context;
     let finalPrompt = prompt;
 
     if (!prompt || prompt.trim() === "") {
       console.log(`${logPrefix} No user prompt provided. Generating one automatically.`);
-      const { data: blob, error: downloadError } = await supabase.storage.from('mira-agent-user-uploads').download(base_image_url.split('/').slice(-2).join('/'));
+      
+      const url = new URL(base_image_url);
+      const pathPrefix = `/storage/v1/object/public/${UPLOAD_BUCKET}/`;
+      const imagePath = decodeURIComponent(url.pathname.substring(pathPrefix.length));
+
+      const { data: blob, error: downloadError } = await supabase.storage.from(UPLOAD_BUCKET).download(imagePath);
       if (downloadError) throw new Error(`Failed to download base image for prompt generation: ${downloadError.message}`);
       
       const reader = new FileReader();
@@ -51,7 +57,7 @@ serve(async (req) => {
     const { error: reframeError } = await supabase.functions.invoke('MIRA-AGENT-tool-reframe-image', {
       body: { 
         job_id,
-        prompt: finalPrompt // Pass the potentially auto-generated prompt
+        prompt: finalPrompt
       }
     });
     if (reframeError) throw new Error(`Reframe tool invocation failed: ${reframeError.message}`);
