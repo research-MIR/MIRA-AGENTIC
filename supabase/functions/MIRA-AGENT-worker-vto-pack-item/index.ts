@@ -129,7 +129,7 @@ serve(async (req) => {
 });
 
 async function handleStart(supabase: SupabaseClient, job: any, logPrefix: string) {
-  console.log(`${logPrefix} Step 1: Getting bounding box for person image.`);
+  console.log(`${logPrefix} Step 1: Getting bounding box and optimizing images.`);
   const bboxData = await safeInvoke(supabase, 'MIRA-AGENT-orchestrator-bbox', { image_url: job.source_person_image_url });
   
   const personBox = bboxData?.person;
@@ -138,7 +138,11 @@ async function handleStart(supabase: SupabaseClient, job: any, logPrefix: string
   }
   console.log(`${logPrefix} Bounding box received.`);
 
-  let personBlob: Blob | null = await safeDownload(supabase, job.source_person_image_url);
+  let [personBlob, garmentBlob] = await Promise.all([
+    safeDownload(supabase, job.source_person_image_url),
+    safeDownload(supabase, job.source_garment_image_url)
+  ]);
+
   const personImage = await ISImage.decode(await personBlob.arrayBuffer());
   personBlob = null; // GC
   const { width: originalWidth, height: originalHeight } = personImage;
@@ -158,14 +162,35 @@ async function handleStart(supabase: SupabaseClient, job: any, logPrefix: string
   const croppedPersonImage = personImage.clone().crop(bbox.x, bbox.y, bbox.width, bbox.height);
   const croppedPersonBuffer = await croppedPersonImage.encode('jpeg', 90);
   
-  const tempPath = `tmp/${job.user_id}/${Date.now()}-cropped_person.jpeg`;
-  await safeUpload(supabase, TEMP_UPLOAD_BUCKET, tempPath, croppedPersonBuffer, { contentType: "image/jpeg" });
-  const croppedPersonUrl = await safeGetPublicUrl(supabase, TEMP_UPLOAD_BUCKET, tempPath);
+  const tempPersonPath = `tmp/${job.user_id}/${Date.now()}-cropped_person.jpeg`;
+  await safeUpload(supabase, TEMP_UPLOAD_BUCKET, tempPersonPath, croppedPersonBuffer, { contentType: "image/jpeg" });
+  const croppedPersonUrl = await safeGetPublicUrl(supabase, TEMP_UPLOAD_BUCKET, tempPersonPath);
   console.log(`${logPrefix} Cropped person image uploaded to temp storage.`);
+
+  const garmentImage = await ISImage.decode(await garmentBlob.arrayBuffer());
+  garmentBlob = null; // GC
+  const MAX_GARMENT_DIMENSION = 1024;
+  if (Math.max(garmentImage.width, garmentImage.height) > MAX_GARMENT_DIMENSION) {
+      garmentImage.resize(
+          garmentImage.width > garmentImage.height ? MAX_GARMENT_DIMENSION : ISImage.RESIZE_AUTO,
+          garmentImage.height > garmentImage.width ? MAX_GARMENT_DIMENSION : ISImage.RESIZE_AUTO
+      );
+  }
+  const optimizedGarmentBuffer = await garmentImage.encode('jpeg', 90);
+  const tempGarmentPath = `tmp/${job.user_id}/${Date.now()}-optimized_garment.jpeg`;
+  await safeUpload(supabase, TEMP_UPLOAD_BUCKET, tempGarmentPath, optimizedGarmentBuffer, { contentType: "image/jpeg" });
+  const optimizedGarmentUrl = await safeGetPublicUrl(supabase, TEMP_UPLOAD_BUCKET, tempGarmentPath);
+  console.log(`${logPrefix} Optimized garment image uploaded to temp storage.`);
 
   await supabase.from('mira-agent-bitstudio-jobs').update({
     status: 'processing',
-    metadata: { ...job.metadata, bbox, cropped_person_url: croppedPersonUrl, google_vto_step: 'generate_step_1' }
+    metadata: { 
+        ...job.metadata, 
+        bbox, 
+        cropped_person_url: croppedPersonUrl, 
+        optimized_garment_url: optimizedGarmentUrl,
+        google_vto_step: 'generate_step_1' 
+    }
   }).eq('id', job.id);
 
   await safeInvoke(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
@@ -176,7 +201,7 @@ async function handleGenerateStep(supabase: SupabaseClient, job: any, sampleStep
   
   const data = await safeInvoke(supabase, 'MIRA-AGENT-tool-virtual-try-on', {
     person_image_url: job.metadata.cropped_person_url,
-    garment_image_url: job.source_garment_image_url,
+    garment_image_url: job.metadata.optimized_garment_url,
     sample_count: 1,
     sample_step: sampleStep
   });
