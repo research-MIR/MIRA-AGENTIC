@@ -174,20 +174,10 @@ async function handleStart(supabase: SupabaseClient, job: any, logPrefix: string
 async function handleGenerateStep(supabase: SupabaseClient, job: any, sampleStep: number, nextStep: string, logPrefix: string) {
   console.log(`${logPrefix} Generating variation with ${sampleStep} steps.`);
   
-  let [personBlob, garmentBlob] = await Promise.all([
-    safeDownload(supabase, job.metadata.cropped_person_url),
-    safeDownload(supabase, job.source_garment_image_url)
-  ]);
-
-  const [personBase64, garmentBase64] = await Promise.all([
-    blobToBase64(personBlob),
-    blobToBase64(garmentBlob)
-  ]);
-  personBlob = null; garmentBlob = null; // GC
-
+  // Pass URLs directly instead of base64 to avoid hitting payload size limits.
   const data = await safeInvoke(supabase, 'MIRA-AGENT-tool-virtual-try-on', {
-    person_image_base64: personBase64,
-    garment_image_base64: garmentBase64,
+    person_image_url: job.metadata.cropped_person_url,
+    garment_image_url: job.source_garment_image_url,
     sample_count: 1,
     sample_step: sampleStep
   });
