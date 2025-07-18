@@ -281,7 +281,7 @@ async function handleCompositing(supabase: SupabaseClient, job: any, logPrefix: 
   
   const standardizedVtoPatchBuffer = await standardizeImageBuffer(vtoPatchBuffer);
   let vtoPatchImage = await ISImage.decode(standardizedVtoPatchBuffer);
-  if (!vtoPatchImage || vtoPatchImage.width <= 1 || vtoPatchImage.height <= 1) {
+  if (!vtoPatchImage || vtoPatchImage.width <= 0 || vtoPatchImage.height <= 0) {
     throw new Error("Failed to decode standardized VTO patch image into a valid image.");
   }
   console.log(`${logPrefix} [COMPOSITE_DEBUG] Decoded VTO patch. Dimensions: ${vtoPatchImage.width}x${vtoPatchImage.height}`);
@@ -292,27 +292,20 @@ async function handleCompositing(supabase: SupabaseClient, job: any, logPrefix: 
   if (!personImage) throw new Error("Failed to decode source person image.");
   console.log(`${logPrefix} [COMPOSITE_DEBUG] Decoded source person image. Dimensions: ${personImage.width}x${personImage.height}`);
 
-  let cropAmount = 4;
-  cropAmount = Math.min(cropAmount, Math.floor(Math.min(vtoPatchImage.width, vtoPatchImage.height) / 2) - 1);
-  console.log(`${logPrefix} [COMPOSITE_DEBUG] Calculated crop amount: ${cropAmount}px`);
+  // Create a full-size canvas for the final image
+  const finalImage = new ISImage(personImage.width, personImage.height);
+  finalImage.composite(personImage, 0, 0);
+  console.log(`${logPrefix} [COMPOSITE_DEBUG] Final canvas created with source image.`);
 
-  if (cropAmount > 0) {
-    vtoPatchImage = vtoPatchImage.crop(cropAmount, cropAmount, vtoPatchImage.width - cropAmount * 2, vtoPatchImage.height - cropAmount * 2);
-    console.log(`${logPrefix} [COMPOSITE_DEBUG] Cropped VTO patch. New dimensions: ${vtoPatchImage.width}x${vtoPatchImage.height}`);
-  }
+  // Create a temporary canvas for the patch to apply the feathered mask
+  const patchCanvas = new ISImage(vtoPatchImage.width, vtoPatchImage.height);
+  patchCanvas.composite(vtoPatchImage, 0, 0);
+  console.log(`${logPrefix} [COMPOSITE_DEBUG] Temporary patch canvas created.`);
 
-  const targetWidth = bbox.width - (cropAmount > 0 ? cropAmount * 2 : 0);
-  const targetHeight = bbox.height - (cropAmount > 0 ? cropAmount * 2 : 0);
-  console.log(`${logPrefix} [COMPOSITE_DEBUG] Target dimensions for resize: ${targetWidth}x${targetHeight}`);
-
-  if (vtoPatchImage.width !== targetWidth || vtoPatchImage.height !== targetHeight) {
-      vtoPatchImage = vtoPatchImage.resize(targetWidth, targetHeight);
-      console.log(`${logPrefix} [COMPOSITE_DEBUG] Resized VTO patch. New dimensions: ${vtoPatchImage.width}x${vtoPatchImage.height}`);
-  }
-
-  const featherWidth = Math.min(20, Math.floor(Math.min(vtoPatchImage.width, vtoPatchImage.height) / 2));
+  // Create the feathered mask
+  const featherWidth = Math.min(20, Math.floor(Math.min(patchCanvas.width, patchCanvas.height) / 4));
   console.log(`${logPrefix} [COMPOSITE_DEBUG] Feather width for mask: ${featherWidth}px`);
-  const mask = new ISImage(vtoPatchImage.width, vtoPatchImage.height);
+  const mask = new ISImage(patchCanvas.width, patchCanvas.height);
   for (let y = 0; y < mask.height; y++) {
       for (let x = 0; x < mask.width; x++) {
           const distToEdge = Math.min(x, mask.width - 1 - x, y, mask.height - 1 - y);
@@ -320,15 +313,17 @@ async function handleCompositing(supabase: SupabaseClient, job: any, logPrefix: 
           mask.setPixelAt(x, y, ISImage.rgbaToColor(alpha, alpha, alpha, 255));
       }
   }
-  vtoPatchImage.mask(mask, true);
+  console.log(`${logPrefix} [COMPOSITE_DEBUG] Feather mask generated.`);
+
+  // Apply the mask to the patch
+  patchCanvas.mask(mask, true);
   console.log(`${logPrefix} [COMPOSITE_DEBUG] Feathering mask applied to VTO patch.`);
 
-  const pasteX = bbox.x + (cropAmount > 0 ? cropAmount : 0);
-  const pasteY = bbox.y + (cropAmount > 0 ? cropAmount : 0);
+  // Composite the feathered patch onto the final image
+  const pasteX = bbox.x;
+  const pasteY = bbox.y;
   console.log(`${logPrefix} [COMPOSITE_DEBUG] Final paste coordinates: x=${pasteX}, y=${pasteY}`);
-
-  const finalImage = personImage.clone();
-  finalImage.composite(vtoPatchImage, pasteX, pasteY);
+  finalImage.composite(patchCanvas, pasteX, pasteY);
   console.log(`${logPrefix} Composition complete.`);
 
   const finalImageBuffer = await finalImage.encodeJPEG(95);
