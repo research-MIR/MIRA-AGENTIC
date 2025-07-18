@@ -53,15 +53,39 @@ const blobToBase64 = async (blob: Blob): Promise<string> => {
     return encodeBase64(new Uint8Array(buffer)); // Use Uint8Array for safety
 };
 
-async function downloadFromSignedUrl(url: string, requestId: string): Promise<Blob> {
-    if (!url.includes('/sign/')) {
-        throw new Error(`[Downloader][${requestId}] Received a non-signed URL, which is not supported. Please provide a signed URL.`);
+async function downloadImage(supabase: SupabaseClient, url: string, requestId: string): Promise<Blob> {
+    console.log(`[Downloader][${requestId}] Attempting to download from URL: ${url}`);
+    if (url.includes('supabase.co')) {
+        const urlObj = new URL(url);
+        const pathSegments = urlObj.pathname.split('/');
+        
+        const objectSegmentIndex = pathSegments.indexOf('object');
+        if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) {
+            throw new Error(`[Downloader][${requestId}] Could not parse bucket name from Supabase URL: ${url}`);
+        }
+        
+        const bucketName = pathSegments[objectSegmentIndex + 2];
+        const filePath = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
+
+        if (!bucketName || !filePath) {
+            throw new Error(`[Downloader][${requestId}] Could not parse bucket or path from Supabase URL: ${url}`);
+        }
+
+        console.log(`[Downloader][${requestId}] Parsed Supabase path. Bucket: ${bucketName}, Path: ${filePath}`);
+        const { data: blob, error } = await supabase.storage.from(bucketName).download(filePath);
+        if (error) {
+            throw new Error(`[Downloader][${requestId}] Failed to download from Supabase storage (${filePath}): ${error.message}`);
+        }
+        console.log(`[Downloader][${requestId}] Supabase download successful. Blob size: ${blob.size}`);
+        return blob;
+    } else {
+        // Handle external URLs (like BitStudio)
+        console.log(`[Downloader][${requestId}] URL is not from Supabase. Fetching directly.`);
+        const response = await fetchWithRetry(url, {}, MAX_RETRIES, RETRY_DELAY_MS, requestId);
+        const blob = await response.blob();
+        console.log(`[Downloader][${requestId}] External URL download successful. Blob size: ${blob.size}`);
+        return blob;
     }
-    console.log(`[Downloader][${requestId}] Downloading from signed URL.`);
-    const response = await fetchWithRetry(url, {}, MAX_RETRIES, RETRY_DELAY_MS, requestId);
-    const blob = await response.blob();
-    console.log(`[Downloader][${requestId}] Signed URL download successful. Blob size: ${blob.size}`);
-    return blob;
 }
 
 serve(async (req) => {
@@ -72,6 +96,8 @@ serve(async (req) => {
     return new Response('ok', { headers: corsHeaders });
   }
   
+  const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+
   try {
     if (!GOOGLE_VERTEX_AI_SA_KEY_JSON || !GOOGLE_PROJECT_ID) {
       throw new Error("Server configuration error: Missing Google Cloud credentials.");
@@ -95,7 +121,7 @@ serve(async (req) => {
         person_image_base64 = person_b64_input;
     } else if (person_image_url) {
         console.log(`[VirtualTryOnTool][${requestId}] Downloading person image from URL: ${person_image_url}`);
-        const personBlob = await downloadFromSignedUrl(person_image_url, requestId);
+        const personBlob = await downloadImage(supabase, person_image_url, requestId);
         person_image_base64 = await blobToBase64(personBlob);
         console.log(`[VirtualTryOnTool][${requestId}] Person image processed. Base64 length: ${person_image_base64.length}`);
     } else {
@@ -106,7 +132,7 @@ serve(async (req) => {
         garment_image_base64 = garment_b64_input;
     } else if (garment_image_url) {
         console.log(`[VirtualTryOnTool][${requestId}] Downloading garment image from URL: ${garment_image_url}`);
-        const garmentBlob = await downloadFromSignedUrl(garment_image_url, requestId);
+        const garmentBlob = await downloadImage(supabase, garment_image_url, requestId);
         garment_image_base64 = await blobToBase64(garmentBlob);
         console.log(`[VirtualTryOnTool][${requestId}] Garment image processed. Base64 length: ${garment_image_base64.length}`);
     } else {
