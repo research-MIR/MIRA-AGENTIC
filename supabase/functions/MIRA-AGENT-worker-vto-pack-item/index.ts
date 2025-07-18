@@ -313,52 +313,44 @@ async function handleCompositing(supabase: SupabaseClient, job: any, logPrefix: 
     }
 
 
-    // --- FEATHERING LOGIC ---
-    const featherWidth = 20;
-    console.log(`${logPrefix} [COMPOSITE_DEBUG] Feather width for mask: ${featherWidth}px`);
+    // --- FEATHERING LOGIC (DIAGNOSTIC VERSION) ---
+    console.log(`${logPrefix} [COMPOSITE_DEBUG] Preparing to create mask for patch with dimensions: ${vtoPatchImage.width}x${vtoPatchImage.height}`);
+
+    if (!(vtoPatchImage.width > 0 && vtoPatchImage.height > 0)) {
+        throw new Error(`Invalid vtoPatchImage dimensions before mask creation: ${vtoPatchImage.width}x${vtoPatchImage.height}`);
+    }
 
     const mask = new ISImage(vtoPatchImage.width, vtoPatchImage.height);
     console.log(`${logPrefix} [COMPOSITE_DEBUG] Mask canvas created with dimensions: ${mask.width}x${mask.height}.`);
 
-    for (let y = 0; y < mask.height; y++) {
-        for (let x = 0; x < mask.width; x++) {
-            const distToEdgeX = Math.min(x, mask.width - 1 - x);
-            const distToEdgeY = Math.min(y, mask.height - 1 - y);
-            const distToEdge = Math.min(distToEdgeX, distToEdgeY);
-            let alpha = 255;
-            if (distToEdge < featherWidth) {
-                alpha = (distToEdge / featherWidth) * 255;
-            }
-            const color = ISImage.rgbaToColor(alpha, alpha, alpha, 255);
-            mask.setPixelAt(x, y, color);
-        }
+    try {
+        console.log(`${logPrefix} [COMPOSITE_DEBUG] Attempting to fill the mask with a solid color (diagnostic).`);
+        // We replace the complex loop with a simple fill command.
+        // This will tell us if the 'mask' object is fundamentally valid.
+        const white = ISImage.rgbaToColor(255, 255, 255, 255);
+        mask.fill(white);
+        console.log(`${logPrefix} [COMPOSITE_DEBUG] Mask fill successful.`);
+    } catch (e) {
+        console.error(`${logPrefix} [COMPOSITE_DEBUG] CRASH during mask.fill(). Error: ${e.stack}`);
+        throw e; // re-throw
     }
-    console.log(`${logPrefix} [COMPOSITE_DEBUG] Feathering loop complete.`);
+
     vtoPatchImage.mask(mask, true);
     console.log(`${logPrefix} [COMPOSITE_DEBUG] Patch masked successfully.`);
     // --- END OF FEATHERING LOGIC ---
-
 
     const pasteX = bbox.x + cropAmount;
     const pasteY = bbox.y + cropAmount;
     console.log(`${logPrefix} [COMPOSITE_DEBUG] Final paste coordinates: (${pasteX}, ${pasteY})`);
 
-
-    // --- NEW CHECK 2: VALIDATE COMPOSITE BOUNDARIES ---
     if (pasteX + vtoPatchImage.width > finalImage.width || pasteY + vtoPatchImage.height > finalImage.height) {
         throw new Error(
-            `Composite boundary error. Aborting. ` +
-            `Canvas: ${finalImage.width}x${finalImage.height}. ` +
-            `Patch: ${vtoPatchImage.width}x${vtoPatchImage.height}. ` +
-            `Paste At: (${pasteX}, ${pasteY}). ` +
-            `Needed Width: ${pasteX + vtoPatchImage.width}, Needed Height: ${pasteY + vtoPatchImage.height}`
+            `Composite boundary error. Aborting. Canvas: ${finalImage.width}x${finalImage.height}, Patch: ${vtoPatchImage.width}x${vtoPatchImage.height}, Paste At: (${pasteX}, ${pasteY}).`
         );
     }
     
-    console.log(`${logPrefix} [COMPOSITE_DEBUG] Final canvas created with source image.`);
     finalImage.composite(vtoPatchImage, pasteX, pasteY);
     console.log(`${logPrefix} Composition complete.`);
-
 
     const finalImageBuffer = await finalImage.encode(0);
     if (!finalImageBuffer || finalImageBuffer.length === 0) {
@@ -366,7 +358,7 @@ async function handleCompositing(supabase: SupabaseClient, job: any, logPrefix: 
     }
 
     const finalFilePath = `${job.user_id}/vto-packs/${Date.now()}_final_composite.png`;
-    await safeUpload(supabase, GENERATED_IMAGES_BUCKET, finalFilePath, new Blob([finalImageBuffer], { type: 'image/png' }), {
+    await safeUpload(supabase, GENERATED_IMAGES_BUCKET, new Blob([finalImageBuffer], { type: 'image/png' }), {
         contentType: 'image/png',
         upsert: true
     });
