@@ -13,12 +13,12 @@ import { ImageCompareModal } from "@/components/ImageCompareModal";
 import { Slider } from "@/components/ui/slider";
 import { RecentJobThumbnail } from "@/components/Jobs/RecentJobThumbnail";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useSecureImage } from "@/hooks/useSecureImage";
 import { useDropzone } from "@/hooks/useDropzone";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RealtimeChannel } from "@supabase/supabase-js";
+import { SecureImageDisplay } from "@/components/VTO/SecureImageDisplay";
 
 interface ReframeJob {
   id: string;
