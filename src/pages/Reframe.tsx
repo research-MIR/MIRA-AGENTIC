@@ -77,7 +77,7 @@ const ImageUploader = ({ onFileSelect, title, imageUrl, onClear }: { onFileSelec
     );
 };
 
-const commonRatios = ["1:1", "9:16", "16:9", "4:3", "3:4"];
+const commonRatios = ["1:1", "9:16", "16:9", "4:3", "3:4", "21:9", "3:2", "2:3", "4:5", "5:4"];
 
 const Reframe = () => {
   const { supabase, session } = useSession();
