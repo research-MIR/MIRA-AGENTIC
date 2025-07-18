@@ -305,14 +305,14 @@ async function handleCompositing(supabase: SupabaseClient, job: any, logPrefix: 
     // 5. Composite the feathered patch onto the main canvas
     finalCtx.drawImage(patchCanvas, bbox.x, bbox.y);
 
-    const finalImageBuffer = finalCanvas.toBuffer('image/png');
+    const finalImageBuffer = finalCanvas.toBuffer('image/jpeg', { quality: 0.9 });
     if (!finalImageBuffer || finalImageBuffer.length === 0) {
         throw new Error("Failed to encode the final composite image.");
     }
 
-    const finalFilePath = `${job.user_id}/vto-packs/${Date.now()}_final_composite.png`;
+    const finalFilePath = `${job.user_id}/vto-packs/${Date.now()}_final_composite.jpeg`;
     await safeUpload(supabase, GENERATED_IMAGES_BUCKET, finalFilePath, finalImageBuffer, {
-        contentType: 'image/png',
+        contentType: 'image/jpeg',
         upsert: true
     });
 
