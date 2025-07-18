@@ -61,8 +61,8 @@ serve(async (req) => {
         downloadImageAsBlob(supabase, mask_image_url)
     ]);
 
-    const baseImage = await loadImage(await baseImageBlob.arrayBuffer());
-    const maskImage = await loadImage(await maskImageBlob.arrayBuffer());
+    const baseImage = await loadImage(new Uint8Array(await baseImageBlob.arrayBuffer()));
+    const maskImage = await loadImage(new Uint8Array(await maskImageBlob.arrayBuffer()));
 
     let finalBaseImageB64: string;
     let finalMaskImageB64: string;
@@ -163,6 +163,9 @@ serve(async (req) => {
   } catch (error) {
     console.error(`${logPrefix} Error:`, error);
     await supabase.from('mira-agent-jobs').update({ status: 'failed', error_message: error.message }).eq('id', job_id);
-    return new Response(JSON.stringify({ error: error.message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
+    return new Response(JSON.stringify({ error: error.message }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      status: 500,
+    });
   }
 });
