@@ -162,7 +162,7 @@ async function handleStart(supabase: SupabaseClient, job: any, logPrefix: string
   };
   
   const croppedPersonImage = personImage.clone().crop(bbox.x, bbox.y, bbox.width, bbox.height);
-  const croppedPersonBuffer = await croppedPersonImage.encode('jpeg', 75);
+  const croppedPersonBuffer = await croppedPersonImage.encodeJPEG(75);
   console.log(`${logPrefix} Cropped person JPEG buffer size: ${croppedPersonBuffer.length} bytes.`);
   const croppedPersonBlob = new Blob([croppedPersonBuffer], { type: 'image/jpeg' });
   
@@ -180,7 +180,7 @@ async function handleStart(supabase: SupabaseClient, job: any, logPrefix: string
           garmentImage.height > garmentImage.width ? MAX_GARMENT_DIMENSION : ISImage.RESIZE_AUTO
       );
   }
-  const optimizedGarmentBuffer = await garmentImage.encode('jpeg', 75);
+  const optimizedGarmentBuffer = await garmentImage.encodeJPEG(75);
   console.log(`${logPrefix} Optimized garment JPEG buffer size: ${optimizedGarmentBuffer.length} bytes.`);
   const optimizedGarmentBlob = new Blob([optimizedGarmentBuffer], { type: 'image/jpeg' });
   const tempGarmentPath = `tmp/${job.user_id}/${Date.now()}-optimized_garment.jpeg`;
@@ -312,7 +312,7 @@ async function handleCompositing(supabase: SupabaseClient, job: any, logPrefix: 
   finalImage.composite(vtoPatchImage, pasteX, pasteY);
   console.log(`${logPrefix} Composition complete.`);
 
-  const finalImageBuffer = await finalImage.encode('jpeg', 95);
+  const finalImageBuffer = await finalImage.encodeJPEG(95);
   if (!finalImageBuffer || finalImageBuffer.length === 0) {
       throw new Error("Failed to encode the final composite image.");
   }
