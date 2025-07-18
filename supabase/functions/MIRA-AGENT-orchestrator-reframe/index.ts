@@ -1,5 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { createCanvas, loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
+import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
@@ -46,7 +48,11 @@ serve(async (req) => {
       const base_image_base64 = await base64Promise;
 
       const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-auto-describe-scene', {
-        body: { base_image_base64, user_hint: "" }
+        body: { 
+          base_image_base64, 
+          user_hint: "",
+          mime_type: 'image/jpeg'
+        }
       });
       if (promptError) throw new Error(`Auto-prompt generation failed: ${promptError.message}`);
       finalPrompt = promptData.scene_prompt;

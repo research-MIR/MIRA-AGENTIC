@@ -30,7 +30,7 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
 
   try {
-    const { base_image_base64, user_hint } = await req.json();
+    const { base_image_base64, user_hint, mime_type } = await req.json();
     if (!base_image_base64) {
       throw new Error("base_image_base64 is required.");
     }
@@ -38,7 +38,7 @@ serve(async (req) => {
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
     
     const userPromptParts = [
-        { inlineData: { mimeType: 'image/png', data: base_image_base64 } },
+        { inlineData: { mimeType: mime_type || 'image/png', data: base_image_base64 } },
         { text: `User Hint: "${user_hint || 'No hint provided. Describe a natural extension of the scene.'}"` }
     ];
 

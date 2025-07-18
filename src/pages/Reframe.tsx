@@ -33,12 +33,26 @@ interface ReframeJob {
   error_message?: string;
 }
 
-const fileToBase64 = (file: File): Promise<string> => {
+const fileToJpegBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.readAsDataURL(file);
-    reader.onload = () => resolve((reader.result as string).split(',')[1]);
-    reader.onerror = (error) => reject(error);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return reject(new Error('Failed to get canvas context'));
+        ctx.drawImage(img, 0, 0);
+        const jpegDataUrl = canvas.toDataURL('image/jpeg', 0.9); // 90% quality
+        resolve(jpegDataUrl.split(',')[1]);
+      };
+      img.onerror = reject;
+    };
+    reader.onerror = reject;
   });
 };
 
@@ -117,8 +131,8 @@ const Reframe = () => {
 
     try {
       const [base_image_base64, mask_image_base64] = await Promise.all([
-        fileToBase64(baseFile),
-        fileToBase64(maskFile)
+        fileToJpegBase64(baseFile),
+        fileToJpegBase64(maskFile)
       ]);
 
       const { error } = await supabase.functions.invoke('MIRA-AGENT-proxy-reframe', {

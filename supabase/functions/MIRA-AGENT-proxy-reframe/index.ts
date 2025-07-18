@@ -34,15 +34,15 @@ serve(async (req) => {
 
     const uploadFile = async (base64: string, filename: string) => {
         const filePath = `${user_id}/reframe-sources/${Date.now()}-${filename}`;
-        const { error } = await supabase.storage.from(UPLOAD_BUCKET).upload(filePath, decodeBase64(base64), { contentType: 'image/png' });
+        const { error } = await supabase.storage.from(UPLOAD_BUCKET).upload(filePath, decodeBase64(base64), { contentType: 'image/jpeg' });
         if (error) throw error;
         const { data: { publicUrl } } = supabase.storage.from(UPLOAD_BUCKET).getPublicUrl(filePath);
         return publicUrl;
     };
 
     const [base_image_url, mask_image_url] = await Promise.all([
-        uploadFile(base_image_base64, 'base.png'),
-        uploadFile(mask_image_base64, 'mask.png')
+        uploadFile(base_image_base64, 'base.jpeg'),
+        uploadFile(mask_image_base64, 'mask.jpeg')
     ]);
 
     const { data: newJob, error: insertError } = await supabase
