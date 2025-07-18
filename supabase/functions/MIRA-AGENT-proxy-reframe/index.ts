@@ -18,16 +18,15 @@ serve(async (req) => {
     const { 
         user_id, 
         base_image_base64, 
-        mask_image_base64, 
         prompt, 
         dilation, 
         steps, 
         count,
-        invert_mask
+        aspect_ratio
     } = await req.json();
 
-    if (!user_id || !base_image_base64 || !mask_image_base64) {
-      throw new Error("user_id, base_image_base64, and mask_image_base64 are required.");
+    if (!user_id || !base_image_base64 || !aspect_ratio) {
+      throw new Error("user_id, base_image_base64, and aspect_ratio are required.");
     }
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
@@ -40,10 +39,7 @@ serve(async (req) => {
         return publicUrl;
     };
 
-    const [base_image_url, mask_image_url] = await Promise.all([
-        uploadFile(base_image_base64, 'base.jpeg'),
-        uploadFile(mask_image_base64, 'mask.jpeg')
-    ]);
+    const base_image_url = await uploadFile(base_image_base64, 'base.jpeg');
 
     const { data: newJob, error: insertError } = await supabase
       .from('mira-agent-jobs')
@@ -54,12 +50,11 @@ serve(async (req) => {
         context: {
           source: 'reframe',
           base_image_url,
-          mask_image_url,
           prompt,
           dilation,
           steps,
           count,
-          invert_mask
+          aspect_ratio
         }
       })
       .select('id')

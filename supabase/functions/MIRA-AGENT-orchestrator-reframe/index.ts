@@ -26,44 +26,83 @@ serve(async (req) => {
     const { data: job, error: fetchError } = await supabase.from('mira-agent-jobs').select('context, user_id').eq('id', job_id).single();
     if (fetchError) throw fetchError;
 
-    const { base_image_url, prompt } = job.context;
-    let finalPrompt = prompt;
+    const { base_image_url, prompt, aspect_ratio } = job.context;
+    if (!base_image_url || !aspect_ratio) throw new Error("Missing base_image_url or aspect_ratio in job context.");
 
-    if (!prompt || prompt.trim() === "") {
-      console.log(`${logPrefix} No user prompt provided. Generating one automatically.`);
-      
-      const url = new URL(base_image_url);
-      const pathPrefix = `/storage/v1/object/public/${UPLOAD_BUCKET}/`;
-      const imagePath = decodeURIComponent(url.pathname.substring(pathPrefix.length));
+    // 1. Download original image and get dimensions
+    const url = new URL(base_image_url);
+    const pathPrefix = `/storage/v1/object/public/${UPLOAD_BUCKET}/`;
+    const imagePath = decodeURIComponent(url.pathname.substring(pathPrefix.length));
+    const { data: blob, error: downloadError } = await supabase.storage.from(UPLOAD_BUCKET).download(imagePath);
+    if (downloadError) throw new Error(`Failed to download base image: ${downloadError.message}`);
+    
+    const originalImage = await loadImage(new Uint8Array(await blob.arrayBuffer()));
+    const originalW = originalImage.width();
+    const originalH = originalImage.height();
 
-      const { data: blob, error: downloadError } = await supabase.storage.from(UPLOAD_BUCKET).download(imagePath);
-      if (downloadError) throw new Error(`Failed to download base image for prompt generation: ${downloadError.message}`);
-      
-      const reader = new FileReader();
-      const base64Promise = new Promise((resolve, reject) => {
-        reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
-        reader.onerror = reject;
-      });
-      reader.readAsDataURL(blob);
-      const base_image_base64 = await base64Promise;
+    // 2. Calculate new dimensions
+    const [targetW, targetH] = aspect_ratio.split(':').map(Number);
+    const targetRatio = targetW / targetH;
+    const originalRatio = originalW / originalH;
 
-      const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-auto-describe-scene', {
-        body: { 
-          base_image_base64, 
-          user_hint: "",
-          mime_type: 'image/jpeg'
-        }
-      });
-      if (promptError) throw new Error(`Auto-prompt generation failed: ${promptError.message}`);
-      finalPrompt = promptData.scene_prompt;
-      console.log(`${logPrefix} Auto-prompt generated: "${finalPrompt}"`);
+    let newW, newH;
+    if (targetRatio > originalRatio) { // Add width
+        newW = Math.round(originalH * targetRatio);
+        newH = originalH;
+    } else { // Add height
+        newH = Math.round(originalW / targetRatio);
+        newW = originalW;
     }
 
-    console.log(`${logPrefix} Invoking final reframe tool.`);
+    const xOffset = (newW - originalW) / 2;
+    const yOffset = (newH - originalH) / 2;
+
+    // 3. Generate the mask image
+    const maskCanvas = createCanvas(newW, newH);
+    const maskCtx = maskCanvas.getContext('2d');
+    maskCtx.fillStyle = 'white';
+    maskCtx.fillRect(0, 0, newW, newH);
+    maskCtx.fillStyle = 'black';
+    maskCtx.fillRect(xOffset, yOffset, originalW, originalH);
+    const maskBuffer = maskCanvas.toBuffer('image/png');
+
+    // 4. Generate the new composite base image
+    const newBaseCanvas = createCanvas(newW, newH);
+    const newBaseCtx = newBaseCanvas.getContext('2d');
+    newBaseCtx.fillStyle = 'white';
+    newBaseCtx.fillRect(0, 0, newW, newH);
+    newBaseCtx.drawImage(originalImage, xOffset, yOffset);
+    const newBaseBuffer = newBaseCanvas.toBuffer('image/png');
+
+    // 5. Upload new assets
+    const uploadFile = async (buffer: Uint8Array, filename: string) => {
+        const filePath = `${job.user_id}/reframe-generated/${job_id}-${filename}`;
+        const { error } = await supabase.storage.from(UPLOAD_BUCKET).upload(filePath, buffer, { contentType: 'image/png' });
+        if (error) throw error;
+        const { data: { publicUrl } } = supabase.storage.from(UPLOAD_BUCKET).getPublicUrl(filePath);
+        return publicUrl;
+    };
+
+    const [new_base_image_url, new_mask_image_url] = await Promise.all([
+        uploadFile(newBaseBuffer, 'base.png'),
+        uploadFile(maskBuffer, 'mask.png')
+    ]);
+
+    // 6. Update job context and invoke final tool
+    await supabase.from('mira-agent-jobs').update({
+        context: {
+            ...job.context,
+            base_image_url: new_base_image_url,
+            mask_image_url: new_mask_image_url,
+            invert_mask: false, // The generated mask is already in the correct format (black=keep)
+        }
+    }).eq('id', job_id);
+
+    console.log(`${logPrefix} Invoking final reframe tool with generated assets.`);
     const { error: reframeError } = await supabase.functions.invoke('MIRA-AGENT-tool-reframe-image', {
       body: { 
         job_id,
-        prompt: finalPrompt
+        prompt: prompt || "" // Use original prompt or empty string
       }
     });
     if (reframeError) throw new Error(`Reframe tool invocation failed: ${reframeError.message}`);

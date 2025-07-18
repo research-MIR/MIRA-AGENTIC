@@ -19,7 +19,6 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { SecureImageDisplay } from "@/components/VTO/SecureImageDisplay";
-import { Switch } from "@/components/ui/switch";
 
 interface ReframeJob {
   id: string;
@@ -84,18 +83,16 @@ const Reframe = () => {
   const channelRef = useRef<RealtimeChannel | null>(null);
 
   const [baseFile, setBaseFile] = useState<File | null>(null);
-  const [maskFile, setMaskFile] = useState<File | null>(null);
   const [prompt, setPrompt] = useState("");
   const [dilation, setDilation] = useState(0.03);
   const [steps, setSteps] = useState(35);
   const [count, setCount] = useState(1);
-  const [invertMask, setInvertMask] = useState(true);
+  const [aspectRatio, setAspectRatio] = useState("1:1");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [isCompareModalOpen, setIsCompareModalOpen] = useState(false);
 
   const basePreviewUrl = useMemo(() => baseFile ? URL.createObjectURL(baseFile) : null, [baseFile]);
-  const maskPreviewUrl = useMemo(() => maskFile ? URL.createObjectURL(maskFile) : null, [maskFile]);
 
   const { data: recentJobs, isLoading: isLoadingRecent } = useQuery<ReframeJob[]>({
     queryKey: ['recentReframeJobs', session?.user?.id],
@@ -119,32 +116,27 @@ const Reframe = () => {
   const startNew = () => {
     setSelectedJobId(null);
     setBaseFile(null);
-    setMaskFile(null);
     setPrompt("");
   };
 
   const handleSubmit = async () => {
-    if (!baseFile || !maskFile) return showError("Please upload both a base and a mask image.");
+    if (!baseFile) return showError("Please upload a base image.");
     
     setIsSubmitting(true);
-    const toastId = showLoading("Uploading images and queuing job...");
+    const toastId = showLoading("Uploading image and queuing job...");
 
     try {
-      const [base_image_base64, mask_image_base64] = await Promise.all([
-        fileToJpegBase64(baseFile),
-        fileToJpegBase64(maskFile)
-      ]);
+      const base_image_base64 = await fileToJpegBase64(baseFile);
 
       const { error } = await supabase.functions.invoke('MIRA-AGENT-proxy-reframe', {
         body: {
           user_id: session?.user?.id,
           base_image_base64,
-          mask_image_base64,
           prompt,
           dilation,
           steps,
           count,
-          invert_mask: invertMask
+          aspect_ratio: aspectRatio,
         }
       });
 
@@ -198,9 +190,8 @@ const Reframe = () => {
             <Card>
               <CardHeader><CardTitle>1. Setup</CardTitle></CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
+                <div className="max-w-xs mx-auto">
                   <ImageUploader onFileSelect={setBaseFile} title={t('baseImage')} imageUrl={basePreviewUrl} onClear={() => setBaseFile(null)} />
-                  <ImageUploader onFileSelect={setMaskFile} title={t('maskImage')} imageUrl={maskPreviewUrl} onClear={() => setMaskFile(null)} />
                 </div>
                 <div>
                   <Label htmlFor="prompt">{t('prompt')}</Label>
@@ -211,6 +202,19 @@ const Reframe = () => {
             <Card>
               <CardHeader><CardTitle>2. Settings</CardTitle></CardHeader>
               <CardContent className="space-y-4">
+                <div>
+                  <Label>{t('aspectRatio')}</Label>
+                  <Select value={aspectRatio} onValueChange={setAspectRatio}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="1:1">Square (1:1)</SelectItem>
+                      <SelectItem value="9:16">Portrait (9:16)</SelectItem>
+                      <SelectItem value="16:9">Widescreen (16:9)</SelectItem>
+                      <SelectItem value="4:3">Landscape (4:3)</SelectItem>
+                      <SelectItem value="3:4">Portrait (3:4)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
                 <div>
                   <Label>{t('maskDilation')}: {dilation.toFixed(3)}</Label>
                   <Slider value={[dilation]} onValueChange={(v) => setDilation(v[0])} min={0} max={0.1} step={0.005} />
@@ -228,16 +232,9 @@ const Reframe = () => {
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="space-y-2 pt-2">
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="invert-mask">{t('invertMask')}</Label>
-                    <Switch id="invert-mask" checked={invertMask} onCheckedChange={setInvertMask} />
-                  </div>
-                  <p className="text-xs text-muted-foreground">{t('invertMaskDescription')}</p>
-                </div>
               </CardContent>
             </Card>
-            <Button size="lg" className="w-full" onClick={handleSubmit} disabled={isSubmitting || !baseFile || !maskFile}>
+            <Button size="lg" className="w-full" onClick={handleSubmit} disabled={isSubmitting || !baseFile}>
               {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
               {t('generate')}
             </Button>
