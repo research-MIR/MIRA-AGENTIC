@@ -11,6 +11,8 @@ const corsHeaders = {
 
 const GOOGLE_VERTEX_AI_SA_KEY_JSON = Deno.env.get('GOOGLE_VERTEX_AI_SA_KEY_JSON');
 const GOOGLE_PROJECT_ID = Deno.env.get('GOOGLE_PROJECT_ID');
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const REGION = 'us-central1';
 const MODEL_ID = 'virtual-try-on-exp-05-31';
 const MAX_RETRIES = 3;
@@ -53,30 +55,46 @@ const blobToBase64 = async (blob: Blob): Promise<string> => {
     return encodeBase64(new Uint8Array(buffer)); // Use Uint8Array for safety
 };
 
-async function downloadFromSignedUrl(url: string, requestId: string): Promise<Blob> {
-    if (!url.includes('/sign/')) {
-        throw new Error(`[Downloader][${requestId}] Received a non-signed URL, which is not supported. Please provide a signed URL.`);
+async function downloadImage(url: string, requestId: string, supabase: SupabaseClient): Promise<Blob> {
+    if (url.includes('/sign/')) {
+        console.log(`[Downloader][${requestId}] Downloading from signed URL.`);
+        const response = await fetchWithRetry(url, {}, MAX_RETRIES, RETRY_DELAY_MS, requestId);
+        const blob = await response.blob();
+        console.log(`[Downloader][${requestId}] Signed URL download successful. Blob size: ${blob.size}`);
+        return blob;
+    } else {
+        console.log(`[Downloader][${requestId}] Downloading from public URL.`);
+        const urlObj = new URL(url);
+        const pathSegments = urlObj.pathname.split('/');
+        const publicSegmentIndex = pathSegments.indexOf('public');
+        if (publicSegmentIndex === -1 || publicSegmentIndex + 1 >= pathSegments.length) {
+            throw new Error(`Could not parse bucket name from public URL: ${url}`);
+        }
+        const bucketName = pathSegments[publicSegmentIndex + 1];
+        const filePath = decodeURIComponent(pathSegments.slice(publicSegmentIndex + 2).join('/'));
+        if (!bucketName || !filePath) {
+            throw new Error(`Could not parse bucket or path from public URL: ${url}`);
+        }
+        const { data, error } = await supabase.storage.from(bucketName).download(filePath);
+        if (error) throw new Error(`Failed to download from Supabase storage (${filePath}): ${error.message}`);
+        return data;
     }
-    console.log(`[Downloader][${requestId}] Downloading from signed URL.`);
-    const response = await fetchWithRetry(url, {}, MAX_RETRIES, RETRY_DELAY_MS, requestId);
-    const blob = await response.blob();
-    console.log(`[Downloader][${requestId}] Signed URL download successful. Blob size: ${blob.size}`);
-    return blob;
 }
 
 serve(async (req) => {
   const requestId = `vto-tool-${Date.now()}`;
-  console.log(`[VirtualTryOnTool][${requestId}] Function invoked. Running version 2.0 with logging fix.`);
+  console.log(`[VirtualTryOnTool][${requestId}] Function invoked. Running version 2.1 with unified downloader.`);
 
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
   
   try {
-    if (!GOOGLE_VERTEX_AI_SA_KEY_JSON || !GOOGLE_PROJECT_ID) {
-      throw new Error("Server configuration error: Missing Google Cloud credentials.");
+    if (!GOOGLE_VERTEX_AI_SA_KEY_JSON || !GOOGLE_PROJECT_ID || !SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+      throw new Error("Server configuration error: Missing Google Cloud or Supabase credentials.");
     }
 
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     const body = await req.json();
     console.log(`[VirtualTryOnTool][${requestId}] Request body successfully parsed. Keys found: ${Object.keys(body).join(', ')}`);
 
@@ -95,7 +113,7 @@ serve(async (req) => {
         person_image_base64 = person_b64_input;
     } else if (person_image_url) {
         console.log(`[VirtualTryOnTool][${requestId}] Downloading person image from URL: ${person_image_url}`);
-        const personBlob = await downloadFromSignedUrl(person_image_url, requestId);
+        const personBlob = await downloadImage(person_image_url, requestId, supabase);
         person_image_base64 = await blobToBase64(personBlob);
         console.log(`[VirtualTryOnTool][${requestId}] Person image processed. Base64 length: ${person_image_base64.length}`);
     } else {
@@ -106,7 +124,7 @@ serve(async (req) => {
         garment_image_base64 = garment_b64_input;
     } else if (garment_image_url) {
         console.log(`[VirtualTryOnTool][${requestId}] Downloading garment image from URL: ${garment_image_url}`);
-        const garmentBlob = await downloadFromSignedUrl(garment_image_url, requestId);
+        const garmentBlob = await downloadImage(garment_image_url, requestId, supabase);
         garment_image_base64 = await blobToBase64(garmentBlob);
         console.log(`[VirtualTryOnTool][${requestId}] Garment image processed. Base64 length: ${garment_image_base64.length}`);
     } else {
