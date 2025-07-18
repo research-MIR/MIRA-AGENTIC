@@ -28,7 +28,6 @@ import EditWithWords from "./pages/EditWithWords.tsx";
 import Experimental from "./pages/Experimental.tsx";
 import ProductRecontext from "./pages/ProductRecontext.tsx";
 import Reframe from "./pages/Reframe.tsx";
-import { GlobalModals } from "./components/GlobalModals.tsx";
 
 const App = () => {
   const { isTourOpen, closeTour, isTourPending, openTour, startTour } = useOnboardingTour();
@@ -119,7 +118,6 @@ const App = () => {
         </Route>
         <Route path="*" element={<NotFound />} />
       </Routes>
-      <GlobalModals />
     </ReactourProvider>
   );
 };
