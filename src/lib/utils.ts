@@ -51,9 +51,12 @@ export const downloadImage = async (url: string, filename: string) => {
   }
 };
 
-export const optimizeImage = (file: File, options?: { quality?: number }): Promise<File> => {
+export const optimizeImage = (file: File, options?: { quality?: number; forceOriginalDimensions?: boolean }): Promise<File> => {
   return new Promise((resolve, reject) => {
     const originalSize = file.size;
+    const MAX_DIMENSION = 1440;
+    const quality = options?.quality || 0.9;
+    const forceOriginalDimensions = options?.forceOriginalDimensions || false;
 
     if (!file.type.startsWith('image/')) {
       console.log(`[ImageOptimizer] Skipped optimization for non-image file: ${file.type}. Passing through original file.`);
@@ -69,15 +72,20 @@ export const optimizeImage = (file: File, options?: { quality?: number }): Promi
       img.onload = () => {
         const canvas = document.createElement('canvas');
         
-        // Always use original dimensions
-        canvas.width = img.width;
-        canvas.height = img.height;
+        const longestSide = Math.max(img.width, img.height);
+        const scale = forceOriginalDimensions ? 1 : (longestSide > MAX_DIMENSION ? MAX_DIMENSION / longestSide : 1);
+        
+        const newWidth = img.width * scale;
+        const newHeight = img.height * scale;
+
+        canvas.width = newWidth;
+        canvas.height = newHeight;
 
         const ctx = canvas.getContext('2d');
         if (!ctx) {
           return reject(new Error('Failed to get canvas context'));
         }
-        ctx.drawImage(img, 0, 0, img.width, img.height);
+        ctx.drawImage(img, 0, 0, newWidth, newHeight);
 
         canvas.toBlob(
           (blob) => {
@@ -90,11 +98,12 @@ export const optimizeImage = (file: File, options?: { quality?: number }): Promi
               lastModified: Date.now(),
             });
             
-            console.log(`[ImageOptimizer] Converted ${file.name} to PNG: ${formatBytes(originalSize)} -> ${formatBytes(newFile.size)}. Dimensions preserved.`);
+            console.log(`[ImageOptimizer] Optimized ${file.name} to PNG: ${formatBytes(originalSize)} -> ${formatBytes(newFile.size)}. Resized: ${!forceOriginalDimensions && scale < 1}`);
 
             resolve(newFile);
           },
-          'image/png'
+          'image/png',
+          quality
         );
       };
       img.onerror = (error) => reject(error);

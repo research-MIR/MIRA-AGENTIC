@@ -1,5 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { GoogleAuth } from "npm:google-auth-library";
+import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -46,9 +48,25 @@ const fetchWithRetry = async (url: string, options: RequestInit, maxRetries = MA
   throw new Error("Fetch with retry failed unexpectedly."); // Should not be reached
 };
 
+const blobToBase64 = async (blob: Blob): Promise<string> => {
+    const buffer = await blob.arrayBuffer();
+    return encodeBase64(new Uint8Array(buffer)); // Use Uint8Array for safety
+};
+
+async function downloadFromSignedUrl(url: string, requestId: string): Promise<Blob> {
+    if (!url.includes('/sign/')) {
+        throw new Error(`[Downloader][${requestId}] Received a non-signed URL, which is not supported. Please provide a signed URL.`);
+    }
+    console.log(`[Downloader][${requestId}] Downloading from signed URL.`);
+    const response = await fetchWithRetry(url, {}, MAX_RETRIES, RETRY_DELAY_MS, requestId);
+    const blob = await response.blob();
+    console.log(`[Downloader][${requestId}] Signed URL download successful. Blob size: ${blob.size}`);
+    return blob;
+}
+
 serve(async (req) => {
   const requestId = `vto-tool-${Date.now()}`;
-  console.log(`[VirtualTryOnTool][${requestId}] Function invoked. Running version 3.0 (base64 only).`);
+  console.log(`[VirtualTryOnTool][${requestId}] Function invoked. Running version 2.0 with logging fix.`);
 
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -63,17 +81,39 @@ serve(async (req) => {
     console.log(`[VirtualTryOnTool][${requestId}] Request body successfully parsed. Keys found: ${Object.keys(body).join(', ')}`);
 
     const { 
-        person_image_base64, 
-        garment_image_base64,
+        person_image_url, garment_image_url, 
+        person_image_base64: person_b64_input, 
+        garment_image_base64: garment_b64_input,
         sample_step,
         sample_count = 1
     } = body;
 
-    if (!person_image_base64 || !garment_image_base64) {
-        throw new Error("person_image_base64 and garment_image_base64 are required.");
+    let person_image_base64: string;
+    let garment_image_base64: string;
+
+    if (person_b64_input) {
+        person_image_base64 = person_b64_input;
+    } else if (person_image_url) {
+        console.log(`[VirtualTryOnTool][${requestId}] Downloading person image from URL: ${person_image_url}`);
+        const personBlob = await downloadFromSignedUrl(person_image_url, requestId);
+        person_image_base64 = await blobToBase64(personBlob);
+        console.log(`[VirtualTryOnTool][${requestId}] Person image processed. Base64 length: ${person_image_base64.length}`);
+    } else {
+        throw new Error("Either person_image_url or person_image_base64 is required.");
     }
 
-    console.log(`[VirtualTryOnTool][${requestId}] Images received. Authenticating with Google...`);
+    if (garment_b64_input) {
+        garment_image_base64 = garment_b64_input;
+    } else if (garment_image_url) {
+        console.log(`[VirtualTryOnTool][${requestId}] Downloading garment image from URL: ${garment_image_url}`);
+        const garmentBlob = await downloadFromSignedUrl(garment_image_url, requestId);
+        garment_image_base64 = await blobToBase64(garmentBlob);
+        console.log(`[VirtualTryOnTool][${requestId}] Garment image processed. Base64 length: ${garment_image_base64.length}`);
+    } else {
+        throw new Error("Either garment_image_url or garment_image_base64 is required.");
+    }
+
+    console.log(`[VirtualTryOnTool][${requestId}] Images processed. Authenticating with Google...`);
     const auth = new GoogleAuth({
       credentials: JSON.parse(GOOGLE_VERTEX_AI_SA_KEY_JSON),
       scopes: 'https://www.googleapis.com/auth/cloud-platform'

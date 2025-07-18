@@ -100,7 +100,6 @@ const Developer = () => {
   const { t } = useLanguage();
   const [isCancelling, setIsCancelling] = useState(false);
   const [isCancellingVTO, setIsCancellingVTO] = useState(false);
-  const [isCancellingVtoPack, setIsCancellingVtoPack] = useState(false);
   const [isShuttingDown, setIsShuttingDown] = useState(false);
 
   const handleCancelAllSegmentationJobs = async () => {
@@ -135,22 +134,6 @@ const Developer = () => {
     }
   };
 
-  const handleCancelAllVtoPackJobs = async () => {
-    setIsCancellingVtoPack(true);
-    const toastId = showLoading("Cancelling all VTO Pack Worker jobs...");
-    try {
-        const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-admin-cancel-all-vto-pack-jobs');
-        if (error) throw error;
-        dismissToast(toastId);
-        showSuccess(data.message);
-    } catch (err: any) {
-        dismissToast(toastId);
-        showError(`Failed to cancel jobs: ${err.message}`);
-    } finally {
-        setIsCancellingVtoPack(false);
-    }
-  };
-
   const handleShutdown = async () => {
     setIsShuttingDown(true);
     const toastId = showLoading("Initiating system-wide job shutdown...");
@@ -182,26 +165,6 @@ const Developer = () => {
               <CardDescription>These actions affect all users and jobs on the platform. Use with extreme caution.</CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button variant="destructive">Cancel All VTO Pack Worker Jobs</Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      This will cancel ALL active ('queued' or 'processing') VTO Pack Worker (Google Engine) jobs for EVERY user. This action cannot be undone.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={handleCancelAllVtoPackJobs} disabled={isCancellingVtoPack}>
-                      {isCancellingVtoPack && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                      Yes, cancel all VTO Pack jobs
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
               <AlertDialog>
                 <AlertDialogTrigger asChild>
                   <Button variant="destructive">Cancel All Segmentation Jobs</Button>

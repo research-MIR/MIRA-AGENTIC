@@ -54,8 +54,6 @@ const blobToBase64 = async (blob: Blob): Promise<string> => {
     return encodeBase64(buffer);
 };
 
-const bufferToBase64 = (buffer: Uint8Array): string => encodeBase64(buffer);
-
 // --- State Machine Logic ---
 
 serve(async (req) => {
@@ -106,9 +104,6 @@ serve(async (req) => {
     console.error(`${logPrefix} Error:`, error);
     await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'failed', error_message: error.message }).eq('id', pair_job_id);
     return new Response(JSON.stringify({ error: error.message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
-  } finally {
-    console.log(`${logPrefix} Releasing processing lock.`);
-    await supabase.from('mira-agent-bitstudio-jobs').update({ processing_lock: false }).eq('id', pair_job_id);
   }
 });
 
@@ -125,11 +120,7 @@ async function handleStart(supabase: SupabaseClient, job: any, logPrefix: string
   }
   console.log(`${logPrefix} Bounding box received.`);
 
-  const [personBlob, garmentBlob] = await Promise.all([
-    downloadFromSupabase(supabase, job.source_person_image_url),
-    downloadFromSupabase(supabase, job.source_garment_image_url)
-  ]);
-
+  const personBlob = await downloadFromSupabase(supabase, job.source_person_image_url);
   const personImage = await ISImage.decode(await personBlob.arrayBuffer());
   const { width: originalWidth, height: originalHeight } = personImage;
 
@@ -144,38 +135,31 @@ async function handleStart(supabase: SupabaseClient, job: any, logPrefix: string
   const croppedPersonUrl = await uploadBuffer(croppedPersonBuffer, supabase, job.user_id, 'cropped_person.png');
   console.log(`${logPrefix} Cropped person image uploaded to temp storage.`);
 
-  const garmentImage = await ISImage.decode(await garmentBlob.arrayBuffer());
-  const garmentBase64 = bufferToBase64(await garmentImage.encode(0));
-  console.log(`${logPrefix} Garment image encoded and will be stored in metadata.`);
-
   await supabase.from('mira-agent-bitstudio-jobs').update({
     status: 'processing',
-    metadata: { 
-        ...job.metadata, 
-        bbox, 
-        cropped_person_url: croppedPersonUrl, 
-        garment_image_base64: garmentBase64,
-        google_vto_step: 'generate_step_1' 
-    }
+    metadata: { ...job.metadata, bbox, cropped_person_url: croppedPersonUrl, google_vto_step: 'generate_step_1' }
   }).eq('id', job.id);
+
+  await supabase.functions.invoke('MIRA-AGENT-worker-vto-pack-item', { body: { pair_job_id: job.id } });
 }
 
 async function handleGenerateStep(supabase: SupabaseClient, job: any, sampleStep: number, nextStep: string, logPrefix: string) {
   console.log(`${logPrefix} Generating variation with ${sampleStep} steps.`);
   
-  const { garment_image_base64, cropped_person_url } = job.metadata;
-  if (!garment_image_base64 || !cropped_person_url) {
-      throw new Error("Missing required metadata: garment_image_base64 or cropped_person_url");
-  }
+  const [personBlob, garmentBlob] = await Promise.all([
+    downloadFromSupabase(supabase, job.metadata.cropped_person_url),
+    downloadFromSupabase(supabase, job.source_garment_image_url)
+  ]);
 
-  const personBlob = await downloadFromSupabase(supabase, cropped_person_url);
-  const personImage = await ISImage.decode(await personBlob.arrayBuffer());
-  const personBase64 = bufferToBase64(await personImage.encode(0));
+  const [personBase64, garmentBase64] = await Promise.all([
+    blobToBase64(personBlob),
+    blobToBase64(garmentBlob)
+  ]);
 
   const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-virtual-try-on', {
     body: {
       person_image_base64: personBase64,
-      garment_image_base64: garment_image_base64,
+      garment_image_base64: garmentBase64,
       sample_count: 1,
       sample_step: sampleStep
     }
@@ -189,21 +173,26 @@ async function handleGenerateStep(supabase: SupabaseClient, job: any, sampleStep
   await supabase.from('mira-agent-bitstudio-jobs').update({
     metadata: { ...job.metadata, generated_variations: [...currentVariations, newVariation], google_vto_step: nextStep }
   }).eq('id', job.id);
+
+  console.log(`${logPrefix} Step ${sampleStep} complete. Advancing to ${nextStep}.`);
+  await supabase.functions.invoke('MIRA-AGENT-worker-vto-pack-item', { body: { pair_job_id: job.id } });
 }
 
 async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix: string) {
   console.log(`${logPrefix} Performing quality check on 3 variations.`);
-  const { generated_variations, garment_image_base64 } = job.metadata;
-  if (!generated_variations || generated_variations.length < 3) throw new Error("Not enough variations generated for quality check.");
-  if (!garment_image_base64) throw new Error("Missing garment_image_base64 in metadata for quality check.");
+  const variations = job.metadata.generated_variations;
+  if (!variations || variations.length < 3) throw new Error("Not enough variations generated for quality check.");
 
-  const personBlob = await downloadFromSupabase(supabase, job.source_person_image_url);
+  const [personBlob, garmentBlob] = await Promise.all([
+    downloadFromSupabase(supabase, job.source_person_image_url),
+    downloadFromSupabase(supabase, job.source_garment_image_url)
+  ]);
 
   const { data: qaData, error: qaError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-quality-checker', {
     body: {
       original_person_image_base64: await blobToBase64(personBlob),
-      reference_garment_image_base64: garment_image_base64,
-      generated_images_base64: generated_variations.map((img: any) => img.base64Image)
+      reference_garment_image_base64: await blobToBase64(garmentBlob),
+      generated_images_base64: variations.map((img: any) => img.base64Image)
     }
   });
   if (qaError) throw qaError;
@@ -213,6 +202,8 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
   await supabase.from('mira-agent-bitstudio-jobs').update({
     metadata: { ...job.metadata, qa_best_index: qaData.best_image_index, qa_reasoning: qaData.reasoning, google_vto_step: 'compositing' }
   }).eq('id', job.id);
+
+  await supabase.functions.invoke('MIRA-AGENT-worker-vto-pack-item', { body: { pair_job_id: job.id } });
 }
 
 async function handleCompositing(supabase: SupabaseClient, job: any, logPrefix: string) {
@@ -227,7 +218,7 @@ async function handleCompositing(supabase: SupabaseClient, job: any, logPrefix: 
   const personBlob = await downloadFromSupabase(supabase, job.source_person_image_url);
   const personImage = await ISImage.decode(await personBlob.arrayBuffer());
 
-  const cropAmount = 4;
+  const cropAmount = 4; // Increased from 2 to 4
   vtoPatchImage.crop(cropAmount, cropAmount, vtoPatchImage.width - (cropAmount * 2), vtoPatchImage.height - (cropAmount * 2));
   
   const targetWidth = bbox.width - (cropAmount * 2);
@@ -237,6 +228,29 @@ async function handleCompositing(supabase: SupabaseClient, job: any, logPrefix: 
       vtoPatchImage.resize(targetWidth, targetHeight);
   }
 
+  // --- NEW FEATHERING LOGIC ---
+  const featherWidth = 20; // Feathering width in pixels.
+  const mask = new ISImage(vtoPatchImage.width, vtoPatchImage.height);
+
+  for (let y = 0; y < mask.height; y++) {
+      for (let x = 0; x < mask.width; x++) {
+          const distToEdgeX = Math.min(x, mask.width - 1 - x);
+          const distToEdgeY = Math.min(y, mask.height - 1 - y);
+          const distToEdge = Math.min(distToEdgeX, distToEdgeY);
+
+          let alpha = 255;
+          if (distToEdge < featherWidth) {
+              alpha = (distToEdge / featherWidth) * 255;
+          }
+          
+          const color = ISImage.rgbaToColor(alpha, alpha, alpha, 255);
+          mask.setPixelAt(x, y, color);
+      }
+  }
+  
+  vtoPatchImage.mask(mask, true);
+  // --- END OF FEATHERING LOGIC ---
+
   const pasteX = bbox.x + cropAmount;
   const pasteY = bbox.y + cropAmount;
 
@@ -244,12 +258,12 @@ async function handleCompositing(supabase: SupabaseClient, job: any, logPrefix: 
   finalImage.composite(vtoPatchImage, pasteX, pasteY);
   console.log(`${logPrefix} Composition complete.`);
 
-  const finalImageBuffer = await finalImage.encode(90); // Encode as high-quality JPEG
+  const finalImageBuffer = await finalImage.encode(0);
   if (!finalImageBuffer || finalImageBuffer.length === 0) {
       throw new Error("Failed to encode the final composite image.");
   }
-  const finalFilePath = `${job.user_id}/vto-packs/${Date.now()}_final_composite.jpeg`;
-  await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(finalFilePath, finalImageBuffer, { contentType: 'image/jpeg', upsert: true });
+  const finalFilePath = `${job.user_id}/vto-packs/${Date.now()}_final_composite.png`;
+  await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(finalFilePath, finalImageBuffer, { contentType: 'image/png', upsert: true });
   
   const { data: urlData, error: urlError } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(finalFilePath);
   if (urlError) throw new Error(`Failed to get public URL after upload: ${urlError.message}`);
