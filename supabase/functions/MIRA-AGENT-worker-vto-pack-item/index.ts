@@ -169,7 +169,7 @@ async function handleStart(supabase: SupabaseClient, job: any, logPrefix: string
 
   const garmentImage = await ISImage.decode(await garmentBlob.arrayBuffer());
   garmentBlob = null; // GC
-  const MAX_GARMENT_DIMENSION = 1024;
+  const MAX_GARMENT_DIMENSION = 2048;
   if (Math.max(garmentImage.width, garmentImage.height) > MAX_GARMENT_DIMENSION) {
       garmentImage.resize(
           garmentImage.width > garmentImage.height ? MAX_GARMENT_DIMENSION : ISImage.RESIZE_AUTO,
