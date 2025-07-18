@@ -67,7 +67,7 @@ serve(async (req) => {
 
     if (insertError) throw insertError;
 
-    supabase.functions.invoke('MIRA-AGENT-tool-reframe-image', { body: { job_id: newJob.id } }).catch(console.error);
+    supabase.functions.invoke('MIRA-AGENT-orchestrator-reframe', { body: { job_id: newJob.id } }).catch(console.error);
 
     return new Response(JSON.stringify({ success: true, jobId: newJob.id }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
