@@ -257,12 +257,12 @@ async function handleCompositing(supabase: SupabaseClient, job: any, logPrefix: 
   finalImage.composite(vtoPatchImage, pasteX, pasteY);
   console.log(`${logPrefix} Composition complete.`);
 
-  const finalImageBuffer = await finalImage.encode(0);
+  const finalImageBuffer = await finalImage.encode(90); // Encode as high-quality JPEG
   if (!finalImageBuffer || finalImageBuffer.length === 0) {
       throw new Error("Failed to encode the final composite image.");
   }
-  const finalFilePath = `${job.user_id}/vto-packs/${Date.now()}_final_composite.png`;
-  await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(finalFilePath, finalImageBuffer, { contentType: 'image/png', upsert: true });
+  const finalFilePath = `${job.user_id}/vto-packs/${Date.now()}_final_composite.jpeg`;
+  await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(finalFilePath, finalImageBuffer, { contentType: 'image/jpeg', upsert: true });
   
   const { data: urlData, error: urlError } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(finalFilePath);
   if (urlError) throw new Error(`Failed to get public URL after upload: ${urlError.message}`);
