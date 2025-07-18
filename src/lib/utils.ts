@@ -51,12 +51,10 @@ export const downloadImage = async (url: string, filename: string) => {
   }
 };
 
-export const optimizeImage = (file: File, options?: { quality?: number; forceOriginalDimensions?: boolean }): Promise<File> => {
+export const optimizeImage = (file: File, options?: { quality?: number }): Promise<File> => {
   return new Promise((resolve, reject) => {
     const originalSize = file.size;
-    const MAX_DIMENSION = 1440;
-    const quality = options?.quality || 0.9;
-    const forceOriginalDimensions = options?.forceOriginalDimensions || false;
+    const quality = options?.quality || 0.8; // Good default for WebP
 
     if (!file.type.startsWith('image/')) {
       console.log(`[ImageOptimizer] Skipped optimization for non-image file: ${file.type}. Passing through original file.`);
@@ -72,20 +70,15 @@ export const optimizeImage = (file: File, options?: { quality?: number; forceOri
       img.onload = () => {
         const canvas = document.createElement('canvas');
         
-        const longestSide = Math.max(img.width, img.height);
-        const scale = forceOriginalDimensions ? 1 : (longestSide > MAX_DIMENSION ? MAX_DIMENSION / longestSide : 1);
-        
-        const newWidth = img.width * scale;
-        const newHeight = img.height * scale;
-
-        canvas.width = newWidth;
-        canvas.height = newHeight;
+        // Always use original dimensions
+        canvas.width = img.width;
+        canvas.height = img.height;
 
         const ctx = canvas.getContext('2d');
         if (!ctx) {
           return reject(new Error('Failed to get canvas context'));
         }
-        ctx.drawImage(img, 0, 0, newWidth, newHeight);
+        ctx.drawImage(img, 0, 0, img.width, img.height);
 
         canvas.toBlob(
           (blob) => {
@@ -93,16 +86,16 @@ export const optimizeImage = (file: File, options?: { quality?: number; forceOri
               return reject(new Error('Canvas toBlob failed'));
             }
             const originalName = file.name.substring(0, file.name.lastIndexOf('.')) || file.name;
-            const newFile = new File([blob], `${originalName}.png`, {
-              type: 'image/png',
+            const newFile = new File([blob], `${originalName}.webp`, {
+              type: 'image/webp',
               lastModified: Date.now(),
             });
             
-            console.log(`[ImageOptimizer] Optimized ${file.name} to PNG: ${formatBytes(originalSize)} -> ${formatBytes(newFile.size)}. Resized: ${!forceOriginalDimensions && scale < 1}`);
+            console.log(`[ImageOptimizer] Compressed ${file.name} to WebP: ${formatBytes(originalSize)} -> ${formatBytes(newFile.size)}. Dimensions preserved.`);
 
             resolve(newFile);
           },
-          'image/png',
+          'image/webp',
           quality
         );
       };
