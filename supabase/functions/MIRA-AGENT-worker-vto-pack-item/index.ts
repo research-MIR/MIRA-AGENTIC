@@ -291,7 +291,7 @@ async function handleCompositing(supabase: SupabaseClient, job: any, logPrefix: 
     }
 
     const finalFilePath = `${job.user_id}/vto-packs/${Date.now()}_final_composite.png`;
-    await safeUpload(supabase, GENERATED_IMAGES_BUCKET, finalImageBuffer, {
+    await safeUpload(supabase, GENERATED_IMAGES_BUCKET, finalFilePath, finalImageBuffer, {
         contentType: 'image/png',
         upsert: true
     });
