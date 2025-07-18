@@ -57,13 +57,25 @@ serve(async (req) => {
     const xOffset = (newW - originalW) / 2;
     const yOffset = (newH - originalH) / 2;
 
-    // 3. Generate the mask image
+    // 3. Generate the mask image with feathering
     const maskCanvas = createCanvas(newW, newH);
     const maskCtx = maskCanvas.getContext('2d');
     maskCtx.fillStyle = 'white';
     maskCtx.fillRect(0, 0, newW, newH);
+
+    // --- NEW FEATHERING LOGIC ---
+    // Apply a blur filter to create a soft edge
+    const featherAmount = Math.max(2, Math.round(Math.min(originalW, originalH) * 0.005)); // Feather by 0.5% of the smallest dimension, min 2px
+    console.log(`${logPrefix} Applying feathering with blur radius: ${featherAmount}px`);
+    maskCtx.filter = `blur(${featherAmount}px)`;
+    // --- END NEW LOGIC ---
+
     maskCtx.fillStyle = 'black';
     maskCtx.fillRect(xOffset, yOffset, originalW, originalH);
+
+    // Reset filter to avoid affecting other potential drawing operations
+    maskCtx.filter = 'none';
+
     const maskBuffer = maskCanvas.toBuffer('image/png');
 
     // 4. Generate the new composite base image
