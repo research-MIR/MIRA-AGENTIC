@@ -274,18 +274,16 @@ async function handleReframe(supabase: SupabaseClient, job: any, logPrefix: stri
     const vtoPatchBuffer = decodeBase64(qa_best_image_base64);
     const vtoPatchImage = await ISImage.decode(vtoPatchBuffer);
 
-    // --- OPTIMIZED MASK GENERATION using imagescript ---
     const maskImage = new ISImage(vtoPatchImage.width, vtoPatchImage.height);
     for (const [x, y, color] of vtoPatchImage.iterateWithColors()) {
         const alpha = ISImage.colorToRGBA(color)[3];
-        if (alpha > 10) { // If pixel is not transparent
-            maskImage.setPixelAt(x, y, 0xFFFFFFFF); // White
+        if (alpha > 10) {
+            maskImage.setPixelAt(x, y, 0xFFFFFFFF);
         }
     }
-    const maskBuffer = await maskImage.encode(0); // PNG
+    const maskBuffer = await maskImage.encode(0);
     const maskBase64 = encodeBase64(maskBuffer);
-    console.log(`${logPrefix} Generated mask from VTO patch alpha channel using imagescript.`);
-    // --- END OF OPTIMIZATION ---
+    console.log(`${logPrefix} Generated mask from VTO patch alpha channel.`);
 
     console.log(`${logPrefix} Invoking reframe proxy...`);
     const { data: reframeJobData, error: reframeError } = await supabase.functions.invoke('MIRA-AGENT-proxy-reframe', {
@@ -297,7 +295,8 @@ async function handleReframe(supabase: SupabaseClient, job: any, logPrefix: stri
             aspect_ratio: final_aspect_ratio,
             invert_mask: true,
             vto_pack_job_id: job.vto_pack_job_id,
-            vto_pair_job_id: job.id
+            vto_pair_job_id: job.id,
+            source: 'vto' // Explicitly declare the source
         }
     });
     if (reframeError) throw reframeError;
