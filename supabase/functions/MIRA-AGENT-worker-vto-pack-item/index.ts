@@ -266,7 +266,7 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
 
 async function handleReframe(supabase: SupabaseClient, job: any, logPrefix: string) {
     console.log(`${logPrefix} Final step: Reframe.`);
-    const { qa_best_image_base64, final_aspect_ratio } = job.metadata;
+    const { qa_best_image_base64, final_aspect_ratio, prompt_appendix } = job.metadata;
     if (!qa_best_image_base64 || !final_aspect_ratio) {
         throw new Error("Missing best VTO image or final aspect ratio for reframe step.");
     }
@@ -293,9 +293,11 @@ async function handleReframe(supabase: SupabaseClient, job: any, logPrefix: stri
             user_id: job.user_id,
             base_image_base64: qa_best_image_base64,
             mask_image_base64: maskBase64,
-            prompt: job.metadata.prompt_appendix || "", // Use appendix as a hint
+            prompt: prompt_appendix || "", // Use appendix as a hint
             aspect_ratio: final_aspect_ratio,
-            invert_mask: true, // The generated mask is white on black, so we need to invert it for the reframe tool
+            invert_mask: true,
+            vto_pack_job_id: job.vto_pack_job_id,
+            vto_pair_job_id: job.id
         }
     });
     if (reframeError) throw reframeError;
