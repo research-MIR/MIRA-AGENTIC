@@ -112,8 +112,8 @@ serve(async (req) => {
       case 'quality_check':
         await handleQualityCheck(supabase, job, logPrefix);
         break;
-      case 'compositing':
-        await handleCompositing(supabase, job, logPrefix);
+      case 'reframe':
+        await handleReframe(supabase, job, logPrefix);
         break;
       default:
         throw new Error(`Unknown step: ${step}`);
@@ -253,59 +253,64 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
   console.log(`${logPrefix} QA complete. Best image index: ${qaData.best_image_index}.`);
 
   await supabase.from('mira-agent-bitstudio-jobs').update({
-    metadata: { ...job.metadata, qa_best_index: qaData.best_image_index, qa_reasoning: qaData.reasoning, google_vto_step: 'compositing' }
+    metadata: { 
+        ...job.metadata, 
+        qa_best_image_base64: variations[qaData.best_image_index].base64Image, // Save the best image data
+        qa_reasoning: qaData.reasoning, 
+        google_vto_step: 'reframe' // Set next step to reframe
+    }
   }).eq('id', job.id);
 
   await safeInvoke(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
 }
 
-async function handleCompositing(supabase: SupabaseClient, job: any, logPrefix: string) {
-    console.log(`${logPrefix} Compositing best result (simplified bulldozer approach).`);
-    const { bbox, generated_variations, qa_best_index } = job.metadata;
-    if (!bbox || !generated_variations || qa_best_index === undefined) {
-        throw new Error("Missing data for compositing.");
+async function handleReframe(supabase: SupabaseClient, job: any, logPrefix: string) {
+    console.log(`${logPrefix} Final step: Reframe.`);
+    const { qa_best_image_base64, final_aspect_ratio } = job.metadata;
+    if (!qa_best_image_base64 || !final_aspect_ratio) {
+        throw new Error("Missing best VTO image or final aspect ratio for reframe step.");
     }
 
-    const bestVtoPatchBase64 = generated_variations[qa_best_index].base64Image;
-    const vtoPatchBuffer = decodeBase64(bestVtoPatchBase64);
-    let vtoPatchImage = await ISImage.decode(vtoPatchBuffer);
+    const vtoPatchBuffer = decodeBase64(qa_best_image_base64);
+    const vtoPatchImage = await ISImage.decode(vtoPatchBuffer);
 
-    const personBlob = await safeDownload(supabase, job.source_person_image_url);
-    const personImage = await ISImage.decode(await personBlob.arrayBuffer());
-
-    const finalImage = personImage.clone();
-
-    // --- SIMPLIFIED LOGIC ---
-    // Resize the patch to the exact dimensions of the bounding box
-    vtoPatchImage = vtoPatchImage.resize(bbox.width, bbox.height);
-    console.log(`${logPrefix} [BULLDOZER] Resized patch to bbox dimensions: ${bbox.width}x${bbox.height}`);
-
-    // Composite directly at the bbox coordinates
-    finalImage.composite(vtoPatchImage, bbox.x, bbox.y);
-    console.log(`${logPrefix} [BULLDOZER] Composited patch at (${bbox.x}, ${bbox.y})`);
-    // --- END SIMPLIFIED LOGIC ---
-
-    const finalImageBuffer = await finalImage.encode(0); // Encode as PNG
-    if (!finalImageBuffer || finalImageBuffer.length === 0) {
-        throw new Error("Failed to encode the final composite image.");
+    // Create a mask from the alpha channel of the VTO patch
+    const maskCanvas = new ISImage(vtoPatchImage.width, vtoPatchImage.height);
+    for (const [x, y, color] of vtoPatchImage.iterateWithColors()) {
+        const alpha = ISImage.colorToRGBA(color)[3];
+        if (alpha > 10) { // If pixel is not transparent
+            maskCanvas.setPixelAt(x, y, 0xFFFFFFFF); // White
+        }
     }
+    const maskBuffer = await maskCanvas.encode(0); // PNG
+    const maskBase64 = encodeBase64(maskBuffer);
+    console.log(`${logPrefix} Generated mask from VTO patch alpha channel.`);
 
-    const finalFilePath = `${job.user_id}/vto-packs/${Date.now()}_final_composite.png`;
-    await safeUpload(supabase, GENERATED_IMAGES_BUCKET, finalFilePath, finalImageBuffer, {
-        contentType: 'image/png',
-        upsert: true
+    // Invoke the reframe proxy
+    console.log(`${logPrefix} Invoking reframe proxy...`);
+    const { data: reframeJobData, error: reframeError } = await supabase.functions.invoke('MIRA-AGENT-proxy-reframe', {
+        body: {
+            user_id: job.user_id,
+            base_image_base64: qa_best_image_base64,
+            mask_image_base64: maskBase64,
+            prompt: job.metadata.prompt_appendix || "", // Use appendix as a hint
+            aspect_ratio: final_aspect_ratio,
+            invert_mask: true, // The generated mask is white on black, so we need to invert it for the reframe tool
+        }
     });
+    if (reframeError) throw reframeError;
 
-    const publicUrl = await safeGetPublicUrl(supabase, GENERATED_IMAGES_BUCKET, finalFilePath);
-    
+    // The reframe job is now running independently. This VTO job's task is complete.
     await supabase.from('mira-agent-bitstudio-jobs').update({
         status: 'complete',
-        final_image_url: publicUrl,
+        final_image_url: null, // The final URL will be in the new reframe job
         metadata: {
             ...job.metadata,
-            google_vto_step: 'done'
+            google_vto_step: 'done',
+            delegated_reframe_job_id: reframeJobData.jobId,
+            qa_best_image_base64: null, // Clear large data
         }
     }).eq('id', job.id);
-    
-    console.log(`${logPrefix} Job finished successfully. Final URL: ${publicUrl}`);
+
+    console.log(`${logPrefix} Handed off to reframe job ${reframeJobData.jobId}. This VTO job is now complete.`);
 }
