@@ -15,17 +15,17 @@ serve(async (req) => {
   }
 
   try {
-    const { pairs, user_id, engine = 'bitstudio' } = await req.json();
+    const { pairs, user_id, engine = 'bitstudio', aspect_ratio } = await req.json();
     if (!pairs || !Array.isArray(pairs) || pairs.length === 0 || !user_id) {
       throw new Error("`pairs` array and `user_id` are required.");
     }
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-    console.log(`[VTO-Packs-Orchestrator] Received request for ${pairs.length} pairs for user ${user_id} using engine: ${engine}.`);
+    console.log(`[VTO-Packs-Orchestrator] Received request for ${pairs.length} pairs for user ${user_id} using engine: ${engine}. Aspect Ratio: ${aspect_ratio}`);
 
     const { data: batchJob, error: batchError } = await supabase
       .from('mira-agent-vto-packs-jobs')
-      .insert({ user_id, metadata: { total_pairs: pairs.length, engine: engine } })
+      .insert({ user_id, metadata: { total_pairs: pairs.length, engine: engine, aspect_ratio: aspect_ratio } })
       .select('id')
       .single();
     
@@ -47,7 +47,8 @@ serve(async (req) => {
             source_garment_image_url: pair.garment_url,
             metadata: { 
                 engine: engine,
-                prompt_appendix: pair.appendix
+                prompt_appendix: pair.appendix,
+                final_aspect_ratio: aspect_ratio, // Store aspect ratio for the worker
             }
         }).select('id').single();
 
