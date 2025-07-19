@@ -296,21 +296,20 @@ async function handleReframe(supabase: SupabaseClient, job: any, logPrefix: stri
             invert_mask: true,
             vto_pack_job_id: job.vto_pack_job_id,
             vto_pair_job_id: job.id,
-            source: 'vto' // Explicitly declare the source
+            source: 'vto'
         }
     });
     if (reframeError) throw reframeError;
 
     await supabase.from('mira-agent-bitstudio-jobs').update({
-        status: 'complete',
-        final_image_url: null,
+        status: 'awaiting_reframe', // New status
         metadata: {
             ...job.metadata,
             google_vto_step: 'done',
             delegated_reframe_job_id: reframeJobData.jobId,
-            qa_best_image_base64: null,
+            qa_best_image_base64: null, // Clear the large data
         }
     }).eq('id', job.id);
 
-    console.log(`${logPrefix} Handed off to reframe job ${reframeJobData.jobId}. This VTO job is now complete.`);
+    console.log(`${logPrefix} Handed off to reframe job ${reframeJobData.jobId}. This VTO job is now awaiting the final result.`);
 }
