@@ -11,6 +11,7 @@ import { Wand2, Loader2, Info, History } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RecentVtoPacks } from "@/components/VTO/RecentVtoPacks";
+import { optimizeImage, sanitizeFilename } from "@/lib/utils";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -28,8 +29,6 @@ const VirtualTryOnPacks = () => {
   const [mode, setMode] = useState<VtoMode | null>(null);
   const [engine, setEngine] = useState<Engine>('bitstudio');
   const [queue, setQueue] = useState<QueueItem[]>([]);
-  const [aspectRatio, setAspectRatio] = useState("4:5");
-  const [scenePrompt, setScenePrompt] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
   const handleSelectMode = (selectedMode: VtoMode) => {
@@ -37,10 +36,8 @@ const VirtualTryOnPacks = () => {
     setStep('provide-inputs');
   };
 
-  const handleQueueReady = (newQueue: QueueItem[], newAspectRatio: string, newScenePrompt: string) => {
+  const handleQueueReady = (newQueue: QueueItem[]) => {
     setQueue(newQueue);
-    setAspectRatio(newAspectRatio);
-    setScenePrompt(newScenePrompt);
     setStep('review-queue');
   };
 
@@ -60,11 +57,13 @@ const VirtualTryOnPacks = () => {
     try {
       const uploadFile = async (file: File, type: 'person' | 'garment') => {
         if (!session?.user) throw new Error("User session not found.");
-        const filePath = `${session.user.id}/vto-source/${type}-${Date.now()}-${file.name}`;
+        const optimizedFile = await optimizeImage(file);
+        const sanitizedName = sanitizeFilename(optimizedFile.name);
+        const filePath = `${session.user.id}/vto-source/${type}-${Date.now()}-${sanitizedName}`;
         
         const { error } = await supabase.storage
           .from('mira-agent-user-uploads')
-          .upload(filePath, file);
+          .upload(filePath, optimizedFile);
         
         if (error) throw new Error(`Failed to upload ${type} image: ${error.message}`);
         
@@ -91,8 +90,6 @@ const VirtualTryOnPacks = () => {
           pairs: pairsForBackend,
           user_id: session?.user?.id,
           engine: engine,
-          aspect_ratio: aspectRatio,
-          scene_prompt: scenePrompt,
         }
       });
 
@@ -139,7 +136,7 @@ const VirtualTryOnPacks = () => {
               <Info className="h-4 w-4" />
               <AlertTitle>Ready to Generate</AlertTitle>
               <AlertDescription>
-                You are about to generate {queue.length} images using the <strong>{engine}</strong> engine with aspect ratio <strong>{aspectRatio}</strong>.
+                You are about to generate {queue.length} images using the <strong>{engine}</strong> engine.
               </AlertDescription>
             </Alert>
             <div className="flex justify-between items-center">

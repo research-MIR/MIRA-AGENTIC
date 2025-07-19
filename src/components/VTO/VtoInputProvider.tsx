@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ModelPoseSelector, VtoModel } from './ModelPoseSelector';
 import { SecureImageDisplay } from './SecureImageDisplay';
-import { useLanguage } from "@/context/LanguageContext";
+import { useLanguage } from '@/context/LanguageContext';
 import { PlusCircle, Shirt, Users, X, Link2, Shuffle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useDropzone } from '@/hooks/useDropzone';
@@ -13,7 +13,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Label } from '../ui/label';
 import { Textarea } from '../ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 
 export interface QueueItem {
   person: { url: string; file?: File };
@@ -23,7 +22,7 @@ export interface QueueItem {
 
 interface VtoInputProviderProps {
   mode: 'one-to-many' | 'precise-pairs' | 'random-pairs';
-  onQueueReady: (queue: QueueItem[], aspectRatio: string, scenePrompt: string) => void;
+  onQueueReady: (queue: QueueItem[]) => void;
   onGoBack: () => void;
 }
 
@@ -62,8 +61,6 @@ const MultiImageUploader = ({ onFilesSelect, title, icon, description }: { onFil
     );
 };
 
-const commonRatios = ["1:1", "9:16", "16:9", "4:3", "3:4", "21:9", "3:2", "2:3", "4:5", "5:4"];
-
 export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProviderProps) => {
   const { t } = useLanguage();
   const [isModelModalOpen, setIsModelModalOpen] = useState(false);
@@ -77,9 +74,6 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
   const [tempPairPersonUrl, setTempPairPersonUrl] = useState<string | null>(null);
   const [tempPairGarmentFile, setTempPairGarmentFile] = useState<File | null>(null);
   const [tempPairAppendix, setTempPairAppendix] = useState("");
-
-  const [aspectRatio, setAspectRatio] = useState("4:5");
-  const [scenePrompt, setScenePrompt] = useState("");
 
   const garmentFileUrl = useMemo(() => garmentFile ? URL.createObjectURL(garmentFile) : null, [garmentFile]);
   const tempPairGarmentUrl = useMemo(() => tempPairGarmentFile ? URL.createObjectURL(tempPairGarmentFile) : null, [tempPairGarmentFile]);
@@ -149,7 +143,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
     } else if (mode === 'precise-pairs') {
       queue = precisePairs;
     }
-    onQueueReady(queue, aspectRatio, scenePrompt);
+    onQueueReady(queue);
   };
 
   const isProceedDisabled = mode === 'one-to-many' 
@@ -286,24 +280,6 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
           {mode === 'precise-pairs' && renderPrecisePairs()}
         </div>
         <div className="lg:col-span-1 space-y-6">
-          <Card>
-            <CardHeader><CardTitle>Final Scene</CardTitle></CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <Label htmlFor="aspect-ratio">{t('aspectRatio')}</Label>
-                <Select value={aspectRatio} onValueChange={setAspectRatio}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {commonRatios.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label htmlFor="scene-prompt">{t('scenePrompt')}</Label>
-                <Textarea id="scene-prompt" value={scenePrompt} onChange={(e) => setScenePrompt(e.target.value)} placeholder={t('scenePromptPlaceholder')} rows={3} />
-              </div>
-            </CardContent>
-          </Card>
           <div className="flex flex-col gap-2">
             <Button size="lg" onClick={handleProceed} disabled={isProceedDisabled}>{t('reviewQueue', { count: mode === 'precise-pairs' ? precisePairs.length : selectedModelUrls.size })}</Button>
             <Button variant="outline" onClick={onGoBack}>{t('goBack')}</Button>
