@@ -13,7 +13,7 @@ const STALLED_POLLER_THRESHOLD_SECONDS = 15;
 const STALLED_AGGREGATION_THRESHOLD_SECONDS = 20;
 const STALLED_PAIR_JOB_THRESHOLD_MINUTES = 2;
 const STALLED_GOOGLE_VTO_THRESHOLD_MINUTES = 2;
-const STALLED_QUEUED_VTO_THRESHOLD_SECONDS = 30; // New threshold for jobs that fail to start
+const STALLED_QUEUED_VTO_THRESHOLD_SECONDS = 30;
 
 serve(async (req)=>{
   const requestId = `watchdog-bg-${Date.now()}`;
@@ -172,6 +172,49 @@ serve(async (req)=>{
         actionsTaken.push(`Started ${queuedGoogleVtoJobs.length} stalled 'queued' Google VTO workers.`);
     } else {
         console.log(`[Watchdog-BG][${requestId}] No stalled 'queued' Google VTO jobs found.`);
+    }
+
+    // --- NEW Task 7: Handle VTO jobs awaiting reframe ---
+    const { data: awaitingReframeJobs, error: reframeError } = await supabase
+        .from('mira-agent-bitstudio-jobs')
+        .select('id, metadata->>reframe_job_id as reframe_job_id')
+        .eq('status', 'awaiting_reframe');
+
+    if (reframeError) {
+        console.error(`[Watchdog-BG][${requestId}] Error querying for jobs awaiting reframe:`, reframeError.message);
+    } else if (awaitingReframeJobs && awaitingReframeJobs.length > 0) {
+        console.log(`[Watchdog-BG][${requestId}] Found ${awaitingReframeJobs.length} VTO job(s) awaiting reframe. Checking status...`);
+        const reframeJobIds = awaitingReframeJobs.map(j => j.reframe_job_id).filter(Boolean);
+        
+        if (reframeJobIds.length > 0) {
+            const { data: completedReframeJobs, error: reframeStatusError } = await supabase
+                .from('mira-agent-jobs')
+                .select('id, status, final_result')
+                .in('id', reframeJobIds);
+
+            if (reframeStatusError) {
+                console.error(`[Watchdog-BG][${requestId}] Error checking reframe job statuses:`, reframeStatusError.message);
+            } else {
+                for (const vtoJob of awaitingReframeJobs) {
+                    const reframeJob = completedReframeJobs.find(rj => rj.id === vtoJob.reframe_job_id);
+                    if (reframeJob?.status === 'complete') {
+                        console.log(`[Watchdog-BG][${requestId}] Reframe job ${reframeJob.id} is complete. Finalizing VTO job ${vtoJob.id}.`);
+                        const finalImageUrl = reframeJob.final_result?.images?.[0]?.publicUrl;
+                        if (finalImageUrl) {
+                            await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'complete', final_image_url: finalImageUrl }).eq('id', vtoJob.id);
+                            actionsTaken.push(`Finalized VTO job ${vtoJob.id} from completed reframe.`);
+                        } else {
+                            await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'failed', error_message: 'Reframe job completed but returned no image.' }).eq('id', vtoJob.id);
+                        }
+                    } else if (reframeJob?.status === 'failed') {
+                        console.log(`[Watchdog-BG][${requestId}] Reframe job ${reframeJob.id} failed. Propagating failure to VTO job ${vtoJob.id}.`);
+                        await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'failed', error_message: `Dependent reframe job failed: ${reframeJob.error_message}` }).eq('id', vtoJob.id);
+                    }
+                }
+            }
+        }
+    } else {
+        console.log(`[Watchdog-BG][${requestId}] No VTO jobs awaiting reframe found.`);
     }
 
     const finalMessage = actionsTaken.length > 0 ? actionsTaken.join(' ') : "No actions required. All jobs are running normally.";
