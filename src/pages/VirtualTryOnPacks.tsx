@@ -15,10 +15,13 @@ import { optimizeImage, sanitizeFilename } from "@/lib/utils";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 type WizardStep = 'select-mode' | 'provide-inputs' | 'review-queue';
 type VtoMode = 'one-to-many' | 'precise-pairs' | 'random-pairs';
 type Engine = 'google' | 'bitstudio';
+
+const aspectRatioOptions = ["1:1", "9:16", "16:9", "4:3", "3:4", "21:9", "3:2", "2:3", "4:5", "5:4"];
 
 const VirtualTryOnPacks = () => {
   const { supabase, session } = useSession();
@@ -30,6 +33,7 @@ const VirtualTryOnPacks = () => {
   const [engine, setEngine] = useState<Engine>('bitstudio');
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [aspectRatio, setAspectRatio] = useState<string>("1:1");
 
   const handleSelectMode = (selectedMode: VtoMode) => {
     setMode(selectedMode);
@@ -90,6 +94,7 @@ const VirtualTryOnPacks = () => {
           pairs: pairsForBackend,
           user_id: session?.user?.id,
           engine: engine,
+          aspect_ratio: aspectRatio, // Pass the new aspect ratio
         }
       });
 
@@ -132,6 +137,24 @@ const VirtualTryOnPacks = () => {
         return (
           <div className="max-w-2xl mx-auto space-y-6">
             <VtoReviewQueue queue={queue} />
+            <Card>
+              <CardContent className="p-4 space-y-2">
+                <Label htmlFor="aspect-ratio-final">{t('aspectRatio')}</Label>
+                <Select value={aspectRatio} onValueChange={setAspectRatio}>
+                  <SelectTrigger id="aspect-ratio-final">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {aspectRatioOptions.map(ratio => (
+                      <SelectItem key={ratio} value={ratio}>{ratio}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  The final images will be generated with this aspect ratio using the Reframe tool.
+                </p>
+              </CardContent>
+            </Card>
             <Alert>
               <Info className="h-4 w-4" />
               <AlertTitle>Ready to Generate</AlertTitle>
