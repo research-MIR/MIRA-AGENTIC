@@ -164,6 +164,7 @@ async function handleStart(supabase: SupabaseClient, job: any, logPrefix: string
     safeDownload(supabase, job.source_garment_image_url)
   ]);
   console.log(`${logPrefix} Original blob sizes - Person: ${personBlob.size} bytes, Garment: ${garmentBlob.size} bytes.`);
+  
   const personImage = await ISImage.decode(await personBlob.arrayBuffer());
   personBlob = null; // GC
   const { width: originalWidth, height: originalHeight } = personImage;
@@ -191,6 +192,7 @@ async function handleStart(supabase: SupabaseClient, job: any, logPrefix: string
   });
   const croppedPersonUrl = await safeGetPublicUrl(supabase, TEMP_UPLOAD_BUCKET, tempPersonPath);
   console.log(`${logPrefix} Cropped person image uploaded to temp storage.`);
+  
   const garmentImage = await ISImage.decode(await garmentBlob.arrayBuffer());
   garmentBlob = null; // GC
   const MAX_GARMENT_DIMENSION = 2048;
@@ -359,12 +361,21 @@ async function handleFinalizeFromReframe(supabase: SupabaseClient, job: any, log
 
     const { data: reframeJob, error: fetchError } = await supabase
         .from('mira-agent-jobs')
-        .select('final_result')
+        .select('final_result, error_message, status')
         .eq('id', reframe_job_id)
         .single();
 
     if (fetchError) throw new Error(`Could not fetch completed reframe job ${reframe_job_id}: ${fetchError.message}`);
     
+    if (reframeJob.status === 'failed') {
+        console.error(`${logPrefix} Dependent reframe job ${reframe_job_id} failed. Propagating failure.`);
+        await supabase.from('mira-agent-bitstudio-jobs').update({
+            status: 'failed',
+            error_message: `Dependent reframe job failed: ${reframeJob.error_message}`
+        }).eq('id', job.id);
+        return;
+    }
+
     const finalImageUrl = reframeJob.final_result?.images?.[0]?.publicUrl;
     if (!finalImageUrl) {
         throw new Error(`Reframe job ${reframe_job_id} completed but has no final image URL.`);
