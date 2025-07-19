@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { createCanvas, loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
+import { Image as ISImage } from "https://deno.land/x/imagescript@1.2.15/mod.ts";
 import { decodeBase64, encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 import imageSize from "https://esm.sh/image-size";
 
@@ -145,7 +145,7 @@ async function handleStart(supabase: SupabaseClient, job: any, logPrefix: string
 
   console.log(`${logPrefix} Original blob sizes - Person: ${personBlob.size} bytes, Garment: ${garmentBlob.size} bytes.`);
 
-  const personImage = await loadImage(new Uint8Array(await personBlob.arrayBuffer()));
+  const personImage = await ISImage.decode(await personBlob.arrayBuffer());
   personBlob = null; // GC
   const { width: originalWidth, height: originalHeight } = personImage;
 
@@ -161,9 +161,8 @@ async function handleStart(supabase: SupabaseClient, job: any, logPrefix: string
     height: Math.max(1, Math.min(abs_height, originalHeight - abs_y)),
   };
   
-  const croppedCanvas = createCanvas(bbox.width, bbox.height);
-  croppedCanvas.getContext('2d').drawImage(personImage, bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
-  const croppedPersonBuffer = croppedCanvas.toBuffer('image/jpeg', { quality: 0.75 });
+  const croppedPersonImage = personImage.clone().crop(bbox.x, bbox.y, bbox.width, bbox.height);
+  const croppedPersonBuffer = await croppedPersonImage.encodeJPEG(75);
   console.log(`${logPrefix} Cropped person JPEG buffer size: ${croppedPersonBuffer.length} bytes.`);
   const croppedPersonBlob = new Blob([croppedPersonBuffer], { type: 'image/jpeg' });
   
@@ -172,13 +171,16 @@ async function handleStart(supabase: SupabaseClient, job: any, logPrefix: string
   const croppedPersonUrl = await safeGetPublicUrl(supabase, TEMP_UPLOAD_BUCKET, tempPersonPath);
   console.log(`${logPrefix} Cropped person image uploaded to temp storage.`);
 
-  const garmentImage = await loadImage(new Uint8Array(await garmentBlob.arrayBuffer()));
+  const garmentImage = await ISImage.decode(await garmentBlob.arrayBuffer());
   garmentBlob = null; // GC
   const MAX_GARMENT_DIMENSION = 2048;
-  const garmentCanvas = createCanvas(garmentImage.width(), garmentImage.height());
-  garmentCanvas.getContext('2d').drawImage(garmentImage, 0, 0);
-  // Resize logic here if needed
-  const optimizedGarmentBuffer = garmentCanvas.toBuffer('image/jpeg', { quality: 0.75 });
+  if (Math.max(garmentImage.width, garmentImage.height) > MAX_GARMENT_DIMENSION) {
+      garmentImage.resize(
+          garmentImage.width > garmentImage.height ? MAX_GARMENT_DIMENSION : ISImage.RESIZE_AUTO,
+          garmentImage.height > garmentImage.width ? MAX_GARMENT_DIMENSION : ISImage.RESIZE_AUTO
+      );
+  }
+  const optimizedGarmentBuffer = await garmentImage.encodeJPEG(75);
   console.log(`${logPrefix} Optimized garment JPEG buffer size: ${optimizedGarmentBuffer.length} bytes.`);
   const optimizedGarmentBlob = new Blob([optimizedGarmentBuffer], { type: 'image/jpeg' });
   const tempGarmentPath = `tmp/${job.user_id}/${Date.now()}-optimized_garment.jpeg`;
@@ -270,22 +272,19 @@ async function handleReframe(supabase: SupabaseClient, job: any, logPrefix: stri
     }
 
     const vtoPatchBuffer = decodeBase64(qa_best_image_base64);
-    const vtoPatchImage = await loadImage(vtoPatchBuffer);
+    const vtoPatchImage = await ISImage.decode(vtoPatchBuffer);
 
-    // --- OPTIMIZED MASK GENERATION using deno-canvas ---
-    const maskCanvas = createCanvas(vtoPatchImage.width(), vtoPatchImage.height());
-    const ctx = maskCanvas.getContext('2d');
-    ctx.drawImage(vtoPatchImage, 0, 0);
-    const imageData = ctx.getImageData(0, 0, maskCanvas.width(), maskCanvas.height());
-    const data = imageData.data;
-    for (let i = 0; i < data.length; i += 4) {
-        const alpha = data[i + 3];
-        const value = alpha > 10 ? 255 : 0;
-        data[i] = value; data[i + 1] = value; data[i + 2] = value; data[i + 3] = 255;
+    // --- OPTIMIZED MASK GENERATION using imagescript ---
+    const maskImage = new ISImage(vtoPatchImage.width, vtoPatchImage.height);
+    for (const [x, y, color] of vtoPatchImage.iterateWithColors()) {
+        const alpha = ISImage.colorToRGBA(color)[3];
+        if (alpha > 10) { // If pixel is not transparent
+            maskImage.setPixelAt(x, y, 0xFFFFFFFF); // White
+        }
     }
-    ctx.putImageData(imageData, 0, 0);
-    const maskBase64 = maskCanvas.toDataURL('image/png').split(',')[1];
-    console.log(`${logPrefix} Generated mask from VTO patch alpha channel.`);
+    const maskBuffer = await maskImage.encode(0); // PNG
+    const maskBase64 = encodeBase64(maskBuffer);
+    console.log(`${logPrefix} Generated mask from VTO patch alpha channel using imagescript.`);
     // --- END OF OPTIMIZATION ---
 
     console.log(`${logPrefix} Invoking reframe proxy...`);
