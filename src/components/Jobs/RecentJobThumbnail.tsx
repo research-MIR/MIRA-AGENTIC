@@ -3,25 +3,30 @@ import { cn } from '@/lib/utils';
 import { AlertTriangle, Loader2, CheckCircle } from 'lucide-react';
 import { useSecureImage } from '@/hooks/useSecureImage';
 
-interface ComfyJob {
+interface Job {
   id: string;
   status: 'queued' | 'processing' | 'complete' | 'failed';
-  final_result?: {
-    publicUrl: string;
-  };
+  final_result?: any; // Use any to handle multiple possible result structures
   metadata?: {
     source_image_url?: string;
   };
+  context?: { // For reframe jobs
+    base_image_url?: string;
+  }
 }
 
 interface Props {
-  job: ComfyJob;
+  job: Job;
   onClick: () => void;
   isSelected: boolean;
 }
 
 export const RecentJobThumbnail = ({ job, onClick, isSelected }: Props) => {
-  const imageUrl = job.status === 'complete' ? job.final_result?.publicUrl : job.metadata?.source_image_url;
+  // Robustly get the image URL, checking for different possible data structures
+  const imageUrl = job.status === 'complete' 
+    ? job.final_result?.publicUrl || job.final_result?.images?.[0]?.publicUrl
+    : job.metadata?.source_image_url || job.context?.base_image_url;
+    
   const { displayUrl, isLoading, error } = useSecureImage(imageUrl);
 
   const renderContent = () => {
@@ -35,7 +40,7 @@ export const RecentJobThumbnail = ({ job, onClick, isSelected }: Props) => {
       <div className="relative w-full h-full">
         <img src={displayUrl} alt="Job source" className="w-full h-full object-cover rounded-md" />
         {job.status === 'complete' && (
-          <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
             <CheckCircle className="h-8 w-8 text-white" />
           </div>
         )}
