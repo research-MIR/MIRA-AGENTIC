@@ -271,10 +271,10 @@ async function handleReframe(supabase: SupabaseClient, job: any, logPrefix: stri
         throw new Error("Missing best VTO image or final aspect ratio for reframe step.");
     }
 
-    // The VTO patch is already a transparent PNG. We can generate the mask from its alpha channel.
     const vtoPatchBuffer = decodeBase64(qa_best_image_base64);
     const vtoPatchImage = await ISImage.decode(vtoPatchBuffer);
 
+    // Create a mask from the alpha channel of the VTO patch
     const maskCanvas = new ISImage(vtoPatchImage.width, vtoPatchImage.height);
     for (const [x, y, color] of vtoPatchImage.iterateWithColors()) {
         const alpha = ISImage.colorToRGBA(color)[3];
@@ -286,7 +286,7 @@ async function handleReframe(supabase: SupabaseClient, job: any, logPrefix: stri
     const maskBase64 = encodeBase64(maskBuffer);
     console.log(`${logPrefix} Generated mask from VTO patch alpha channel.`);
 
-    // Invoke the reframe proxy with all necessary data
+    // Invoke the reframe proxy
     console.log(`${logPrefix} Invoking reframe proxy...`);
     const { data: reframeJobData, error: reframeError } = await supabase.functions.invoke('MIRA-AGENT-proxy-reframe', {
         body: {
@@ -295,7 +295,7 @@ async function handleReframe(supabase: SupabaseClient, job: any, logPrefix: stri
             mask_image_base64: maskBase64,
             prompt: prompt_appendix || "", // Use appendix as a hint
             aspect_ratio: final_aspect_ratio,
-            invert_mask: true, // The generated mask is white on black, so we need to invert it for the reframe tool
+            invert_mask: true,
             vto_pack_job_id: job.vto_pack_job_id,
             vto_pair_job_id: job.id
         }
