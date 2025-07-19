@@ -26,95 +26,87 @@ serve(async (req) => {
     const { data: job, error: fetchError } = await supabase.from('mira-agent-jobs').select('context, user_id').eq('id', job_id).single();
     if (fetchError) throw fetchError;
 
-    const { base_image_url, prompt, aspect_ratio } = job.context;
-    if (!base_image_url || !aspect_ratio) throw new Error("Missing base_image_url or aspect_ratio in job context.");
+    const { context } = job;
+    let final_base_url = context.base_image_url;
+    let final_mask_url = context.mask_image_url;
 
-    // 1. Download original image and get dimensions
-    const url = new URL(base_image_url);
-    const pathPrefix = `/storage/v1/object/public/${UPLOAD_BUCKET}/`;
-    const imagePath = decodeURIComponent(url.pathname.substring(pathPrefix.length));
-    const { data: blob, error: downloadError } = await supabase.storage.from(UPLOAD_BUCKET).download(imagePath);
-    if (downloadError) throw new Error(`Failed to download base image: ${downloadError.message}`);
-    
-    const originalImage = await loadImage(new Uint8Array(await blob.arrayBuffer()));
-    const originalW = originalImage.width();
-    const originalH = originalImage.height();
+    if (!final_mask_url) {
+        // --- ORIGINAL WORKFLOW: MASK GENERATION ---
+        console.log(`${logPrefix} No pre-made mask found. Generating new canvas and mask.`);
+        const { base_image_url, aspect_ratio } = context;
+        if (!base_image_url || !aspect_ratio) throw new Error("Missing base_image_url or aspect_ratio for mask generation.");
 
-    // 2. Calculate new dimensions
-    const [targetW, targetH] = aspect_ratio.split(':').map(Number);
-    const targetRatio = targetW / targetH;
-    const originalRatio = originalW / originalH;
+        const url = new URL(base_image_url);
+        const pathPrefix = `/storage/v1/object/public/${UPLOAD_BUCKET}/`;
+        const imagePath = decodeURIComponent(url.pathname.substring(pathPrefix.length));
+        const { data: blob, error: downloadError } = await supabase.storage.from(UPLOAD_BUCKET).download(imagePath);
+        if (downloadError) throw new Error(`Failed to download base image: ${downloadError.message}`);
+        
+        const originalImage = await loadImage(new Uint8Array(await blob.arrayBuffer()));
+        const originalW = originalImage.width();
+        const originalH = originalImage.height();
 
-    let newW, newH;
-    if (targetRatio > originalRatio) { // Add width
-        newW = Math.round(originalH * targetRatio);
-        newH = originalH;
-    } else { // Add height
-        newH = Math.round(originalW / targetRatio);
-        newW = originalW;
+        const [targetW, targetH] = aspect_ratio.split(':').map(Number);
+        const targetRatio = targetW / targetH;
+        const originalRatio = originalW / originalH;
+
+        let newW, newH;
+        if (targetRatio > originalRatio) {
+            newW = Math.round(originalH * targetRatio);
+            newH = originalH;
+        } else {
+            newH = Math.round(originalW / targetRatio);
+            newW = originalW;
+        }
+
+        const xOffset = (newW - originalW) / 2;
+        const yOffset = (newH - originalH) / 2;
+
+        const maskCanvas = createCanvas(newW, newH);
+        const maskCtx = maskCanvas.getContext('2d');
+        maskCtx.fillStyle = 'white';
+        maskCtx.fillRect(0, 0, newW, newH);
+        const featherAmount = Math.max(2, Math.round(Math.min(originalW, originalH) * 0.005));
+        maskCtx.filter = `blur(${featherAmount}px)`;
+        maskCtx.fillStyle = 'black';
+        maskCtx.fillRect(xOffset, yOffset, originalW, originalH);
+        maskCtx.filter = 'none';
+        const maskBuffer = maskCanvas.toBuffer('image/png');
+
+        const newBaseCanvas = createCanvas(newW, newH);
+        const newBaseCtx = newBaseCanvas.getContext('2d');
+        newBaseCtx.fillStyle = 'white';
+        newBaseCtx.fillRect(0, 0, newW, newH);
+        newBaseCtx.drawImage(originalImage, xOffset, yOffset);
+        const newBaseBuffer = newBaseCanvas.toBuffer('image/png');
+
+        const uploadFile = async (buffer: Uint8Array, filename: string) => {
+            const filePath = `${job.user_id}/reframe-generated/${job_id}-${filename}`;
+            const { error } = await supabase.storage.from(UPLOAD_BUCKET).upload(filePath, buffer, { contentType: 'image/png' });
+            if (error) throw error;
+            const { data: { publicUrl } } = supabase.storage.from(UPLOAD_BUCKET).getPublicUrl(filePath);
+            return publicUrl;
+        };
+
+        [final_base_url, final_mask_url] = await Promise.all([
+            uploadFile(newBaseBuffer, 'base.png'),
+            uploadFile(maskBuffer, 'mask.png')
+        ]);
+
+        await supabase.from('mira-agent-jobs').update({
+            context: { ...context, base_image_url: final_base_url, mask_image_url: final_mask_url }
+        }).eq('id', job_id);
+        console.log(`${logPrefix} Generated and uploaded new assets.`);
+    } else {
+        // --- NEW WORKFLOW: MASK PROVIDED ---
+        console.log(`${logPrefix} Pre-made mask found. Bypassing canvas generation.`);
     }
 
-    const xOffset = (newW - originalW) / 2;
-    const yOffset = (newH - originalH) / 2;
-
-    // 3. Generate the mask image with feathering
-    const maskCanvas = createCanvas(newW, newH);
-    const maskCtx = maskCanvas.getContext('2d');
-    maskCtx.fillStyle = 'white';
-    maskCtx.fillRect(0, 0, newW, newH);
-
-    // --- NEW FEATHERING LOGIC ---
-    // Apply a blur filter to create a soft edge
-    const featherAmount = Math.max(2, Math.round(Math.min(originalW, originalH) * 0.005)); // Feather by 0.5% of the smallest dimension, min 2px
-    console.log(`${logPrefix} Applying feathering with blur radius: ${featherAmount}px`);
-    maskCtx.filter = `blur(${featherAmount}px)`;
-    // --- END NEW LOGIC ---
-
-    maskCtx.fillStyle = 'black';
-    maskCtx.fillRect(xOffset, yOffset, originalW, originalH);
-
-    // Reset filter to avoid affecting other potential drawing operations
-    maskCtx.filter = 'none';
-
-    const maskBuffer = maskCanvas.toBuffer('image/png');
-
-    // 4. Generate the new composite base image
-    const newBaseCanvas = createCanvas(newW, newH);
-    const newBaseCtx = newBaseCanvas.getContext('2d');
-    newBaseCtx.fillStyle = 'white';
-    newBaseCtx.fillRect(0, 0, newW, newH);
-    newBaseCtx.drawImage(originalImage, xOffset, yOffset);
-    const newBaseBuffer = newBaseCanvas.toBuffer('image/png');
-
-    // 5. Upload new assets
-    const uploadFile = async (buffer: Uint8Array, filename: string) => {
-        const filePath = `${job.user_id}/reframe-generated/${job_id}-${filename}`;
-        const { error } = await supabase.storage.from(UPLOAD_BUCKET).upload(filePath, buffer, { contentType: 'image/png' });
-        if (error) throw error;
-        const { data: { publicUrl } } = supabase.storage.from(UPLOAD_BUCKET).getPublicUrl(filePath);
-        return publicUrl;
-    };
-
-    const [new_base_image_url, new_mask_image_url] = await Promise.all([
-        uploadFile(newBaseBuffer, 'base.png'),
-        uploadFile(maskBuffer, 'mask.png')
-    ]);
-
-    // 6. Update job context and invoke final tool
-    await supabase.from('mira-agent-jobs').update({
-        context: {
-            ...job.context,
-            base_image_url: new_base_image_url,
-            mask_image_url: new_mask_image_url,
-            invert_mask: false, // The generated mask is already in the correct format (black=keep)
-        }
-    }).eq('id', job_id);
-
-    console.log(`${logPrefix} Invoking final reframe tool with generated assets.`);
+    console.log(`${logPrefix} Invoking final reframe tool with assets.`);
     const { error: reframeError } = await supabase.functions.invoke('MIRA-AGENT-tool-reframe-image', {
       body: { 
         job_id,
-        prompt: prompt || "" // Use original prompt or empty string
+        prompt: context.prompt || ""
       }
     });
     if (reframeError) throw new Error(`Reframe tool invocation failed: ${reframeError.message}`);
