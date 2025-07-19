@@ -80,7 +80,7 @@ const blobToBase64 = async (blob: Blob): Promise<string> => {
 serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
 
-  const { pair_job_id } = await req.json();
+  const { pair_job_id, reframe_result_url } = await req.json();
   if (!pair_job_id) {
     return new Response(JSON.stringify({ error: "pair_job_id is required." }), { status: 400, headers: corsHeaders });
   }
@@ -89,37 +89,50 @@ serve(async (req) => {
   const logPrefix = `[VTO-Pack-Worker][${pair_job_id}]`;
 
   try {
-    console.log(`${logPrefix} Starting job.`);
-    const { data: job, error: fetchError } = await supabase.from('mira-agent-bitstudio-jobs').select('*').eq('id', pair_job_id).single();
-    if (fetchError) throw fetchError;
+    if (reframe_result_url) {
+        // This is a callback from the reframe orchestrator. Finalize the job.
+        console.log(`${logPrefix} Received reframe result. Finalizing job.`);
+        await supabase.from('mira-agent-bitstudio-jobs')
+            .update({
+                status: 'complete',
+                final_image_url: reframe_result_url
+            })
+            .eq('id', pair_job_id);
+        console.log(`${logPrefix} Job successfully finalized.`);
+    } else {
+        // This is a standard invocation. Run the state machine.
+        console.log(`${logPrefix} Starting job.`);
+        const { data: job, error: fetchError } = await supabase.from('mira-agent-bitstudio-jobs').select('*').eq('id', pair_job_id).single();
+        if (fetchError) throw fetchError;
 
-    const step = job.metadata?.google_vto_step || 'start';
-    console.log(`${logPrefix} Current step: ${step}`);
+        const step = job.metadata?.google_vto_step || 'start';
+        console.log(`${logPrefix} Current step: ${step}`);
 
-    switch (step) {
-      case 'start':
-        await handleStart(supabase, job, logPrefix);
-        break;
-      case 'generate_step_1':
-        await handleGenerateStep(supabase, job, 15, 'generate_step_2', logPrefix);
-        break;
-      case 'generate_step_2':
-        await handleGenerateStep(supabase, job, 30, 'generate_step_3', logPrefix);
-        break;
-      case 'generate_step_3':
-        await handleGenerateStep(supabase, job, 55, 'quality_check', logPrefix);
-        break;
-      case 'quality_check':
-        await handleQualityCheck(supabase, job, logPrefix);
-        break;
-      case 'reframe':
-        await handleReframe(supabase, job, logPrefix);
-        break;
-      default:
-        throw new Error(`Unknown step: ${step}`);
+        switch (step) {
+          case 'start':
+            await handleStart(supabase, job, logPrefix);
+            break;
+          case 'generate_step_1':
+            await handleGenerateStep(supabase, job, 15, 'generate_step_2', logPrefix);
+            break;
+          case 'generate_step_2':
+            await handleGenerateStep(supabase, job, 30, 'generate_step_3', logPrefix);
+            break;
+          case 'generate_step_3':
+            await handleGenerateStep(supabase, job, 55, 'quality_check', logPrefix);
+            break;
+          case 'quality_check':
+            await handleQualityCheck(supabase, job, logPrefix);
+            break;
+          case 'reframe':
+            await handleReframe(supabase, job, logPrefix);
+            break;
+          default:
+            throw new Error(`Unknown step: ${step}`);
+        }
     }
 
-    return new Response(JSON.stringify({ success: true, message: `Step '${step}' processed.` }), { headers: corsHeaders });
+    return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
 
   } catch (error) {
     console.error(`${logPrefix} Error:`, error);
