@@ -284,29 +284,12 @@ async function handleReframe(supabase: SupabaseClient, job: any, logPrefix: stri
         throw new Error("Missing best VTO image or final aspect ratio for reframe step.");
     }
 
-    const vtoPatchBuffer = decodeBase64(qa_best_image_base64);
-    const vtoPatchImage = await ISImage.decode(vtoPatchBuffer);
-
-    const maskImage = new ISImage(vtoPatchImage.width, vtoPatchImage.height);
-    for (const [x, y, color] of vtoPatchImage.iterateWithColors()) {
-        const alpha = ISImage.colorToRGBA(color)[3];
-        if (alpha > 10) {
-            maskImage.setPixelAt(x, y, 0xFFFFFFFF);
-        }
-    }
-    const maskBuffer = await maskImage.encode(0);
-    const maskBase64 = encodeBase64(maskBuffer);
-    console.log(`${logPrefix} Generated mask from VTO patch alpha channel.`);
-
-    console.log(`${logPrefix} Invoking reframe proxy...`);
     const { data: reframeJobData, error: reframeError } = await supabase.functions.invoke('MIRA-AGENT-proxy-reframe', {
         body: {
             user_id: job.user_id,
             base_image_base64: qa_best_image_base64,
-            mask_image_base64: maskBase64,
             prompt: prompt_appendix || "",
             aspect_ratio: final_aspect_ratio,
-            invert_mask: true,
             vto_pack_job_id: job.vto_pack_job_id,
             vto_pair_job_id: job.id,
             source: 'vto'
@@ -315,7 +298,7 @@ async function handleReframe(supabase: SupabaseClient, job: any, logPrefix: stri
     if (reframeError) throw reframeError;
 
     await supabase.from('mira-agent-bitstudio-jobs').update({
-        status: 'awaiting_reframe', // New status
+        status: 'awaiting_reframe',
         metadata: {
             ...job.metadata,
             google_vto_step: 'done',
