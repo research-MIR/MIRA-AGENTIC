@@ -27,8 +27,9 @@ serve(async (req) => {
         count, 
         aspect_ratio,
         invert_mask,
-        vto_pack_job_id, // New optional parameter for lineage
-        vto_pair_job_id  // New optional parameter for lineage
+        vto_pack_job_id,
+        vto_pair_job_id,
+        source // New parameter
     } = await req.json();
 
     if (!user_id || !base_image_base64 || !aspect_ratio) {
@@ -52,7 +53,7 @@ serve(async (req) => {
     }
 
     const context = {
-        source: 'reframe',
+        source: source || 'reframe', // Use provided source or default
         base_image_url,
         mask_image_url,
         prompt,
@@ -61,8 +62,8 @@ serve(async (req) => {
         count,
         aspect_ratio,
         invert_mask: invert_mask || false,
-        vto_pack_job_id: vto_pack_job_id || null, // Store lineage
-        vto_pair_job_id: vto_pair_job_id || null, // Store lineage
+        vto_pack_job_id: vto_pack_job_id || null,
+        vto_pair_job_id: vto_pair_job_id || null,
     };
 
     const { data: newJob, error: insertError } = await supabase
