@@ -12,17 +12,21 @@ const corsHeaders = {
 };
 
 serve(async (req) => {
-  if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { headers: corsHeaders });
+  }
 
   try {
     const { 
         user_id, 
         base_image_base64, 
+        mask_image_base64, // New optional parameter
         prompt, 
         dilation, 
         steps, 
-        count,
-        aspect_ratio
+        count, 
+        aspect_ratio,
+        invert_mask // New optional parameter
     } = await req.json();
 
     if (!user_id || !base_image_base64 || !aspect_ratio) {
@@ -32,14 +36,30 @@ serve(async (req) => {
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
 
     const uploadFile = async (base64: string, filename: string) => {
-        const filePath = `${user_id}/reframe-sources/${Date.now()}-${filename}`;
-        const { error } = await supabase.storage.from(UPLOAD_BUCKET).upload(filePath, decodeBase64(base64), { contentType: 'image/jpeg' });
-        if (error) throw error;
-        const { data: { publicUrl } } = supabase.storage.from(UPLOAD_BUCKET).getPublicUrl(filePath);
-        return publicUrl;
+      const filePath = `${user_id}/reframe-sources/${Date.now()}-${filename}`;
+      const { error } = await supabase.storage.from(UPLOAD_BUCKET).upload(filePath, decodeBase64(base64), { contentType: 'image/png' });
+      if (error) throw error;
+      const { data: { publicUrl } } = supabase.storage.from(UPLOAD_BUCKET).getPublicUrl(filePath);
+      return publicUrl;
     };
 
-    const base_image_url = await uploadFile(base_image_base64, 'base.jpeg');
+    const base_image_url = await uploadFile(base_image_base64, 'base.png');
+    let mask_image_url = null;
+    if (mask_image_base64) {
+        mask_image_url = await uploadFile(mask_image_base64, 'mask.png');
+    }
+
+    const context = {
+        source: 'reframe',
+        base_image_url,
+        mask_image_url, // Will be null if not provided
+        prompt,
+        dilation,
+        steps,
+        count,
+        aspect_ratio,
+        invert_mask: invert_mask || false
+    };
 
     const { data: newJob, error: insertError } = await supabase
       .from('mira-agent-jobs')
@@ -47,22 +67,16 @@ serve(async (req) => {
         user_id,
         status: 'queued',
         original_prompt: `Reframe: ${prompt || 'Untitled'}`,
-        context: {
-          source: 'reframe',
-          base_image_url,
-          prompt,
-          dilation,
-          steps,
-          count,
-          aspect_ratio
-        }
+        context: context
       })
       .select('id')
       .single();
 
     if (insertError) throw insertError;
 
-    supabase.functions.invoke('MIRA-AGENT-orchestrator-reframe', { body: { job_id: newJob.id } }).catch(console.error);
+    supabase.functions.invoke('MIRA-AGENT-orchestrator-reframe', {
+      body: { job_id: newJob.id }
+    }).catch(console.error);
 
     return new Response(JSON.stringify({ success: true, jobId: newJob.id }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
