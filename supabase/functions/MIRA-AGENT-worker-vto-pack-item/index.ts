@@ -165,7 +165,7 @@ async function handleStart(supabase: SupabaseClient, job: any, logPrefix: string
   ]);
   console.log(`${logPrefix} Original blob sizes - Person: ${personBlob.size} bytes, Garment: ${garmentBlob.size} bytes.`);
   
-  const personImage = await ISImage.decode(await personBlob.arrayBuffer());
+  const personImage = await ISImage.decode(new Uint8Array(await (await new Response(personBlob).arrayBuffer())));
   personBlob = null; // GC
   const { width: originalWidth, height: originalHeight } = personImage;
   const abs_x = Math.floor(personBox[1] / 1000 * originalWidth);
@@ -193,7 +193,7 @@ async function handleStart(supabase: SupabaseClient, job: any, logPrefix: string
   const croppedPersonUrl = await safeGetPublicUrl(supabase, TEMP_UPLOAD_BUCKET, tempPersonPath);
   console.log(`${logPrefix} Cropped person image uploaded to temp storage.`);
   
-  const garmentImage = await ISImage.decode(await garmentBlob.arrayBuffer());
+  const garmentImage = await ISImage.decode(new Uint8Array(await (await new Response(garmentBlob).arrayBuffer())));
   garmentBlob = null; // GC
   const MAX_GARMENT_DIMENSION = 2048;
   if (Math.max(garmentImage.width, garmentImage.height) > MAX_GARMENT_DIMENSION) {
