@@ -31,7 +31,6 @@ serve(async (req) => {
     let final_mask_url = context.mask_image_url;
 
     if (!final_mask_url) {
-        // --- ORIGINAL WORKFLOW: MASK GENERATION ---
         console.log(`${logPrefix} No pre-made mask found. Generating new canvas and mask.`);
         const { base_image_url, aspect_ratio } = context;
         if (!base_image_url || !aspect_ratio) throw new Error("Missing base_image_url or aspect_ratio for mask generation.");
@@ -98,7 +97,6 @@ serve(async (req) => {
         }).eq('id', job_id);
         console.log(`${logPrefix} Generated and uploaded new assets.`);
     } else {
-        // --- NEW WORKFLOW: MASK PROVIDED ---
         console.log(`${logPrefix} Pre-made mask found. Bypassing canvas generation.`);
     }
 
@@ -110,6 +108,32 @@ serve(async (req) => {
       }
     });
     if (reframeError) throw new Error(`Reframe tool invocation failed: ${reframeError.message}`);
+
+    // --- Finalization Step ---
+    const { data: finalJobData, error: finalFetchError } = await supabase.from('mira-agent-jobs').select('final_result, context').eq('id', job_id).single();
+    if (finalFetchError) throw finalFetchError;
+
+    const parentVtoJobId = finalJobData.context?.vto_pair_job_id;
+    if (parentVtoJobId) {
+        console.log(`${logPrefix} This was a VTO job. Finalizing parent job ${parentVtoJobId}...`);
+        const finalImageUrl = finalJobData.final_result?.images?.[0]?.publicUrl;
+        if (finalImageUrl) {
+            const { error: updateVtoError } = await supabase
+                .from('mira-agent-bitstudio-jobs')
+                .update({
+                    status: 'complete',
+                    final_image_url: finalImageUrl
+                })
+                .eq('id', parentVtoJobId);
+            if (updateVtoError) {
+                console.error(`${logPrefix} Failed to update parent VTO job:`, updateVtoError);
+            } else {
+                console.log(`${logPrefix} Parent VTO job ${parentVtoJobId} successfully finalized.`);
+            }
+        } else {
+            console.warn(`${logPrefix} Reframe job completed but no final image URL was found to update the parent VTO job.`);
+        }
+    }
 
     return new Response(JSON.stringify({ success: true }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
