@@ -119,6 +119,9 @@ serve(async (req) => {
       case 'prepare_for_reframe':
         await handlePrepareForReframe(supabase, job, logPrefix);
         break;
+      case 'finalize_from_reframe':
+        await handleFinalizeFromReframe(supabase, job, logPrefix);
+        break;
       default:
         throw new Error(`Unknown step: ${step}`);
     }
@@ -341,8 +344,37 @@ async function handlePrepareForReframe(supabase: SupabaseClient, job: any, logPr
 
     await supabase.from('mira-agent-bitstudio-jobs').update({
         status: 'awaiting_reframe',
-        metadata: { ...job.metadata, reframe_job_id: reframeJobData.jobId, google_vto_step: 'done' }
+        metadata: { ...job.metadata, reframe_job_id: reframeJobData.jobId, google_vto_step: 'finalize_from_reframe' }
     }).eq('id', job.id);
 
     console.log(`${logPrefix} Reframe job ${reframeJobData.jobId} created. VTO worker is now paused, awaiting completion.`);
+}
+
+async function handleFinalizeFromReframe(supabase: SupabaseClient, job: any, logPrefix: string) {
+    console.log(`${logPrefix} Woken up to finalize job from reframe.`);
+    const { reframe_job_id } = job.metadata;
+    if (!reframe_job_id) {
+        throw new Error("Cannot finalize: reframe_job_id is missing from metadata.");
+    }
+
+    const { data: reframeJob, error: fetchError } = await supabase
+        .from('mira-agent-jobs')
+        .select('final_result')
+        .eq('id', reframe_job_id)
+        .single();
+
+    if (fetchError) throw new Error(`Could not fetch completed reframe job ${reframe_job_id}: ${fetchError.message}`);
+    
+    const finalImageUrl = reframeJob.final_result?.images?.[0]?.publicUrl;
+    if (!finalImageUrl) {
+        throw new Error(`Reframe job ${reframe_job_id} completed but has no final image URL.`);
+    }
+
+    await supabase.from('mira-agent-bitstudio-jobs').update({
+        status: 'complete',
+        final_image_url: finalImageUrl,
+        metadata: { ...job.metadata, google_vto_step: 'done' }
+    }).eq('id', job.id);
+
+    console.log(`${logPrefix} Job successfully finalized. Final URL: ${finalImageUrl}`);
 }

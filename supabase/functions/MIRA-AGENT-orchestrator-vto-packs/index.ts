@@ -15,9 +15,12 @@ serve(async (req) => {
   }
 
   try {
-    const { pairs, user_id, engine = 'bitstudio' } = await req.json();
+    const { pairs, user_id, engine = 'bitstudio', aspect_ratio, scene_prompt } = await req.json();
     if (!pairs || !Array.isArray(pairs) || pairs.length === 0 || !user_id) {
       throw new Error("`pairs` array and `user_id` are required.");
+    }
+    if (engine === 'google' && !aspect_ratio) {
+        throw new Error("`aspect_ratio` is required when using the Google VTO engine.");
     }
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
@@ -47,7 +50,9 @@ serve(async (req) => {
             source_garment_image_url: pair.garment_url,
             metadata: { 
                 engine: engine,
-                prompt_appendix: pair.appendix
+                prompt_appendix: pair.appendix,
+                aspect_ratio: aspect_ratio, // Store new parameter
+                scene_prompt: scene_prompt,   // Store new parameter
             }
         }).select('id').single();
 
