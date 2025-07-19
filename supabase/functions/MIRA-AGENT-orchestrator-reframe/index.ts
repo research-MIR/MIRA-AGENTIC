@@ -115,23 +115,22 @@ serve(async (req) => {
 
     const parentVtoJobId = finalJobData.context?.vto_pair_job_id;
     if (parentVtoJobId) {
-        console.log(`${logPrefix} This was a VTO job. Finalizing parent job ${parentVtoJobId}...`);
+        console.log(`${logPrefix} This was a VTO job. Reporting back to parent worker ${parentVtoJobId}...`);
         const finalImageUrl = finalJobData.final_result?.images?.[0]?.publicUrl;
         if (finalImageUrl) {
-            const { error: updateVtoError } = await supabase
-                .from('mira-agent-bitstudio-jobs')
-                .update({
-                    status: 'complete',
-                    final_image_url: finalImageUrl
-                })
-                .eq('id', parentVtoJobId);
-            if (updateVtoError) {
-                console.error(`${logPrefix} Failed to update parent VTO job:`, updateVtoError);
+            const { error: callbackError } = await supabase.functions.invoke('MIRA-AGENT-worker-vto-pack-item', {
+                body: {
+                    pair_job_id: parentVtoJobId,
+                    reframe_result_url: finalImageUrl
+                }
+            });
+            if (callbackError) {
+                console.error(`${logPrefix} Failed to report back to parent VTO worker:`, callbackError);
             } else {
-                console.log(`${logPrefix} Parent VTO job ${parentVtoJobId} successfully finalized.`);
+                console.log(`${logPrefix} Successfully reported back to parent VTO worker.`);
             }
         } else {
-            console.warn(`${logPrefix} Reframe job completed but no final image URL was found to update the parent VTO job.`);
+            console.warn(`${logPrefix} Reframe job completed but no final image URL was found to report back to the parent VTO job.`);
         }
     }
 
