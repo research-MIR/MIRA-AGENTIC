@@ -108,7 +108,7 @@ serve(async (req) => {
       newBaseCtx.fillStyle = 'white';
       newBaseCtx.fillRect(0, 0, newW, newH);
       newBaseCtx.drawImage(originalImage, xOffset, yOffset);
-      finalBaseImageB64 = encodeBase64(newBaseCanvas.toBuffer('image/jpeg', { quality: 95 }));
+      finalBaseImageB64 = encodeBase64(newBaseCanvas.toBuffer('image/jpeg', 95));
       console.log(`${logPrefix} Generated new assets in memory.`);
     } else {
       console.log(`${logPrefix} Pre-made mask found. Downloading assets.`);
