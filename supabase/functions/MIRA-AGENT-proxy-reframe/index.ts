@@ -59,6 +59,7 @@ serve(async (req) => {
 
     const context = {
         source: source || 'reframe',
+        reframe_step: 'start', // Initial step for the new worker
         base_image_url: final_base_image_url,
         mask_image_url: final_mask_image_url,
         prompt,
@@ -74,7 +75,7 @@ serve(async (req) => {
       .from('mira-agent-jobs')
       .insert({
         user_id,
-        status: 'queued',
+        status: 'processing', // Start as processing since the worker will run immediately
         original_prompt: `Reframe: ${prompt || 'Untitled'}`,
         context: context
       })
@@ -83,7 +84,7 @@ serve(async (req) => {
 
     if (insertError) throw insertError;
 
-    supabase.functions.invoke('MIRA-AGENT-orchestrator-reframe', {
+    supabase.functions.invoke('MIRA-AGENT-worker-reframe', {
       body: { job_id: newJob.id }
     }).catch(console.error);
 
