@@ -15,11 +15,13 @@ import { optimizeImage, sanitizeFilename } from "@/lib/utils";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
+import { Switch } from "@/components/ui/switch";
+import { cn } from "@/lib/utils";
 
 type WizardStep = 'select-mode' | 'provide-inputs' | 'review-queue';
 type VtoMode = 'one-to-many' | 'precise-pairs' | 'random-pairs';
 
-const aspectRatioOptions = ["1:1", "9:16", "16:9", "4:3", "3:4", "21:9", "3:2", "2:3", "4:5", "5:4"];
+const aspectRatioOptions = ["1:1", "16:9", "9:16", "4:3", "3:4", "21:9", "3:2", "2:3", "4:5", "5:4"];
 
 const VirtualTryOnPacks = () => {
   const { supabase, session } = useSession();
@@ -31,6 +33,7 @@ const VirtualTryOnPacks = () => {
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [aspectRatio, setAspectRatio] = useState<string>("1:1");
+  const [skipReframe, setSkipReframe] = useState(false);
 
   const handleSelectMode = (selectedMode: VtoMode) => {
     setMode(selectedMode);
@@ -92,6 +95,7 @@ const VirtualTryOnPacks = () => {
           user_id: session?.user?.id,
           engine: 'google',
           aspect_ratio: aspectRatio,
+          skip_reframe: skipReframe,
         }
       });
 
@@ -135,9 +139,20 @@ const VirtualTryOnPacks = () => {
           <div className="max-w-2xl mx-auto space-y-6">
             <VtoReviewQueue queue={queue} />
             <Card>
+              <CardContent className="p-4 space-y-4">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="skip-reframe-switch" className="flex items-center gap-2">
+                    {t('skipReframe')}
+                  </Label>
+                  <Switch id="skip-reframe-switch" checked={skipReframe} onCheckedChange={setSkipReframe} />
+                </div>
+                <p className="text-xs text-muted-foreground">{t('skipReframeDescription')}</p>
+              </CardContent>
+            </Card>
+            <Card>
               <CardContent className="p-4 space-y-2">
-                <Label htmlFor="aspect-ratio-final">{t('aspectRatio')}</Label>
-                <Select value={aspectRatio} onValueChange={setAspectRatio}>
+                <Label htmlFor="aspect-ratio-final" className={cn(skipReframe && "text-muted-foreground")}>{t('aspectRatio')}</Label>
+                <Select value={aspectRatio} onValueChange={setAspectRatio} disabled={skipReframe}>
                   <SelectTrigger id="aspect-ratio-final">
                     <SelectValue />
                   </SelectTrigger>
@@ -148,7 +163,7 @@ const VirtualTryOnPacks = () => {
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
-                  The final images will be generated with this aspect ratio using the Reframe tool.
+                  {skipReframe ? t('aspectRatioDisabled') : t('aspectRatioDescription')}
                 </p>
               </CardContent>
             </Card>

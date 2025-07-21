@@ -142,6 +142,10 @@ Prima di tentare di nuovo, controlla se il tuo lavoro appare nella lista dei "Jo
     bitstudioVTODescription: "Più lento ma con una qualità e un realismo superiori, ideale per risultati finali.",
     loopModels: "Usa tutti i capi (riutilizza modelli)",
     loopModelsDescription: "Se il numero di capi è maggiore del numero di modelli, i modelli verranno riutilizzati per garantire che ogni capo venga provato.",
+    skipReframe: "Salta Reframe & Ottieni Immagine 1:1",
+    skipReframeDescription: "Questo salterà il passaggio di outpainting, risultando in un'immagine quadrata (1:1) più veloce.",
+    aspectRatioDisabled: "Le proporzioni vengono ignorate quando il reframe viene saltato.",
+    aspectRatioDescription: "Le immagini finali verranno generate con queste proporzioni utilizzando lo strumento Reframe.",
   },
   en: {
     proMode: "Pro Mode",
@@ -286,5 +290,9 @@ Before trying again, please check if your job shows up in the "Recent Jobs" list
     bitstudioVTODescription: "Slower but with superior quality and realism, ideal for final results.",
     loopModels: "Use all garments (loop models)",
     loopModelsDescription: "If there are more garments than models, models will be reused to ensure every garment is tried on.",
+    skipReframe: "Skip Reframe & Output 1:1 Image",
+    skipReframeDescription: "This will bypass the outpainting step, resulting in a faster, square (1:1) image.",
+    aspectRatioDisabled: "Aspect ratio is ignored when reframe is skipped.",
+    aspectRatioDescription: "The final images will be generated with this aspect ratio using the Reframe tool.",
   },
 };

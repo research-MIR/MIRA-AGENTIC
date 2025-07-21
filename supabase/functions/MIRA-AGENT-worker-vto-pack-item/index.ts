@@ -56,6 +56,14 @@ async function safeGetPublicUrl(supabase: SupabaseClient, bucket: string, path: 
     return data.publicUrl;
 }
 
+async function uploadBase64ToStorage(supabase: SupabaseClient, base64: string, userId: string, filename: string) {
+    const buffer = decodeBase64(base64);
+    const filePath = `${userId}/vto-pack-results/${Date.now()}-${filename}`;
+    await safeUpload(supabase, GENERATED_IMAGES_BUCKET, filePath, new Blob([buffer], { type: 'image/png' }), { contentType: 'image/png', upsert: true });
+    const publicUrl = await safeGetPublicUrl(supabase, GENERATED_IMAGES_BUCKET, filePath);
+    return { publicUrl, storagePath: filePath };
+}
+
 // --- Utility Functions ---
 
 function parseStorageURL(url: string) {
@@ -74,6 +82,34 @@ const blobToBase64 = async (blob: Blob): Promise<string> => {
     const buffer = await blob.arrayBuffer();
     return encodeBase64(new Uint8Array(buffer)); // Use Uint8Array for safety
 };
+
+async function getDimensionsFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<{width: number, height: number}> {
+    const url = new URL(publicUrl);
+    const pathSegments = url.pathname.split('/');
+    
+    const objectSegmentIndex = pathSegments.indexOf('object');
+    if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) {
+        throw new Error(`Could not parse bucket name from Supabase URL: ${publicUrl}`);
+    }
+    
+    const bucketName = pathSegments[objectSegmentIndex + 2];
+    const filePath = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
+
+    if (!bucketName || !filePath) {
+        throw new Error(`Could not parse bucket or path from Supabase URL: ${publicUrl}`);
+    }
+
+    // Download only the first 64KB, which is more than enough for image headers.
+    const { data: fileHead, error } = await supabase.storage.from(bucketName).download(filePath, { range: '0-65535' });
+    if (error) throw new Error(`Failed to download image header: ${error.message}`);
+
+    const buffer = new Uint8Array(await fileHead.arrayBuffer());
+    const size = imageSize(buffer);
+    if (!size || !size.width || !size.height) throw new Error("Could not determine image dimensions from file header.");
+    
+    return { width: size.width, height: size.height };
+}
+
 
 async function triggerNextJobInPack(supabase: SupabaseClient, currentJob: any, logPrefix: string) {
     const packId = currentJob.vto_pack_job_id;
@@ -298,16 +334,39 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
   }
   console.log(`${logPrefix} QA complete. Best image index: ${qaData.best_image_index}.`);
 
-  await supabase.from('mira-agent-bitstudio-jobs').update({
-    metadata: { 
-        ...job.metadata, 
-        qa_best_image_base64: variations[qaData.best_image_index].base64Image, // Save the best image data
-        qa_reasoning: qaData.reasoning, 
-        google_vto_step: 'reframe' // Set next step to reframe
-    }
-  }).eq('id', job.id);
+  const bestImageBase64 = variations[qaData.best_image_index].base64Image;
+  const shouldSkipReframe = job.metadata.skip_reframe === true || job.metadata.final_aspect_ratio === '1:1';
 
-  await safeInvoke(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
+  if (shouldSkipReframe) {
+      console.log(`${logPrefix} QA passed and reframe is skipped. Finalizing job.`);
+      
+      const finalImage = await uploadBase64ToStorage(supabase, bestImageBase64, job.user_id, 'final_vto_pack.png');
+
+      await supabase.from('mira-agent-bitstudio-jobs').update({
+          status: 'complete',
+          final_image_url: finalImage.publicUrl,
+          metadata: {
+              ...job.metadata,
+              qa_best_image_base64: null, // Clear large data
+              qa_reasoning: qaData.reasoning,
+              google_vto_step: 'done'
+          }
+      }).eq('id', job.id);
+
+      console.log(`${logPrefix} Job finalized with 1:1 image. Triggering next job in pack.`);
+      await triggerNextJobInPack(supabase, job, logPrefix);
+  } else {
+      await supabase.from('mira-agent-bitstudio-jobs').update({
+        metadata: { 
+            ...job.metadata, 
+            qa_best_image_base64: bestImageBase64,
+            qa_reasoning: qaData.reasoning, 
+            google_vto_step: 'reframe'
+        }
+      }).eq('id', job.id);
+
+      await safeInvoke(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
+  }
 }
 
 async function handleReframe(supabase: SupabaseClient, job: any, logPrefix: string) {
