@@ -71,7 +71,7 @@ async function downloadImage(supabase: SupabaseClient, url: string, requestId: s
 
 serve(async (req) => {
   const requestId = `vto-tool-${Date.now()}`;
-  console.log(`[VirtualTryOnTool][${requestId}] Function invoked. Running version 2.1 with validation retry.`);
+  console.log(`[VirtualTryOnTool][${requestId}] Function invoked. Running version 2.2 with prompt fix.`);
 
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -132,6 +132,7 @@ serve(async (req) => {
 
     const requestBody = {
       instances: [{
+        prompt: "a photorealistic image of the garment on the person",
         personImage: { image: { bytesBase64Encoded: person_image_base64 } },
         productImages: [{ image: { bytesBase64Encoded: garment_image_base64 } }]
       }],
