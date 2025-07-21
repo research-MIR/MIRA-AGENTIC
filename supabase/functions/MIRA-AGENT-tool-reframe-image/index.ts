@@ -48,23 +48,29 @@ serve(async (req) => {
     console.log(`${logPrefix} Starting job.`);
     await supabase.from('mira-agent-jobs').update({ status: 'processing' }).eq('id', job_id);
 
+    console.log(`${logPrefix} Fetching job details from database...`);
     const { data: job, error: fetchError } = await supabase.from('mira-agent-jobs').select('context, user_id').eq('id', job_id).single();
     if (fetchError) throw fetchError;
+    console.log(`${logPrefix} Job details fetched successfully.`);
 
     const { context } = job;
     const { base_image_url, mask_image_url, prompt, dilation, steps, count, invert_mask } = context;
     if (!base_image_url || !mask_image_url) throw new Error("Missing image URLs in job context.");
+    console.log(`${logPrefix} Base URL: ${base_image_url}`);
+    console.log(`${logPrefix} Mask URL: ${mask_image_url}`);
 
     console.log(`${logPrefix} Downloading images...`);
     const [baseImageBlob, maskImageBlob] = await Promise.all([
         downloadImageAsBlob(supabase, base_image_url),
         downloadImageAsBlob(supabase, mask_image_url)
     ]);
+    console.log(`${logPrefix} Images downloaded. Base size: ${baseImageBlob.size}, Mask size: ${maskImageBlob.size}`);
 
     const [finalBaseImageB64, finalMaskImageB64] = await Promise.all([
         blobToBase64(baseImageBlob),
         blobToBase64(maskImageBlob)
     ]);
+    console.log(`${logPrefix} Images converted to Base64. Base length: ${finalBaseImageB64.length}, Mask length: ${finalMaskImageB64.length}`);
 
     const auth = new GoogleAuth({
       credentials: JSON.parse(GOOGLE_VERTEX_AI_SA_KEY_JSON!),
@@ -90,22 +96,30 @@ serve(async (req) => {
         }
       }
     };
+    
+    // Sanitize payload for logging
+    const sanitizedPayload = JSON.parse(JSON.stringify(requestBody));
+    sanitizedPayload.instances[0].referenceImages[0].referenceImage.bytesBase64Encoded = `[BASE64_DATA_REDACTED_LENGTH_${finalBaseImageB64.length}]`;
+    sanitizedPayload.instances[0].referenceImages[1].referenceImage.bytesBase64Encoded = `[BASE64_DATA_REDACTED_LENGTH_${finalMaskImageB64.length}]`;
 
-    console.log(`${logPrefix} Calling Google Vertex AI...`);
+    console.log(`${logPrefix} Calling Google Vertex AI with sanitized payload:`, JSON.stringify(sanitizedPayload, null, 2));
     const response = await fetch(apiUrl, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json; charset=utf-8' },
       body: JSON.stringify(requestBody)
     });
 
+    console.log(`${logPrefix} Google Vertex AI response status: ${response.status}`);
     if (!response.ok) {
       const errorBody = await response.text();
+      console.error(`${logPrefix} Google API Error Body:`, errorBody);
       throw new Error(`API call failed with status ${response.status}: ${errorBody}`);
     }
 
     const responseData = await response.json();
     const predictions = responseData.predictions;
     if (!predictions || !Array.isArray(predictions) || predictions.length === 0) {
+      console.error(`${logPrefix} Invalid API response:`, JSON.stringify(responseData, null, 2));
       throw new Error("API response did not contain valid image predictions.");
     }
     console.log(`${logPrefix} Received ${predictions.length} predictions.`);
@@ -113,6 +127,7 @@ serve(async (req) => {
     const uploadPromises = predictions.map(async (prediction: any, index: number) => {
       const imageBuffer = decodeBase64(prediction.bytesBase64Encoded);
       const filePath = `${job.user_id}/reframe/${Date.now()}_${index}.png`;
+      console.log(`${logPrefix} Uploading result ${index + 1} to ${filePath}...`);
       await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(filePath, imageBuffer, { contentType: 'image/png', upsert: true });
       const { data: { publicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
       return { publicUrl, storagePath: filePath };
@@ -121,15 +136,17 @@ serve(async (req) => {
     const finalImages = await Promise.all(uploadPromises);
     console.log(`${logPrefix} Uploaded ${finalImages.length} images to storage.`);
 
+    console.log(`${logPrefix} Updating job status to 'complete'.`);
     await supabase.from('mira-agent-jobs').update({
       status: 'complete',
       final_result: { images: finalImages }
     }).eq('id', job_id);
+    console.log(`${logPrefix} Job finalized successfully.`);
 
     return new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   } catch (error) {
-    console.error(`${logPrefix} Error:`, error);
+    console.error(`${logPrefix} FATAL ERROR:`, error);
     await supabase.from('mira-agent-jobs').update({ status: 'failed', error_message: error.message }).eq('id', job_id);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
