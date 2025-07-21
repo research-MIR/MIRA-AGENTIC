@@ -81,20 +81,41 @@ const ProductRecontext = () => {
     enabled: !!activeJobId,
   });
 
+  const { data: recentJobs, isLoading: isLoadingRecent } = useQuery({
+    queryKey: ['recentRecontextJobs', session?.user?.id],
+    queryFn: async () => {
+      if (!session?.user) return [];
+      const { data, error } = await supabase
+        .from('mira-agent-jobs')
+        .select('id, status, final_result, context')
+        .eq('context->>source', 'recontext')
+        .eq('user_id', session.user.id)
+        .order('created_at', { ascending: false })
+        .limit(10);
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!session?.user,
+  });
+
   useEffect(() => {
-    if (!activeJobId || !session?.user?.id) return;
+    if (!session?.user?.id) return;
     if (channelRef.current) supabase.removeChannel(channelRef.current);
 
-    const channel = supabase.channel(`recontext-job-${activeJobId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'mira-agent-jobs', filter: `id=eq.${activeJobId}` },
+    const channel = supabase.channel(`recontext-jobs-tracker-${session.user.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mira-agent-jobs', filter: `user_id=eq.${session.user.id}` },
         (payload) => {
-          queryClient.setQueryData(['recontextJob', activeJobId], payload.new);
+          const job = payload.new as any;
+          if (job?.context?.source === 'recontext') {
+            queryClient.invalidateQueries({ queryKey: ['recontextJob', job.id] });
+            queryClient.invalidateQueries({ queryKey: ['recentRecontextJobs', session.user.id] });
+          }
         }
       ).subscribe();
     channelRef.current = channel;
 
     return () => { if (channelRef.current) supabase.removeChannel(channelRef.current); };
-  }, [activeJobId, session?.user?.id, supabase, queryClient]);
+  }, [session?.user?.id, supabase, queryClient]);
 
   const handleGenerate = async () => {
     if (productFiles.length === 0 || (!prompt && !sceneFile)) {
@@ -194,27 +215,50 @@ const ProductRecontext = () => {
               </Button>
             </CardContent>
           </Card>
-          <Card>
-            <CardHeader><CardTitle>{t('result')}</CardTitle></CardHeader>
-            <CardContent>
-              {isLoadingActiveJob || (activeJob && activeJob.status === 'processing') ? (
-                <div className="flex justify-center p-12"><Loader2 className="h-8 w-8 animate-spin" /></div>
-              ) : resultImageUrl ? (
-                <div className="space-y-4">
-                  <div className="mt-2 aspect-square w-full bg-muted rounded-md flex items-center justify-center">
-                    <button className="w-full h-full" onClick={() => showImage({ images: [{ url: resultImageUrl }], currentIndex: 0 })}>
-                      <img src={resultImageUrl} className="max-w-full max-h-full object-contain" />
-                    </button>
+          <div className="space-y-6">
+            <Card>
+              <CardHeader><CardTitle>{t('result')}</CardTitle></CardHeader>
+              <CardContent>
+                {isLoadingActiveJob || (activeJob && (activeJob.status === 'processing' || activeJob.status === 'awaiting_reframe')) ? (
+                  <div className="flex justify-center p-12"><Loader2 className="h-8 w-8 animate-spin" /></div>
+                ) : resultImageUrl ? (
+                  <div className="space-y-4">
+                    <div className="mt-2 aspect-square w-full bg-muted rounded-md flex items-center justify-center">
+                      <button className="w-full h-full" onClick={() => showImage({ images: [{ url: resultImageUrl }], currentIndex: 0 })}>
+                        <img src={resultImageUrl} className="max-w-full max-h-full object-contain" />
+                      </button>
+                    </div>
+                    <Button className="w-full" onClick={() => setIsCompareModalOpen(true)}>{t('compareResults')}</Button>
                   </div>
-                  <Button className="w-full" onClick={() => setIsCompareModalOpen(true)}>{t('compareResults')}</Button>
-                </div>
-              ) : (
-                <div className="flex items-center justify-center h-64">
-                  <p className="text-sm text-muted-foreground">{t('resultPlaceholder')}</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                ) : (
+                  <div className="flex items-center justify-center h-64">
+                    <p className="text-sm text-muted-foreground">{t('resultPlaceholder')}</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader><CardTitle>Recent Jobs</CardTitle></CardHeader>
+              <CardContent>
+                {isLoadingRecent ? <Skeleton className="h-24 w-full" /> : recentJobs && recentJobs.length > 0 ? (
+                  <ScrollArea className="h-32">
+                    <div className="flex gap-4 pb-2">
+                      {recentJobs.map(job => (
+                        <RecentJobThumbnail
+                          key={job.id}
+                          job={job}
+                          onClick={() => setActiveJobId(job.id)}
+                          isSelected={activeJobId === job.id}
+                        />
+                      ))}
+                    </div>
+                  </ScrollArea>
+                ) : (
+                  <p className="text-sm text-muted-foreground">No recent jobs found.</p>
+                )}
+              </CardContent>
+            </Card>
+          </div>
         </div>
       </div>
       {isCompareModalOpen && sourceImageUrl && resultImageUrl && (
