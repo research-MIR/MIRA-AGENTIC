@@ -85,7 +85,7 @@ serve(async (req) => {
       
       const maskImageData = maskCtx.getImageData(0, 0, newW, newH);
       const maskImageScript = new ISImage(maskImageData.width, maskImageData.height, maskImageData.data);
-      const maskBuffer = await maskImageScript.encodeJPEG(90);
+      const maskBuffer = await maskImageScript.encode(0); // Encode as PNG (lossless)
       console.log(`${logPrefix} Generated mask buffer using imagescript. Length: ${maskBuffer.length}`);
       if (maskBuffer.length === 0) {
           throw new Error("FATAL: Generated mask buffer is empty. ImageScript operation failed.");
@@ -99,7 +99,7 @@ serve(async (req) => {
       
       const newBaseImageData = newBaseCtx.getImageData(0, 0, newW, newH);
       const newBaseImageScript = new ISImage(newBaseImageData.width, newBaseImageData.height, newBaseImageData.data);
-      const newBaseBuffer = await newBaseImageScript.encodeJPEG(90);
+      const newBaseBuffer = await newBaseImageScript.encodeJPEG(90); // Base image can be JPEG
       console.log(`${logPrefix} Generated new base image buffer using imagescript. Length: ${newBaseBuffer.length}`);
       if (newBaseBuffer.length === 0) {
           throw new Error("FATAL: Generated base image buffer is empty. ImageScript operation failed.");
@@ -126,7 +126,7 @@ serve(async (req) => {
 
       [final_base_url, final_mask_url] = await Promise.all([
         uploadFile(newBaseBuffer, 'base.jpeg', 'image/jpeg'),
-        uploadFile(maskBuffer, 'mask.jpeg', 'image/jpeg')
+        uploadFile(maskBuffer, 'mask.png', 'image/png')
       ]);
       
       console.log(`${logPrefix} Uploaded new assets. Base URL: ${final_base_url}, Mask URL: ${final_mask_url}`);
