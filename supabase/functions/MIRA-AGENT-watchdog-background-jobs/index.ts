@@ -14,6 +14,7 @@ const STALLED_AGGREGATION_THRESHOLD_SECONDS = 20;
 const STALLED_PAIR_JOB_THRESHOLD_MINUTES = 2;
 const STALLED_GOOGLE_VTO_THRESHOLD_MINUTES = 2;
 const STALLED_QUEUED_VTO_THRESHOLD_SECONDS = 30;
+const STALLED_REFRAME_THRESHOLD_MINUTES = 2; // New threshold for reframe jobs
 
 serve(async (req)=>{
   const requestId = `watchdog-bg-${Date.now()}`;
@@ -225,7 +226,7 @@ serve(async (req)=>{
         console.log(`[Watchdog-BG][${requestId}] No jobs awaiting reframe found.`);
     }
 
-    // --- NEW Task 8: Handle Recontext Jobs Awaiting Reframe ---
+    // --- Task 8: Handle Recontext Jobs Awaiting Reframe ---
     const { data: awaitingRecontextJobs, error: recontextError } = await supabase
       .from('mira-agent-jobs')
       .select('id, context')
@@ -267,6 +268,28 @@ serve(async (req)=>{
         actionsTaken.push(`Checked status for ${awaitingRecontextJobs.length} recontext jobs awaiting reframe.`);
     } else {
         console.log(`[Watchdog-BG][${requestId}] No recontext jobs awaiting reframe found.`);
+    }
+
+    // --- NEW Task 9: Handle Stalled Reframe Worker Jobs ---
+    const reframeThreshold = new Date(Date.now() - STALLED_REFRAME_THRESHOLD_MINUTES * 60 * 1000).toISOString();
+    const { data: stalledReframeJobs, error: stalledReframeError } = await supabase
+      .from('mira-agent-jobs')
+      .select('id')
+      .eq('status', 'processing')
+      .in('context->>source', ['reframe', 'reframe_from_recontext'])
+      .lt('updated_at', reframeThreshold);
+
+    if (stalledReframeError) {
+        console.error(`[Watchdog-BG][${requestId}] Error querying for stalled reframe jobs:`, stalledReframeError.message);
+    } else if (stalledReframeJobs && stalledReframeJobs.length > 0) {
+        console.log(`[Watchdog-BG][${requestId}] Found ${stalledReframeJobs.length} stalled reframe job(s). Re-triggering workers...`);
+        const reframeWorkerPromises = stalledReframeJobs.map(job => 
+            supabase.functions.invoke('MIRA-AGENT-worker-reframe', { body: { job_id: job.id } })
+        );
+        await Promise.allSettled(reframeWorkerPromises);
+        actionsTaken.push(`Re-triggered ${stalledReframeJobs.length} stalled reframe workers.`);
+    } else {
+        console.log(`[Watchdog-BG][${requestId}] No stalled reframe jobs found.`);
     }
 
     const finalMessage = actionsTaken.length > 0 ? actionsTaken.join(' ') : "No actions required. All jobs are running normally.";
