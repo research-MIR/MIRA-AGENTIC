@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { createCanvas, loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
+import { Image as ISImage } from "https://deno.land/x/imagescript@1.2.15/mod.ts";
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
@@ -82,10 +83,12 @@ serve(async (req) => {
       maskCtx.shadowBlur = featherAmount;
       maskCtx.fillRect(xOffset, yOffset, originalW, originalH);
       
-      const maskBuffer = maskCanvas.toBuffer('image/jpeg', 0.9);
-      console.log(`${logPrefix} Generated mask buffer. Length: ${maskBuffer.length}`);
+      const maskImageData = maskCtx.getImageData(0, 0, newW, newH);
+      const maskImageScript = new ISImage(maskImageData.width, maskImageData.height, maskImageData.data);
+      const maskBuffer = await maskImageScript.encodeJPEG(90);
+      console.log(`${logPrefix} Generated mask buffer using imagescript. Length: ${maskBuffer.length}`);
       if (maskBuffer.length === 0) {
-          throw new Error("FATAL: Generated mask buffer is empty. Canvas operation failed.");
+          throw new Error("FATAL: Generated mask buffer is empty. ImageScript operation failed.");
       }
 
       const newBaseCanvas = createCanvas(newW, newH);
@@ -94,10 +97,12 @@ serve(async (req) => {
       newBaseCtx.fillRect(0, 0, newW, newH);
       newBaseCtx.drawImage(originalImage, xOffset, yOffset);
       
-      const newBaseBuffer = newBaseCanvas.toBuffer('image/jpeg', 0.9);
-      console.log(`${logPrefix} Generated new base image buffer. Length: ${newBaseBuffer.length}`);
+      const newBaseImageData = newBaseCtx.getImageData(0, 0, newW, newH);
+      const newBaseImageScript = new ISImage(newBaseImageData.width, newBaseImageData.height, newBaseImageData.data);
+      const newBaseBuffer = await newBaseImageScript.encodeJPEG(90);
+      console.log(`${logPrefix} Generated new base image buffer using imagescript. Length: ${newBaseBuffer.length}`);
       if (newBaseBuffer.length === 0) {
-          throw new Error("FATAL: Generated base image buffer is empty. Canvas operation failed.");
+          throw new Error("FATAL: Generated base image buffer is empty. ImageScript operation failed.");
       }
 
       const uploadFile = async (buffer: Uint8Array, filename: string, contentType: string) => {
