@@ -45,8 +45,8 @@ serve(async (req) => {
       if (downloadError) throw new Error(`Failed to download base image: ${downloadError.message}`);
 
       const originalImage = await loadImage(new Uint8Array(await blob.arrayBuffer()));
-      const originalW = originalImage.width;
-      const originalH = originalImage.height;
+      const originalW = originalImage.width();
+      const originalH = originalImage.height();
 
       const [targetW, targetH] = aspect_ratio.split(':').map(Number);
       const targetRatio = targetW / targetH;
