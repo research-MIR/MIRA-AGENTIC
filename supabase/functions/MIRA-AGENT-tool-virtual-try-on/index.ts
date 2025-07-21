@@ -2,20 +2,17 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { GoogleAuth } from "npm:google-auth-library";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
-
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS"
 };
-
 const GOOGLE_VERTEX_AI_SA_KEY_JSON = Deno.env.get('GOOGLE_VERTEX_AI_SA_KEY_JSON');
 const GOOGLE_PROJECT_ID = Deno.env.get('GOOGLE_PROJECT_ID');
 const REGION = 'us-central1';
 const MODEL_ID = 'virtual-try-on-exp-05-31';
-const MAX_RETRIES = 3;
-const RETRY_DELAY_MS = 2000;
-
+const MAX_RETRIES = 6;
+const RETRY_DELAY_MS = 50000;
 // --- DIAGNOSTIC: Global Error Handlers ---
 self.addEventListener('unhandledrejection', (event)=>{
   console.error(`[GLOBAL UNHANDLED REJECTION] Reason:`, event.reason);
@@ -24,8 +21,7 @@ self.addEventListener('error', (event)=>{
   console.error(`[GLOBAL ERROR] Message: ${event.message}, Filename: ${event.filename}, Lineno: ${event.lineno}, Error:`, event.error);
 });
 // --- END DIAGNOSTIC ---
-
-const fetchWithRetry = async (url: string, options: RequestInit, maxRetries = 3, delay = 1500, requestId: string)=>{
+const fetchWithRetry = async (url: string, options: RequestInit, maxRetries = 3, delay = 15000, requestId: string)=>{
   for(let attempt = 1; attempt <= maxRetries; attempt++){
     try {
       const response = await fetch(url, options);
@@ -46,12 +42,10 @@ const fetchWithRetry = async (url: string, options: RequestInit, maxRetries = 3,
   }
   throw new Error("Fetch with retry failed unexpectedly."); // Should not be reached
 };
-
-const blobToBase64 = async (blob: Blob): Promise<string>=>{
+const blobToBase64 = async (blob: Blob)=>{
   const buffer = await blob.arrayBuffer();
   return encodeBase64(new Uint8Array(buffer)); // Use Uint8Array for safety
 };
-
 async function downloadImage(supabase: any, url: string, requestId: string) {
   console.log(`[Downloader][${requestId}] Attempting to download from URL: ${url}`);
   if (url.includes('supabase.co')) {
@@ -82,7 +76,6 @@ async function downloadImage(supabase: any, url: string, requestId: string) {
     return blob;
   }
 }
-
 serve(async (req)=>{
   const requestId = `vto-tool-${Date.now()}`;
   console.log(`[VirtualTryOnTool][${requestId}] Function invoked. Running version 2.1 with safety filter retry.`);
@@ -157,12 +150,9 @@ serve(async (req)=>{
     // Nullify large objects to free up memory before the large network request
     person_image_base64 = null;
     garment_image_base64 = null;
-    
     let predictions: any[] | null = null;
-
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    for(let attempt = 1; attempt <= MAX_RETRIES; attempt++){
       console.log(`[VirtualTryOnTool][${requestId}] Calling Google Vertex AI, attempt ${attempt}/${MAX_RETRIES}.`);
-      
       const response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
@@ -171,29 +161,25 @@ serve(async (req)=>{
         },
         body: JSON.stringify(requestBody)
       });
-
       if (!response.ok) {
         console.warn(`[VirtualTryOnTool][${requestId}] API call failed with status ${response.status} on attempt ${attempt}.`);
         if (attempt === MAX_RETRIES) {
           throw new Error(`API call failed with status ${response.status} after ${MAX_RETRIES} attempts: ${await response.text()}`);
         }
+        await new Promise((resolve)=>setTimeout(resolve, RETRY_DELAY_MS * attempt));
+        continue;
+      }
+      const responseData = await response.json();
+      const potentialPredictions = responseData.predictions;
+      const raiFilteredReason = potentialPredictions?.[0]?.raiFilteredReason;
+      if (raiFilteredReason) {
+        console.warn(`[VirtualTryOnTool][${requestId}] Safety filter triggered on attempt ${attempt}. Reason: ${raiFilteredReason}. Retrying...`);
+        if (attempt === MAX_RETRIES) {
+          throw new Error(`Generation failed due to repeated safety filter blocks. Last reason: ${raiFilteredReason}`);
+        }
         await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS * attempt));
         continue;
       }
-
-      const responseData = await response.json();
-      const potentialPredictions = responseData.predictions;
-
-      const raiFilteredReason = potentialPredictions?.[0]?.raiFilteredReason;
-      if (raiFilteredReason) {
-          console.warn(`[VirtualTryOnTool][${requestId}] Safety filter triggered on attempt ${attempt}. Reason: ${raiFilteredReason}. Retrying...`);
-          if (attempt === MAX_RETRIES) {
-              throw new Error(`Generation failed due to repeated safety filter blocks. Last reason: ${raiFilteredReason}`);
-          }
-          await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS * attempt));
-          continue;
-      }
-
       if (potentialPredictions && Array.isArray(potentialPredictions) && potentialPredictions.length > 0 && potentialPredictions.every((p: any) => p && p.bytesBase64Encoded)) {
         console.log(`[VirtualTryOnTool][${requestId}] Successfully received and validated ${potentialPredictions.length} predictions on attempt ${attempt}.`);
         predictions = potentialPredictions;
@@ -206,11 +192,9 @@ serve(async (req)=>{
         await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS * attempt));
       }
     }
-
     if (!predictions) {
       throw new Error("Failed to get a valid response from the AI model after all retries.");
     }
-
     const generatedImages = predictions.map((p)=>{
       if (!p.bytesBase64Encoded) {
         console.error(`[VirtualTryOnTool][${requestId}] A prediction object was missing the 'bytesBase64Encoded' field.`);
