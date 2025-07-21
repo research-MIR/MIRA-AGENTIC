@@ -83,7 +83,7 @@ serve(async (req) => {
       
       const maskImageData = maskCtx.getImageData(0, 0, newW, newH);
       const maskImageScript = new ISImage(maskImageData.width, maskImageData.height, maskImageData.data);
-      const maskBuffer = await maskImageScript.encodeWEBP(90);
+      const maskBuffer = await maskImageScript.encodeJPEG(90);
       if (maskBuffer.length === 0) throw new Error("FATAL: Generated mask buffer is empty.");
 
       const newBaseCanvas = createCanvas(newW, newH);
@@ -94,7 +94,7 @@ serve(async (req) => {
       
       const newBaseImageData = newBaseCtx.getImageData(0, 0, newW, newH);
       const newBaseImageScript = new ISImage(newBaseImageData.width, newBaseImageData.height, newBaseImageData.data);
-      const newBaseBuffer = await newBaseImageScript.encodeWEBP(90);
+      const newBaseBuffer = await newBaseImageScript.encodeJPEG(90);
       if (newBaseBuffer.length === 0) throw new Error("FATAL: Generated base image buffer is empty.");
       
       baseImageForPromptingB64 = encodeBase64(newBaseBuffer);
@@ -109,8 +109,8 @@ serve(async (req) => {
       };
 
       [final_base_url, final_mask_url] = await Promise.all([
-        uploadFile(newBaseBuffer, 'base.webp', 'image/webp'),
-        uploadFile(maskBuffer, 'mask.webp', 'image/webp')
+        uploadFile(newBaseBuffer, 'base.jpeg', 'image/jpeg'),
+        uploadFile(maskBuffer, 'mask.jpeg', 'image/jpeg')
       ]);
       
       await supabase.from('mira-agent-jobs').update({
@@ -128,7 +128,7 @@ serve(async (req) => {
         body: {
             base_image_base64: baseImageForPromptingB64,
             user_hint: context.prompt || "",
-            mime_type: 'image/webp'
+            mime_type: 'image/jpeg'
         }
     });
     if (promptError) throw new Error(`Auto-describe-scene tool failed: ${promptError.message}`);
