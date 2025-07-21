@@ -80,7 +80,7 @@ serve(async (req) => {
     const x = (finalCanvas.width - baseImage.width()) / 2;
     const y = (finalCanvas.height - baseImage.height()) / 2;
     ctx.drawImage(baseImage, x, y);
-    const finalBaseImageB64 = finalCanvas.toDataURL('image/png').split(',')[1];
+    const finalBaseImageB64 = finalCanvas.toDataURL('image/jpeg', 0.9).split(',')[1];
     
     const finalMaskImageB64 = await blobToBase64(maskImageBlob);
 
@@ -124,7 +124,7 @@ serve(async (req) => {
         editMode: "EDIT_MODE_OUTPAINT",
         sampleCount: count || 1,
         outputOptions: {
-            mimeType: "image/png"
+            mimeType: "image/jpeg"
         }
       }
     };
@@ -153,9 +153,9 @@ serve(async (req) => {
 
     const uploadPromises = predictions.map(async (prediction: any, index: number) => {
       const imageBuffer = decodeBase64(prediction.bytesBase64Encoded);
-      const filePath = `${job.user_id}/reframe/${Date.now()}_${index}.png`;
+      const filePath = `${job.user_id}/reframe/${Date.now()}_${index}.jpeg`;
       await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(filePath, imageBuffer, {
-        contentType: 'image/png',
+        contentType: 'image/jpeg',
         upsert: true
       });
       const { data: { publicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
@@ -175,7 +175,6 @@ serve(async (req) => {
       },
       context: {
         ...job.context,
-        // Add the original base image URL to the final context for comparison
         original_base_image_url: job.context.base_image_url
       }
     }).eq('id', job_id);
