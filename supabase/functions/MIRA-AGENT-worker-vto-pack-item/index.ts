@@ -323,8 +323,7 @@ async function handleReframe(supabase: SupabaseClient, job: any, logPrefix: stri
             base_image_base64: qa_best_image_base64,
             prompt: prompt_appendix || "",
             aspect_ratio: final_aspect_ratio,
-            source: 'vto',
-            parent_recontext_job_id: job.id, // Pass self as parent for tracking
+            source: 'reframe_from_vto',
         }
     });
     if (reframeError) throw reframeError;

@@ -270,13 +270,13 @@ serve(async (req)=>{
         console.log(`[Watchdog-BG][${requestId}] No recontext jobs awaiting reframe found.`);
     }
 
-    // --- NEW Task 9: Handle Stalled Reframe Worker Jobs ---
+    // --- Task 9: Handle Stalled Reframe Worker Jobs ---
     const reframeThreshold = new Date(Date.now() - STALLED_REFRAME_THRESHOLD_MINUTES * 60 * 1000).toISOString();
     const { data: stalledReframeJobs, error: stalledReframeError } = await supabase
       .from('mira-agent-jobs')
       .select('id')
       .eq('status', 'processing')
-      .in('context->>source', ['reframe', 'reframe_from_recontext'])
+      .in('context->>source', ['reframe', 'reframe_from_recontext', 'reframe_from_vto'])
       .lt('updated_at', reframeThreshold);
 
     if (stalledReframeError) {
