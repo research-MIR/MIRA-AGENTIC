@@ -84,8 +84,10 @@ serve(async (req) => {
       maskCtx.fillRect(xOffset, yOffset, originalW, originalH);
       
       const maskBuffer = maskCanvas.toBuffer('image/png', 0);
-      
       console.log(`${logPrefix} Generated mask buffer. Length: ${maskBuffer.length}`);
+      if (maskBuffer.length === 0) {
+          throw new Error("FATAL: Generated mask buffer is empty. Canvas operation failed.");
+      }
 
       // --- OPTIMIZED BASE IMAGE GENERATION ---
       const newBaseCanvas = createCanvas(newW, newH);
@@ -95,7 +97,6 @@ serve(async (req) => {
       newBaseCtx.drawImage(originalImage, xOffset, yOffset);
       
       const newBaseBuffer = newBaseCanvas.toBuffer('image/png');
-      
       console.log(`${logPrefix} Generated new base image buffer. Length: ${newBaseBuffer.length}`);
       if (newBaseBuffer.length === 0) {
           throw new Error("FATAL: Generated base image buffer is empty. Canvas operation failed.");
@@ -103,9 +104,11 @@ serve(async (req) => {
 
       const uploadFile = async (buffer: Uint8Array, filename: string, contentType: string) => {
         const filePath = `${job.user_id}/reframe-generated/${job_id}-${filename}`;
+        console.log(`${logPrefix} Uploading ${filename} (${buffer.length} bytes) to ${filePath}...`);
         const { error } = await supabase.storage.from(UPLOAD_BUCKET).upload(filePath, buffer, { contentType });
         if (error) throw error;
         const { data: { publicUrl } } = supabase.storage.from(UPLOAD_BUCKET).getPublicUrl(filePath);
+        console.log(`${logPrefix} Successfully uploaded ${filename}.`);
         return publicUrl;
       };
 
@@ -119,7 +122,7 @@ serve(async (req) => {
       await supabase.from('mira-agent-jobs').update({
         context: { ...context, base_image_url: final_base_url, mask_image_url: final_mask_url }
       }).eq('id', job_id);
-      console.log(`${logPrefix} Generated and uploaded new assets.`);
+      console.log(`${logPrefix} Saved new assets to storage, ready for reframe tool.`);
     } else {
       console.log(`${logPrefix} Pre-made mask found. Bypassing canvas generation.`);
     }
