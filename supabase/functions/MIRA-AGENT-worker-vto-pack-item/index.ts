@@ -109,37 +109,6 @@ async function getDimensionsFromSupabase(supabase: SupabaseClient, publicUrl: st
 }
 
 
-async function triggerNextJobInPack(supabase: SupabaseClient, currentJob: any, logPrefix: string) {
-    const packId = currentJob.vto_pack_job_id;
-    if (!packId) {
-        console.log(`${logPrefix} Job is not part of a pack. Chain ends here.`);
-        return;
-    }
-
-    console.log(`${logPrefix} Checking for next job in pack ${packId}.`);
-    const { data: nextJob, error } = await supabase
-        .from('mira-agent-bitstudio-jobs')
-        .select('id')
-        .eq('vto_pack_job_id', packId)
-        .eq('status', 'pending')
-        .order('created_at', { ascending: true })
-        .limit(1)
-        .single();
-
-    if (error && error.code !== 'PGRST116') { // PGRST116 = no rows found
-        console.error(`${logPrefix} Error fetching next job:`, error);
-        return;
-    }
-
-    if (nextJob) {
-        console.log(`${logPrefix} Found next job: ${nextJob.id}. Invoking worker for it.`);
-        await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'queued' }).eq('id', nextJob.id);
-        invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: nextJob.id });
-    } else {
-        console.log(`${logPrefix} No more pending jobs found in pack. Chain complete.`);
-    }
-}
-
 // --- State Machine Logic ---
 
 serve(async (req) => {
@@ -168,7 +137,6 @@ serve(async (req) => {
             })
             .eq('id', pair_job_id);
         console.log(`${logPrefix} Job successfully finalized.`);
-        await triggerNextJobInPack(supabase, job, logPrefix);
     } else {
         console.log(`${logPrefix} Starting job.`);
         const step = job.metadata?.google_vto_step || 'start';
@@ -203,7 +171,6 @@ serve(async (req) => {
   } catch (error) {
     console.error(`${logPrefix} Error:`, error);
     await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'failed', error_message: error.message }).eq('id', pair_job_id);
-    await triggerNextJobInPack(supabase, job, logPrefix); // Trigger next job even on failure
     return new Response(JSON.stringify({ error: error.message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
   }
 });
@@ -358,8 +325,7 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
           }
       }).eq('id', job.id);
 
-      console.log(`${logPrefix} Job finalized with 1:1 image. Triggering next job in pack.`);
-      await triggerNextJobInPack(supabase, job, logPrefix);
+      console.log(`${logPrefix} Job finalized with 1:1 image.`);
   } else {
       await supabase.from('mira-agent-bitstudio-jobs').update({
         metadata: { 
@@ -388,6 +354,7 @@ async function handleReframe(supabase: SupabaseClient, job: any, logPrefix: stri
             prompt: prompt_appendix || "",
             aspect_ratio: final_aspect_ratio,
             source: 'reframe_from_vto',
+            parent_vto_job_id: job.id
         }
     });
     if (reframeError) throw reframeError;

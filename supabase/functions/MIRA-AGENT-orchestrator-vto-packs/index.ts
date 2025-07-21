@@ -59,17 +59,7 @@ serve(async (req) => {
         throw new Error("Failed to insert pair jobs into the database.");
     }
 
-    console.log(`[VTO-Packs-Orchestrator] ${insertedJobs.length} pair jobs created with 'pending' status.`);
-
-    // Kick off the first job in the sequence
-    const firstJobId = insertedJobs[0].id;
-    console.log(`[VTO-Packs-Orchestrator] Kicking off the first job in the sequence: ${firstJobId}`);
-    
-    await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'queued' }).eq('id', firstJobId);
-
-    supabase.functions.invoke('MIRA-AGENT-worker-vto-pack-item', {
-        body: { pair_job_id: firstJobId }
-    }).catch(console.error);
+    console.log(`[VTO-Packs-Orchestrator] ${insertedJobs.length} pair jobs created with 'pending' status. The watchdog will now take over.`);
 
     return new Response(JSON.stringify({ success: true, message: `${pairs.length} jobs have been queued for processing.` }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
