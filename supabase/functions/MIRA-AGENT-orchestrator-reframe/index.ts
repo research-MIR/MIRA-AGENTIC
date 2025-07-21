@@ -73,8 +73,8 @@ serve(async (req) => {
       if (downloadError) throw new Error(`Failed to download base image: ${downloadError.message}`);
 
       const originalImage = await loadImage(new Uint8Array(await blob.arrayBuffer()));
-      const originalW = originalImage.width;
-      const originalH = originalImage.height;
+      const originalW = originalImage.width();
+      const originalH = originalImage.height();
 
       const [targetW, targetH] = aspect_ratio.split(':').map(Number);
       const targetRatio = targetW / targetH;
@@ -108,7 +108,7 @@ serve(async (req) => {
       newBaseCtx.fillStyle = 'white';
       newBaseCtx.fillRect(0, 0, newW, newH);
       newBaseCtx.drawImage(originalImage, xOffset, yOffset);
-      finalBaseImageB64 = encodeBase64(newBaseCanvas.toBuffer('image/jpeg', 95));
+      finalBaseImageB64 = encodeBase64(newBaseCanvas.toBuffer('image/jpeg', { quality: 95 }));
       console.log(`${logPrefix} Generated new assets in memory.`);
     } else {
       console.log(`${logPrefix} Pre-made mask found. Downloading assets.`);
