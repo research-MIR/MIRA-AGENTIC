@@ -18,6 +18,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { RecentJobThumbnail } from "@/components/Jobs/RecentJobThumbnail";
 import { ImageCompareModal } from "@/components/ImageCompareModal";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -56,6 +57,7 @@ const ProductRecontext = () => {
   const { t } = useLanguage();
   const { showImage } = useImagePreview();
   const channelRef = useRef<RealtimeChannel | null>(null);
+  const queryClient = useQueryClient();
 
   const [productFiles, setProductFiles] = useState<File[]>([]);
   const [sceneFile, setSceneFile] = useState<File | null>(null);
@@ -164,7 +166,7 @@ const ProductRecontext = () => {
                       {productPreviews.map((url, index) => (
                         <div key={index} className="relative">
                           <img src={url} alt={`Product preview ${index + 1}`} className="w-16 h-16 object-cover rounded-md" />
-                          <Button variant="destructive" size="icon" className="absolute -top-2 -right-2 h-5 w-5 rounded-full" onClick={() => removeProductFile(index)}><X className="h-3 w-3" /></Button>
+                          <Button variant="destructive" size="icon" className="absolute -top-2 -right-2 h-5 w-5 rounded-full" onClick={() => setProductFiles(files => files.filter((_, i) => i !== index))}><X className="h-3 w-3" /></Button>
                         </div>
                       ))}
                     </div>
