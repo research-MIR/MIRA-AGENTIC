@@ -70,20 +70,27 @@ serve(async (req) => {
       const xOffset = (newW - originalW) / 2;
       const yOffset = (newH - originalH) / 2;
 
-      // Generate mask with blur filter for feathering
-      const maskCanvas = createCanvas(newW, newH);
-      const maskCtx = maskCanvas.getContext('2d');
-      maskCtx.fillStyle = 'white';
-      maskCtx.fillRect(0, 0, newW, newH);
+      // --- NEW ROBUST MASK GENERATION ---
+      // Step 1: Create a sharp, un-blurred mask on a temporary canvas
+      const rawMaskCanvas = createCanvas(newW, newH);
+      const rawMaskCtx = rawMaskCanvas.getContext('2d');
+      rawMaskCtx.fillStyle = 'white';
+      rawMaskCtx.fillRect(0, 0, newW, newH);
+      rawMaskCtx.fillStyle = 'black';
+      rawMaskCtx.fillRect(xOffset, yOffset, originalW, originalH);
+
+      // Step 2: Create the final canvas and draw the blurred version of the first canvas onto it
+      const featheredMaskCanvas = createCanvas(newW, newH);
+      const featheredCtx = featheredMaskCanvas.getContext('2d');
       const featherAmount = Math.max(2, Math.round(Math.min(originalW, originalH) * 0.005));
       console.log(`${logPrefix} Applying feathering with blur radius: ${featherAmount}px`);
-      maskCtx.filter = `blur(${featherAmount}px)`;
-      maskCtx.fillStyle = 'black';
-      maskCtx.fillRect(xOffset, yOffset, originalW, originalH);
-      maskCtx.filter = 'none';
-      const maskDataURL = maskCanvas.toDataURL('image/jpeg', 0.9);
+      featheredCtx.filter = `blur(${featherAmount}px)`;
+      featheredCtx.drawImage(rawMaskCanvas, 0, 0);
+      
+      const maskDataURL = featheredMaskCanvas.toDataURL('image/jpeg', 0.9);
       const maskBuffer = decodeBase64(maskDataURL.split(',')[1]);
       if (maskBuffer.length === 0) throw new Error("FATAL: Generated mask buffer is empty.");
+      // --- END ROBUST MASK GENERATION ---
 
       // Generate new base image IN MEMORY for prompt generation
       const newBaseCanvas = createCanvas(newW, newH);
