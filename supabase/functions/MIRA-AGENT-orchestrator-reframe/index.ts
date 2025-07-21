@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { createCanvas, loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
-import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
+import { encodeBase64, decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
@@ -81,7 +81,8 @@ serve(async (req) => {
       maskCtx.fillStyle = 'black';
       maskCtx.fillRect(xOffset, yOffset, originalW, originalH);
       maskCtx.filter = 'none';
-      const maskBuffer = maskCanvas.toBuffer('image/jpeg', 0.9);
+      const maskDataURL = maskCanvas.toDataURL('image/jpeg', 0.9);
+      const maskBuffer = decodeBase64(maskDataURL.split(',')[1]);
       if (maskBuffer.length === 0) throw new Error("FATAL: Generated mask buffer is empty.");
 
       // Generate new base image IN MEMORY for prompt generation
@@ -90,7 +91,8 @@ serve(async (req) => {
       newBaseCtx.fillStyle = 'white';
       newBaseCtx.fillRect(0, 0, newW, newH);
       newBaseCtx.drawImage(originalImage, xOffset, yOffset);
-      const newBaseBuffer = newBaseCanvas.toBuffer('image/jpeg', 0.9);
+      const newBaseDataURL = newBaseCanvas.toDataURL('image/jpeg', 0.9);
+      const newBaseBuffer = decodeBase64(newBaseDataURL.split(',')[1]);
       if (newBaseBuffer.length === 0) throw new Error("FATAL: Generated base image buffer is empty.");
       baseImageForPromptingB64 = encodeBase64(newBaseBuffer);
 
