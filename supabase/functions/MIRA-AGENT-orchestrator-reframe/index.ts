@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { createCanvas, loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
 import { Image as ISImage } from "https://deno.land/x/imagescript@1.2.15/mod.ts";
+import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
@@ -12,8 +13,12 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Initialize the Supabase client once per isolate lifecycle to save CPU time on cold starts.
 const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
+
+const blobToBase64 = async (blob: Blob): Promise<string> => {
+    const buffer = await blob.arrayBuffer();
+    return encodeBase64(new Uint8Array(buffer));
+};
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -30,9 +35,10 @@ serve(async (req) => {
     const { data: job, error: fetchError } = await supabase.from('mira-agent-jobs').select('context, user_id').eq('id', job_id).single();
     if (fetchError) throw fetchError;
 
-    const { context } = job;
+    let { context } = job;
     let final_base_url = context.base_image_url;
     let final_mask_url = context.mask_image_url;
+    let baseImageForPromptingB64: string;
 
     if (!final_mask_url) {
       console.log(`${logPrefix} No pre-made mask found. Generating new canvas and mask.`);
@@ -45,14 +51,10 @@ serve(async (req) => {
       const { data: blob, error: downloadError } = await supabase.storage.from(UPLOAD_BUCKET).download(imagePath);
       if (downloadError) throw new Error(`Failed to download base image: ${downloadError.message}`);
       
-      console.log(`${logPrefix} Downloaded original image blob. Size: ${blob.size}, Type: ${blob.type}`);
-
       const originalImage = await loadImage(new Uint8Array(await blob.arrayBuffer()));
       const originalW = originalImage.width();
       const originalH = originalImage.height();
       
-      console.log(`${logPrefix} Loaded original image. Dimensions: ${originalW}x${originalH}`);
-
       const [targetW, targetH] = aspect_ratio.split(':').map(Number);
       const targetRatio = targetW / targetH;
       const originalRatio = originalW / originalH;
@@ -66,65 +68,41 @@ serve(async (req) => {
         newW = originalW;
       }
       
-      console.log(`${logPrefix} Calculated new canvas dimensions: ${newW}x${newH}`);
-
       const xOffset = (newW - originalW) / 2;
       const yOffset = (newH - originalH) / 2;
 
-      // --- MASK GENERATION ---
       const maskCanvas = createCanvas(newW, newH);
       const maskCtx = maskCanvas.getContext('2d');
-      // **FIX:** Fill with solid white first to prevent black background on JPEG export.
       maskCtx.fillStyle = 'white';
       maskCtx.fillRect(0, 0, newW, newH);
-      
       const featherAmount = Math.min(Math.max(2, Math.round(Math.min(originalW, originalH) * 0.005)), 48);
-      
       maskCtx.fillStyle = 'black';
       maskCtx.shadowColor = 'black';
       maskCtx.shadowBlur = featherAmount;
       maskCtx.fillRect(xOffset, yOffset, originalW, originalH);
-      
       const maskImageData = maskCtx.getImageData(0, 0, newW, newH);
       const maskImageScript = new ISImage(maskImageData.width, maskImageData.height, maskImageData.data);
       const maskBuffer = await maskImageScript.encodeJPEG(90);
-      console.log(`${logPrefix} Generated mask buffer using imagescript. Length: ${maskBuffer.length}`);
-      if (maskBuffer.length === 0) {
-          throw new Error("FATAL: Generated mask buffer is empty. ImageScript operation failed.");
-      }
+      if (maskBuffer.length === 0) throw new Error("FATAL: Generated mask buffer is empty.");
 
-      // --- NEW BASE IMAGE GENERATION ---
       const newBaseCanvas = createCanvas(newW, newH);
       const newBaseCtx = newBaseCanvas.getContext('2d');
-      // **FIX:** Fill with solid white first.
       newBaseCtx.fillStyle = 'white';
       newBaseCtx.fillRect(0, 0, newW, newH);
       newBaseCtx.drawImage(originalImage, xOffset, yOffset);
-      
       const newBaseImageData = newBaseCtx.getImageData(0, 0, newW, newH);
       const newBaseImageScript = new ISImage(newBaseImageData.width, newBaseImageData.height, newBaseImageData.data);
       const newBaseBuffer = await newBaseImageScript.encodeJPEG(90);
-      console.log(`${logPrefix} Generated new base image buffer using imagescript. Length: ${newBaseBuffer.length}`);
-      if (newBaseBuffer.length === 0) {
-          throw new Error("FATAL: Generated base image buffer is empty. ImageScript operation failed.");
-      }
+      if (newBaseBuffer.length === 0) throw new Error("FATAL: Generated base image buffer is empty.");
+      
+      baseImageForPromptingB64 = encodeBase64(newBaseBuffer);
 
       const uploadFile = async (buffer: Uint8Array, filename: string, contentType: string) => {
         const filePath = `${job.user_id}/reframe-generated/${job_id}-${filename}`;
-        console.log(`${logPrefix} Uploading ${filename} (${buffer.length} bytes) to ${filePath}...`);
         const { data: uploadData, error: uploadError } = await supabase.storage.from(UPLOAD_BUCKET).upload(filePath, buffer, { contentType });
-        if (uploadError) {
-          console.error(`${logPrefix} Supabase storage upload failed for ${filename}:`, uploadError);
-          throw new Error(`Supabase storage upload failed for ${filename}: ${uploadError.message}`);
-        }
-        console.log(`${logPrefix} Supabase storage upload successful for ${filename}. Path: ${uploadData.path}`);
-        
+        if (uploadError) throw new Error(`Supabase storage upload failed for ${filename}: ${uploadError.message}`);
         const { data: urlData } = supabase.storage.from(UPLOAD_BUCKET).getPublicUrl(filePath);
-        if (!urlData || !urlData.publicUrl) {
-            console.error(`${logPrefix} Failed to get public URL for ${filePath}. URL data was null or empty.`);
-            throw new Error(`Failed to get public URL for uploaded file: ${filePath}`);
-        }
-        console.log(`${logPrefix} Successfully got public URL for ${filename}.`);
+        if (!urlData || !urlData.publicUrl) throw new Error(`Failed to get public URL for uploaded file: ${filePath}`);
         return urlData.publicUrl;
       };
 
@@ -133,19 +111,35 @@ serve(async (req) => {
         uploadFile(maskBuffer, 'mask.jpeg', 'image/jpeg')
       ]);
       
-      console.log(`${logPrefix} Uploaded new assets. Base URL: ${final_base_url}, Mask URL: ${final_mask_url}`);
-
       await supabase.from('mira-agent-jobs').update({
         context: { ...context, base_image_url: final_base_url, mask_image_url: final_mask_url }
       }).eq('id', job_id);
-      console.log(`${logPrefix} Saved new assets to storage, ready for reframe tool.`);
+      context = { ...context, base_image_url: final_base_url, mask_image_url: final_mask_url }; // Update local context
     } else {
-      console.log(`${logPrefix} Pre-made mask found. Bypassing canvas generation.`);
+      console.log(`${logPrefix} Pre-made mask found. Downloading base image for prompt generation.`);
+      const baseImageBlob = await downloadImageAsBlob(supabase, final_base_url);
+      baseImageForPromptingB64 = await blobToBase64(baseImageBlob);
     }
 
-    console.log(`${logPrefix} Invoking final reframe tool with assets.`);
+    console.log(`${logPrefix} Invoking auto-describe-scene tool to generate intelligent prompt...`);
+    const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-auto-describe-scene', {
+        body: {
+            base_image_base64: baseImageForPromptingB64,
+            user_hint: context.prompt || "",
+            mime_type: 'image/jpeg'
+        }
+    });
+    if (promptError) throw new Error(`Auto-describe-scene tool failed: ${promptError.message}`);
+    const finalPrompt = promptData.scene_prompt;
+    console.log(`${logPrefix} Generated intelligent prompt: "${finalPrompt}"`);
+
+    await supabase.from('mira-agent-jobs').update({
+        context: { ...context, final_prompt_used: finalPrompt }
+    }).eq('id', job_id);
+
+    console.log(`${logPrefix} Invoking final reframe tool with assets and new prompt.`);
     const { error: reframeError } = await supabase.functions.invoke('MIRA-AGENT-tool-reframe-image', {
-      body: { job_id, prompt: context.prompt || "" }
+      body: { job_id, prompt: finalPrompt }
     });
     if (reframeError) throw new Error(`Reframe tool invocation failed: ${reframeError.message}`);
 
@@ -184,3 +178,12 @@ serve(async (req) => {
     });
   }
 });
+
+async function downloadImageAsBlob(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
+    const url = new URL(publicUrl);
+    const pathPrefix = `/storage/v1/object/public/${UPLOAD_BUCKET}/`;
+    const filePath = decodeURIComponent(url.pathname.substring(pathPrefix.length));
+    const { data, error } = await supabase.storage.from(UPLOAD_BUCKET).download(filePath);
+    if (error) throw new Error(`Failed to download image from storage: ${error.message}`);
+    return data;
+}
