@@ -99,7 +99,7 @@ serve(async (req) => {
       
       const newBaseImageData = newBaseCtx.getImageData(0, 0, newW, newH);
       const newBaseImageScript = new ISImage(newBaseImageData.width, newBaseImageData.height, newBaseImageData.data);
-      const newBaseBuffer = await newBaseImageScript.encodeJPEG(90); // Base image can be JPEG
+      const newBaseBuffer = await newBaseImageScript.encode(0); // Encode as PNG
       console.log(`${logPrefix} Generated new base image buffer using imagescript. Length: ${newBaseBuffer.length}`);
       if (newBaseBuffer.length === 0) {
           throw new Error("FATAL: Generated base image buffer is empty. ImageScript operation failed.");
@@ -125,7 +125,7 @@ serve(async (req) => {
       };
 
       [final_base_url, final_mask_url] = await Promise.all([
-        uploadFile(newBaseBuffer, 'base.jpeg', 'image/jpeg'),
+        uploadFile(newBaseBuffer, 'base.png', 'image/png'),
         uploadFile(maskBuffer, 'mask.png', 'image/png')
       ]);
       
