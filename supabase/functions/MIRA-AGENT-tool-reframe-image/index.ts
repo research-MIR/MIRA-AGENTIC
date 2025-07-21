@@ -103,7 +103,6 @@ serve(async (req) => {
       }
     };
     
-    // Sanitize payload for logging
     const sanitizedPayload = JSON.parse(JSON.stringify(requestBody));
     sanitizedPayload.instances[0].referenceImages[0].referenceImage.bytesBase64Encoded = `[BASE64_DATA_REDACTED_LENGTH_${finalBaseImageB64.length}]`;
     sanitizedPayload.instances[0].referenceImages[1].referenceImage.bytesBase64Encoded = `[BASE64_DATA_REDACTED_LENGTH_${finalMaskImageB64.length}]`;
@@ -152,9 +151,10 @@ serve(async (req) => {
     return new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`${logPrefix} FATAL ERROR:`, error);
-    await supabase.from('mira-agent-jobs').update({ status: 'failed', error_message: error.message }).eq('id', job_id);
-    return new Response(JSON.stringify({ error: error.message }), {
+    await supabase.from('mira-agent-jobs').update({ status: 'failed', error_message: errorMessage }).eq('id', job_id);
+    return new Response(JSON.stringify({ error: errorMessage }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,
     });

@@ -70,7 +70,6 @@ serve(async (req) => {
       const xOffset = (newW - originalW) / 2;
       const yOffset = (newH - originalH) / 2;
 
-      // --- OPTIMIZED MASK GENERATION ---
       const maskCanvas = createCanvas(newW, newH);
       const maskCtx = maskCanvas.getContext('2d');
       maskCtx.fillStyle = 'white';
@@ -89,7 +88,6 @@ serve(async (req) => {
           throw new Error("FATAL: Generated mask buffer is empty. Canvas operation failed.");
       }
 
-      // --- OPTIMIZED BASE IMAGE GENERATION ---
       const newBaseCanvas = createCanvas(newW, newH);
       const newBaseCtx = newBaseCanvas.getContext('2d');
       newBaseCtx.fillStyle = 'white';
@@ -105,11 +103,20 @@ serve(async (req) => {
       const uploadFile = async (buffer: Uint8Array, filename: string, contentType: string) => {
         const filePath = `${job.user_id}/reframe-generated/${job_id}-${filename}`;
         console.log(`${logPrefix} Uploading ${filename} (${buffer.length} bytes) to ${filePath}...`);
-        const { error } = await supabase.storage.from(UPLOAD_BUCKET).upload(filePath, buffer, { contentType });
-        if (error) throw error;
-        const { data: { publicUrl } } = supabase.storage.from(UPLOAD_BUCKET).getPublicUrl(filePath);
-        console.log(`${logPrefix} Successfully uploaded ${filename}.`);
-        return publicUrl;
+        const { data: uploadData, error: uploadError } = await supabase.storage.from(UPLOAD_BUCKET).upload(filePath, buffer, { contentType });
+        if (uploadError) {
+          console.error(`${logPrefix} Supabase storage upload failed for ${filename}:`, uploadError);
+          throw new Error(`Supabase storage upload failed for ${filename}: ${uploadError.message}`);
+        }
+        console.log(`${logPrefix} Supabase storage upload successful for ${filename}. Path: ${uploadData.path}`);
+        
+        const { data: urlData } = supabase.storage.from(UPLOAD_BUCKET).getPublicUrl(filePath);
+        if (!urlData || !urlData.publicUrl) {
+            console.error(`${logPrefix} Failed to get public URL for ${filePath}. URL data was null or empty.`);
+            throw new Error(`Failed to get public URL for uploaded file: ${filePath}`);
+        }
+        console.log(`${logPrefix} Successfully got public URL for ${filename}.`);
+        return urlData.publicUrl;
       };
 
       [final_base_url, final_mask_url] = await Promise.all([
@@ -133,7 +140,6 @@ serve(async (req) => {
     });
     if (reframeError) throw new Error(`Reframe tool invocation failed: ${reframeError.message}`);
 
-    // --- Finalization Step ---
     const { data: finalJobData, error: finalFetchError } = await supabase.from('mira-agent-jobs').select('final_result, context').eq('id', job_id).single();
     if (finalFetchError) throw finalFetchError;
 
@@ -160,9 +166,10 @@ serve(async (req) => {
       status: 200,
     });
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`${logPrefix} Error:`, error);
-    await supabase.from('mira-agent-jobs').update({ status: 'failed', error_message: error.message }).eq('id', job_id);
-    return new Response(JSON.stringify({ error: error.message }), {
+    await supabase.from('mira-agent-jobs').update({ status: 'failed', error_message: errorMessage }).eq('id', job_id);
+    return new Response(JSON.stringify({ error: errorMessage }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,
     });
