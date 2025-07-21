@@ -43,10 +43,14 @@ serve(async (req) => {
       const imagePath = decodeURIComponent(url.pathname.substring(pathPrefix.length));
       const { data: blob, error: downloadError } = await supabase.storage.from(UPLOAD_BUCKET).download(imagePath);
       if (downloadError) throw new Error(`Failed to download base image: ${downloadError.message}`);
+      
+      console.log(`${logPrefix} Downloaded original image blob. Size: ${blob.size}, Type: ${blob.type}`);
 
       const originalImage = await loadImage(new Uint8Array(await blob.arrayBuffer()));
       const originalW = originalImage.width();
       const originalH = originalImage.height();
+      
+      console.log(`${logPrefix} Loaded original image. Dimensions: ${originalW}x${originalH}`);
 
       const [targetW, targetH] = aspect_ratio.split(':').map(Number);
       const targetRatio = targetW / targetH;
@@ -60,6 +64,8 @@ serve(async (req) => {
         newH = Math.round(originalW / targetRatio);
         newW = originalW;
       }
+      
+      console.log(`${logPrefix} Calculated new canvas dimensions: ${newW}x${newH}`);
 
       const xOffset = (newW - originalW) / 2;
       const yOffset = (newH - originalH) / 2;
@@ -78,6 +84,8 @@ serve(async (req) => {
       maskCtx.fillRect(xOffset, yOffset, originalW, originalH);
       
       const maskBuffer = maskCanvas.toBuffer('image/png', 0);
+      
+      console.log(`${logPrefix} Generated mask buffer. Length: ${maskBuffer.length}`);
 
       // --- OPTIMIZED BASE IMAGE GENERATION ---
       const newBaseCanvas = createCanvas(newW, newH);
@@ -87,6 +95,11 @@ serve(async (req) => {
       newBaseCtx.drawImage(originalImage, xOffset, yOffset);
       
       const newBaseBuffer = newBaseCanvas.toBuffer('image/png');
+      
+      console.log(`${logPrefix} Generated new base image buffer. Length: ${newBaseBuffer.length}`);
+      if (newBaseBuffer.length === 0) {
+          throw new Error("FATAL: Generated base image buffer is empty. Canvas operation failed.");
+      }
 
       const uploadFile = async (buffer: Uint8Array, filename: string, contentType: string) => {
         const filePath = `${job.user_id}/reframe-generated/${job_id}-${filename}`;
@@ -100,6 +113,8 @@ serve(async (req) => {
         uploadFile(newBaseBuffer, 'base.png', 'image/png'),
         uploadFile(maskBuffer, 'mask.png', 'image/png')
       ]);
+      
+      console.log(`${logPrefix} Uploaded new assets. Base URL: ${final_base_url}, Mask URL: ${final_mask_url}`);
 
       await supabase.from('mira-agent-jobs').update({
         context: { ...context, base_image_url: final_base_url, mask_image_url: final_mask_url }

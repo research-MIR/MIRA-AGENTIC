@@ -65,12 +65,18 @@ serve(async (req) => {
         downloadImageAsBlob(supabase, mask_image_url)
     ]);
     console.log(`${logPrefix} Images downloaded. Base size: ${baseImageBlob.size}, Mask size: ${maskImageBlob.size}`);
+    if (baseImageBlob.size === 0) {
+        throw new Error("Downloaded base image is empty (0 bytes). Cannot proceed.");
+    }
 
     const [finalBaseImageB64, finalMaskImageB64] = await Promise.all([
         blobToBase64(baseImageBlob),
         blobToBase64(maskImageBlob)
     ]);
     console.log(`${logPrefix} Images converted to Base64. Base length: ${finalBaseImageB64.length}, Mask length: ${finalMaskImageB64.length}`);
+    if (finalBaseImageB64.length === 0) {
+        throw new Error("Converted base image is empty (0 length base64 string). Cannot proceed.");
+    }
 
     const auth = new GoogleAuth({
       credentials: JSON.parse(GOOGLE_VERTEX_AI_SA_KEY_JSON!),
