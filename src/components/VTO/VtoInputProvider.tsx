@@ -5,16 +5,18 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ModelPoseSelector, VtoModel, ModelPack } from './ModelPoseSelector';
 import { SecureImageDisplay } from './SecureImageDisplay';
-import { useLanguage } from '@/context/LanguageContext';
-import { PlusCircle, Shirt, Users, X, Link2, Shuffle } from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { useDropzone } from '@/hooks/useDropzone';
+import { useLanguage } from "@/context/LanguageContext";
+import { PlusCircle, Shirt, Users, X, Link2, Shuffle, Info } from 'lucide-react';
+import { cn } from "@/lib/utils";
+import { useDropzone } from "@/hooks/useDropzone";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Label } from '../ui/label';
 import { Textarea } from '../ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useQuery } from '@tanstack/react-query';
 import { useSession } from '../Auth/SessionContextProvider';
+import { Switch } from "@/components/ui/switch";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 export interface QueueItem {
   person: { url: string; file?: File };
@@ -72,6 +74,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
   const [garmentFile, setGarmentFile] = useState<File | null>(null);
   const [generalAppendix, setGeneralAppendix] = useState("");
   const [randomGarmentFiles, setRandomGarmentFiles] = useState<File[]>([]);
+  const [loopModels, setLoopModels] = useState(true);
 
   const [precisePairs, setPrecisePairs] = useState<QueueItem[]>([]);
   const [tempPairPersonUrl, setTempPairPersonUrl] = useState<string | null>(null);
@@ -180,18 +183,35 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
         const shuffledModels = [...selectedModels].sort(() => 0.5 - Math.random());
         const shuffledGarments = [...garments].sort(() => 0.5 - Math.random());
 
-        const numPairs = Math.min(shuffledModels.length, shuffledGarments.length);
+        if (loopModels && shuffledModels.length > 0) {
+            const numGarments = shuffledGarments.length;
+            const numModels = shuffledModels.length;
+            
+            for (let i = 0; i < numGarments; i++) {
+                const model = shuffledModels[i % numModels]; // Loop through models
+                const garment = shuffledGarments[i];
+                
+                for (const pose of model.poses) {
+                    queue.push({
+                        person: { url: pose.final_url },
+                        garment: { url: garment.url, file: garment.file },
+                        appendix: generalAppendix,
+                    });
+                }
+            }
+        } else {
+            const numPairs = Math.min(shuffledModels.length, shuffledGarments.length);
+            for (let i = 0; i < numPairs; i++) {
+                const model = shuffledModels[i];
+                const garment = shuffledGarments[i];
 
-        for (let i = 0; i < numPairs; i++) {
-            const model = shuffledModels[i];
-            const garment = shuffledGarments[i];
-
-            for (const pose of model.poses) {
-                queue.push({
-                    person: { url: pose.final_url },
-                    garment: { url: garment.url, file: garment.file },
-                    appendix: generalAppendix,
-                });
+                for (const pose of model.poses) {
+                    queue.push({
+                        person: { url: pose.final_url },
+                        garment: { url: garment.url, file: garment.file },
+                        appendix: generalAppendix,
+                    });
+                }
             }
         }
       }
@@ -269,6 +289,28 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
          <div>
           <Label htmlFor="general-appendix-random">{t('promptAppendix')}</Label>
           <Textarea id="general-appendix-random" value={generalAppendix} onChange={(e) => setGeneralAppendix(e.target.value)} placeholder={t('promptAppendixPlaceholder')} rows={2} />
+        </div>
+        <div className="flex items-center justify-between p-2 rounded-md bg-muted/50">
+            <div className="flex items-center gap-2">
+                <Label htmlFor="loop-models-switch" className="text-sm font-medium">
+                    {t('loopModels')}
+                </Label>
+                <TooltipProvider>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Info className="h-4 w-4 text-muted-foreground cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent>
+                            <p className="max-w-xs">{t('loopModelsDescription')}</p>
+                        </TooltipContent>
+                    </Tooltip>
+                </TooltipProvider>
+            </div>
+            <Switch
+                id="loop-models-switch"
+                checked={loopModels}
+                onCheckedChange={setLoopModels}
+            />
         </div>
       </CardContent>
     </Card>

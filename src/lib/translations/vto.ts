@@ -140,6 +140,8 @@ Prima di tentare di nuovo, controlla se il tuo lavoro appare nella lista dei "Jo
     bitstudioVTO: "B VTO",
     googleVTODescription: "Veloce e ottimo per risultati rapidi e concettuali.",
     bitstudioVTODescription: "Più lento ma con una qualità e un realismo superiori, ideale per risultati finali.",
+    loopModels: "Usa tutti i capi (riutilizza modelli)",
+    loopModelsDescription: "Se il numero di capi è maggiore del numero di modelli, i modelli verranno riutilizzati per garantire che ogni capo venga provato.",
   },
   en: {
     proMode: "Pro Mode",
@@ -282,5 +284,7 @@ Before trying again, please check if your job shows up in the "Recent Jobs" list
     bitstudioVTO: "B VTO",
     googleVTODescription: "Fast and great for quick, conceptual results.",
     bitstudioVTODescription: "Slower but with superior quality and realism, ideal for final results.",
+    loopModels: "Use all garments (loop models)",
+    loopModelsDescription: "If there are more garments than models, models will be reused to ensure every garment is tried on.",
   },
 };
