@@ -51,15 +51,14 @@ serve(async (req) => {
     const { data: insertedJobs, error: insertError } = await supabase
         .from('mira-agent-bitstudio-jobs')
         .insert(pairJobsToInsert)
-        .select('id')
-        .order('created_at', { ascending: true });
+        .select('id');
 
     if (insertError) throw insertError;
     if (!insertedJobs || insertedJobs.length === 0) {
         throw new Error("Failed to insert pair jobs into the database.");
     }
 
-    console.log(`[VTO-Packs-Orchestrator] ${insertedJobs.length} pair jobs created with 'pending' status. The watchdog will now take over.`);
+    console.log(`[VTO-Packs-Orchestrator] ${insertedJobs.length} pair jobs created with 'pending' status. The watchdog will start processing them shortly.`);
 
     return new Response(JSON.stringify({ success: true, message: `${pairs.length} jobs have been queued for processing.` }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

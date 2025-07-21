@@ -32,6 +32,14 @@ function invokeNextStep(supabase: SupabaseClient, functionName: string, payload:
   });
 }
 
+function triggerWatchdog(supabase: SupabaseClient, logPrefix: string) {
+  console.log(`${logPrefix} Job has terminated (completed or failed). Triggering watchdog to check for the next job in the queue.`);
+  // Fire-and-forget, we don't want to wait for the watchdog to finish.
+  supabase.functions.invoke('MIRA-AGENT-watchdog-background-jobs', { body: {} }).catch(err => {
+    console.error(`${logPrefix} CRITICAL: Failed to invoke watchdog after job termination.`, err);
+  });
+}
+
 async function safeDownload(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
     const { bucket, path } = parseStorageURL(publicUrl);
     const { data, error } = await supabase.storage.from(bucket).download(path)
@@ -81,34 +89,6 @@ const blobToBase64 = async (blob: Blob): Promise<string> => {
     return encodeBase64(new Uint8Array(buffer)); // Use Uint8Array for safety
 };
 
-async function getDimensionsFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<{width: number, height: number}> {
-    const url = new URL(publicUrl);
-    const pathSegments = url.pathname.split('/');
-    
-    const objectSegmentIndex = pathSegments.indexOf('object');
-    if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) {
-        throw new Error(`Could not parse bucket name from Supabase URL: ${publicUrl}`);
-    }
-    
-    const bucketName = pathSegments[objectSegmentIndex + 2];
-    const filePath = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
-
-    if (!bucketName || !filePath) {
-        throw new Error(`Could not parse bucket or path from Supabase URL: ${publicUrl}`);
-    }
-
-    // Download only the first 64KB, which is more than enough for image headers.
-    const { data: fileHead, error } = await supabase.storage.from(bucketName).download(filePath, { range: '0-65535' });
-    if (error) throw new Error(`Failed to download image header: ${error.message}`);
-
-    const buffer = new Uint8Array(await fileHead.arrayBuffer());
-    const size = imageSize(buffer);
-    if (!size || !size.width || !size.height) throw new Error("Could not determine image dimensions from file header.");
-    
-    return { width: size.width, height: size.height };
-}
-
-
 // --- State Machine Logic ---
 
 serve(async (req) => {
@@ -137,6 +117,7 @@ serve(async (req) => {
             })
             .eq('id', pair_job_id);
         console.log(`${logPrefix} Job successfully finalized.`);
+        triggerWatchdog(supabase, logPrefix);
     } else {
         console.log(`${logPrefix} Starting job.`);
         const step = job.metadata?.google_vto_step || 'start';
@@ -171,6 +152,7 @@ serve(async (req) => {
   } catch (error) {
     console.error(`${logPrefix} Error:`, error);
     await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'failed', error_message: error.message }).eq('id', pair_job_id);
+    triggerWatchdog(supabase, logPrefix); // Trigger watchdog even on failure to free up the slot
     return new Response(JSON.stringify({ error: error.message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
   }
 });
@@ -326,6 +308,7 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
       }).eq('id', job.id);
 
       console.log(`${logPrefix} Job finalized with 1:1 image.`);
+      triggerWatchdog(supabase, logPrefix);
   } else {
       await supabase.from('mira-agent-bitstudio-jobs').update({
         metadata: { 
