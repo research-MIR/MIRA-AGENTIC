@@ -82,7 +82,7 @@ serve(async (req) => {
       maskCtx.shadowBlur = featherAmount;
       maskCtx.fillRect(xOffset, yOffset, originalW, originalH);
       
-      const maskBuffer = maskCanvas.toBuffer('image/png', 0);
+      const maskBuffer = maskCanvas.toBuffer('image/jpeg', 0.9);
       console.log(`${logPrefix} Generated mask buffer. Length: ${maskBuffer.length}`);
       if (maskBuffer.length === 0) {
           throw new Error("FATAL: Generated mask buffer is empty. Canvas operation failed.");
@@ -94,7 +94,7 @@ serve(async (req) => {
       newBaseCtx.fillRect(0, 0, newW, newH);
       newBaseCtx.drawImage(originalImage, xOffset, yOffset);
       
-      const newBaseBuffer = newBaseCanvas.toBuffer('image/png');
+      const newBaseBuffer = newBaseCanvas.toBuffer('image/jpeg', 0.9);
       console.log(`${logPrefix} Generated new base image buffer. Length: ${newBaseBuffer.length}`);
       if (newBaseBuffer.length === 0) {
           throw new Error("FATAL: Generated base image buffer is empty. Canvas operation failed.");
@@ -120,8 +120,8 @@ serve(async (req) => {
       };
 
       [final_base_url, final_mask_url] = await Promise.all([
-        uploadFile(newBaseBuffer, 'base.png', 'image/png'),
-        uploadFile(maskBuffer, 'mask.png', 'image/png')
+        uploadFile(newBaseBuffer, 'base.jpeg', 'image/jpeg'),
+        uploadFile(maskBuffer, 'mask.jpeg', 'image/jpeg')
       ]);
       
       console.log(`${logPrefix} Uploaded new assets. Base URL: ${final_base_url}, Mask URL: ${final_mask_url}`);
