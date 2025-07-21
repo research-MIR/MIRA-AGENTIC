@@ -45,8 +45,8 @@ serve(async (req) => {
       if (downloadError) throw new Error(`Failed to download base image: ${downloadError.message}`);
 
       const originalImage = await loadImage(new Uint8Array(await blob.arrayBuffer()));
-      const originalW = originalImage.width();
-      const originalH = originalImage.height();
+      const originalW = originalImage.width;
+      const originalH = originalImage.height;
 
       const [targetW, targetH] = aspect_ratio.split(':').map(Number);
       const targetRatio = targetW / targetH;
@@ -70,17 +70,14 @@ serve(async (req) => {
       maskCtx.fillStyle = 'white';
       maskCtx.fillRect(0, 0, newW, newH);
       
-      // Guard rail the feather amount to prevent excessive blur on large images
       const featherAmount = Math.min(Math.max(2, Math.round(Math.min(originalW, originalH) * 0.005)), 48);
       
-      // Use shadowBlur for a much faster feathering effect than filter: blur()
       maskCtx.fillStyle = 'black';
       maskCtx.shadowColor = 'black';
       maskCtx.shadowBlur = featherAmount;
       maskCtx.fillRect(xOffset, yOffset, originalW, originalH);
       
-      // Use fast, low-compression PNG encoding for the lossless mask
-      const maskBuffer = maskCanvas.toBuffer('image/png', { compressionLevel: 0 });
+      const maskBuffer = maskCanvas.toBuffer('image/png', 0);
 
       // --- OPTIMIZED BASE IMAGE GENERATION ---
       const newBaseCanvas = createCanvas(newW, newH);
@@ -89,8 +86,7 @@ serve(async (req) => {
       newBaseCtx.fillRect(0, 0, newW, newH);
       newBaseCtx.drawImage(originalImage, xOffset, yOffset);
       
-      // Use fast, visually-lossless JPEG encoding for the photographic base image
-      const newBaseBuffer = newBaseCanvas.toBuffer('image/jpeg', { quality: 0.95 });
+      const newBaseBuffer = newBaseCanvas.toBuffer('image/jpeg', 95);
 
       const uploadFile = async (buffer: Uint8Array, filename: string, contentType: string) => {
         const filePath = `${job.user_id}/reframe-generated/${job_id}-${filename}`;
