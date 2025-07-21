@@ -13,14 +13,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RecentVtoPacks } from "@/components/VTO/RecentVtoPacks";
 import { optimizeImage, sanitizeFilename } from "@/lib/utils";
 import { Label } from "@/components/ui/label";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
 
 type WizardStep = 'select-mode' | 'provide-inputs' | 'review-queue';
 type VtoMode = 'one-to-many' | 'precise-pairs' | 'random-pairs';
-type Engine = 'google' | 'bitstudio';
 
 const aspectRatioOptions = ["1:1", "9:16", "16:9", "4:3", "3:4", "21:9", "3:2", "2:3", "4:5", "5:4"];
 
@@ -31,7 +28,6 @@ const VirtualTryOnPacks = () => {
 
   const [step, setStep] = useState<WizardStep>('select-mode');
   const [mode, setMode] = useState<VtoMode | null>(null);
-  const [engine, setEngine] = useState<Engine>('bitstudio');
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [aspectRatio, setAspectRatio] = useState<string>("1:1");
@@ -94,8 +90,8 @@ const VirtualTryOnPacks = () => {
         body: {
           pairs: pairsForBackend,
           user_id: session?.user?.id,
-          engine: engine,
-          aspect_ratio: aspectRatio, // Pass the new aspect ratio
+          engine: 'google',
+          aspect_ratio: aspectRatio,
         }
       });
 
@@ -160,7 +156,7 @@ const VirtualTryOnPacks = () => {
               <Info className="h-4 w-4" />
               <AlertTitle>Ready to Generate</AlertTitle>
               <AlertDescription>
-                You are about to generate {queue.length} images using the <strong>{engine}</strong> engine.
+                You are about to generate {queue.length} images using the <strong>Google VTO</strong> engine.
               </AlertDescription>
             </Alert>
             <div className="flex justify-between items-center">
@@ -194,35 +190,6 @@ const VirtualTryOnPacks = () => {
                 <h1 className="text-3xl font-bold">{t('virtualTryOnPacks')}</h1>
                 <p className="text-muted-foreground">{getStepTitle()}</p>
             </div>
-            <div className="flex items-center gap-4">
-                <Label>{t('engine')}</Label>
-                <RadioGroup value={engine} onValueChange={(v) => setEngine(v as any)} className="flex items-center space-x-2 border p-1 rounded-md">
-                    <TooltipProvider>
-                        <Tooltip>
-                            <TooltipTrigger asChild>
-                                <Label htmlFor="bitstudio-engine" className="flex items-center space-x-2 p-2 rounded-sm has-[:checked]:bg-muted cursor-pointer">
-                                    <RadioGroupItem value="bitstudio" id="bitstudio-engine" />
-                                    <span>{t('bitstudioVTO')}</span>
-                                </Label>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                                <p>{t('bitstudioVTODescription')}</p>
-                            </TooltipContent>
-                        </Tooltip>
-                        <Tooltip>
-                            <TooltipTrigger asChild>
-                                <Label htmlFor="google-engine" className="flex items-center space-x-2 p-2 rounded-sm has-[:checked]:bg-muted cursor-pointer">
-                                    <RadioGroupItem value="google" id="google-engine" />
-                                    <span>{t('googleVTO')}</span>
-                                </Label>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                                <p>{t('googleVTODescription')}</p>
-                            </TooltipContent>
-                        </Tooltip>
-                    </TooltipProvider>
-                </RadioGroup>
-            </div>
         </div>
       </header>
       <div className="flex-1 overflow-y-auto">
@@ -235,7 +202,7 @@ const VirtualTryOnPacks = () => {
             {renderCreateStep()}
           </TabsContent>
           <TabsContent value="recent" className="pt-6">
-            <RecentVtoPacks engine={engine} />
+            <RecentVtoPacks />
           </TabsContent>
         </Tabs>
       </div>

@@ -15,7 +15,7 @@ serve(async (req) => {
   }
 
   try {
-    const { pairs, user_id, engine = 'bitstudio', aspect_ratio } = await req.json();
+    const { pairs, user_id, engine = 'google', aspect_ratio } = await req.json();
     if (!pairs || !Array.isArray(pairs) || pairs.length === 0 || !user_id) {
       throw new Error("`pairs` array and `user_id` are required.");
     }
@@ -33,56 +33,42 @@ serve(async (req) => {
     const vtoPackJobId = batchJob.id;
     console.log(`[VTO-Packs-Orchestrator] Main batch job ${vtoPackJobId} created.`);
 
-    const jobPromises = pairs.map(async (pair: any, index: number) => {
-      const pairLogPrefix = `[VTO-Packs-Orchestrator][Pair ${index + 1}/${pairs.length}]`;
-      try {
-        console.log(`${pairLogPrefix} Processing pair. Person: ${pair.person_url}, Garment: ${pair.garment_url}`);
-        
-        const { data: newJob, error: insertError } = await supabase.from('mira-agent-bitstudio-jobs').insert({
-            user_id,
-            vto_pack_job_id: vtoPackJobId,
-            mode: 'base',
-            status: 'queued',
-            source_person_image_url: pair.person_url,
-            source_garment_image_url: pair.garment_url,
-            metadata: { 
-                engine: engine,
-                prompt_appendix: pair.appendix,
-                final_aspect_ratio: aspect_ratio, // Store aspect ratio for the worker
-            }
-        }).select('id').single();
-
-        if (insertError) throw insertError;
-        const newJobId = newJob.id;
-        console.log(`${pairLogPrefix} Job record created with ID: ${newJobId}`);
-
-        if (engine === 'google') {
-          console.log(`${pairLogPrefix} Using Google VTO engine. Invoking pack worker...`);
-          supabase.functions.invoke('MIRA-AGENT-worker-vto-pack-item', {
-            body: { pair_job_id: newJobId }
-          }).catch(console.error);
-        } else { // Default to bitstudio
-          console.log(`${pairLogPrefix} Using BitStudio engine. Invoking proxy...`);
-          const { error } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
-              body: { 
-                  person_image_url: pair.person_url, 
-                  garment_image_url: pair.garment_url, 
-                  user_id: user_id, 
-                  mode: 'base',
-                  prompt_appendix: pair.appendix,
-                  vto_pack_job_id: vtoPackJobId,
-                  existing_job_id: newJobId 
-              }
-          });
-          if (error) throw error;
-          console.log(`${pairLogPrefix} BitStudio proxy invoked successfully.`);
+    const pairJobsToInsert = pairs.map((pair: any) => ({
+        user_id,
+        vto_pack_job_id: vtoPackJobId,
+        mode: 'base',
+        status: 'pending', // All jobs start as pending
+        source_person_image_url: pair.person_url,
+        source_garment_image_url: pair.garment_url,
+        metadata: { 
+            engine: engine,
+            prompt_appendix: pair.appendix,
+            final_aspect_ratio: aspect_ratio,
         }
-      } catch (err) {
-        console.error(`${pairLogPrefix} Failed to queue job for person ${pair.person_url}:`, err);
-      }
-    });
+    }));
 
-    Promise.allSettled(jobPromises);
+    const { data: insertedJobs, error: insertError } = await supabase
+        .from('mira-agent-bitstudio-jobs')
+        .insert(pairJobsToInsert)
+        .select('id')
+        .order('created_at', { ascending: true });
+
+    if (insertError) throw insertError;
+    if (!insertedJobs || insertedJobs.length === 0) {
+        throw new Error("Failed to insert pair jobs into the database.");
+    }
+
+    console.log(`[VTO-Packs-Orchestrator] ${insertedJobs.length} pair jobs created with 'pending' status.`);
+
+    // Kick off the first job in the sequence
+    const firstJobId = insertedJobs[0].id;
+    console.log(`[VTO-Packs-Orchestrator] Kicking off the first job in the sequence: ${firstJobId}`);
+    
+    await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'queued' }).eq('id', firstJobId);
+
+    supabase.functions.invoke('MIRA-AGENT-worker-vto-pack-item', {
+        body: { pair_job_id: firstJobId }
+    }).catch(console.error);
 
     return new Response(JSON.stringify({ success: true, message: `${pairs.length} jobs have been queued for processing.` }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

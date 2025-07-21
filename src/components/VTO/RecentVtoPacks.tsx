@@ -19,11 +19,7 @@ interface VtoPackJob {
   };
 }
 
-interface RecentVtoPacksProps {
-  engine: 'google' | 'bitstudio';
-}
-
-export const RecentVtoPacks = ({ engine }: RecentVtoPacksProps) => {
+export const RecentVtoPacks = () => {
   const { supabase, session } = useSession();
   const { showImage } = useImagePreview();
   const queryClient = useQueryClient();
@@ -94,11 +90,6 @@ export const RecentVtoPacks = ({ engine }: RecentVtoPacksProps) => {
     }, {} as Record<string, BitStudioJob[]>);
   }, [childJobs]);
 
-  const filteredPacks = useMemo(() => {
-    if (!packs) return [];
-    return packs.filter(pack => (pack.metadata?.engine || 'bitstudio') === engine);
-  }, [packs, engine]);
-
   if (isLoadingPacks) {
     return <div className="space-y-4"><Skeleton className="h-20 w-full" /><Skeleton className="h-20 w-full" /></div>;
   }
@@ -107,13 +98,13 @@ export const RecentVtoPacks = ({ engine }: RecentVtoPacksProps) => {
     return <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Error</AlertTitle><AlertDescription>{packsError.message}</AlertDescription></Alert>;
   }
 
-  if (!filteredPacks || filteredPacks.length === 0) {
-    return <p className="text-center text-muted-foreground py-8">No recent batch jobs found for the selected engine.</p>;
+  if (!packs || packs.length === 0) {
+    return <p className="text-center text-muted-foreground py-8">No recent batch jobs found.</p>;
   }
 
   return (
     <Accordion type="single" collapsible className="w-full space-y-4">
-      {filteredPacks.map(pack => {
+      {packs.map(pack => {
         const jobsInPack = groupedJobs[pack.id] || [];
         const completedJobs = jobsInPack.filter(j => j.status === 'complete');
         const failedJobs = jobsInPack.filter(j => j.status === 'failed');
