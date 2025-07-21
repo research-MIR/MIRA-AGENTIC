@@ -26,12 +26,10 @@ const corsHeaders = {
 // --- Hardened Safe Wrapper Functions ---
 
 async function safeInvoke(supabase: SupabaseClient, functionName: string, payload: object) {
-  const { data, error } = await supabase.functions.invoke(functionName, { body: payload })
-    .catch((e) => { throw e ?? new Error(`[${functionName}] rejected with null`); });
-
-  if (error) throw error ?? new Error(`[${functionName}] error was null`);
-  if (data == null) throw new Error(`[${functionName}] data missing`);
-  return data;
+  // Fire-and-forget: We don't await the result, just handle potential invocation error.
+  supabase.functions.invoke(functionName, { body: payload }).catch(err => {
+    console.error(`[safeInvoke] Error invoking ${functionName}:`, err);
+  });
 }
 
 async function safeDownload(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
@@ -136,7 +134,7 @@ async function triggerNextJobInPack(supabase: SupabaseClient, currentJob: any, l
     if (nextJob) {
         console.log(`${logPrefix} Found next job: ${nextJob.id}. Invoking worker for it.`);
         await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'queued' }).eq('id', nextJob.id);
-        await safeInvoke(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: nextJob.id });
+        safeInvoke(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: nextJob.id });
     } else {
         console.log(`${logPrefix} No more pending jobs found in pack. Chain complete.`);
     }
@@ -200,7 +198,7 @@ serve(async (req) => {
         }
     }
 
-    return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
+    return new Response(JSON.stringify({ success: true, message: "Step initiated." }), { headers: corsHeaders });
 
   } catch (error) {
     console.error(`${logPrefix} Error:`, error);
@@ -281,7 +279,7 @@ async function handleStart(supabase: SupabaseClient, job: any, logPrefix: string
     }
   }).eq('id', job.id);
 
-  await safeInvoke(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
+  safeInvoke(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
 }
 
 async function handleGenerateStep(supabase: SupabaseClient, job: any, sampleStep: number, nextStep: string, logPrefix: string) {
@@ -307,7 +305,7 @@ async function handleGenerateStep(supabase: SupabaseClient, job: any, sampleStep
   }).eq('id', job.id);
 
   console.log(`${logPrefix} Step ${sampleStep} complete. Advancing to ${nextStep}.`);
-  await safeInvoke(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
+  safeInvoke(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
 }
 
 async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix: string) {
@@ -365,7 +363,7 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
         }
       }).eq('id', job.id);
 
-      await safeInvoke(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
+      safeInvoke(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
   }
 }
 
