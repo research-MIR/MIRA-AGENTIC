@@ -12,7 +12,7 @@ const corsHeaders = {
 const GOOGLE_VERTEX_AI_SA_KEY_JSON = Deno.env.get('GOOGLE_VERTEX_AI_SA_KEY_JSON');
 const GOOGLE_PROJECT_ID = Deno.env.get('GOOGLE_PROJECT_ID');
 const REGION = 'us-central1';
-const MODEL_ID = 'virtual-try-on-exp-05-31'; // Reverted to the original, working model
+const MODEL_ID = 'virtual-try-on-exp-05-31';
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1500;
 
@@ -28,7 +28,7 @@ self.addEventListener('error', (event) => {
 
 const blobToBase64 = async (blob: Blob): Promise<string> => {
     const buffer = await blob.arrayBuffer();
-    return encodeBase64(new Uint8Array(buffer));
+    return encodeBase64(new Uint8Array(buffer)); // Use Uint8Array for safety
 };
 
 async function downloadImage(supabase: SupabaseClient, url: string, requestId: string): Promise<Blob> {
@@ -57,6 +57,7 @@ async function downloadImage(supabase: SupabaseClient, url: string, requestId: s
         console.log(`[Downloader][${requestId}] Supabase download successful. Blob size: ${blob.size}`);
         return blob;
     } else {
+        // Handle external URLs (like BitStudio)
         console.log(`[Downloader][${requestId}] URL is not from Supabase. Fetching directly.`);
         const response = await fetch(url);
         if (!response.ok) {
@@ -70,7 +71,7 @@ async function downloadImage(supabase: SupabaseClient, url: string, requestId: s
 
 serve(async (req) => {
   const requestId = `vto-tool-${Date.now()}`;
-  console.log(`[VirtualTryOnTool][${requestId}] Function invoked. Running version 2.3 (Original Model with Retry).`);
+  console.log(`[VirtualTryOnTool][${requestId}] Function invoked. Running version 2.4 with safety filter retry.`);
 
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -163,6 +164,17 @@ serve(async (req) => {
 
       const responseData = await response.json();
       const potentialPredictions = responseData.predictions;
+
+      // New check for the specific safety filter error
+      const raiFilteredReason = potentialPredictions?.[0]?.raiFilteredReason;
+      if (raiFilteredReason && raiFilteredReason.includes("contained children")) {
+          console.warn(`[VirtualTryOnTool][${requestId}] Safety filter triggered for 'children' on attempt ${attempt}. Retrying...`);
+          if (attempt === MAX_RETRIES) {
+              throw new Error("Generation failed due to repeated safety filter blocks (child content).");
+          }
+          await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS * attempt));
+          continue; // Force a retry
+      }
 
       if (potentialPredictions && Array.isArray(potentialPredictions) && potentialPredictions.length > 0 && potentialPredictions.every((p: any) => p && p.bytesBase64Encoded)) {
         console.log(`[VirtualTryOnTool][${requestId}] Successfully received and validated ${potentialPredictions.length} predictions on attempt ${attempt}.`);
