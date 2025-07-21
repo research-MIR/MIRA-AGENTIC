@@ -29,7 +29,6 @@ interface ReframeJob {
   };
   context?: {
     base_image_url?: string;
-    original_base_image_url?: string;
   };
   error_message?: string;
 }
@@ -105,7 +104,7 @@ const Reframe = () => {
       if (!session?.user) return [];
       const { data, error } = await supabase
         .from('mira-agent-jobs')
-        .select('id, status, final_result, context')
+        .select('id, status, final_result, context, error_message')
         .eq('context->>source', 'reframe')
         .eq('user_id', session.user.id)
         .order('created_at', { ascending: false })
@@ -222,7 +221,7 @@ const Reframe = () => {
     };
   }, [session?.user?.id, supabase, queryClient]);
 
-  const sourceImageUrl = selectedJob?.context?.original_base_image_url || selectedJob?.context?.base_image_url;
+  const sourceImageUrl = selectedJob?.context?.base_image_url;
   const resultImageUrl = selectedJob?.status === 'complete' ? selectedJob.final_result?.images?.[0]?.publicUrl : null;
 
   return (
@@ -347,7 +346,7 @@ const Reframe = () => {
                       {recentJobs.map(job => (
                         <RecentJobThumbnail
                           key={job.id}
-                          job={job}
+                          job={{...job, metadata: { source_image_url: job.context?.base_image_url }}}
                           onClick={() => setSelectedJobId(job.id)}
                           isSelected={selectedJobId === job.id}
                         />
