@@ -86,7 +86,7 @@ serve(async (req) => {
       newBaseCtx.fillRect(0, 0, newW, newH);
       newBaseCtx.drawImage(originalImage, xOffset, yOffset);
       
-      const newBaseBuffer = newBaseCanvas.toBuffer('image/jpeg', 95);
+      const newBaseBuffer = newBaseCanvas.toBuffer('image/png');
 
       const uploadFile = async (buffer: Uint8Array, filename: string, contentType: string) => {
         const filePath = `${job.user_id}/reframe-generated/${job_id}-${filename}`;
@@ -97,7 +97,7 @@ serve(async (req) => {
       };
 
       [final_base_url, final_mask_url] = await Promise.all([
-        uploadFile(newBaseBuffer, 'base.jpeg', 'image/jpeg'),
+        uploadFile(newBaseBuffer, 'base.png', 'image/png'),
         uploadFile(maskBuffer, 'mask.png', 'image/png')
       ]);
 
