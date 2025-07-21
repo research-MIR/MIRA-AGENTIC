@@ -29,6 +29,17 @@ const blobToBase64 = (blob: Blob): Promise<string> => {
   });
 };
 
+async function downloadImageAsBlob(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
+    const url = new URL(publicUrl);
+    const pathSegments = url.pathname.split('/');
+    const bucketName = pathSegments[pathSegments.indexOf('public') + 1];
+    const filePath = pathSegments.slice(pathSegments.indexOf(bucketName) + 1).join('/');
+    
+    const { data, error } = await supabase.storage.from(bucketName).download(filePath);
+    if (error) throw new Error(`Failed to download image from storage: ${error.message}`);
+    return data;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -62,8 +73,8 @@ serve(async (req) => {
       if (downloadError) throw new Error(`Failed to download base image: ${downloadError.message}`);
 
       const originalImage = await loadImage(new Uint8Array(await blob.arrayBuffer()));
-      const originalW = originalImage.width();
-      const originalH = originalImage.height();
+      const originalW = originalImage.width;
+      const originalH = originalImage.height;
 
       const [targetW, targetH] = aspect_ratio.split(':').map(Number);
       const targetRatio = targetW / targetH;
@@ -90,7 +101,7 @@ serve(async (req) => {
       maskCtx.shadowColor = 'black';
       maskCtx.shadowBlur = featherAmount;
       maskCtx.fillRect(xOffset, yOffset, originalW, originalH);
-      finalMaskImageB64 = encodeBase64(maskCanvas.toBuffer('image/png', 0));
+      finalMaskImageB64 = encodeBase64(maskCanvas.toBuffer('image/png'));
 
       const newBaseCanvas = createCanvas(newW, newH);
       const newBaseCtx = newBaseCanvas.getContext('2d');
