@@ -70,24 +70,21 @@ serve(async (req) => {
       const xOffset = (newW - originalW) / 2;
       const yOffset = (newH - originalH) / 2;
 
-      // --- NEW ROBUST MASK GENERATION ---
-      // Step 1: Create a sharp, un-blurred mask on a temporary canvas
-      const rawMaskCanvas = createCanvas(newW, newH);
-      const rawMaskCtx = rawMaskCanvas.getContext('2d');
-      rawMaskCtx.fillStyle = 'white';
-      rawMaskCtx.fillRect(0, 0, newW, newH);
-      rawMaskCtx.fillStyle = 'black';
-      rawMaskCtx.fillRect(xOffset, yOffset, originalW, originalH);
-
-      // Step 2: Create the final canvas and draw the blurred version of the first canvas onto it
-      const featheredMaskCanvas = createCanvas(newW, newH);
-      const featheredCtx = featheredMaskCanvas.getContext('2d');
-      const featherAmount = Math.max(2, Math.round(Math.min(originalW, originalH) * 0.005));
-      console.log(`${logPrefix} Applying feathering with blur radius: ${featherAmount}px`);
-      featheredCtx.filter = `blur(${featherAmount}px)`;
-      featheredCtx.drawImage(rawMaskCanvas, 0, 0);
+      // --- NEW ROBUST MASK GENERATION using shadowBlur ---
+      const maskCanvas = createCanvas(newW, newH);
+      const maskCtx = maskCanvas.getContext('2d');
+      maskCtx.fillStyle = 'white';
+      maskCtx.fillRect(0, 0, newW, newH);
       
-      const maskDataURL = featheredMaskCanvas.toDataURL('image/jpeg', 0.9);
+      const featherAmount = Math.max(2, Math.round(Math.min(originalW, originalH) * 0.005));
+      console.log(`${logPrefix} Applying feathering with shadowBlur radius: ${featherAmount}px`);
+      
+      maskCtx.shadowColor = 'black';
+      maskCtx.shadowBlur = featherAmount;
+      maskCtx.fillStyle = 'black';
+      maskCtx.fillRect(xOffset, yOffset, originalW, originalH);
+      
+      const maskDataURL = maskCanvas.toDataURL('image/jpeg', 0.9);
       const maskBuffer = decodeBase64(maskDataURL.split(',')[1]);
       if (maskBuffer.length === 0) throw new Error("FATAL: Generated mask buffer is empty.");
       // --- END ROBUST MASK GENERATION ---
