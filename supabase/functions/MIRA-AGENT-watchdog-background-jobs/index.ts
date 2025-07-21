@@ -13,7 +13,7 @@ const STALLED_POLLER_THRESHOLD_SECONDS = 15;
 const STALLED_AGGREGATION_THRESHOLD_SECONDS = 20;
 const STALLED_PAIR_JOB_THRESHOLD_MINUTES = 2;
 const STALLED_GOOGLE_VTO_THRESHOLD_MINUTES = 2;
-const STALLED_QUEUED_VTO_THRESHOLD_SECONDS = 30; // New threshold for jobs that fail to start
+const STALLED_QUEUED_VTO_THRESHOLD_SECONDS = 30;
 
 serve(async (req)=>{
   const requestId = `watchdog-bg-${Date.now()}`;
@@ -26,6 +26,7 @@ serve(async (req)=>{
   try {
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
     let actionsTaken = [];
+    
     // --- Task 1: Handle Stalled BitStudio Pollers ---
     const pollerThreshold = new Date(Date.now() - STALLED_POLLER_THRESHOLD_SECONDS * 1000).toISOString();
     const { data: stalledJobs, error: stalledError } = await supabase.from('mira-agent-bitstudio-jobs').select('id').in('status', [
@@ -46,6 +47,7 @@ serve(async (req)=>{
     } else {
       console.log(`[Watchdog-BG][${requestId}] No stalled BitStudio jobs found.`);
     }
+    
     // --- Task 2: Handle New Pending Batch Inpainting Jobs ---
     const { data: pendingPairs, error: pendingError } = await supabase.from('mira-agent-batch-inpaint-pair-jobs').select('id').eq('status', 'pending').limit(5);
     if (pendingError) {
@@ -66,6 +68,7 @@ serve(async (req)=>{
     } else {
       console.log(`[Watchdog-BG][${requestId}] No new pending batch jobs found.`);
     }
+    
     // --- Task 3: Handle Stalled Segmentation Aggregation Jobs ---
     const segmentationThreshold = new Date(Date.now() - STALLED_AGGREGATION_THRESHOLD_SECONDS * 1000).toISOString();
     const { data: stalledAggregationJobs, error: aggregationError } = await supabase.from('mira-agent-mask-aggregation-jobs').select('id, results').in('status', [
@@ -92,6 +95,7 @@ serve(async (req)=>{
     } else {
       console.log(`[Watchdog-BG][${requestId}] No stalled aggregation jobs found.`);
     }
+    
     // --- Task 4: Handle Stalled Batch Inpainting Pair Jobs ---
     const pairJobThreshold = new Date(Date.now() - STALLED_PAIR_JOB_THRESHOLD_MINUTES * 60 * 1000).toISOString();
     const { data: stalledPairJobs, error: stalledPairError } = await supabase.from('mira-agent-batch-inpaint-pair-jobs').select('id, status, metadata').in('status', [
@@ -126,6 +130,7 @@ serve(async (req)=>{
     } else {
       console.log(`[Watchdog-BG][${requestId}] No stalled pair jobs found.`);
     }
+    
     // --- Task 5: Handle Stalled 'processing' Google VTO Pack Jobs ---
     const googleVtoThreshold = new Date(Date.now() - STALLED_GOOGLE_VTO_THRESHOLD_MINUTES * 60 * 1000).toISOString();
     const { data: stalledGoogleVtoJobs, error: googleVtoError } = await supabase
@@ -148,7 +153,7 @@ serve(async (req)=>{
         console.log(`[Watchdog-BG][${requestId}] No stalled 'processing' Google VTO jobs found.`);
     }
 
-    // --- Task 6: Handle Stalled 'queued' Google VTO Pack Jobs (NEW) ---
+    // --- Task 6: Handle Stalled 'queued' Google VTO Pack Jobs ---
     const queuedVtoThreshold = new Date(Date.now() - STALLED_QUEUED_VTO_THRESHOLD_SECONDS * 1000).toISOString();
     const { data: queuedGoogleVtoJobs, error: queuedVtoError } = await supabase
       .from('mira-agent-bitstudio-jobs')
@@ -218,6 +223,50 @@ serve(async (req)=>{
         actionsTaken.push(`Checked status for ${awaitingReframeJobs.length} jobs awaiting reframe.`);
     } else {
         console.log(`[Watchdog-BG][${requestId}] No jobs awaiting reframe found.`);
+    }
+
+    // --- NEW Task 8: Handle Recontext Jobs Awaiting Reframe ---
+    const { data: awaitingRecontextJobs, error: recontextError } = await supabase
+      .from('mira-agent-jobs')
+      .select('id, context')
+      .eq('status', 'awaiting_reframe')
+      .eq('context->>source', 'recontext');
+
+    if (recontextError) {
+        console.error(`[Watchdog-BG][${requestId}] Error querying for recontext jobs awaiting reframe:`, recontextError.message);
+    } else if (awaitingRecontextJobs && awaitingRecontextJobs.length > 0) {
+        console.log(`[Watchdog-BG][${requestId}] Found ${awaitingRecontextJobs.length} recontext job(s) awaiting reframe. Checking status...`);
+        const recontextCheckPromises = awaitingRecontextJobs.map(async (recontextJob) => {
+            const reframeJobId = recontextJob.context?.delegated_reframe_job_id;
+            if (!reframeJobId) return;
+
+            const { data: reframeJob, error: reframeFetchError } = await supabase
+                .from('mira-agent-jobs')
+                .select('status, final_result, error_message')
+                .eq('id', reframeJobId)
+                .single();
+
+            if (reframeFetchError) {
+                console.error(`[Watchdog-BG][${requestId}] Could not fetch reframe job ${reframeJobId}:`, reframeFetchError.message);
+                return;
+            }
+
+            if (reframeJob.status === 'complete') {
+                console.log(`[Watchdog-BG][${requestId}] Reframe job ${reframeJobId} is complete. Finalizing parent recontext job ${recontextJob.id}.`);
+                await supabase.from('mira-agent-jobs')
+                    .update({ status: 'complete', final_result: reframeJob.final_result })
+                    .eq('id', recontextJob.id);
+            } else if (reframeJob.status === 'failed') {
+                console.error(`[Watchdog-BG][${requestId}] Reframe job ${reframeJobId} failed. Propagating failure to recontext job ${recontextJob.id}.`);
+                await supabase.from('mira-agent-jobs')
+                    .update({ status: 'failed', error_message: `Delegated reframe job failed: ${reframeJob.error_message}` })
+                    .eq('id', recontextJob.id);
+            }
+        });
+        await Promise.allSettled(recontextCheckPromises);
+        actionsTaken.push(`Checked status for ${awaitingRecontextJobs.length} recontext jobs awaiting reframe.`);
+    } else {
+        console.log(`[Watchdog-BG][${requestId}] No recontext jobs awaiting reframe found.`);
     }
 
     const finalMessage = actionsTaken.length > 0 ? actionsTaken.join(' ') : "No actions required. All jobs are running normally.";

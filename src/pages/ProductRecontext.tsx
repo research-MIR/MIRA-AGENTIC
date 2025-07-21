@@ -1,18 +1,23 @@
-import { useState, useRef, useCallback, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Loader2, Wand2, UploadCloud, X, FlaskConical } from "lucide-react";
+import { Loader2, Wand2, UploadCloud, X, FlaskConical, Image as ImageIcon, PlusCircle } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { cn } from "@/lib/utils";
 import { useDropzone } from "@/hooks/useDropzone";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { Switch } from "@/components/ui/switch";
 import { useImagePreview } from "@/context/ImagePreviewContext";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { RealtimeChannel } from "@supabase/supabase-js";
+import { Skeleton } from "@/components/ui/skeleton";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { RecentJobThumbnail } from "@/components/Jobs/RecentJobThumbnail";
+import { ImageCompareModal } from "@/components/ImageCompareModal";
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -44,215 +49,181 @@ const ImageUploader = ({ onFileSelect, title, imageUrl, onClear, multiple = fals
     );
 };
 
-interface AnalysisResult {
-  imageUrl: string;
-  description: string;
-  finalPrompt: string;
-  steps: number;
-}
+const aspectRatioOptions = ["1:1", "16:9", "9:16", "4:3", "3:4", "21:9", "3:2", "2:3"];
 
 const ProductRecontext = () => {
-  const { supabase } = useSession();
+  const { supabase, session } = useSession();
   const { t } = useLanguage();
   const { showImage } = useImagePreview();
+  const channelRef = useRef<RealtimeChannel | null>(null);
 
   const [productFiles, setProductFiles] = useState<File[]>([]);
   const [sceneFile, setSceneFile] = useState<File | null>(null);
   const [prompt, setPrompt] = useState("");
-  const [result, setResult] = useState<AnalysisResult | null>(null);
-  const [analysisResults, setAnalysisResults] = useState<AnalysisResult[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [isAnalysisMode, setIsAnalysisMode] = useState(false);
-  const [stepAmounts, setStepAmounts] = useState("15, 30, 50");
+  const [aspectRatio, setAspectRatio] = useState("1:1");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [isCompareModalOpen, setIsCompareModalOpen] = useState(false);
 
   const productPreviews = useMemo(() => productFiles.map(f => URL.createObjectURL(f)), [productFiles]);
   const scenePreview = useMemo(() => sceneFile ? URL.createObjectURL(sceneFile) : null, [sceneFile]);
 
-  const handleProductFileSelect = (files: FileList | null) => {
-    if (!files) return;
-    const newFiles = Array.from(files);
-    setProductFiles(prev => [...prev, ...newFiles].slice(0, 3));
-  };
+  const { data: activeJob, isLoading: isLoadingActiveJob } = useQuery({
+    queryKey: ['recontextJob', activeJobId],
+    queryFn: async () => {
+      if (!activeJobId) return null;
+      const { data, error } = await supabase.from('mira-agent-jobs').select('*').eq('id', activeJobId).single();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!activeJobId,
+  });
 
-  const removeProductFile = (index: number) => {
-    setProductFiles(prev => prev.filter((_, i) => i !== index));
-  };
+  useEffect(() => {
+    if (!activeJobId || !session?.user?.id) return;
+    if (channelRef.current) supabase.removeChannel(channelRef.current);
+
+    const channel = supabase.channel(`recontext-job-${activeJobId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mira-agent-jobs', filter: `id=eq.${activeJobId}` },
+        (payload) => {
+          queryClient.setQueryData(['recontextJob', activeJobId], payload.new);
+        }
+      ).subscribe();
+    channelRef.current = channel;
+
+    return () => { if (channelRef.current) supabase.removeChannel(channelRef.current); };
+  }, [activeJobId, session?.user?.id, supabase, queryClient]);
 
   const handleGenerate = async () => {
     if (productFiles.length === 0 || (!prompt && !sceneFile)) {
       showError("Please provide at least one product image and either a scene prompt or a scene reference image.");
       return;
     }
-    setIsLoading(true);
-    setResult(null);
-    setAnalysisResults([]);
+    setIsSubmitting(true);
+    const toastId = showLoading("Preparing assets and starting job...");
 
     try {
       const product_images_base64 = await Promise.all(productFiles.map(fileToBase64));
       const scene_reference_image_base64 = sceneFile ? await fileToBase64(sceneFile) : null;
 
-      if (isAnalysisMode) {
-        const steps = stepAmounts.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n) && n > 0);
-        if (steps.length === 0) throw new Error("Please enter valid, comma-separated step amounts for Analysis Mode.");
-        
-        const toastId = showLoading(`Generating ${steps.length} images...`);
-        const promises = steps.map(step => 
-          supabase.functions.invoke('MIRA-AGENT-orchestrator-recontext', {
-            body: { product_images_base64, user_scene_prompt: prompt, scene_reference_image_base64, sample_step: step }
-          }).then(res => ({ ...res, steps: step }))
-        );
-        
-        const results = await Promise.all(promises);
-        const successfulResults: AnalysisResult[] = [];
-        results.forEach(res => {
-          if (res.error) throw res.error;
-          successfulResults.push({
-            imageUrl: `data:${res.data.mimeType};base64,${res.data.base64Image}`,
-            description: res.data.productDescription,
-            finalPrompt: res.data.finalPromptUsed,
-            steps: res.steps,
-          });
-        });
-        setAnalysisResults(successfulResults);
-        dismissToast(toastId);
-        showSuccess("Analysis complete!");
-
-      } else {
-        const toastId = showLoading("Generating image...");
-        const { data, error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-recontext', {
-          body: { product_images_base64, user_scene_prompt: prompt, scene_reference_image_base64 }
-        });
-        if (error) throw error;
-        setResult({
-          imageUrl: `data:${data.mimeType};base64,${data.base64Image}`,
-          description: data.productDescription,
-          finalPrompt: data.finalPromptUsed,
-          steps: 0 // Not applicable in single mode
-        });
-        dismissToast(toastId);
-      }
+      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-recontext', {
+        body: { 
+          user_id: session?.user?.id,
+          product_images_base64, 
+          user_scene_prompt: prompt, 
+          scene_reference_image_base64,
+          aspect_ratio: aspectRatio
+        }
+      });
+      if (error) throw error;
+      
+      setActiveJobId(data.jobId);
+      dismissToast(toastId);
+      showSuccess("Job started successfully!");
     } catch (err: any) {
+      dismissToast(toastId);
       showError(`Generation failed: ${err.message}`);
     } finally {
-      setIsLoading(false);
+      setIsSubmitting(false);
     }
   };
 
+  const startNew = () => {
+    setActiveJobId(null);
+    setProductFiles([]);
+    setSceneFile(null);
+    setPrompt("");
+    setAspectRatio("1:1");
+  };
+
+  const resultImageUrl = activeJob?.status === 'complete' ? activeJob.final_result?.images?.[0]?.publicUrl : null;
+  const sourceImageUrl = activeJob?.context?.base_image_url;
+
   return (
-    <div className="p-4 md:p-8 h-screen overflow-y-auto">
-      <header className="pb-4 mb-8 border-b">
-        <h1 className="text-3xl font-bold">{t('productRecontext')}</h1>
-        <p className="text-muted-foreground">{t('productRecontextDescription')}</p>
-      </header>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <Card>
-          <CardHeader>
-            <CardTitle>Setup</CardTitle>
-            <CardDescription>Provide your product and scene information.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>{t('productImage')} (up to 3)</Label>
-                <ImageUploader onFileSelect={handleProductFileSelect} title={t('uploadProduct')} multiple />
-                {productPreviews.length > 0 && (
-                  <div className="flex flex-wrap gap-2 pt-2">
-                    {productPreviews.map((url, index) => (
-                      <div key={index} className="relative">
-                        <img src={url} alt={`Product preview ${index + 1}`} className="w-16 h-16 object-cover rounded-md" />
-                        <Button variant="destructive" size="icon" className="absolute -top-2 -right-2 h-5 w-5 rounded-full" onClick={() => removeProductFile(index)}><X className="h-3 w-3" /></Button>
-                      </div>
-                    ))}
-                  </div>
-                )}
+    <>
+      <div className="p-4 md:p-8 h-screen overflow-y-auto">
+        <header className="pb-4 mb-8 border-b">
+          <h1 className="text-3xl font-bold">{t('productRecontext')}</h1>
+          <p className="text-muted-foreground">{t('productRecontextDescription')}</p>
+        </header>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          <Card>
+            <CardHeader>
+              <div className="flex justify-between items-center">
+                <CardTitle>Setup</CardTitle>
+                {activeJob && <Button variant="outline" onClick={startNew}>{t('newJob')}</Button>}
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="scene-prompt">{t('scenePrompt')}</Label>
-                <Textarea id="scene-prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t('scenePromptPlaceholder')} rows={3} />
-                <Label className="pt-2 block">{t('sceneReferenceImage')}</Label>
-                <ImageUploader onFileSelect={(files) => files && setSceneFile(files[0])} title={t('uploadSceneReference')} imageUrl={scenePreview} onClear={() => setSceneFile(null)} />
-              </div>
-            </div>
-            <div className="space-y-2 p-3 border rounded-md">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="analysis-mode" className="flex items-center gap-2"><FlaskConical className="h-4 w-4" />{t('analysisMode')}</Label>
-                <Switch id="analysis-mode" checked={isAnalysisMode} onCheckedChange={setIsAnalysisMode} />
-              </div>
-              {isAnalysisMode && (
-                <div className="pt-2">
-                  <Label htmlFor="step-amounts">{t('stepAmounts')}</Label>
-                  <Input id="step-amounts" value={stepAmounts} onChange={(e) => setStepAmounts(e.target.value)} placeholder="e.g., 15, 30, 50" />
-                </div>
-              )}
-            </div>
-            <Button className="w-full" onClick={handleGenerate} disabled={isLoading}>
-              {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
-              {t('generate')}
-            </Button>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>{t('result')}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {isLoading ? (
-              <div className="flex justify-center p-12"><Loader2 className="h-8 w-8 animate-spin" /></div>
-            ) : isAnalysisMode ? (
+            </CardHeader>
+            <CardContent className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
-                {analysisResults.map((res, index) => (
-                  <div key={index} className="space-y-2">
-                    <Label className="text-center block">{res.steps} steps</Label>
-                    <button
-                      className="w-full aspect-square block"
-                      onClick={() => showImage({
-                        images: analysisResults.map(r => ({ url: r.imageUrl })),
-                        currentIndex: index
-                      })}
-                    >
-                      <img src={res.imageUrl} className="max-w-full max-h-full object-contain rounded-md" />
+                <div className="space-y-2">
+                  <Label>{t('productImage')} (up to 3)</Label>
+                  <ImageUploader onFileSelect={(files) => files && setProductFiles(Array.from(files).slice(0, 3))} title={t('uploadProduct')} multiple />
+                  {productPreviews.length > 0 && (
+                    <div className="flex flex-wrap gap-2 pt-2">
+                      {productPreviews.map((url, index) => (
+                        <div key={index} className="relative">
+                          <img src={url} alt={`Product preview ${index + 1}`} className="w-16 h-16 object-cover rounded-md" />
+                          <Button variant="destructive" size="icon" className="absolute -top-2 -right-2 h-5 w-5 rounded-full" onClick={() => removeProductFile(index)}><X className="h-3 w-3" /></Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="scene-prompt">{t('scenePrompt')}</Label>
+                  <Textarea id="scene-prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t('scenePromptPlaceholder')} rows={3} />
+                  <Label className="pt-2 block">{t('sceneReferenceImage')}</Label>
+                  <ImageUploader onFileSelect={(files) => files && setSceneFile(files[0])} title={t('uploadSceneReference')} imageUrl={scenePreview} onClear={() => setSceneFile(null)} />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="aspect-ratio">{t('aspectRatio')}</Label>
+                <Select value={aspectRatio} onValueChange={setAspectRatio}>
+                  <SelectTrigger id="aspect-ratio"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {aspectRatioOptions.map(ratio => <SelectItem key={ratio} value={ratio}>{ratio}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button className="w-full" onClick={handleGenerate} disabled={isSubmitting || isLoadingActiveJob || (activeJob && activeJob.status !== 'complete' && activeJob.status !== 'failed')}>
+                {(isSubmitting || isLoadingActiveJob) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+                {t('generate')}
+              </Button>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader><CardTitle>{t('result')}</CardTitle></CardHeader>
+            <CardContent>
+              {isLoadingActiveJob || (activeJob && activeJob.status === 'processing') ? (
+                <div className="flex justify-center p-12"><Loader2 className="h-8 w-8 animate-spin" /></div>
+              ) : resultImageUrl ? (
+                <div className="space-y-4">
+                  <div className="mt-2 aspect-square w-full bg-muted rounded-md flex items-center justify-center">
+                    <button className="w-full h-full" onClick={() => showImage({ images: [{ url: resultImageUrl }], currentIndex: 0 })}>
+                      <img src={resultImageUrl} className="max-w-full max-h-full object-contain" />
                     </button>
                   </div>
-                ))}
-              </div>
-            ) : result ? (
-              <>
-                <div className="mt-2 aspect-square w-full bg-muted rounded-md flex items-center justify-center">
-                  <button
-                    className="w-full h-full"
-                    onClick={() => showImage({
-                      images: [{ url: result.imageUrl }],
-                      currentIndex: 0
-                    })}
-                  >
-                    <img src={result.imageUrl} className="max-w-full max-h-full object-contain" />
-                  </button>
+                  <Button className="w-full" onClick={() => setIsCompareModalOpen(true)}>{t('compareResults')}</Button>
                 </div>
-                <Accordion type="single" collapsible className="w-full mt-2">
-                  <AccordionItem value="item-1">
-                    <AccordionTrigger>View AI Analysis & Final Prompt</AccordionTrigger>
-                    <AccordionContent className="space-y-2">
-                      <div>
-                        <h4 className="font-semibold text-sm">AI Product Description:</h4>
-                        <p className="text-sm p-2 bg-muted rounded-md">{result.description}</p>
-                      </div>
-                      <div>
-                        <h4 className="font-semibold text-sm">Final Prompt Used:</h4>
-                        <p className="text-sm p-2 bg-muted rounded-md font-mono">{result.finalPrompt}</p>
-                      </div>
-                    </AccordionContent>
-                  </AccordionItem>
-                </Accordion>
-              </>
-            ) : (
-              <div className="flex items-center justify-center h-64">
-                <p className="text-sm text-muted-foreground">{t('resultPlaceholder')}</p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+              ) : (
+                <div className="flex items-center justify-center h-64">
+                  <p className="text-sm text-muted-foreground">{t('resultPlaceholder')}</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       </div>
-    </div>
+      {isCompareModalOpen && sourceImageUrl && resultImageUrl && (
+        <ImageCompareModal 
+          isOpen={isCompareModalOpen}
+          onClose={() => setIsCompareModalOpen(false)}
+          beforeUrl={sourceImageUrl}
+          afterUrl={resultImageUrl}
+        />
+      )}
+    </>
   );
 };
 
