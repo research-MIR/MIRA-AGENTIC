@@ -1,24 +1,16 @@
-import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { useSession } from '@/components/Auth/SessionContextProvider';
-import { Skeleton } from '@/components/ui/skeleton';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { AlertTriangle, CheckCircle } from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { SecureImageDisplay } from './SecureImageDisplay';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Label } from "@/components/ui/label";
 import { useLanguage } from '@/context/LanguageContext';
-import { Button } from '../ui/button';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from '@/components/ui/skeleton';
+import { cn } from '@/lib/utils';
+import { AlertTriangle, CheckCircle } from 'lucide-react';
+import { SecureImageDisplay } from './SecureImageDisplay';
 
 interface Pose {
   final_url: string;
-}
-
-interface ModelPack {
-  id: string;
-  name: string;
 }
 
 export interface VtoModel {
@@ -27,56 +19,39 @@ export interface VtoModel {
   poses: Pose[];
 }
 
+export interface ModelPack {
+  id: string;
+  name: string;
+}
+
 interface ModelPoseSelectorProps {
   mode: 'single' | 'multiple' | 'get-all';
   selectedUrls?: Set<string>;
   onSelect?: (urls: string[]) => void;
   onUseEntirePack?: (models: VtoModel[]) => void;
+  models: VtoModel[];
+  isLoading: boolean;
+  error: Error | null;
+  packs: ModelPack[] | undefined;
+  isLoadingPacks: boolean;
+  selectedPackId: string;
+  setSelectedPackId: (id: string) => void;
 }
 
-export const ModelPoseSelector = ({ mode, selectedUrls, onSelect, onUseEntirePack }: ModelPoseSelectorProps) => {
-  const { supabase, session } = useSession();
+export const ModelPoseSelector = ({
+  mode,
+  selectedUrls,
+  onSelect,
+  onUseEntirePack,
+  models,
+  isLoading,
+  error,
+  packs,
+  isLoadingPacks,
+  selectedPackId,
+  setSelectedPackId
+}: ModelPoseSelectorProps) => {
   const { t } = useLanguage();
-  const [selectedPackId, setSelectedPackId] = useState<string>('all');
-
-  const { data: packs, isLoading: isLoadingPacks } = useQuery<ModelPack[]>({
-    queryKey: ['modelPacks', session?.user?.id],
-    queryFn: async () => {
-      if (!session?.user) return [];
-      const { data, error } = await supabase.from('mira-agent-model-packs').select('id, name').eq('user_id', session.user.id);
-      if (error) throw error;
-      return data;
-    },
-    enabled: !!session?.user,
-  });
-
-  const { data: models, isLoading, error } = useQuery<VtoModel[]>({
-    queryKey: ['vtoPackModels', session?.user?.id, selectedPackId],
-    queryFn: async () => {
-      if (!session?.user) return [];
-      let query = supabase
-        .from('mira-agent-model-generation-jobs')
-        .select('id, base_model_image_url, final_posed_images')
-        .eq('user_id', session.user.id)
-        .eq('status', 'complete');
-      
-      if (selectedPackId !== 'all') {
-        query = query.eq('pack_id', selectedPackId);
-      }
-
-      const { data, error } = await query;
-      if (error) throw error;
-
-      return data
-        .map(job => ({
-          jobId: job.id,
-          baseModelUrl: job.base_model_image_url,
-          poses: (job.final_posed_images || []).filter((p: any) => p.is_upscaled)
-        }))
-        .filter(model => model.poses.length > 0);
-    },
-    enabled: !!session?.user,
-  });
 
   const handleSelect = (poseUrls: string[]) => {
     if (onSelect) {

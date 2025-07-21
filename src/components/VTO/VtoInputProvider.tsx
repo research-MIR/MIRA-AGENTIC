@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { ModelPoseSelector, VtoModel } from './ModelPoseSelector';
+import { ModelPoseSelector, VtoModel, ModelPack } from './ModelPoseSelector';
 import { SecureImageDisplay } from './SecureImageDisplay';
 import { useLanguage } from '@/context/LanguageContext';
 import { PlusCircle, Shirt, Users, X, Link2, Shuffle } from 'lucide-react';
@@ -13,6 +13,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Label } from '../ui/label';
 import { Textarea } from '../ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { useQuery } from '@tanstack/react-query';
+import { useSession } from '../Auth/SessionContextProvider';
 
 export interface QueueItem {
   person: { url: string; file?: File };
@@ -62,6 +64,7 @@ const MultiImageUploader = ({ onFilesSelect, title, icon, description }: { onFil
 };
 
 export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProviderProps) => {
+  const { supabase, session } = useSession();
   const { t } = useLanguage();
   const [isModelModalOpen, setIsModelModalOpen] = useState(false);
   
@@ -74,6 +77,47 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
   const [tempPairPersonUrl, setTempPairPersonUrl] = useState<string | null>(null);
   const [tempPairGarmentFile, setTempPairGarmentFile] = useState<File | null>(null);
   const [tempPairAppendix, setTempPairAppendix] = useState("");
+
+  const [selectedPackId, setSelectedPackId] = useState<string>('all');
+
+  const { data: packs, isLoading: isLoadingPacks } = useQuery<ModelPack[]>({
+    queryKey: ['modelPacks', session?.user?.id],
+    queryFn: async () => {
+      if (!session?.user) return [];
+      const { data, error } = await supabase.from('mira-agent-model-packs').select('id, name').eq('user_id', session.user.id);
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!session?.user,
+  });
+
+  const { data: models, isLoading: isLoadingModels, error: modelsError } = useQuery<VtoModel[]>({
+    queryKey: ['vtoPackModels', session?.user?.id, selectedPackId],
+    queryFn: async () => {
+      if (!session?.user) return [];
+      let query = supabase
+        .from('mira-agent-model-generation-jobs')
+        .select('id, base_model_image_url, final_posed_images')
+        .eq('user_id', session.user.id)
+        .eq('status', 'complete');
+      
+      if (selectedPackId !== 'all') {
+        query = query.eq('pack_id', selectedPackId);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      return data
+        .map(job => ({
+          jobId: job.id,
+          baseModelUrl: job.base_model_image_url,
+          poses: (job.final_posed_images || []).filter((p: any) => p.is_upscaled)
+        }))
+        .filter(model => model.poses.length > 0);
+    },
+    enabled: !!session?.user,
+  });
 
   const garmentFileUrl = useMemo(() => garmentFile ? URL.createObjectURL(garmentFile) : null, [garmentFile]);
   const tempPairGarmentUrl = useMemo(() => tempPairGarmentFile ? URL.createObjectURL(tempPairGarmentFile) : null, [tempPairGarmentFile]);
@@ -122,24 +166,35 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
     let queue: QueueItem[] = [];
     if (mode === 'one-to-many' && garmentFile) {
       queue = Array.from(selectedModelUrls).map(personUrl => ({
-        person: { url: personUrl }, // No file for selected models
+        person: { url: personUrl },
         garment: { url: URL.createObjectURL(garmentFile), file: garmentFile },
         appendix: generalAppendix,
       }));
     } else if (mode === 'random-pairs') {
-        if (selectedModelUrls.size > 0 && randomGarmentFiles.length > 0) {
-            const models = Array.from(selectedModelUrls);
-            const garments = randomGarmentFiles.map(f => ({ file: f, url: URL.createObjectURL(f) }));
-            const numPairs = Math.min(models.length, garments.length);
-            const shuffledGarments = [...garments].sort(() => 0.5 - Math.random());
-            for (let i = 0; i < numPairs; i++) {
+      if (models && selectedModelUrls.size > 0 && randomGarmentFiles.length > 0) {
+        const selectedModels = models.filter(model => 
+            model.poses.some(pose => selectedModelUrls.has(pose.final_url))
+        );
+        const garments = randomGarmentFiles.map(f => ({ file: f, url: URL.createObjectURL(f) }));
+
+        const shuffledModels = [...selectedModels].sort(() => 0.5 - Math.random());
+        const shuffledGarments = [...garments].sort(() => 0.5 - Math.random());
+
+        const numPairs = Math.min(shuffledModels.length, shuffledGarments.length);
+
+        for (let i = 0; i < numPairs; i++) {
+            const model = shuffledModels[i];
+            const garment = shuffledGarments[i];
+
+            for (const pose of model.poses) {
                 queue.push({
-                    person: { url: models[i] },
-                    garment: { url: shuffledGarments[i].url, file: shuffledGarments[i].file },
+                    person: { url: pose.final_url },
+                    garment: { url: garment.url, file: garment.file },
                     appendix: generalAppendix,
                 });
             }
         }
+      }
     } else if (mode === 'precise-pairs') {
       queue = precisePairs;
     }
@@ -165,12 +220,12 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
             <Button variant="outline" className="w-full" onClick={() => setIsModelModalOpen(true)}>
               {t('selectModels')} ({selectedModelUrls.size})
             </Button>
-            <ModelPoseSelector mode="get-all" onUseEntirePack={handleUseEntirePack} />
+            <ModelPoseSelector mode="get-all" onUseEntirePack={handleUseEntirePack} models={models || []} isLoading={isLoadingModels} error={modelsError as Error | null} packs={packs} isLoadingPacks={isLoadingPacks} selectedPackId={selectedPackId} setSelectedPackId={setSelectedPackId} />
           </div>
           <div className="space-y-2">
             <Label>{t('uploadGarment')}</Label>
             <div className="aspect-square max-w-xs mx-auto">
-              <ImageUploader onFileSelect={setGarmentFile} title={t('garmentImage')} imageUrl={garmentFileUrl} onClear={() => setGarmentFile(null)} />
+              <ImageUploader onFileSelect={(files) => files && setGarmentFile(files[0])} title={t('garmentImage')} imageUrl={garmentFileUrl} onClear={() => setGarmentFile(null)} />
             </div>
           </div>
         </div>
@@ -195,7 +250,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
             <Button variant="outline" className="w-full" onClick={() => setIsModelModalOpen(true)}>
               {t('selectModels')} ({selectedModelUrls.size})
             </Button>
-            <ModelPoseSelector mode="get-all" onUseEntirePack={handleUseEntirePack} />
+            <ModelPoseSelector mode="get-all" onUseEntirePack={handleUseEntirePack} models={models || []} isLoading={isLoadingModels} error={modelsError as Error | null} packs={packs} isLoadingPacks={isLoadingPacks} selectedPackId={selectedPackId} setSelectedPackId={setSelectedPackId} />
           </div>
           <div className="space-y-2">
             <Label>{t('uploadGarments')}</Label>
@@ -241,7 +296,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
                     )}
                 </div>
             </div>
-            <ImageUploader onFileSelect={setTempPairGarmentFile} title={t('garment')} imageUrl={tempPairGarmentUrl} onClear={() => setTempPairGarmentFile(null)} />
+            <ImageUploader onFileSelect={(files) => files && setTempPairGarmentFile(files[0])} title={t('garment')} imageUrl={tempPairGarmentUrl} onClear={() => setTempPairGarmentFile(null)} />
           </div>
           <div>
             <Label htmlFor="pair-appendix">{t('promptAppendixPair')}</Label>
@@ -293,6 +348,14 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
             mode={mode === 'precise-pairs' ? 'single' : 'multiple'} 
             selectedUrls={selectedModelUrls} 
             onSelect={mode === 'precise-pairs' ? handleSingleModelSelect : handleMultiModelSelect}
+            onUseEntirePack={handleUseEntirePack}
+            models={models || []}
+            isLoading={isLoadingModels}
+            error={modelsError as Error | null}
+            packs={packs}
+            isLoadingPacks={isLoadingPacks}
+            selectedPackId={selectedPackId}
+            setSelectedPackId={setSelectedPackId}
           />
           <DialogFooter>
             <Button onClick={() => setIsModelModalOpen(false)}>Done</Button>
