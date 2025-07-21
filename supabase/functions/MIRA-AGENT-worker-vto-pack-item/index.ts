@@ -25,10 +25,10 @@ const corsHeaders = {
 
 // --- Hardened Safe Wrapper Functions ---
 
-async function safeInvoke(supabase: SupabaseClient, functionName: string, payload: object) {
+function invokeNextStep(supabase: SupabaseClient, functionName: string, payload: object) {
   // Fire-and-forget: We don't await the result, just handle potential invocation error.
   supabase.functions.invoke(functionName, { body: payload }).catch(err => {
-    console.error(`[safeInvoke] Error invoking ${functionName}:`, err);
+    console.error(`[invokeNextStep] Error invoking ${functionName}:`, err);
   });
 }
 
@@ -134,7 +134,7 @@ async function triggerNextJobInPack(supabase: SupabaseClient, currentJob: any, l
     if (nextJob) {
         console.log(`${logPrefix} Found next job: ${nextJob.id}. Invoking worker for it.`);
         await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'queued' }).eq('id', nextJob.id);
-        safeInvoke(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: nextJob.id });
+        invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: nextJob.id });
     } else {
         console.log(`${logPrefix} No more pending jobs found in pack. Chain complete.`);
     }
@@ -210,7 +210,8 @@ serve(async (req) => {
 
 async function handleStart(supabase: SupabaseClient, job: any, logPrefix: string) {
   console.log(`${logPrefix} Step 1: Getting bounding box and optimizing images.`);
-  const bboxData = await safeInvoke(supabase, 'MIRA-AGENT-orchestrator-bbox', { image_url: job.source_person_image_url });
+  const { data: bboxData, error: bboxError } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-bbox', { body: { image_url: job.source_person_image_url } });
+  if (bboxError) throw bboxError;
   
   const personBox = bboxData?.person;
   if (!personBox || !Array.isArray(personBox) || personBox.length !== 4 || personBox.some((v: any) => typeof v !== 'number')) {
@@ -279,18 +280,21 @@ async function handleStart(supabase: SupabaseClient, job: any, logPrefix: string
     }
   }).eq('id', job.id);
 
-  safeInvoke(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
+  invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
 }
 
 async function handleGenerateStep(supabase: SupabaseClient, job: any, sampleStep: number, nextStep: string, logPrefix: string) {
   console.log(`${logPrefix} Generating variation with ${sampleStep} steps.`);
   
-  const data = await safeInvoke(supabase, 'MIRA-AGENT-tool-virtual-try-on', {
-    person_image_url: job.metadata.cropped_person_url,
-    garment_image_url: job.metadata.optimized_garment_url,
-    sample_count: 1,
-    sample_step: sampleStep
+  const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-virtual-try-on', {
+    body: {
+        person_image_url: job.metadata.cropped_person_url,
+        garment_image_url: job.metadata.optimized_garment_url,
+        sample_count: 1,
+        sample_step: sampleStep
+    }
   });
+  if (error) throw error;
 
   const generatedImages = data?.generatedImages;
   if (!generatedImages || !Array.isArray(generatedImages) || generatedImages.length === 0 || !generatedImages[0]?.base64Image) {
@@ -305,7 +309,7 @@ async function handleGenerateStep(supabase: SupabaseClient, job: any, sampleStep
   }).eq('id', job.id);
 
   console.log(`${logPrefix} Step ${sampleStep} complete. Advancing to ${nextStep}.`);
-  safeInvoke(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
+  invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
 }
 
 async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix: string) {
@@ -320,11 +324,14 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
     safeDownload(supabase, job.source_garment_image_url)
   ]);
 
-  const qaData = await safeInvoke(supabase, 'MIRA-AGENT-tool-vto-quality-checker', {
-    original_person_image_base64: await blobToBase64(personBlob),
-    reference_garment_image_base64: await blobToBase64(garmentBlob),
-    generated_images_base64: variations.map((img: any) => img.base64Image)
+  const { data: qaData, error } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-quality-checker', {
+    body: {
+        original_person_image_base64: await blobToBase64(personBlob),
+        reference_garment_image_base64: await blobToBase64(garmentBlob),
+        generated_images_base64: variations.map((img: any) => img.base64Image)
+    }
   });
+  if (error) throw error;
   personBlob = null; garmentBlob = null; // GC
   
   if (!qaData || typeof qaData.best_image_index !== 'number') {
@@ -363,7 +370,7 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
         }
       }).eq('id', job.id);
 
-      safeInvoke(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
+      invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
   }
 }
 
