@@ -54,11 +54,10 @@ serve(async (req) => {
     console.log(`${logPrefix} Job details fetched successfully.`);
 
     const { context } = job;
-    const { base_image_url, mask_image_url, final_prompt_used, dilation, steps, count } = context;
+    const { base_image_url, mask_image_url, prompt, dilation, steps, count, invert_mask } = context;
     if (!base_image_url || !mask_image_url) throw new Error("Missing image URLs in job context.");
-    
-    const finalPrompt = final_prompt_used || "A high quality photorealistic image.";
-    console.log(`${logPrefix} Using intelligent prompt: "${finalPrompt}"`);
+    console.log(`${logPrefix} Base URL: ${base_image_url}`);
+    console.log(`${logPrefix} Mask URL: ${mask_image_url}`);
 
     console.log(`${logPrefix} Downloading images...`);
     const [baseImageBlob, maskImageBlob] = await Promise.all([
@@ -66,12 +65,18 @@ serve(async (req) => {
         downloadImageAsBlob(supabase, mask_image_url)
     ]);
     console.log(`${logPrefix} Images downloaded. Base size: ${baseImageBlob.size}, Mask size: ${maskImageBlob.size}`);
+    if (baseImageBlob.size === 0) {
+        throw new Error("Downloaded base image is empty (0 bytes). Cannot proceed.");
+    }
 
     const [finalBaseImageB64, finalMaskImageB64] = await Promise.all([
         blobToBase64(baseImageBlob),
         blobToBase64(maskImageBlob)
     ]);
-    console.log(`${logPrefix} Images converted to Base64.`);
+    console.log(`${logPrefix} Images converted to Base64. Base length: ${finalBaseImageB64.length}, Mask length: ${finalMaskImageB64.length}`);
+    if (finalBaseImageB64.length === 0) {
+        throw new Error("Converted base image is empty (0 length base64 string). Cannot proceed.");
+    }
 
     const auth = new GoogleAuth({
       credentials: JSON.parse(GOOGLE_VERTEX_AI_SA_KEY_JSON!),
@@ -82,7 +87,7 @@ serve(async (req) => {
 
     const requestBody = {
       instances: [{
-        prompt: finalPrompt,
+        prompt: prompt || "A high quality photorealistic image.",
         referenceImages: [
           { referenceType: "REFERENCE_TYPE_RAW", referenceId: 1, referenceImage: { bytesBase64Encoded: finalBaseImageB64 } },
           { referenceType: "REFERENCE_TYPE_MASK", referenceId: 2, referenceImage: { bytesBase64Encoded: finalMaskImageB64 }, maskImageConfig: { maskMode: "MASK_MODE_USER_PROVIDED", dilation: dilation || 0.03 } }
@@ -99,8 +104,8 @@ serve(async (req) => {
     };
     
     const sanitizedPayload = JSON.parse(JSON.stringify(requestBody));
-    sanitizedPayload.instances[0].referenceImages[0].referenceImage.bytesBase64Encoded = `[BASE64_DATA_REDACTED]`;
-    sanitizedPayload.instances[0].referenceImages[1].referenceImage.bytesBase64Encoded = `[BASE64_DATA_REDACTED]`;
+    sanitizedPayload.instances[0].referenceImages[0].referenceImage.bytesBase64Encoded = `[BASE64_DATA_REDACTED_LENGTH_${finalBaseImageB64.length}]`;
+    sanitizedPayload.instances[0].referenceImages[1].referenceImage.bytesBase64Encoded = `[BASE64_DATA_REDACTED_LENGTH_${finalMaskImageB64.length}]`;
 
     console.log(`${logPrefix} Calling Google Vertex AI with sanitized payload:`, JSON.stringify(sanitizedPayload, null, 2));
     const response = await fetch(apiUrl, {

@@ -64,7 +64,6 @@
     "react-router-dom": "^6.26.2",
     "recharts": "^2.12.7",
     "remark-gfm": "^4.0.1",
-    "sharp": "^0.34.3",
     "simplex-noise": "^4.0.3",
     "sonner": "^1.5.0",
     "tailwind-merge": "^2.5.2",
