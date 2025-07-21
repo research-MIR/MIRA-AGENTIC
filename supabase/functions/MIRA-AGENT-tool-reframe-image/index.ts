@@ -172,6 +172,11 @@ serve(async (req) => {
       status: 'complete',
       final_result: {
         images: finalImages
+      },
+      context: {
+        ...job.context,
+        // Add the original base image URL to the final context for comparison
+        original_base_image_url: job.context.base_image_url
       }
     }).eq('id', job_id);
     
