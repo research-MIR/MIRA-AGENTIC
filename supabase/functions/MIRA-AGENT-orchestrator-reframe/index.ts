@@ -71,8 +71,10 @@ serve(async (req) => {
       const xOffset = (newW - originalW) / 2;
       const yOffset = (newH - originalH) / 2;
 
+      // --- MASK GENERATION ---
       const maskCanvas = createCanvas(newW, newH);
       const maskCtx = maskCanvas.getContext('2d');
+      // **FIX:** Fill with solid white first to prevent black background on JPEG export.
       maskCtx.fillStyle = 'white';
       maskCtx.fillRect(0, 0, newW, newH);
       
@@ -91,8 +93,10 @@ serve(async (req) => {
           throw new Error("FATAL: Generated mask buffer is empty. ImageScript operation failed.");
       }
 
+      // --- NEW BASE IMAGE GENERATION ---
       const newBaseCanvas = createCanvas(newW, newH);
       const newBaseCtx = newBaseCanvas.getContext('2d');
+      // **FIX:** Fill with solid white first.
       newBaseCtx.fillStyle = 'white';
       newBaseCtx.fillRect(0, 0, newW, newH);
       newBaseCtx.drawImage(originalImage, xOffset, yOffset);
