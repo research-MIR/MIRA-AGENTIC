@@ -81,7 +81,7 @@ serve(async (req) => {
       maskCtx.fillStyle = 'black';
       maskCtx.fillRect(xOffset, yOffset, originalW, originalH);
       maskCtx.filter = 'none';
-      const maskBuffer = maskCanvas.toBuffer('image/jpeg', { quality: 0.9 });
+      const maskBuffer = maskCanvas.toBuffer('image/jpeg', 0.9);
       if (maskBuffer.length === 0) throw new Error("FATAL: Generated mask buffer is empty.");
 
       // Generate new base image IN MEMORY for prompt generation
@@ -90,7 +90,7 @@ serve(async (req) => {
       newBaseCtx.fillStyle = 'white';
       newBaseCtx.fillRect(0, 0, newW, newH);
       newBaseCtx.drawImage(originalImage, xOffset, yOffset);
-      const newBaseBuffer = newBaseCanvas.toBuffer('image/jpeg', { quality: 0.9 });
+      const newBaseBuffer = newBaseCanvas.toBuffer('image/jpeg', 0.9);
       if (newBaseBuffer.length === 0) throw new Error("FATAL: Generated base image buffer is empty.");
       baseImageForPromptingB64 = encodeBase64(newBaseBuffer);
 
