@@ -101,6 +101,7 @@ const Developer = () => {
   const [isCancelling, setIsCancelling] = useState(false);
   const [isCancellingVTO, setIsCancellingVTO] = useState(false);
   const [isShuttingDown, setIsShuttingDown] = useState(false);
+  const [isResettingVtoPacks, setIsResettingVtoPacks] = useState(false);
 
   const handleCancelAllSegmentationJobs = async () => {
     setIsCancelling(true);
@@ -147,6 +148,22 @@ const Developer = () => {
         showError(`Shutdown failed: ${err.message}`);
     } finally {
         setIsShuttingDown(false);
+    }
+  };
+
+  const handleResetVtoPacks = async () => {
+    setIsResettingVtoPacks(true);
+    const toastId = showLoading("Resetting all incomplete VTO packs...");
+    try {
+        const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-admin-reset-vto-packs');
+        if (error) throw error;
+        dismissToast(toastId);
+        showSuccess(data.message);
+    } catch (err: any) {
+        dismissToast(toastId);
+        showError(`Failed to reset packs: ${err.message}`);
+    } finally {
+        setIsResettingVtoPacks(false);
     }
   };
 
@@ -201,6 +218,26 @@ const Developer = () => {
                     <AlertDialogAction onClick={handleCancelAllVTOJobs} disabled={isCancellingVTO}>
                       {isCancellingVTO && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                       Yes, cancel all VTO Pro jobs
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="destructive">Reset Incomplete VTO Packs</Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This will permanently DELETE all incomplete VTO packs and their associated child jobs for ALL users. This is useful for clearing stuck jobs from the system. This action cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={handleResetVtoPacks} disabled={isResettingVtoPacks}>
+                      {isResettingVtoPacks && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      Yes, reset VTO packs
                     </AlertDialogAction>
                   </AlertDialogFooter>
                 </AlertDialogContent>
