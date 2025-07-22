@@ -156,9 +156,9 @@ serve(async (req)=>{
     } else {
       console.log(`[Watchdog-BG][${requestId}] No stalled pair jobs found.`);
     }
-    // --- Task 5: Handle Stalled 'processing' Google VTO Pack Jobs ---
+    // --- Task 5: Handle Stalled 'processing' or 'awaiting_reframe' Google VTO Pack Jobs ---
     const googleVtoThreshold = new Date(Date.now() - STALLED_GOOGLE_VTO_THRESHOLD_MINUTES * 60 * 1000).toISOString();
-    const { data: stalledGoogleVtoJobs, error: googleVtoError } = await supabase.from('mira-agent-bitstudio-jobs').select('id').eq('metadata->>engine', 'google').eq('status', 'processing').lt('updated_at', googleVtoThreshold);
+    const { data: stalledGoogleVtoJobs, error: googleVtoError } = await supabase.from('mira-agent-bitstudio-jobs').select('id').eq('metadata->>engine', 'google').in('status', ['processing', 'awaiting_reframe']).lt('updated_at', googleVtoThreshold);
     if (googleVtoError) {
       console.error(`[Watchdog-BG][${requestId}] Error querying for stalled Google VTO jobs:`, googleVtoError.message);
     } else if (stalledGoogleVtoJobs && stalledGoogleVtoJobs.length > 0) {
@@ -171,7 +171,7 @@ serve(async (req)=>{
       await Promise.allSettled(workerPromises);
       actionsTaken.push(`Re-triggered ${stalledGoogleVtoJobs.length} stalled Google VTO workers.`);
     } else {
-      console.log(`[Watchdog-BG][${requestId}] No stalled 'processing' Google VTO jobs found.`);
+      console.log(`[Watchdog-BG][${requestId}] No stalled 'processing' or 'awaiting_reframe' Google VTO jobs found.`);
     }
     // --- Task 6: Handle Stalled 'queued' Google VTO Pack Jobs ---
     const queuedVtoThreshold = new Date(Date.now() - STALLED_QUEUED_VTO_THRESHOLD_SECONDS * 1000).toISOString();
