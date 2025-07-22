@@ -1,4 +1,4 @@
-import { useMemo, useEffect } from 'react';
+import { useMemo, useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSession } from '@/components/Auth/SessionContextProvider';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -10,64 +10,92 @@ import { SecureImageDisplay } from './SecureImageDisplay';
 import { BitStudioJob } from '@/types/vto';
 import { RealtimeChannel } from '@supabase/supabase-js';
 
-interface VtoPackJob {
-  id: string;
+interface VtoPackSummary {
+  pack_id: string;
   created_at: string;
   metadata: {
     total_pairs: number;
     engine?: 'google' | 'bitstudio';
   };
+  total_jobs: number;
+  completed_jobs: number;
+  failed_jobs: number;
+  in_progress_jobs: number;
 }
 
-export const RecentVtoPacks = () => {
+const VtoPackDetailView = ({ packId, isOpen }: { packId: string, isOpen: boolean }) => {
   const { supabase, session } = useSession();
   const { showImage } = useImagePreview();
-  const queryClient = useQueryClient();
 
-  const { data: packs, isLoading: isLoadingPacks, error: packsError } = useQuery<VtoPackJob[]>({
-    queryKey: ['recentVtoPacks', session?.user?.id],
+  const { data: childJobs, isLoading } = useQuery<BitStudioJob[]>({
+    queryKey: ['vtoPackChildJobs', packId],
     queryFn: async () => {
       if (!session?.user) return [];
       const { data, error } = await supabase
-        .from('mira-agent-vto-packs-jobs')
+        .from('mira-agent-bitstudio-jobs')
         .select('*')
-        .eq('user_id', session.user.id)
-        .order('created_at', { ascending: false })
-        .limit(10);
+        .eq('vto_pack_job_id', packId);
+      if (error) throw error;
+      return data as BitStudioJob[];
+    },
+    enabled: isOpen, // Lazy-load trigger
+  });
+
+  if (isLoading) {
+    return <div className="flex justify-center p-4"><Loader2 className="h-6 w-6 animate-spin" /></div>;
+  }
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      {childJobs?.map(job => (
+        <div 
+          key={job.id} 
+          className="w-32 h-32 relative group cursor-pointer"
+          onClick={() => job.final_image_url && showImage({ images: [{ url: job.final_image_url }], currentIndex: 0 })}
+        >
+          <SecureImageDisplay 
+            imageUrl={job.final_image_url || job.source_person_image_url || null} 
+            alt="Job result" 
+            className="w-full h-full object-cover rounded-md"
+          />
+          {job.status === 'complete' && <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity" />}
+          {job.status === 'failed' && <div className="absolute inset-0 bg-destructive/70 flex items-center justify-center rounded-md"><XCircle className="h-8 w-8 text-destructive-foreground" /></div>}
+          {(job.status === 'processing' || job.status === 'queued') && <div className="absolute inset-0 bg-black/70 flex items-center justify-center rounded-md"><Loader2 className="h-8 w-8 animate-spin text-white" /></div>}
+        </div>
+      ))}
+    </div>
+  );
+};
+
+export const RecentVtoPacks = () => {
+  const { supabase, session } = useSession();
+  const queryClient = useQueryClient();
+  const [openPackId, setOpenPackId] = useState<string | null>(null);
+
+  const { data: packs, isLoading: isLoadingPacks, error: packsError } = useQuery<VtoPackSummary[]>({
+    queryKey: ['recentVtoPackSummaries', session?.user?.id],
+    queryFn: async () => {
+      if (!session?.user) return [];
+      const { data, error } = await supabase.rpc('get_vto_pack_summaries', { p_user_id: session.user.id });
       if (error) throw error;
       return data;
     },
     enabled: !!session?.user,
   });
 
-  const packIds = useMemo(() => packs?.map(p => p.id) || [], [packs]);
-
-  const { data: childJobs, isLoading: isLoadingChildren } = useQuery<BitStudioJob[]>({
-    queryKey: ['vtoPackChildJobs', packIds],
-    queryFn: async () => {
-      if (packIds.length === 0) return [];
-      const { data, error } = await supabase
-        .from('mira-agent-bitstudio-jobs')
-        .select('*')
-        .in('vto_pack_job_id', packIds);
-      if (error) throw error;
-      return data as BitStudioJob[];
-    },
-    enabled: packIds.length > 0,
-  });
-
   useEffect(() => {
     if (!session?.user?.id) return;
 
     const channel: RealtimeChannel = supabase
-      .channel(`vto-pack-child-jobs-tracker-${session.user.id}`)
-      .on<BitStudioJob>(
+      .channel(`vto-pack-summary-tracker-${session.user.id}`)
+      .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'mira-agent-bitstudio-jobs', filter: `user_id=eq.${session.user.id}` },
         (payload) => {
           if (payload.new.vto_pack_job_id) {
-            console.log('[RecentVtoPacks] Realtime update received for child job:', payload.new.id);
-            queryClient.invalidateQueries({ queryKey: ['vtoPackChildJobs', packIds] });
+            console.log('[RecentVtoPacks] Realtime update received, invalidating summaries.');
+            queryClient.invalidateQueries({ queryKey: ['recentVtoPackSummaries', session.user.id] });
+            queryClient.invalidateQueries({ queryKey: ['vtoPackChildJobs', payload.new.vto_pack_job_id] });
           }
         }
       )
@@ -76,19 +104,7 @@ export const RecentVtoPacks = () => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [session?.user?.id, supabase, queryClient, packIds]);
-
-  const groupedJobs = useMemo(() => {
-    if (!childJobs) return {};
-    return childJobs.reduce((acc, job) => {
-      const packId = job.vto_pack_job_id;
-      if (packId) {
-        if (!acc[packId]) acc[packId] = [];
-        acc[packId].push(job);
-      }
-      return acc;
-    }, {} as Record<string, BitStudioJob[]>);
-  }, [childJobs]);
+  }, [session?.user?.id, supabase, queryClient]);
 
   if (isLoadingPacks) {
     return <div className="space-y-4"><Skeleton className="h-20 w-full" /><Skeleton className="h-20 w-full" /></div>;
@@ -103,51 +119,31 @@ export const RecentVtoPacks = () => {
   }
 
   return (
-    <Accordion type="single" collapsible className="w-full space-y-4">
+    <Accordion type="single" collapsible className="w-full space-y-4" onValueChange={setOpenPackId}>
       {packs.map(pack => {
-        const jobsInPack = groupedJobs[pack.id] || [];
-        const completedJobs = jobsInPack.filter(j => j.status === 'complete');
-        const failedJobs = jobsInPack.filter(j => j.status === 'failed');
-        const inProgress = jobsInPack.length < (pack.metadata?.total_pairs || jobsInPack.length) || jobsInPack.some(j => j.status === 'processing' || j.status === 'queued');
+        const inProgress = pack.in_progress_jobs > 0;
+        const hasFailures = pack.failed_jobs > 0;
+        const isComplete = !inProgress && pack.total_jobs > 0;
 
         return (
-          <AccordionItem key={pack.id} value={pack.id} className="border rounded-md">
+          <AccordionItem key={pack.pack_id} value={pack.pack_id} className="border rounded-md">
             <AccordionTrigger className="p-4 hover:no-underline">
               <div className="flex justify-between items-center w-full">
                 <div className="text-left">
                   <p className="font-semibold">Batch from {new Date(pack.created_at).toLocaleString()}</p>
                   <p className="text-sm text-muted-foreground">
-                    {completedJobs.length} / {pack.metadata?.total_pairs || jobsInPack.length} completed
+                    {pack.completed_jobs} / {pack.metadata?.total_pairs || pack.total_jobs} completed
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
                   {inProgress && <Loader2 className="h-5 w-5 animate-spin text-primary" />}
-                  {failedJobs.length > 0 && <XCircle className="h-5 w-5 text-destructive" />}
-                  {completedJobs.length > 0 && !inProgress && <CheckCircle className="h-5 w-5 text-green-600" />}
+                  {hasFailures && <XCircle className="h-5 w-5 text-destructive" />}
+                  {isComplete && !hasFailures && <CheckCircle className="h-5 w-5 text-green-600" />}
                 </div>
               </div>
             </AccordionTrigger>
             <AccordionContent className="p-4 pt-0">
-              {isLoadingChildren ? <Loader2 className="h-6 w-6 animate-spin" /> : (
-                <div className="flex flex-wrap gap-2">
-                  {jobsInPack.map(job => (
-                    <div 
-                      key={job.id} 
-                      className="w-32 h-32 relative group cursor-pointer"
-                      onClick={() => job.final_image_url && showImage({ images: [{ url: job.final_image_url }], currentIndex: 0 })}
-                    >
-                      <SecureImageDisplay 
-                        imageUrl={job.final_image_url || job.source_person_image_url || null} 
-                        alt="Job result" 
-                        className="w-full h-full object-cover rounded-md"
-                      />
-                      {job.status === 'complete' && <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity" />}
-                      {job.status === 'failed' && <div className="absolute inset-0 bg-destructive/70 flex items-center justify-center rounded-md"><XCircle className="h-8 w-8 text-destructive-foreground" /></div>}
-                      {(job.status === 'processing' || job.status === 'queued') && <div className="absolute inset-0 bg-black/70 flex items-center justify-center rounded-md"><Loader2 className="h-8 w-8 animate-spin text-white" /></div>}
-                    </div>
-                  ))}
-                </div>
-              )}
+              <VtoPackDetailView packId={pack.pack_id} isOpen={openPackId === pack.pack_id} />
             </AccordionContent>
           </AccordionItem>
         )
