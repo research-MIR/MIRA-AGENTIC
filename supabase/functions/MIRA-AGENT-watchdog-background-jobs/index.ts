@@ -1,28 +1,59 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
 };
+
+const LOCK_NAME = 'watchdog-background-jobs';
+const LOCK_TIMEOUT_SECONDS = 45; // A lock is considered stale after 45 seconds
+
 const STALLED_POLLER_THRESHOLD_SECONDS = 15;
 const STALLED_AGGREGATION_THRESHOLD_SECONDS = 20;
 const STALLED_PAIR_JOB_THRESHOLD_MINUTES = 2;
 const STALLED_GOOGLE_VTO_THRESHOLD_MINUTES = 2;
 const STALLED_QUEUED_VTO_THRESHOLD_SECONDS = 30;
-const STALLED_REFRAME_THRESHOLD_MINUTES = 2; // New threshold for reframe jobs
+const STALLED_REFRAME_THRESHOLD_MINUTES = 2;
+
 serve(async (req)=>{
   const requestId = `watchdog-bg-${Date.now()}`;
-  console.log(`[Watchdog-BG][${requestId}] Function invoked.`);
+  console.log(`[Watchdog-BG][${requestId}] Invocation attempt.`);
+
   if (req.method === 'OPTIONS') {
-    return new Response(null, {
-      headers: corsHeaders
-    });
+    return new Response(null, { headers: corsHeaders });
   }
+
+  const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
+  const lockHolderId = crypto.randomUUID();
+  let lockAcquired = false;
+
   try {
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    // --- ATTEMPT TO ACQUIRE LOCK ---
+    const staleTimestamp = new Date(Date.now() - LOCK_TIMEOUT_SECONDS * 1000).toISOString();
+    const { count, error: lockError } = await supabase
+      .from('mira_agent_locks')
+      .update({ locked_at: new Date().toISOString(), lock_holder: lockHolderId })
+      .eq('lock_name', LOCK_NAME)
+      .or(`locked_at.is.null,locked_at.lt.${staleTimestamp}`);
+
+    if (lockError) {
+        console.error(`[Watchdog-BG][${requestId}] Error during lock acquisition:`, lockError.message);
+        throw lockError;
+    }
+
+    if (count === 0) {
+        console.log(`[Watchdog-BG][${requestId}] Lock is currently held by another process. Exiting gracefully.`);
+        return new Response(JSON.stringify({ message: "Lock held, skipping execution." }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+    }
+
+    lockAcquired = true;
+    console.log(`[Watchdog-BG][${requestId}] Lock acquired by ${lockHolderId}. Proceeding with checks.`);
+
     let actionsTaken = [];
+    
     // --- Task 1: Handle Stalled BitStudio Pollers ---
     const pollerThreshold = new Date(Date.now() - STALLED_POLLER_THRESHOLD_SECONDS * 1000).toISOString();
     const { data: stalledJobs, error: stalledError } = await supabase.from('mira-agent-bitstudio-jobs').select('id').in('status', [
@@ -281,25 +312,29 @@ serve(async (req)=>{
     }
     const finalMessage = actionsTaken.length > 0 ? actionsTaken.join(' ') : "No actions required. All jobs are running normally.";
     console.log(`[Watchdog-BG][${requestId}] Check complete. ${finalMessage}`);
-    return new Response(JSON.stringify({
-      message: finalMessage
-    }), {
-      headers: {
-        ...corsHeaders,
-        'Content-Type': 'application/json'
-      },
+    
+    return new Response(JSON.stringify({ message: finalMessage }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200
     });
   } catch (error) {
     console.error(`[Watchdog-BG][${requestId}] Unhandled error:`, error);
-    return new Response(JSON.stringify({
-      error: error.message
-    }), {
-      headers: {
-        ...corsHeaders,
-        'Content-Type': 'application/json'
-      },
+    return new Response(JSON.stringify({ error: error.message }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500
     });
+  } finally {
+    if (lockAcquired) {
+      const { error: releaseError } = await supabase
+        .from('mira_agent_locks')
+        .update({ locked_at: null, lock_holder: null })
+        .eq('lock_name', LOCK_NAME)
+        .eq('lock_holder', lockHolderId);
+      if (releaseError) {
+        console.error(`[Watchdog-BG][${requestId}] CRITICAL: Failed to release lock!`, releaseError.message);
+      } else {
+        console.log(`[Watchdog-BG][${requestId}] Lock released successfully.`);
+      }
+    }
   }
 });
