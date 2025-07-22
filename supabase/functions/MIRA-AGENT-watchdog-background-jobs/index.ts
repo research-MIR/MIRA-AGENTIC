@@ -44,24 +44,26 @@ serve(async (req)=>{
       console.log(`[Watchdog-BG][${requestId}] No stalled BitStudio jobs found.`);
     }
     // --- Task 2: Handle New Pending Batch Inpainting Jobs ---
-    const { data: pendingPairs, error: pendingError } = await supabase.from('mira-agent-batch-inpaint-pair-jobs').select('id').eq('status', 'pending').limit(5);
-    if (pendingError) {
-      console.error(`[Watchdog-BG][${requestId}] Error querying for pending batch jobs:`, pendingError.message);
-    } else if (pendingPairs && pendingPairs.length > 0) {
-      console.log(`[Watchdog-BG][${requestId}] Found ${pendingPairs.length} new pending batch job(s). Triggering workers...`);
-      const jobIdsToProcess = pendingPairs.map((p)=>p.id);
-      await supabase.from('mira-agent-batch-inpaint-pair-jobs').update({
-        status: 'processing'
-      }).in('id', jobIdsToProcess);
-      const workerPromises = jobIdsToProcess.map((id)=>supabase.functions.invoke('MIRA-AGENT-worker-batch-inpaint', {
-          body: {
-            pair_job_id: id
-          }
-        }));
-      await Promise.allSettled(workerPromises);
-      actionsTaken.push(`Started ${jobIdsToProcess.length} new batch inpaint workers.`);
+    console.log(`[Watchdog-BG][${requestId}] === Task 2: Managing Batch Inpaint Job Slot via RPC ===`);
+    const { data: claimedBatchJobId, error: batchRpcError } = await supabase.rpc('claim_next_batch_inpaint_job');
+    if (batchRpcError) {
+        console.error(`[Watchdog-BG][${requestId}] Task 2: RPC 'claim_next_batch_inpaint_job' failed:`, batchRpcError.message);
+    } else if (claimedBatchJobId) {
+        console.log(`[Watchdog-BG][${requestId}] Task 2: Successfully claimed batch inpaint job ${claimedBatchJobId} via RPC. Invoking worker.`);
+        const { error: invokeError } = await supabase.functions.invoke('MIRA-AGENT-worker-batch-inpaint', {
+            body: { pair_job_id: claimedBatchJobId }
+        });
+        if (invokeError) {
+            console.error(`[Watchdog-BG][${requestId}] Task 2: CRITICAL! Failed to invoke worker for claimed job ${claimedBatchJobId}:`, invokeError);
+            await supabase.from('mira-agent-batch-inpaint-pair-jobs').update({
+                status: 'pending',
+                error_message: 'Watchdog failed to invoke worker.'
+            }).eq('id', claimedBatchJobId);
+        } else {
+            actionsTaken.push(`Started new batch inpaint worker for job ${claimedBatchJobId}.`);
+        }
     } else {
-      console.log(`[Watchdog-BG][${requestId}] No new pending batch jobs found.`);
+        console.log(`[Watchdog-BG][${requestId}] Task 2: No pending batch inpaint jobs found to claim.`);
     }
     // --- Task 3: Handle Stalled Segmentation Aggregation Jobs ---
     const segmentationThreshold = new Date(Date.now() - STALLED_AGGREGATION_THRESHOLD_SECONDS * 1000).toISOString();
@@ -162,51 +164,27 @@ serve(async (req)=>{
       console.log(`[Watchdog-BG][${requestId}] No stalled 'queued' Google VTO jobs found.`);
     }
     // --- Task 7: Manage Single Google VTO Pack Job Slot ---
-    console.log(`[Watchdog-BG][${requestId}] === Task 7: Managing Google VTO Pack Job Slot ===`);
-    const { data: activeJob, error: activeJobError } = await supabase.from('mira-agent-bitstudio-jobs').select('id, status').in('status', [
-      'queued',
-      'processing',
-      'awaiting_reframe'
-    ]).eq('metadata->>engine', 'google').limit(1).single();
-    if (activeJobError && activeJobError.code !== 'PGRST116') {
-      console.error(`[Watchdog-BG][${requestId}] Task 7: Error checking for active VTO jobs:`, activeJobError.message);
-    } else if (activeJob) {
-      console.log(`[Watchdog-BG][${requestId}] Task 7: Slot is BUSY. Active job ${activeJob.id} has status '${activeJob.status}'. No action will be taken.`);
-    } else {
-      console.log(`[Watchdog-BG][${requestId}] Task 7: Slot is FREE. Searching for a pending job to start.`);
-      const { data: nextJob, error: nextJobError } = await supabase.from('mira-agent-bitstudio-jobs').select('id').eq('status', 'pending').eq('metadata->>engine', 'google').order('created_at', {
-        ascending: true
-      }).limit(1).single();
-      if (nextJobError && nextJobError.code !== 'PGRST116') {
-        console.error(`[Watchdog-BG][${requestId}] Task 7: Error fetching next pending VTO job:`, nextJobError.message);
-      } else if (nextJob) {
-        console.log(`[Watchdog-BG][${requestId}] Task 7: Found pending job ${nextJob.id}. Attempting to start it now.`);
-        const { error: updateError } = await supabase.from('mira-agent-bitstudio-jobs').update({
-          status: 'queued'
-        }).eq('id', nextJob.id);
-        if (updateError) {
-          console.error(`[Watchdog-BG][${requestId}] Task 7: Failed to update status for job ${nextJob.id}:`, updateError.message);
-        } else {
-          console.log(`[Watchdog-BG][${requestId}] Task 7: Successfully claimed job ${nextJob.id}. Invoking worker.`);
-          const { error: invokeError } = await supabase.functions.invoke('MIRA-AGENT-worker-vto-pack-item', {
-            body: {
-              pair_job_id: nextJob.id
-            }
-          });
-          if (invokeError) {
-            console.error(`[Watchdog-BG][${requestId}] Task 7: CRITICAL! Failed to invoke worker for job ${nextJob.id}:`, invokeError);
+    console.log(`[Watchdog-BG][${requestId}] === Task 7: Managing Google VTO Pack Job Slot via RPC ===`);
+    const { data: claimedVtoJobId, error: vtoRpcError } = await supabase.rpc('claim_next_google_vto_job');
+    if (vtoRpcError) {
+        console.error(`[Watchdog-BG][${requestId}] Task 7: RPC 'claim_next_google_vto_job' failed:`, vtoRpcError.message);
+    } else if (claimedVtoJobId) {
+        console.log(`[Watchdog-BG][${requestId}] Task 7: Successfully claimed job ${claimedVtoJobId} via RPC. Invoking worker.`);
+        const { error: invokeError } = await supabase.functions.invoke('MIRA-AGENT-worker-vto-pack-item', {
+            body: { pair_job_id: claimedVtoJobId }
+        });
+        if (invokeError) {
+            console.error(`[Watchdog-BG][${requestId}] Task 7: CRITICAL! Failed to invoke worker for claimed job ${claimedVtoJobId}:`, invokeError);
             await supabase.from('mira-agent-bitstudio-jobs').update({
-              status: 'failed',
-              error_message: 'Watchdog failed to invoke worker.'
-            }).eq('id', nextJob.id);
-          } else {
-            console.log(`[Watchdog-BG][${requestId}] Task 7: Successfully invoked worker for job ${nextJob.id}.`);
-            actionsTaken.push(`Started new Google VTO worker for job ${nextJob.id}.`);
-          }
+                status: 'pending',
+                error_message: 'Watchdog failed to invoke worker.'
+            }).eq('id', claimedVtoJobId);
+        } else {
+            console.log(`[Watchdog-BG][${requestId}] Task 7: Successfully invoked worker for job ${claimedVtoJobId}.`);
+            actionsTaken.push(`Started new Google VTO worker for job ${claimedVtoJobId}.`);
         }
-      } else {
-        console.log(`[Watchdog-BG][${requestId}] Task 7: No pending Google VTO jobs found in the queue. The slot remains free.`);
-      }
+    } else {
+        console.log(`[Watchdog-BG][${requestId}] Task 7: No pending job was claimed. The slot is either busy or the queue is empty.`);
     }
     console.log(`[Watchdog-BG][${requestId}] === Task 7: Finished ===`);
     // --- Task 8: Handle VTO Jobs Awaiting Reframe ---
