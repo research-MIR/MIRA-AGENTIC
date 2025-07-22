@@ -42,10 +42,13 @@ serve(async (req)=>{
     
     // --- Task 1: Handle Stalled BitStudio Pollers ---
     const pollerThreshold = new Date(Date.now() - STALLED_POLLER_THRESHOLD_SECONDS * 1000).toISOString();
-    const { data: stalledJobs, error: stalledError } = await supabase.from('mira-agent-bitstudio-jobs').select('id').in('status', [
-      'queued',
-      'processing'
-    ]).lt('last_polled_at', pollerThreshold);
+    const { data: stalledJobs, error: stalledError } = await supabase
+      .from('mira-agent-bitstudio-jobs')
+      .select('id')
+      .in('status', ['queued', 'processing'])
+      .lt('last_polled_at', pollerThreshold)
+      .neq('metadata->>engine', 'google'); // IMPORTANT: Exclude Google jobs from this check
+
     if (stalledError) {
       console.error(`[Watchdog-BG][${requestId}] Error querying for stalled jobs:`, stalledError.message);
     } else if (stalledJobs && stalledJobs.length > 0) {
@@ -60,6 +63,7 @@ serve(async (req)=>{
     } else {
       console.log(`[Watchdog-BG][${requestId}] No stalled BitStudio jobs found.`);
     }
+
     // --- Task 2: Handle New Pending Batch Inpainting Jobs ---
     console.log(`[Watchdog-BG][${requestId}] === Task 2: Managing Batch Inpaint Job Slot via RPC ===`);
     const { data: claimedBatchJobId, error: batchRpcError } = await supabase.rpc('claim_next_batch_inpaint_job');
@@ -82,6 +86,7 @@ serve(async (req)=>{
     } else {
         console.log(`[Watchdog-BG][${requestId}] Task 2: No pending batch inpaint jobs found to claim.`);
     }
+
     // --- Task 3: Handle Stalled Segmentation Aggregation Jobs ---
     const segmentationThreshold = new Date(Date.now() - STALLED_AGGREGATION_THRESHOLD_SECONDS * 1000).toISOString();
     const { data: stalledAggregationJobs, error: aggregationError } = await supabase.from('mira-agent-mask-aggregation-jobs').select('id, results').in('status', [
@@ -108,6 +113,7 @@ serve(async (req)=>{
     } else {
       console.log(`[Watchdog-BG][${requestId}] No stalled aggregation jobs found.`);
     }
+
     // --- Task 4: Handle Stalled Batch Inpainting Pair Jobs ---
     const pairJobThreshold = new Date(Date.now() - STALLED_PAIR_JOB_THRESHOLD_MINUTES * 60 * 1000).toISOString();
     const { data: stalledPairJobs, error: stalledPairError } = await supabase.from('mira-agent-batch-inpaint-pair-jobs').select('id, status, metadata').in('status', [
@@ -142,6 +148,7 @@ serve(async (req)=>{
     } else {
       console.log(`[Watchdog-BG][${requestId}] No stalled pair jobs found.`);
     }
+
     // --- Task 5: Handle Stalled 'processing', 'awaiting_reframe', 'awaiting_fix', or 'fixing' Google VTO Pack Jobs ---
     const googleVtoThreshold = new Date(Date.now() - STALLED_GOOGLE_VTO_THRESHOLD_MINUTES * 60 * 1000).toISOString();
     const { data: stalledGoogleVtoJobs, error: googleVtoError } = await supabase.from('mira-agent-bitstudio-jobs').select('id').eq('metadata->>engine', 'google').in('status', ['processing', 'awaiting_reframe', 'awaiting_fix', 'fixing']).lt('updated_at', googleVtoThreshold);
@@ -159,6 +166,7 @@ serve(async (req)=>{
     } else {
       console.log(`[Watchdog-BG][${requestId}] No stalled 'processing', 'awaiting_reframe', 'awaiting_fix', or 'fixing' Google VTO jobs found.`);
     }
+
     // --- Task 6: Handle Stalled 'queued' Google VTO Pack Jobs ---
     const queuedVtoThreshold = new Date(Date.now() - STALLED_QUEUED_VTO_THRESHOLD_SECONDS * 1000).toISOString();
     const { data: queuedGoogleVtoJobs, error: queuedVtoError } = await supabase.from('mira-agent-bitstudio-jobs').select('id').eq('metadata->>engine', 'google').eq('status', 'queued').lt('updated_at', queuedVtoThreshold);
@@ -177,6 +185,7 @@ serve(async (req)=>{
     } else {
       console.log(`[Watchdog-BG][${requestId}] No stalled 'queued' Google VTO jobs found.`);
     }
+
     // --- Task 7: Manage Single Google VTO Pack Job Slot ---
     console.log(`[Watchdog-BG][${requestId}] === Task 7: Managing Google VTO Pack Job Slot via RPC ===`);
     const { data: claimedVtoJobId, error: vtoRpcError } = await supabase.rpc('claim_next_google_vto_job');
@@ -201,6 +210,7 @@ serve(async (req)=>{
         console.log(`[Watchdog-BG][${requestId}] Task 7: No pending job was claimed. The slot is either busy or the queue is empty.`);
     }
     console.log(`[Watchdog-BG][${requestId}] === Task 7: Finished ===`);
+
     // --- Task 8: Handle VTO Jobs Awaiting Reframe ---
     const { data: awaitingReframeJobs, error: reframeError } = await supabase.from('mira-agent-bitstudio-jobs').select('id, metadata').eq('status', 'awaiting_reframe');
     if (reframeError) {
@@ -239,6 +249,7 @@ serve(async (req)=>{
     } else {
       console.log(`[Watchdog-BG][${requestId}] No jobs awaiting reframe found.`);
     }
+
     // --- Task 9: Handle Recontext Jobs Awaiting Reframe ---
     const { data: awaitingRecontextJobs, error: recontextError } = await supabase.from('mira-agent-jobs').select('id, context').eq('status', 'awaiting_reframe').eq('context->>source', 'recontext');
     if (recontextError) {
@@ -272,6 +283,7 @@ serve(async (req)=>{
     } else {
       console.log(`[Watchdog-BG][${requestId}] No recontext jobs awaiting reframe found.`);
     }
+
     // --- Task 10: Handle Stalled Reframe Worker Jobs ---
     const reframeThreshold = new Date(Date.now() - STALLED_REFRAME_THRESHOLD_MINUTES * 60 * 1000).toISOString();
     const { data: stalledReframeJobs, error: stalledReframeError } = await supabase.from('mira-agent-jobs').select('id').eq('status', 'processing').in('context->>source', [
@@ -293,6 +305,7 @@ serve(async (req)=>{
     } else {
       console.log(`[Watchdog-BG][${requestId}] No stalled reframe jobs found.`);
     }
+
     const finalMessage = actionsTaken.length > 0 ? actionsTaken.join(' ') : "No actions required. All jobs are running normally.";
     console.log(`[Watchdog-BG][${requestId}] Check complete. ${finalMessage}`);
     
