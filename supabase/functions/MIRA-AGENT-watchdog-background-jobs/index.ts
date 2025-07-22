@@ -8,9 +8,6 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
 };
 
-const LOCK_NAME = 'watchdog-background-jobs';
-const LOCK_TIMEOUT_SECONDS = 45; // A lock is considered stale after 45 seconds
-
 const STALLED_POLLER_THRESHOLD_SECONDS = 15;
 const STALLED_AGGREGATION_THRESHOLD_SECONDS = 20;
 const STALLED_PAIR_JOB_THRESHOLD_MINUTES = 2;
@@ -27,30 +24,22 @@ serve(async (req)=>{
   }
 
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-  const lockHolderId = crypto.randomUUID();
-  let lockAcquired = false;
 
   try {
-    // --- ATTEMPT TO ACQUIRE LOCK ---
-    const staleTimestamp = new Date(Date.now() - LOCK_TIMEOUT_SECONDS * 1000).toISOString();
-    const { count, error: lockError } = await supabase
-      .from('mira_agent_locks')
-      .update({ locked_at: new Date().toISOString(), lock_holder: lockHolderId })
-      .eq('lock_name', LOCK_NAME)
-      .or(`locked_at.is.null,locked_at.lt.${staleTimestamp}`);
+    // --- ATTEMPT TO ACQUIRE ADVISORY LOCK ---
+    const { data: lockAcquired, error: lockError } = await supabase.rpc('try_acquire_watchdog_lock');
 
     if (lockError) {
-        console.error(`[Watchdog-BG][${requestId}] Error during lock acquisition:`, lockError.message);
+        console.error(`[Watchdog-BG][${requestId}] Error acquiring advisory lock:`, lockError.message);
         throw lockError;
     }
 
-    if (count === 0) {
-        console.log(`[Watchdog-BG][${requestId}] Lock is currently held by another process. Exiting gracefully.`);
+    if (!lockAcquired) {
+        console.log(`[Watchdog-BG][${requestId}] Advisory lock is held by another process. Exiting gracefully.`);
         return new Response(JSON.stringify({ message: "Lock held, skipping execution." }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
     }
-
-    lockAcquired = true;
-    console.log(`[Watchdog-BG][${requestId}] Lock acquired by ${lockHolderId}. Proceeding with checks.`);
+    
+    console.log(`[Watchdog-BG][${requestId}] Advisory lock acquired. Proceeding with checks.`);
 
     let actionsTaken = [];
     
@@ -323,18 +312,6 @@ serve(async (req)=>{
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500
     });
-  } finally {
-    if (lockAcquired) {
-      const { error: releaseError } = await supabase
-        .from('mira_agent_locks')
-        .update({ locked_at: null, lock_holder: null })
-        .eq('lock_name', LOCK_NAME)
-        .eq('lock_holder', lockHolderId);
-      if (releaseError) {
-        console.error(`[Watchdog-BG][${requestId}] CRITICAL: Failed to release lock!`, releaseError.message);
-      } else {
-        console.log(`[Watchdog-BG][${requestId}] Lock released successfully.`);
-      }
-    }
   }
+  // The advisory lock is automatically released when the function execution ends.
 });
