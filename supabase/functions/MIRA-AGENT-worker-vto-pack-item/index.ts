@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { Image as ISImage } from "https://deno.land/x/imagescript@1.2.15/mod.ts";
 import { decodeBase64, encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 // --- Global Error Handlers for Observability ---
@@ -18,8 +18,9 @@ const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
 };
+
 // --- Hardened Safe Wrapper Functions ---
-function invokeNextStep(supabase, functionName, payload) {
+function invokeNextStep(supabase: SupabaseClient, functionName: string, payload: object) {
   // Fire-and-forget: We don't await the result, just handle potential invocation error.
   supabase.functions.invoke(functionName, {
     body: payload
@@ -27,54 +28,60 @@ function invokeNextStep(supabase, functionName, payload) {
     console.error(`[invokeNextStep] Error invoking ${functionName}:`, err);
   });
 }
-function triggerWatchdog(supabase, logPrefix) {
-  console.log(`${logPrefix} Job has terminated (completed or failed). Triggering watchdog to check for the next job in the queue.`);
-  // Fire-and-forget, we don't want to wait for the watchdog to finish.
-  supabase.functions.invoke('MIRA-AGENT-watchdog-background-jobs', {
-    body: {}
-  }).catch((err)=>{
-    console.error(`${logPrefix} CRITICAL: Failed to invoke watchdog after job termination.`, err);
-  });
+
+async function triggerWatchdog(supabase: SupabaseClient, logPrefix: string) {
+  console.log(`${logPrefix} Job has terminated. Triggering watchdog to start next job.`);
+  for (let i = 0; i < 3; i++) {
+    const { error } = await supabase.functions.invoke('MIRA-AGENT-watchdog-background-jobs', { body: {} });
+    if (!error) {
+      console.log(`${logPrefix} Watchdog invoked successfully.`);
+      return;
+    }
+    console.error(`${logPrefix} Failed to invoke watchdog (attempt ${i+1}/3):`, error.message);
+    if (i < 2) await new Promise(resolve => setTimeout(resolve, 1000)); // wait 1s before retry
+  }
+  console.error(`${logPrefix} CRITICAL: Failed to invoke watchdog after 3 attempts. Next job will start on the next cron schedule.`);
 }
-async function safeDownload(supabase, publicUrl) {
-  const { bucket, path } = parseStorageURL(publicUrl);
-  const { data, error } = await supabase.storage.from(bucket).download(path).catch((e)=>{
-    throw e ?? new Error(`[safeDownload:${path}] rejected with null`);
-  });
-  if (error) throw error ?? new Error(`[safeDownload:${path}] error was null`);
-  if (!data) throw new Error(`[safeDownload:${path}] data missing`);
-  return data;
+
+async function safeDownload(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
+    const { bucket, path } = parseStorageURL(publicUrl);
+    const { data, error } = await supabase.storage.from(bucket).download(path).catch((e)=>{
+        throw e ?? new Error(`[safeDownload:${path}] rejected with null`);
+    });
+    if (error) throw error ?? new Error(`[safeDownload:${path}] error was null`);
+    if (!data) throw new Error(`[safeDownload:${path}] data missing`);
+    return data;
 }
-async function safeUpload(supabase, bucket, path, body, options) {
+async function safeUpload(supabase: SupabaseClient, bucket: string, path: string, body: any, options: any) {
   const { error } = await supabase.storage.from(bucket).upload(path, body, options).catch((e)=>{
     throw e ?? new Error(`[safeUpload:${path}] rejected with null`);
   });
   if (error) throw error ?? new Error(`[safeUpload:${path}] error was null`);
 }
-async function safeGetPublicUrl(supabase, bucket, path) {
+async function safeGetPublicUrl(supabase: SupabaseClient, bucket: string, path: string): Promise<string> {
   const { data } = supabase.storage.from(bucket).getPublicUrl(path);
   if (!data || !data.publicUrl) throw new Error(`[safeGetPublicUrl:${path}] Failed to create public URL.`);
   return data.publicUrl;
 }
-async function uploadBase64ToStorage(supabase, base64, userId, filename) {
-  const buffer = decodeBase64(base64);
-  const filePath = `${userId}/vto-pack-results/${Date.now()}-${filename}`;
-  await safeUpload(supabase, GENERATED_IMAGES_BUCKET, filePath, new Blob([
-    buffer
-  ], {
-    type: 'image/png'
-  }), {
-    contentType: 'image/png',
-    upsert: true
-  });
-  const publicUrl = await safeGetPublicUrl(supabase, GENERATED_IMAGES_BUCKET, filePath);
-  return {
-    publicUrl,
-    storagePath: filePath
-  };
+async function uploadBase64ToStorage(supabase: SupabaseClient, base64: string, userId: string, filename: string) {
+    const buffer = decodeBase64(base64);
+    const filePath = `${userId}/vto-pack-results/${Date.now()}-${filename}`;
+    await safeUpload(supabase, GENERATED_IMAGES_BUCKET, filePath, new Blob([
+        buffer
+    ], {
+        type: 'image/png'
+    }), {
+        contentType: 'image/png',
+        upsert: true
+    });
+    const publicUrl = await safeGetPublicUrl(supabase, GENERATED_IMAGES_BUCKET, filePath);
+    return {
+        publicUrl,
+        storagePath: filePath
+    };
 }
 // --- Utility Functions ---
-function parseStorageURL(url) {
+function parseStorageURL(url: string) {
   const u = new URL(url);
   const pathSegments = u.pathname.split('/');
   const objectSegmentIndex = pathSegments.indexOf('object');
@@ -88,7 +95,7 @@ function parseStorageURL(url) {
     path
   };
 }
-const blobToBase64 = async (blob)=>{
+const blobToBase64 = async (blob: Blob): Promise<string>=>{
   const buffer = await blob.arrayBuffer();
   return encodeBase64(new Uint8Array(buffer)); // Use Uint8Array for safety
 };
@@ -108,7 +115,7 @@ serve(async (req)=>{
       headers: corsHeaders
     });
   }
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
   const logPrefix = `[VTO-Pack-Worker][${pair_job_id}]`;
   let job;
   try {
@@ -122,7 +129,7 @@ serve(async (req)=>{
         final_image_url: reframe_result_url
       }).eq('id', pair_job_id);
       console.log(`${logPrefix} Job successfully finalized.`);
-      triggerWatchdog(supabase, logPrefix);
+      await triggerWatchdog(supabase, logPrefix);
     } else {
       console.log(`${logPrefix} Starting job.`);
       const step = job.metadata?.google_vto_step || 'start';
@@ -162,7 +169,7 @@ serve(async (req)=>{
       status: 'failed',
       error_message: error.message
     }).eq('id', pair_job_id);
-    triggerWatchdog(supabase, logPrefix); // Trigger watchdog even on failure to free up the slot
+    await triggerWatchdog(supabase, logPrefix); // Trigger watchdog even on failure to free up the slot
     return new Response(JSON.stringify({
       error: error.message
     }), {
@@ -174,7 +181,7 @@ serve(async (req)=>{
     });
   }
 });
-async function handleStart(supabase, job, logPrefix) {
+async function handleStart(supabase: SupabaseClient, job: any, logPrefix: string) {
   console.log(`${logPrefix} Step 1: Getting bounding box and optimizing images.`);
   const { data: bboxData, error: bboxError } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-bbox', {
     body: {
@@ -183,7 +190,7 @@ async function handleStart(supabase, job, logPrefix) {
   });
   if (bboxError) throw bboxError;
   const personBox = bboxData?.person;
-  if (!personBox || !Array.isArray(personBox) || personBox.length !== 4 || personBox.some((v)=>typeof v !== 'number')) {
+  if (!personBox || !Array.isArray(personBox) || personBox.length !== 4 || personBox.some((v: any)=>typeof v !== 'number')) {
     throw new Error("Orchestrator did not return a valid bounding box array.");
   }
   console.log(`${logPrefix} Bounding box received.`);
@@ -252,7 +259,7 @@ async function handleStart(supabase, job, logPrefix) {
     pair_job_id: job.id
   });
 }
-async function handleGenerateStep(supabase, job, sampleStep, nextStep, logPrefix) {
+async function handleGenerateStep(supabase: SupabaseClient, job: any, sampleStep: number, nextStep: string, logPrefix: string) {
   console.log(`${logPrefix} Generating variation with ${sampleStep} steps.`);
   const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-virtual-try-on', {
     body: {
@@ -284,7 +291,7 @@ async function handleGenerateStep(supabase, job, sampleStep, nextStep, logPrefix
     pair_job_id: job.id
   });
 }
-async function handleQualityCheck(supabase, job, logPrefix) {
+async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix: string) {
   console.log(`${logPrefix} Performing quality check on 3 variations.`);
   const variations = job.metadata.generated_variations;
   if (!variations || !Array.isArray(variations) || variations.length < 3) {
@@ -298,7 +305,7 @@ async function handleQualityCheck(supabase, job, logPrefix) {
     body: {
       original_person_image_base64: await blobToBase64(personBlob),
       reference_garment_image_base64: await blobToBase64(garmentBlob),
-      generated_images_base64: variations.map((img)=>img.base64Image)
+      generated_images_base64: variations.map((img: any)=>img.base64Image)
     }
   });
   if (error) throw error;
@@ -324,7 +331,7 @@ async function handleQualityCheck(supabase, job, logPrefix) {
       }
     }).eq('id', job.id);
     console.log(`${logPrefix} Job finalized with 1:1 image.`);
-    triggerWatchdog(supabase, logPrefix);
+    await triggerWatchdog(supabase, logPrefix);
   } else {
     await supabase.from('mira-agent-bitstudio-jobs').update({
       metadata: {
@@ -339,7 +346,7 @@ async function handleQualityCheck(supabase, job, logPrefix) {
     });
   }
 }
-async function handleReframe(supabase, job, logPrefix) {
+async function handleReframe(supabase: SupabaseClient, job: any, logPrefix: string) {
   console.log(`${logPrefix} Final step: Reframe.`);
   const { qa_best_image_base64, final_aspect_ratio, prompt_appendix } = job.metadata;
   if (!qa_best_image_base64 || !final_aspect_ratio) {
