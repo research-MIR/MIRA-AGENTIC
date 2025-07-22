@@ -9,6 +9,8 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+const CHUNK_SIZE = 25; // Insert jobs in chunks of 25 to avoid hitting data limits
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -33,7 +35,7 @@ serve(async (req) => {
     const vtoPackJobId = batchJob.id;
     console.log(`[VTO-Packs-Orchestrator] Main batch job ${vtoPackJobId} created.`);
 
-    const pairJobsToInsert = pairs.map((pair: any) => ({
+    const allPairJobsToInsert = pairs.map((pair: any) => ({
         user_id,
         vto_pack_job_id: vtoPackJobId,
         mode: 'base',
@@ -48,19 +50,32 @@ serve(async (req) => {
         }
     }));
 
-    const { data: insertedJobs, error: insertError } = await supabase
-        .from('mira-agent-bitstudio-jobs')
-        .insert(pairJobsToInsert)
-        .select('id');
+    let totalInserted = 0;
+    for (let i = 0; i < allPairJobsToInsert.length; i += CHUNK_SIZE) {
+        const chunk = allPairJobsToInsert.slice(i, i + CHUNK_SIZE);
+        console.log(`[VTO-Packs-Orchestrator] Inserting chunk ${i / CHUNK_SIZE + 1} with ${chunk.length} jobs...`);
+        const { data: insertedJobs, error: insertError } = await supabase
+            .from('mira-agent-bitstudio-jobs')
+            .insert(chunk)
+            .select('id');
 
-    if (insertError) throw insertError;
-    if (!insertedJobs || insertedJobs.length === 0) {
-        throw new Error("Failed to insert pair jobs into the database.");
+        if (insertError) {
+            console.error(`[VTO-Packs-Orchestrator] Error inserting chunk:`, insertError);
+            throw new Error(`Failed to insert a chunk of jobs: ${insertError.message}`);
+        }
+        
+        if (insertedJobs) {
+            totalInserted += insertedJobs.length;
+        }
     }
 
-    console.log(`[VTO-Packs-Orchestrator] ${insertedJobs.length} pair jobs created with 'pending' status. The watchdog will start processing them shortly.`);
+    if (totalInserted !== pairs.length) {
+        throw new Error(`Mismatch in job creation. Expected ${pairs.length}, but only created ${totalInserted}.`);
+    }
 
-    return new Response(JSON.stringify({ success: true, message: `${pairs.length} jobs have been queued for processing.` }), {
+    console.log(`[VTO-Packs-Orchestrator] Successfully inserted all ${totalInserted} pair jobs with 'pending' status. The watchdog will start processing them shortly.`);
+
+    return new Response(JSON.stringify({ success: true, message: `${totalInserted} jobs have been queued for processing.` }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });
