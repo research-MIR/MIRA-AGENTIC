@@ -7,6 +7,8 @@ const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const MODEL_NAME = "gemini-2.5-flash-lite-preview-06-17";
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 1000;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -139,16 +141,36 @@ async function downloadImageAsPart(imageUrl: string, label: string): Promise<Par
 }
 
 function extractJson(text: string): any {
-    const match = text.match(/```json\s*([\s\S]*?)\s*```/);
-    if (match && match[1]) {
-        return JSON.parse(match[1]);
-    }
+    // Attempt 1: Parse the whole string as JSON
     try {
         return JSON.parse(text);
     } catch (e) {
-        console.error("Failed to parse JSON from model response:", text);
-        throw new Error("The model returned a response that could not be parsed as JSON.");
+        // Not a valid JSON object, proceed to next attempt
     }
+
+    // Attempt 2: Look for a JSON markdown block
+    const markdownMatch = text.match(/```json\s*([\s\S]*?)\s*```/);
+    if (markdownMatch && markdownMatch[1]) {
+        try {
+            return JSON.parse(markdownMatch[1]);
+        } catch (e) {
+            // Invalid JSON inside markdown, proceed to next attempt
+        }
+    }
+
+    // Attempt 3: Look for the "--- FINAL PROMPT ---" marker
+    const finalPromptMarker = "--- FINAL PROMPT ---";
+    const markerIndex = text.indexOf(finalPromptMarker);
+    if (markerIndex !== -1) {
+        const promptText = text.substring(markerIndex + finalPromptMarker.length).trim();
+        if (promptText) {
+            return { final_prompt: promptText };
+        }
+    }
+
+    // If all attempts fail, throw an error
+    console.error("Failed to parse JSON from model response:", text);
+    throw new Error("The model returned a response that could not be parsed as JSON.");
 }
 
 serve(async (req) => {
@@ -207,25 +229,39 @@ serve(async (req) => {
     }
     finalParts.push({ text: `--- METADATA ---\nIS_HELPER_ENABLED: ${useHelper}` });
 
-    const result = await ai.models.generateContent({
-        model: MODEL_NAME,
-        contents: [{ role: 'user', parts: finalParts }],
-        generationConfig: { responseMimeType: "application/json" },
-        safetySettings,
-        config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
-    });
+    let lastError: Error | null = null;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+            console.log(`[VTO-PromptHelper] Attempt ${attempt}/${MAX_RETRIES}...`);
+            const result = await ai.models.generateContent({
+                model: MODEL_NAME,
+                contents: [{ role: 'user', parts: finalParts }],
+                generationConfig: { responseMimeType: "application/json" },
+                safetySettings,
+                config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
+            });
 
-    const responseJson = extractJson(result.text);
-    const finalPrompt = responseJson.final_prompt;
+            const responseJson = extractJson(result.text);
+            const finalPrompt = responseJson.final_prompt;
 
-    if (!finalPrompt) {
-        throw new Error("AI Helper did not return a final prompt in the expected format.");
+            if (!finalPrompt) {
+                throw new Error("AI Helper did not return a final prompt in the expected format.");
+            }
+
+            return new Response(JSON.stringify({ final_prompt: finalPrompt }), {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+              status: 200,
+            });
+        } catch (error) {
+            lastError = error;
+            console.warn(`[VTO-PromptHelper] Attempt ${attempt} failed:`, error.message);
+            if (attempt < MAX_RETRIES) {
+                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS * attempt)); // Exponential backoff
+            }
+        }
     }
 
-    return new Response(JSON.stringify({ final_prompt: finalPrompt }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 200,
-    });
+    throw lastError || new Error("VTO Prompt Helper failed after all retries.");
 
   } catch (error) {
     console.error("[VTO-PromptHelper] Error:", error);
