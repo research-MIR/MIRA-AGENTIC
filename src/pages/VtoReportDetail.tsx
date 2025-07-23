@@ -23,7 +23,10 @@ interface ReportDetail {
   job_id: string;
   status: string;
   comparative_report: {
-    overall_pass: boolean;
+    thinking?: string;
+    report?: {
+      overall_pass: boolean;
+    }
   } | null;
   source_person_image_url: string;
   source_garment_image_url: string;
@@ -127,8 +130,8 @@ const VtoReportDetail = () => {
     }
   };
 
-  const passedJobs = reportDetails?.filter(j => j.comparative_report?.overall_pass) || [];
-  const failedJobs = reportDetails?.filter(j => !j.comparative_report?.overall_pass) || [];
+  const passedJobs = reportDetails?.filter(j => j.comparative_report?.report?.overall_pass) || [];
+  const failedJobs = reportDetails?.filter(j => !j.comparative_report?.report?.overall_pass) || [];
 
   const renderJobGrid = (jobs: ReportDetail[]) => (
     <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
@@ -139,8 +142,8 @@ const VtoReportDetail = () => {
           onClick={() => showImage({ images: [{ url: job.final_image_url }], currentIndex: 0 })}
         >
           <SecureImageDisplay imageUrl={job.final_image_url} alt={`Job ${job.job_id}`} className="w-full h-full object-cover rounded-md" />
-          <Badge variant={job.comparative_report?.overall_pass ? 'default' : 'destructive'} className="absolute top-2 right-2">
-            {job.comparative_report?.overall_pass ? 'PASS' : 'FAIL'}
+          <Badge variant={job.comparative_report?.report?.overall_pass ? 'default' : 'destructive'} className="absolute top-2 right-2">
+            {job.comparative_report?.report?.overall_pass ? 'PASS' : 'FAIL'}
           </Badge>
         </Card>
       ))}
