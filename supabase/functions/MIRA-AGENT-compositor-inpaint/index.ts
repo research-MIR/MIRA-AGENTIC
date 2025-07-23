@@ -125,35 +125,6 @@ serve(async (req) => {
         safeDecode(logPrefix, "patch", standardizedPatchBuffer)
     ]);
 
-    const croppedMaskBuffer = await standardizeImageBuffer(decodeBase64(cropped_dilated_mask_base64));
-    const croppedMaskImage = await loadImage(croppedMaskBuffer);
-
-    // --- START OF NEW DEBUG ASSET GENERATION ---
-    logStep(logPrefix, "debug_asset_generation_start");
-    const featherAmount = Math.max(5, Math.round(bbox.width * 0.05));
-
-    // Create and upload the un-blurred compositing mask
-    const finalCompositingMaskCanvas = createCanvas(sourceImage.width, sourceImage.height);
-    const finalCompositingMaskCtx = finalCompositingMaskCanvas.getContext('2d');
-    finalCompositingMaskCtx.drawImage(croppedMaskImage, bbox.x, bbox.y, bbox.width, bbox.height);
-    const finalCompositingMaskBuffer = finalCompositingMaskCanvas.toBuffer('image/png');
-    const final_compositing_mask_url = await uploadBufferToStorage(supabase, finalCompositingMaskBuffer, job.user_id, 'final_compositing_mask.png');
-
-    // Create and upload the blurred/feathered mask
-    const featheredMaskCanvas = createCanvas(sourceImage.width, sourceImage.height);
-    const featheredMaskCtx = featheredMaskCanvas.getContext('2d');
-    featheredMaskCtx.filter = `blur(${featherAmount}px)`;
-    featheredMaskCtx.drawImage(croppedMaskImage, bbox.x, bbox.y, bbox.width, bbox.height);
-    const featheredMaskBuffer = featheredMaskCanvas.toBuffer('image/png');
-    const feathered_mask_url = await uploadBufferToStorage(supabase, featheredMaskBuffer, job.user_id, 'feathered_mask.png');
-    
-    const updatedDebugAssets = {
-        ...metadata.debug_assets,
-        final_compositing_mask_url,
-        feathered_mask_url
-    };
-    // --- END OF NEW DEBUG ASSET GENERATION ---
-
     logStep(logPrefix, "compositing_start_memory_efficient");
 
     const sourceCropCanvas = createCanvas(bbox.width, bbox.height);
@@ -170,7 +141,9 @@ serve(async (req) => {
     featheredCtx.drawImage(await loadImage(inpaintedPatchImg.bitmap.data), 0, 0, bbox.width, bbox.height);
 
     if (cropped_dilated_mask_base64) {
+        const croppedMaskImage = await loadImage(decodeBase64(cropped_dilated_mask_base64));
         featheredCtx.globalCompositeOperation = 'destination-in';
+        const featherAmount = Math.max(5, Math.round(bbox.width * 0.05));
         featheredCtx.filter = `blur(${featherAmount}px)`;
         featheredCtx.drawImage(croppedMaskImage, 0, 0, bbox.width, bbox.height);
     }
@@ -209,7 +182,7 @@ serve(async (req) => {
         logStep(logPrefix, "verification_complete", { is_match: verificationResult?.is_match });
     }
 
-    const finalMetadata = { ...job.metadata, verification_result: verificationResult, debug_assets: updatedDebugAssets };
+    const finalMetadata = { ...job.metadata, verification_result: verificationResult };
 
     if (verificationResult && verificationResult.is_match === false) {
         logStep(logPrefix, "qa_failed", { reason: verificationResult.mismatch_reason });
