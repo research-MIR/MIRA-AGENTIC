@@ -23,6 +23,7 @@ Your task is to synthesize these individual reports into a single, cohesive, and
 2.  **Calculate Special Metrics:** Calculate the "Outfit Completion Rate": the percentage of *passed* jobs where \`garment_comparison.generated_extra_garments\` was true.
 3.  **Synthesize Qualitative Insights:** Read the "Strategic Recommendations" sections from all reports. Identify the most critical, recurring themes, hard limits, and actionable advice. Combine them into a unified, non-redundant list in the final report.
 4.  **Combine Camera Angle Analysis:** Merge the camera angle data from all reports to present a complete picture for each shot type.
+5.  **Leverage Quantitative Scores:** In your "Hard Limits" and "Actionable Advice" sections, you MUST use the numerical scores from the individual reports to provide data-driven insights. For example: "The average \`pattern_accuracy\` score for complex garments was only 4.5/10, indicating a systemic weakness in this area."
 
 ### OUTPUT FORMAT
 Your entire response MUST be a single, valid JSON object with "thinking" and "report" keys.
@@ -61,11 +62,11 @@ A brief, one-paragraph overview of the pack's performance and the most critical 
 
 ## 4. Strategic Recommendations
 ### Hard Limits & Known Issues
-- (Bulleted list of identified limitations)
+- (Bulleted list of identified limitations, supported by quantitative data where possible)
 ### The Safe Zone: Your Most Reliable Inputs
-- (Description of the ideal conditions for success)
+- (Description of the ideal conditions for success, supported by quantitative data)
 ### Actionable Advice for Future Packs
-- (Bulleted list of concrete recommendations)
+- (Bulleted list of concrete recommendations, supported by quantitative data)
 `;
 
 const extractJson = (text: string): any => {
@@ -145,8 +146,6 @@ serve(async (req) => {
       .update({
         synthesis_report: finalAnalysis.report,
         synthesis_thinking: finalAnalysis.thinking,
-        // A field to indicate completion, could be a status or a timestamp
-        // For now, just populating the report is the indicator.
       })
       .eq('id', pack_id);
 
@@ -161,7 +160,6 @@ serve(async (req) => {
 
   } catch (error) {
     console.error(`[VTO-Report-Worker][${pack_id}] Error:`, error);
-    // Update the job with an error message
     await supabase.from('mira-agent-vto-packs-jobs').update({
         synthesis_report: `# Analysis Failed\n\nAn error occurred during the report synthesis: ${error.message}`
     }).eq('id', pack_id);
