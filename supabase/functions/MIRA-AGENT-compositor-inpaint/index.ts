@@ -28,6 +28,17 @@ const probeBuffer = async (logPrefix: string, name: string, ab: ArrayBuffer) => 
   return { u8, len, head, sha256 };
 };
 
+const safeDecode = async (logPrefix: string, label: string, ab: ArrayBuffer) => {
+  try {
+    const img = await Image.decode(ab);
+    logStep(logPrefix, `${label}:decode_success`, { width: img.width, height: img.height });
+    return img;
+  } catch (e) {
+    logStep(logPrefix, `${label}:decode_error`, { message: (e as Error).message, stack: (e as Error).stack });
+    throw e;
+  }
+};
+
 // --- Core Logic Helpers ---
 async function uploadBufferToStorage(supabase: SupabaseClient, buffer: Uint8Array | null, userId: string, filename: string): Promise<string | null> {
     if (!buffer) return null;
@@ -41,6 +52,14 @@ async function uploadBufferToStorage(supabase: SupabaseClient, buffer: Uint8Arra
     }
     const { data: { publicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
     return publicUrl;
+}
+
+async function standardizeImageBuffer(buffer: Uint8Array): Promise<Uint8Array> {
+    const image = await loadImage(buffer);
+    const canvas = createCanvas(image.width(), image.height());
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(image, 0, 0);
+    return canvas.toBuffer('image/png');
 }
 
 serve(async (req) => {
@@ -93,49 +112,36 @@ serve(async (req) => {
     problematicBuffer = patchBuffer;
     await probeBuffer(logPrefix, "patch_raw", patchBuffer);
 
-    // --- Generate and Upload Debug Assets ---
-    let final_compositing_mask_url: string | null = null;
-    let feathered_mask_url: string | null = null;
-    let croppedMaskImage: any = null;
+    const sourceBuffer = await sourceBlob.arrayBuffer();
+    await probeBuffer(logPrefix, "source_raw", sourceBuffer);
 
-    if (cropped_dilated_mask_base64) {
-        const croppedMaskBuffer = decodeBase64(cropped_dilated_mask_base64);
-        final_compositing_mask_url = await uploadBufferToStorage(supabase, croppedMaskBuffer, job.user_id, 'final_compositing_mask.png');
-        croppedMaskImage = await loadImage(croppedMaskBuffer);
+    logStep(logPrefix, "standardization_start");
+    const standardizedPatchBuffer = await standardizeImageBuffer(new Uint8Array(patchBuffer));
+    await probeBuffer(logPrefix, "patch_standardized", standardizedPatchBuffer);
+    logStep(logPrefix, "standardization_complete");
 
-        const featheredCanvas = createCanvas(croppedMaskImage.width(), croppedMaskImage.height());
-        const featheredCtx = featheredCanvas.getContext('2d');
-        const featherAmount = Math.max(5, Math.round(bbox.width * 0.05));
-        featheredCtx.filter = `blur(${featherAmount}px)`;
-        featheredCtx.drawImage(croppedMaskImage, 0, 0);
-        feathered_mask_url = await uploadBufferToStorage(supabase, featheredCanvas.toBuffer('image/png'), job.user_id, 'feathered_mask.png');
-        logStep(logPrefix, "debug_assets_generated");
-    }
-    // --- End Debug Asset Generation ---
+    let [sourceImage, inpaintedPatchImg] = await Promise.all([
+        safeDecode(logPrefix, "source", sourceBuffer),
+        safeDecode(logPrefix, "patch", standardizedPatchBuffer)
+    ]);
 
     logStep(logPrefix, "compositing_start_memory_efficient");
 
-    // 1. Decode small patch first
-    const inpaintedPatchImg = await loadImage(new Uint8Array(patchBuffer));
-    logStep(logPrefix, "decoded_patch", { width: inpaintedPatchImg.width(), height: inpaintedPatchImg.height() });
-
-    // 2. Create source crop
-    const sourceImageForCrop = await loadImage(new Uint8Array(await sourceBlob.arrayBuffer()));
     const sourceCropCanvas = createCanvas(bbox.width, bbox.height);
     const sourceCropCtx = sourceCropCanvas.getContext('2d');
-    sourceCropCtx.drawImage(sourceImageForCrop, bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
+    sourceCropCtx.drawImage(await loadImage(sourceImage.bitmap.data), bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
     logStep(logPrefix, "created_source_crop", { width: bbox.width, height: bbox.height });
 
-    // 3. Composite small buffers
     const blendedPatchCanvas = createCanvas(bbox.width, bbox.height);
     const blendedCtx = blendedPatchCanvas.getContext('2d');
     blendedCtx.drawImage(sourceCropCanvas, 0, 0);
     
     const featheredPatchCanvas = createCanvas(bbox.width, bbox.height);
     const featheredCtx = featheredPatchCanvas.getContext('2d');
-    featheredCtx.drawImage(inpaintedPatchImg, 0, 0, bbox.width, bbox.height);
+    featheredCtx.drawImage(await loadImage(inpaintedPatchImg.bitmap.data), 0, 0, bbox.width, bbox.height);
 
-    if (croppedMaskImage) {
+    if (cropped_dilated_mask_base64) {
+        const croppedMaskImage = await loadImage(decodeBase64(cropped_dilated_mask_base64));
         featheredCtx.globalCompositeOperation = 'destination-in';
         const featherAmount = Math.max(5, Math.round(bbox.width * 0.05));
         featheredCtx.filter = `blur(${featherAmount}px)`;
@@ -145,21 +151,19 @@ serve(async (req) => {
     blendedCtx.drawImage(featheredPatchCanvas, 0, 0);
     logStep(logPrefix, "composited_small_buffers");
 
-    // 4. Re-assemble final image
-    const finalCanvas = createCanvas(sourceImageForCrop.width(), sourceImageForCrop.height());
+    const finalCanvas = createCanvas(sourceImage.width, sourceImage.height);
     const finalCtx = finalCanvas.getContext('2d');
-    finalCtx.drawImage(sourceImageForCrop, 0, 0);
+    finalCtx.drawImage(await loadImage(sourceImage.bitmap.data), 0, 0);
     finalCtx.drawImage(blendedPatchCanvas, bbox.x, bbox.y);
     logStep(logPrefix, "final_image_reassembled");
 
-    // 5. Encode and Upload using stable imagescript
     const finalImageData = finalCtx.getImageData(0, 0, finalCanvas.width, finalCanvas.height);
     const finalImage = new Image(finalCanvas.width, finalCanvas.height, finalImageData.data);
-    const finalImageBuffer = await finalImage.encode(0);
+    const finalImageBuffer = await finalImage.encode(0.75, 1); // Encode as JPEG with 75% quality
     await probeBuffer(logPrefix, "final_encoded", finalImageBuffer);
     
-    const finalFilePath = `${job.user_id}/vto-final/${Date.now()}_final_composite.png`;
-    await uploadBufferToStorage(supabase, finalImageBuffer, job.user_id, 'final_composite.png');
+    const finalFilePath = `${job.user_id}/vto-final/${Date.now()}_final_composite.jpeg`;
+    await uploadBufferToStorage(supabase, finalImageBuffer, job.user_id, 'final_composite.jpeg');
     const { data: { publicUrl: finalPublicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(finalFilePath);
     logStep(logPrefix, "composition_complete", { finalUrl: finalPublicUrl });
 
@@ -178,15 +182,7 @@ serve(async (req) => {
         logStep(logPrefix, "verification_complete", { is_match: verificationResult?.is_match });
     }
 
-    const finalMetadata = { 
-        ...job.metadata, 
-        verification_result: verificationResult,
-        debug_assets: {
-            ...job.metadata.debug_assets,
-            final_compositing_mask_url,
-            feathered_mask_url,
-        }
-    };
+    const finalMetadata = { ...job.metadata, verification_result: verificationResult };
 
     if (verificationResult && verificationResult.is_match === false) {
         logStep(logPrefix, "qa_failed", { reason: verificationResult.mismatch_reason });
