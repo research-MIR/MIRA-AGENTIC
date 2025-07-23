@@ -9,9 +9,9 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 const GENERATED_IMAGES_BUCKET = "mira-generations";
 // ---- Feather & output tunables ------------------------------------------------
-const FEATHER_RATIO = parseFloat(Deno.env.get("FEATHER_RATIO") ?? "1.5"); // 3% of min dim
+const FEATHER_RATIO = parseFloat(Deno.env.get("FEATHER_RATIO") ?? "10"); // 3% of min dim
 const FEATHER_MIN_PX = parseInt(Deno.env.get("FEATHER_MIN_PX") ?? "3", 10);
-const FEATHER_MAX_PX = parseInt(Deno.env.get("FEATHER_MAX_PX") ?? "64", 10);
+const FEATHER_MAX_PX = parseInt(Deno.env.get("FEATHER_MAX_PX") ?? "128", 10);
 const JPEG_QUALITY = parseFloat(Deno.env.get("JPEG_QUALITY") ?? "0.9"); // 0..1
 // -----------------------------------------------------------------------------
 // Utilities

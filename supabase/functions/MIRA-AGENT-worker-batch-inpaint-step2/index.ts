@@ -6,6 +6,8 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const TMP_BUCKET = 'mira-agent-user-uploads';
 
+const BBOX_PADDING_PERCENTAGE = 0.10; // 10% padding
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -138,7 +140,7 @@ serve(async (req) => {
         throw new Error("Mask is empty.");
     }
     
-    const padding = Math.round(Math.max(maxX - minX, maxY - minY) * 0.05);
+    const padding = Math.round(Math.max(maxX - minX, maxY - minY) * BBOX_PADDING_PERCENTAGE);
     const bbox = {
       x: Math.max(0, minX - padding),
       y: Math.max(0, minY - padding),

@@ -225,7 +225,7 @@ serve(async (req) => {
           mask_image_id: maskImageId,
           prompt: prompt || "photorealistic",
           denoise: denoise || 0.99,
-          resolution: resolution || 'standard',
+          resolution: resolution || 'high',
           num_images: num_images || 1,
         };
 
