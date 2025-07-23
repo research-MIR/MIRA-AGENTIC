@@ -100,6 +100,15 @@ serve(async (req) => {
     const patch = inpaintedPatchImg;
     const { x, y } = bbox;
 
+    // --- SAFETY CHECK ---
+    if (!patch || !patch.bitmap || !patch.bitmap.data) {
+        throw new Error("Failed to decode the inpainted patch image. It may be corrupted or in an unsupported format.");
+    }
+    if (!src || !src.bitmap || !src.bitmap.data) {
+        throw new Error("Failed to decode the source image. It may be corrupted or in an unsupported format.");
+    }
+    // --- END SAFETY CHECK ---
+
     if (x + patch.width > src.width || y + patch.height > src.height) {
         throw new Error("Patch is outside the bounds of the source image.");
     }
