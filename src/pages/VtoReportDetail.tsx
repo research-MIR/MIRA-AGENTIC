@@ -3,37 +3,91 @@ import { useLanguage } from "@/context/LanguageContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, AlertTriangle, Loader2 } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSession } from "@/components/Auth/SessionContextProvider";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { SecureImageDisplay } from "@/components/VTO/SecureImageDisplay";
+import { useImagePreview } from "@/context/ImagePreviewContext";
+import { useEffect } from "react";
+import { RealtimeChannel } from "@supabase/supabase-js";
 
-// Mock data
-const mockDetail = {
-  pack_id: "pack-123",
-  jobs: [
-    { id: "job-1", status: "pass", imageUrl: "https://placehold.co/400x400/a3e635/3f3f46?text=PASS" },
-    { id: "job-2", status: "fail", imageUrl: "https://placehold.co/400x400/ef4444/ffffff?text=FAIL" },
-    { id: "job-3", status: "pass", imageUrl: "https://placehold.co/400x400/a3e635/3f3f46?text=PASS" },
-    { id: "job-4", status: "pass", imageUrl: "https://placehold.co/400x400/a3e635/3f3f46?text=PASS" },
-    { id: "job-5", status: "fail", imageUrl: "https://placehold.co/400x400/ef4444/ffffff?text=FAIL" },
-  ]
-};
+interface ReportDetail {
+  report_id: string;
+  job_id: string;
+  status: string;
+  comparative_report: {
+    overall_pass: boolean;
+  } | null;
+  source_person_image_url: string;
+  source_garment_image_url: string;
+  final_image_url: string;
+}
 
 const VtoReportDetail = () => {
   const { packId } = useParams();
   const { t } = useLanguage();
+  const { supabase, session } = useSession();
+  const { showImage } = useImagePreview();
+  const queryClient = useQueryClient();
 
-  const passedJobs = mockDetail.jobs.filter(j => j.status === 'pass');
-  const failedJobs = mockDetail.jobs.filter(j => j.status === 'fail');
+  const { data: reportDetails, isLoading, error } = useQuery<ReportDetail[]>({
+    queryKey: ['vtoReportDetail', packId],
+    queryFn: async () => {
+      if (!packId || !session?.user) return [];
+      const { data, error } = await supabase.rpc('get_vto_report_details_for_pack', {
+        p_pack_id: packId,
+        p_user_id: session.user.id
+      });
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!packId && !!session?.user,
+  });
 
-  const renderJobGrid = (jobs: typeof mockDetail.jobs) => (
+  useEffect(() => {
+    if (!packId || !session?.user?.id) return;
+    const channel: RealtimeChannel = supabase
+      .channel(`vto-report-detail-tracker-${packId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'mira-agent-vto-qa-reports', filter: `vto_pack_job_id=eq.${packId}` },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ['vtoReportDetail', packId] });
+        }
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [packId, session?.user?.id, supabase, queryClient]);
+
+  const passedJobs = reportDetails?.filter(j => j.comparative_report?.overall_pass) || [];
+  const failedJobs = reportDetails?.filter(j => !j.comparative_report?.overall_pass) || [];
+
+  const renderJobGrid = (jobs: ReportDetail[]) => (
     <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
       {jobs.map(job => (
-        <Card key={job.id} className="relative group cursor-pointer">
-          <img src={job.imageUrl} className="w-full h-full object-cover rounded-md" />
-          <Badge variant={job.status === 'pass' ? 'default' : 'destructive'} className="absolute top-2 right-2">{job.status.toUpperCase()}</Badge>
+        <Card 
+          key={job.job_id} 
+          className="relative group cursor-pointer"
+          onClick={() => showImage({ images: [{ url: job.final_image_url }], currentIndex: 0 })}
+        >
+          <SecureImageDisplay imageUrl={job.final_image_url} alt={`Job ${job.job_id}`} className="w-full h-full object-cover rounded-md" />
+          <Badge variant={job.comparative_report?.overall_pass ? 'default' : 'destructive'} className="absolute top-2 right-2">
+            {job.comparative_report?.overall_pass ? 'PASS' : 'FAIL'}
+          </Badge>
         </Card>
       ))}
     </div>
   );
+
+  if (isLoading) {
+    return <div className="p-8"><Skeleton className="h-12 w-1/3" /><div className="grid grid-cols-6 gap-4 mt-8">{[...Array(12)].map((_, i) => <Skeleton key={i} className="h-40 w-full" />)}</div></div>;
+  }
+
+  if (error) {
+    return <div className="p-8"><Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Error</AlertTitle><AlertDescription>{error.message}</AlertDescription></Alert></div>;
+  }
 
   return (
     <div className="p-4 md:p-8 h-screen flex flex-col">
@@ -47,13 +101,13 @@ const VtoReportDetail = () => {
       </header>
       <Tabs defaultValue="all" className="w-full flex-1 flex flex-col">
         <TabsList>
-          <TabsTrigger value="all">{t('allJobs')} ({mockDetail.jobs.length})</TabsTrigger>
+          <TabsTrigger value="all">{t('allJobs')} ({reportDetails?.length || 0})</TabsTrigger>
           <TabsTrigger value="passed">{t('passedJobs')} ({passedJobs.length})</TabsTrigger>
           <TabsTrigger value="failed">{t('failedJobs')} ({failedJobs.length})</TabsTrigger>
         </TabsList>
         <div className="flex-1 overflow-y-auto mt-4">
           <TabsContent value="all">
-            {renderJobGrid(mockDetail.jobs)}
+            {renderJobGrid(reportDetails || [])}
           </TabsContent>
           <TabsContent value="passed">
             {renderJobGrid(passedJobs)}
