@@ -16,7 +16,7 @@ serve(async (req) => {
 
   try {
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-    const statusesToDelete = ['failed', 'permanently_failed'];
+    const statusesToDelete = ['permanently_failed']; // Only target hard-failed jobs
 
     const { count, error } = await supabase
       .from('mira-agent-bitstudio-jobs')
@@ -27,7 +27,7 @@ serve(async (req) => {
       throw new Error(`Failed to delete jobs: ${error.message}`);
     }
     
-    const message = `Successfully deleted ${count || 0} failed VTO job(s).`;
+    const message = `Successfully deleted ${count || 0} permanently failed VTO job(s).`;
     console.log(message);
 
     return new Response(JSON.stringify({ success: true, message, count }), {

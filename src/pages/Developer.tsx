@@ -267,7 +267,7 @@ const Developer = () => {
                   <AlertDialogHeader>
                     <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
                     <AlertDialogDescription>
-                      This will permanently DELETE all jobs from the 'mira-agent-bitstudio-jobs' table with a status of 'failed' or 'permanently_failed'. This can improve query performance but is irreversible.
+                      This will permanently DELETE all jobs from the 'mira-agent-bitstudio-jobs' table with a status of 'permanently_failed'. This can improve query performance but is irreversible.
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
