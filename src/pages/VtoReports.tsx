@@ -1,4 +1,4 @@
-import { useMemo, useEffect } from "react";
+import { useMemo, useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
@@ -9,6 +9,8 @@ import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { RealtimeChannel } from "@supabase/supabase-js";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 
 interface QaReport {
   id: string;
@@ -37,6 +39,7 @@ const VtoReports = () => {
   const { t } = useLanguage();
   const { supabase, session } = useSession();
   const queryClient = useQueryClient();
+  const [isAnalyzing, setIsAnalyzing] = useState<string | null>(null);
 
   const { data: reports, isLoading, error } = useQuery<QaReport[]>({
     queryKey: ['vtoQaReports', session?.user?.id],
@@ -96,6 +99,38 @@ const VtoReports = () => {
     return Array.from(packs.values()).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   }, [reports]);
 
+  const handleResetAndAnalyze = async (packId: string) => {
+    if (!session?.user) return;
+    setIsAnalyzing(packId);
+    const toastId = showLoading("Resetting previous analysis...");
+    try {
+      // Step 1: Reset the pack
+      const { data: resetData, error: resetError } = await supabase.rpc('MIRA-AGENT-admin-reset-vto-pack-analysis', {
+        p_pack_id: packId,
+        p_user_id: session.user.id
+      });
+      if (resetError) throw resetError;
+      
+      dismissToast(toastId);
+      showSuccess(`Reset ${resetData} old reports. Starting new analysis...`);
+      
+      // Step 2: Trigger the orchestrator to start a fresh analysis
+      const { data: orchestratorData, error: orchestratorError } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-vto-reporter', {
+        body: { pack_id: packId, user_id: session.user.id }
+      });
+      if (orchestratorError) throw orchestratorError;
+
+      showSuccess(orchestratorData.message);
+      queryClient.invalidateQueries({ queryKey: ['vtoQaReports', session.user.id] });
+
+    } catch (err: any) {
+      dismissToast(toastId);
+      showError(`Operation failed: ${err.message}`);
+    } finally {
+      setIsAnalyzing(null);
+    }
+  };
+
   if (isLoading) {
     return <div className="p-8 space-y-4"><Skeleton className="h-32 w-full" /><Skeleton className="h-32 w-full" /></div>;
   }
@@ -117,9 +152,33 @@ const VtoReports = () => {
               <CardHeader>
                 <CardTitle className="flex justify-between items-center">
                   <span>Pack from {new Date(report.created_at).toLocaleString()}</span>
-                  <Link to={`/vto-reports/${report.pack_id}`}>
-                    <Button variant="outline">{t('viewReport')}</Button>
-                  </Link>
+                  <div className="flex items-center gap-2">
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button variant="outline" size="sm" disabled={isAnalyzing === report.pack_id}>
+                          {isAnalyzing === report.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <BarChart2 className="h-4 w-4 mr-2" />}
+                          Re-analyze Pack
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Reset and Re-analyze?</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            This will permanently delete all existing QA reports for this pack and generate new ones from scratch. This is useful if the analysis logic has been updated. This action cannot be undone.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction onClick={() => handleResetAndAnalyze(report.pack_id)}>
+                            Yes, Reset & Re-analyze
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                    <Link to={`/vto-reports/${report.pack_id}`}>
+                      <Button>{t('viewReport')}</Button>
+                    </Link>
+                  </div>
                 </CardTitle>
               </CardHeader>
               <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
