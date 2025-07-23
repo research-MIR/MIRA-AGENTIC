@@ -86,21 +86,21 @@ const ReportDetailModal = ({ report, isOpen, onClose }: { report: ReportDetail |
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-6xl">
+      <DialogContent className="max-w-[90vw] w-full h-[90vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>Forensic Analysis Report</DialogTitle>
           <DialogDescription>Job ID: {report.job_id}</DialogDescription>
         </DialogHeader>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 py-4">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-6 py-4 flex-1 overflow-hidden">
           {/* Column 1: Inputs */}
-          <div className="space-y-4">
+          <div className="md:col-span-1 space-y-4 flex flex-col">
             <ImageCard title="Source Person" url={report.source_person_image_url} />
             <ImageCard title="Reference Garment" url={report.source_garment_image_url} />
           </div>
           
           {/* Column 2: Analysis */}
-          <div className="md:col-span-1">
-            <ScrollArea className="h-[70vh] pr-4">
+          <div className="md:col-span-3 h-full overflow-hidden">
+            <ScrollArea className="h-full pr-4">
               {reportData ? (
                 <div className="space-y-4">
                   <Card>
@@ -170,7 +170,7 @@ const ReportDetailModal = ({ report, isOpen, onClose }: { report: ReportDetail |
           </div>
 
           {/* Column 3: Output */}
-          <div className="space-y-4">
+          <div className="md:col-span-1 space-y-4 flex flex-col">
             <ImageCard title="Final Result" url={report.final_image_url} />
           </div>
         </div>
