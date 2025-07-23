@@ -62,6 +62,29 @@ serve(async (req) => {
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
 
   try {
+    // --- ATOMIC UPDATE TO CLAIM THE JOB ---
+    const { data: claimedJob, error: claimError } = await supabase
+      .from('mira-agent-batch-inpaint-pair-jobs')
+      .update({ status: 'processing_step_2' }) // New status to indicate it's being processed
+      .eq('id', pair_job_id)
+      .eq('status', 'mask_expanded') // Only claim if it's in the correct state
+      .select('id')
+      .single();
+
+    if (claimError) {
+        console.error(`${logPrefix} Error trying to claim job:`, claimError.message);
+        throw claimError;
+    }
+
+    if (!claimedJob) {
+        console.log(`${logPrefix} Job was already claimed by another instance or is not in 'mask_expanded' state. Exiting gracefully.`);
+        return new Response(JSON.stringify({ success: true, message: "Job already claimed or not in a valid state." }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            status: 200,
+        });
+    }
+    // --- END OF ATOMIC UPDATE ---
+
     const { data: pairJob, error: fetchError } = await supabase
       .from('mira-agent-batch-inpaint-pair-jobs')
       .select('*')
@@ -71,7 +94,7 @@ serve(async (req) => {
     if (fetchError) throw new Error(`Failed to fetch pair job: ${fetchError.message}`);
     if (!pairJob) throw new Error(`Pair job with ID ${pair_job_id} not found.`);
 
-    if (pairJob.inpainting_job_id) {
+    if (pairJob.inpainting_job_id && pairJob.status !== 'processing_step_2') {
         console.warn(`${logPrefix} Safety check triggered. Inpainting job already exists (${pairJob.inpainting_job_id}). This is a duplicate invocation. Exiting gracefully.`);
         return new Response(JSON.stringify({ success: true, message: "Duplicate invocation detected, exiting." }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -129,7 +152,7 @@ serve(async (req) => {
     // --- END OF CORRECTION ---
 
     const croppedSourceImage = sourceImage.clone().crop(bbox.x, bbox.y, bbox.width, bbox.height);
-    const croppedSourceBuffer = await croppedSourceImage.encode(0);
+    const croppedSourceBuffer = await croppedSourceImage.encodeJPEG(75);
     const source_cropped_url = await uploadBuffer(croppedSourceBuffer, supabase);
 
     const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-prompt-helper', {

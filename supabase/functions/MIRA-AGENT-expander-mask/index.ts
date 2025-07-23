@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { createCanvas, loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
+import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -143,15 +144,23 @@ serve(async (req) => {
 
     if (parentFetchError) throw parentFetchError;
 
-    const debug_assets = { raw_mask_url, expanded_mask_url: expandedMaskUrl };
+    const debug_assets = { ...parentPairJob.metadata?.debug_assets, raw_mask_url, expanded_mask_url: expandedMaskUrl };
+    
+    console.log(`[Expander][${requestId}] Updating parent job ${parent_pair_job_id} to 'mask_expanded' status.`);
     await supabase.from('mira-agent-batch-inpaint-pair-jobs')
-        .update({ metadata: { ...parentPairJob.metadata, debug_assets } })
+        .update({ 
+            status: 'mask_expanded', 
+            metadata: { ...parentPairJob.metadata, debug_assets: debug_assets } 
+        })
         .eq('id', parent_pair_job_id);
 
-    console.log(`[Expander][${requestId}] Triggering Step 2 worker for parent job ${parent_pair_job_id}.`);
-    supabase.functions.invoke('MIRA-AGENT-worker-batch-inpaint-step2', {
-        body: { pair_job_id: parent_pair_job_id, final_mask_url: expandedMaskUrl }
-    }).catch(console.error);
+    console.log(`[Expander][${requestId}] Proactively invoking watchdog to continue the pipeline.`);
+    supabase.functions.invoke('MIRA-AGENT-watchdog-background-jobs', {
+        body: {}
+    }).catch(err => {
+        // This is a fire-and-forget, so we only log the error if it fails.
+        console.error(`[Expander][${requestId}] Non-critical error invoking watchdog:`, err.message);
+    });
 
     return new Response(JSON.stringify({ success: true, expandedMaskUrl }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

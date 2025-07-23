@@ -330,6 +330,35 @@ serve(async (req) => {
     }
     console.log(`[Watchdog-BG][${requestId}] === Task 11: Finished ===`);
 
+    // --- NEW Task 12: Handle jobs with expanded masks, ready for step 2 ---
+    const { data: readyForStep2Jobs, error: step2Error } = await supabase
+      .from('mira-agent-batch-inpaint-pair-jobs')
+      .select('id, metadata')
+      .eq('status', 'mask_expanded');
+
+    if (step2Error) {
+      console.error(`[Watchdog-BG][${requestId}] Error querying for jobs ready for step 2:`, step2Error.message);
+    } else if (readyForStep2Jobs && readyForStep2Jobs.length > 0) {
+      console.log(`[Watchdog-BG][${requestId}] Found ${readyForStep2Jobs.length} job(s) with expanded masks. Triggering step 2 worker...`);
+      const step2Promises = readyForStep2Jobs.map((job) => {
+        const finalMaskUrl = job.metadata?.debug_assets?.expanded_mask_url;
+        if (!finalMaskUrl) {
+          console.error(`[Watchdog-BG][${requestId}] Job ${job.id} is in 'mask_expanded' state but is missing the expanded_mask_url in metadata. Skipping.`);
+          return Promise.resolve();
+        }
+        return supabase.functions.invoke('MIRA-AGENT-worker-batch-inpaint-step2', {
+          body: {
+            pair_job_id: job.id,
+            final_mask_url: finalMaskUrl
+          }
+        });
+      });
+      await Promise.allSettled(step2Promises);
+      actionsTaken.push(`Triggered Step 2 worker for ${readyForStep2Jobs.length} jobs.`);
+    } else {
+      console.log(`[Watchdog-BG][${requestId}] No jobs ready for step 2 found.`);
+    }
+
     const finalMessage = actionsTaken.length > 0 ? actionsTaken.join(' ') : "No actions required. All jobs are running normally.";
     console.log(`[Watchdog-BG][${requestId}] Check complete. ${finalMessage}`);
     
