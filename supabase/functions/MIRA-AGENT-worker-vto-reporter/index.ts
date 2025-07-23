@@ -46,6 +46,16 @@ const comparativeAnalysisPrompt = `You are a senior Quality Assurance inspector 
 2.  Analyze the original person's image to assess pose and scene characteristics.
 3.  Your entire response MUST be a single, valid JSON object.
 
+### CRITICAL: Decision Logic for "overall_pass"
+The "overall_pass" field should ONLY be 'false' if there are significant TECHNICAL FLAWS in the generation. A simple mismatch in garment type is NOT a failure condition on its own, but it MUST be noted.
+- **FAIL (overall_pass: false)** if:
+  - The pose is significantly changed or distorted.
+  - The body type is unnaturally altered.
+  - There are severe anatomical incorrectness issues (e.g., mangled hands).
+  - The lighting or blending is extremely poor.
+- **PASS (overall_pass: true)** if:
+  - The image is technically sound, even if the garment type is wrong. For example, if the reference was a t-shirt but the AI generated a high-quality, realistic jacket, this is a PASS, but the 'garment_comparison.type_match' must be 'false'.
+
 ### Rules for 'pose_complexity':
 -   **standard A-pose**: Standing straight, facing camera, arms relaxed at sides.
 -   **casual standing**: Standing with minor variations (hands on hips, slight turn). Limbs are mostly visible.
