@@ -248,7 +248,7 @@ export const RecentVtoPacks = () => {
         }
       });
 
-      await Promise.all(jobPromises);
+      await Promise.all(imagePromises);
 
       dismissToast(toastId);
       showLoading("Zipping debug files...");
@@ -293,8 +293,8 @@ export const RecentVtoPacks = () => {
 
         return (
           <AccordionItem key={pack.pack_id} value={pack.pack_id} className="border rounded-md">
-            <AccordionTrigger className="p-4 hover:no-underline">
-              <div className="flex justify-between items-center w-full">
+            <AccordionTrigger asChild>
+              <div className="p-4 flex justify-between items-center w-full cursor-pointer">
                 <div className="text-left">
                   <p className="font-semibold">Batch from {new Date(pack.created_at).toLocaleString()}</p>
                   <p className="text-sm text-muted-foreground">
