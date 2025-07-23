@@ -8,7 +8,7 @@ import { AlertTriangle, CheckCircle, Loader2, XCircle, Download, HardDriveDownlo
 import { useImagePreview } from '@/context/ImagePreviewContext';
 import { SecureImageDisplay } from './SecureImageDisplay';
 import { BitStudioJob } from '@/types/vto';
-import { RealtimeChannel } from '@supabase/supabase-js';
+import { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js';
 import { Button } from '../ui/button';
 import { showError, showLoading, dismissToast, showSuccess } from '@/utils/toast';
 import JSZip from 'jszip';
@@ -111,6 +111,32 @@ export const RecentVtoPacks = () => {
     };
   }, [session?.user?.id, supabase, queryClient]);
 
+  const downloadFromSupabase = async (url: string | null): Promise<Blob | null> => {
+    if (!url) return null;
+    try {
+        const urlObj = new URL(url);
+        const pathSegments = urlObj.pathname.split('/');
+        const objectSegmentIndex = pathSegments.indexOf('object');
+        if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) {
+            console.error(`Could not parse bucket from URL: ${url}`);
+            return null;
+        }
+        const bucketName = pathSegments[objectSegmentIndex + 2];
+        const pathStartIndex = urlObj.pathname.indexOf(bucketName) + bucketName.length + 1;
+        const storagePath = decodeURIComponent(urlObj.pathname.substring(pathStartIndex));
+
+        const { data, error } = await supabase.storage.from(bucketName).download(storagePath);
+        if (error) {
+            console.error(`Failed to download ${storagePath}:`, error);
+            return null;
+        }
+        return data;
+    } catch (e) {
+        console.error(`Error in downloadFromSupabase for URL ${url}:`, e);
+        return null;
+    }
+  };
+
   const handleDownloadResults = async (packId: string) => {
     setIsDownloadingResults(packId);
     const toastId = showLoading("Fetching job results...");
@@ -134,13 +160,9 @@ export const RecentVtoPacks = () => {
 
       const zip = new JSZip();
       const imagePromises = jobs.map(async (job) => {
-        try {
-          const response = await fetch(job.final_image_url!);
-          if (!response.ok) return null;
-          const blob = await response.blob();
+        const blob = await downloadFromSupabase(job.final_image_url);
+        if (blob) {
           zip.file(`result_${job.id}.png`, blob);
-        } catch (e) {
-          console.error(`Failed to fetch ${job.final_image_url}`, e);
         }
       });
       await Promise.all(imagePromises);
@@ -193,9 +215,9 @@ export const RecentVtoPacks = () => {
       const jobPromises = jobs.map(async (job) => {
         try {
           const [personBlob, garmentBlob, resultBlob] = await Promise.all([
-            fetch(job.source_person_image_url!).then(res => res.ok ? res.blob() : null),
-            fetch(job.source_garment_image_url!).then(res => res.ok ? res.blob() : null),
-            job.final_image_url ? fetch(job.final_image_url).then(res => res.ok ? res.blob() : null) : Promise.resolve(null)
+            downloadFromSupabase(job.source_person_image_url),
+            downloadFromSupabase(job.source_garment_image_url),
+            downloadFromSupabase(job.final_image_url)
           ]);
 
           const jobFolder = individualAssetsFolder!.folder(job.id);
