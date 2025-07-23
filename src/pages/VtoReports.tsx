@@ -17,10 +17,12 @@ interface QaReport {
   vto_pack_job_id: string;
   created_at: string;
   comparative_report: {
-    overall_pass: boolean;
-    failure_category: string | null;
-    pose_and_body_analysis?: {
-        pose_changed: boolean;
+    report?: {
+      overall_pass: boolean;
+      failure_category: string | null;
+      pose_and_body_analysis?: {
+          pose_changed: boolean;
+      }
     }
   } | null;
 }
@@ -84,15 +86,18 @@ const VtoReports = () => {
       }
       const summary = packs.get(report.vto_pack_job_id)!;
       summary.total_jobs++;
-      if (report.comparative_report?.overall_pass) {
-        if (report.comparative_report.pose_and_body_analysis?.pose_changed) {
+      
+      const reportData = report.comparative_report?.report;
+
+      if (reportData?.overall_pass) {
+        if (reportData.pose_and_body_analysis?.pose_changed) {
             summary.passed_with_pose_change++;
         } else {
             summary.passed_jobs++;
         }
       } else {
         summary.failed_jobs++;
-        const reason = report.comparative_report?.failure_category || "Unknown";
+        const reason = reportData?.failure_category || "Unknown";
         summary.failure_summary[reason] = (summary.failure_summary[reason] || 0) + 1;
       }
     }
