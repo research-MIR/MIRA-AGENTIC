@@ -306,6 +306,30 @@ serve(async (req)=>{
       console.log(`[Watchdog-BG][${requestId}] No stalled reframe jobs found.`);
     }
 
+    // --- Task 11: Handle New VTO QA Jobs ---
+    console.log(`[Watchdog-BG][${requestId}] === Task 11: Managing VTO QA Job Slot via RPC ===`);
+    const { data: claimedQaJobId, error: qaRpcError } = await supabase.rpc('claim_next_vto_qa_job');
+    if (qaRpcError) {
+        console.error(`[Watchdog-BG][${requestId}] Task 11: RPC 'claim_next_vto_qa_job' failed:`, qaRpcError.message);
+    } else if (claimedQaJobId) {
+        console.log(`[Watchdog-BG][${requestId}] Task 11: Successfully claimed VTO QA job ${claimedQaJobId} via RPC. Invoking worker.`);
+        const { error: invokeError } = await supabase.functions.invoke('MIRA-AGENT-worker-vto-reporter', {
+            body: { qa_job_id: claimedQaJobId }
+        });
+        if (invokeError) {
+            console.error(`[Watchdog-BG][${requestId}] Task 11: CRITICAL! Failed to invoke worker for claimed QA job ${claimedQaJobId}:`, invokeError);
+            await supabase.from('mira-agent-vto-qa-reports').update({
+                status: 'pending',
+                error_message: 'Watchdog failed to invoke worker.'
+            }).eq('id', claimedQaJobId);
+        } else {
+            actionsTaken.push(`Started new VTO QA worker for job ${claimedQaJobId}.`);
+        }
+    } else {
+        console.log(`[Watchdog-BG][${requestId}] Task 11: No pending VTO QA jobs found to claim.`);
+    }
+    console.log(`[Watchdog-BG][${requestId}] === Task 11: Finished ===`);
+
     const finalMessage = actionsTaken.length > 0 ? actionsTaken.join(' ') : "No actions required. All jobs are running normally.";
     console.log(`[Watchdog-BG][${requestId}] Check complete. ${finalMessage}`);
     
