@@ -97,9 +97,16 @@ serve(async (req) => {
     const allMasks = (job.results || []).flat().filter((item: any) => item && item.mask && item.box_2d);
 
     for (const maskData of allMasks) {
+      try {
         const maskBase64 = maskData.mask.startsWith('data:image/png;base64,') 
             ? maskData.mask.split(',')[1] 
             : maskData.mask;
+        
+        if (!maskBase64) {
+            console.warn(`[Compositor][${requestId}] Skipping a mask because its base64 data was empty.`);
+            continue;
+        }
+
         const maskImageBuffer = decodeBase64(maskBase64);
         const maskImage = await loadImage(maskImageBuffer);
         
@@ -112,6 +119,10 @@ serve(async (req) => {
         if (bboxWidth > 0 && bboxHeight > 0) {
             rawMaskCtx.drawImage(maskImage, absX0, absY0, bboxWidth, bboxHeight);
         }
+      } catch (e) {
+          console.warn(`[Compositor][${requestId}] Could not process a single mask from a worker. Error: ${e.message}. Skipping it and continuing.`);
+          // Don't re-throw, just continue to the next mask
+      }
     }
 
     const rawMaskUrl = await uploadBufferToStorage(supabase, rawMaskCanvas.toBuffer('image/png'), job.user_id, 'raw_mask.png');
