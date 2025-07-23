@@ -1,12 +1,12 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { GoogleGenAI, Content, Part } from 'https://esm.sh/@google/genai@0.15.0';
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
+import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 
-const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const MODEL_NAME = "gemini-2.5-pro-preview-06-05";
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -55,14 +55,17 @@ Your primary task is to use the provided images to **visually verify and expand 
     -   Are there anatomical errors (mangled hands, distorted limbs, unnatural proportions)?
 3.  **Synthesize Final Report:** Based on your direct visual analysis, generate the final JSON report.
 
-### CRITICAL: Decision Logic for "overall_pass"
+### CRITICAL: Decision Logic for "overall_pass" & "failure_category"
 The "overall_pass" field should ONLY be 'false' if there are significant TECHNICAL FLAWS in the generation. A simple mismatch in garment type or a change in pose are NOT failure conditions on their own, but they MUST be noted.
+
 - **FAIL (overall_pass: false)** if:
-  - The body type is unnaturally altered. If so, set \`failure_category\` to "Body Distortion".
-  - There are severe anatomical incorrectness issues (e.g., mangled hands, distorted limbs, unnatural proportions). If so, set \`failure_category\` to "Anatomical Error".
-  - The lighting or blending is extremely poor. If so, set \`failure_category\` to "Quality Issue".
+  - The body type is unnaturally altered. Set \`failure_category\` to "Body Distortion".
+  - There are severe anatomical incorrectness issues (e.g., mangled hands, distorted limbs, unnatural proportions). Set \`failure_category\` to "Anatomical Error".
+  - The lighting or blending is extremely poor. Set \`failure_category\` to "Quality Issue".
 - **PASS (overall_pass: true)** if:
   - The image is technically sound, even if the garment type is wrong or the pose has changed. These deviations must be noted in their respective sections.
+
+**MANDATORY RULE:** If you set \`overall_pass\` to \`false\`, you MUST set \`failure_category\` to one of the three specified values ("Body Distortion", "Anatomical Error", "Quality Issue"). If multiple issues are present, choose the most severe one. If none of these three specific categories fit perfectly but the image is still a technical failure, you MUST set \`failure_category\` to "Other". The \`failure_category\` field can only be \`null\` if \`overall_pass\` is \`true\`.
 
 ### NEW RULE: Handling Generated Outfits
 It is common for the AI to generate a complete, plausible outfit even if the reference is only a single item (e.g., generating a matching top and shoes when the reference is a skirt). This is **correct and desirable creative behavior**.
