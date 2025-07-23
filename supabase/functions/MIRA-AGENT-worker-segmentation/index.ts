@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { GoogleGenAI, Content, Part, HarmCategory, HarmBlockThreshold } from 'https://esm.sh/@google/genai@0.15.0';
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
@@ -59,6 +59,25 @@ async function appendResultToJob(supabase: any, jobId: string, result: any) {
     console.log(`[SegmentWorker] RPC 'append_result_and_get_count' SUCCEEDED for job ${jobId}. New count is: ${newCount}`);
 }
 
+function parseStorageURL(url: string) {
+    const u = new URL(url);
+    const pathSegments = u.pathname.split('/');
+    const objectSegmentIndex = pathSegments.indexOf('object');
+    if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) {
+        throw new Error(`Invalid Supabase storage URL format: ${url}`);
+    }
+    const bucket = pathSegments[objectSegmentIndex + 2];
+    const path = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
+    return { bucket, path };
+}
+
+async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
+    const { bucket, path } = parseStorageURL(publicUrl);
+    const { data, error } = await supabase.storage.from(bucket).download(path);
+    if (error) throw new Error(`Failed to download from Supabase storage (${path}): ${error.message}`);
+    return data;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -91,9 +110,7 @@ serve(async (req) => {
         throw new Error(`Could not retrieve source image path from metadata for job ${aggregation_job_id}`);
     }
 
-    const imageResponse = await fetch(sourceImageUrl);
-    if (!imageResponse.ok) throw new Error(`Failed to download source image from ${sourceImageUrl}`);
-    const imageBlob = await imageResponse.blob();
+    const imageBlob = await downloadFromSupabase(supabase, sourceImageUrl);
     const imageBuffer = await imageBlob.arrayBuffer();
     const image_base64 = encodeBase64(imageBuffer);
     const mime_type = imageBlob.type || 'image/png';
