@@ -91,15 +91,15 @@ const ReportDetailModal = ({ report, isOpen, onClose }: { report: ReportDetail |
           <DialogTitle>Forensic Analysis Report</DialogTitle>
           <DialogDescription>Job ID: {report.job_id}</DialogDescription>
         </DialogHeader>
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-6 py-4 flex-1 overflow-hidden">
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 py-4 flex-1 overflow-hidden">
           {/* Column 1: Inputs */}
-          <div className="md:col-span-1 space-y-4 flex flex-col">
+          <div className="lg:col-span-1 space-y-4 flex flex-col">
             <ImageCard title="Source Person" url={report.source_person_image_url} />
             <ImageCard title="Reference Garment" url={report.source_garment_image_url} />
           </div>
           
           {/* Column 2: Analysis */}
-          <div className="md:col-span-3 h-full overflow-hidden">
+          <div className="lg:col-span-3 h-full overflow-hidden">
             <ScrollArea className="h-full pr-4">
               {reportData ? (
                 <div className="space-y-4">
@@ -170,8 +170,11 @@ const ReportDetailModal = ({ report, isOpen, onClose }: { report: ReportDetail |
           </div>
 
           {/* Column 3: Output */}
-          <div className="md:col-span-1 space-y-4 flex flex-col">
-            <ImageCard title="Final Result" url={report.final_image_url} />
+          <div className="lg:col-span-1 flex flex-col space-y-1">
+            <h3 className="text-sm font-semibold text-center text-muted-foreground">Final Result</h3>
+            <div className="flex-1 bg-muted rounded-md flex items-center justify-center overflow-hidden">
+              <SecureImageDisplay imageUrl={report.final_image_url} alt="Final Result" />
+            </div>
           </div>
         </div>
         <DialogFooter>
