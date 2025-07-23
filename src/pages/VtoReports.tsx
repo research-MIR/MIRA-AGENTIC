@@ -17,12 +17,10 @@ interface QaReport {
   vto_pack_job_id: string;
   created_at: string;
   comparative_report: {
-    report?: {
-      overall_pass: boolean;
-      failure_category: string | null;
-      pose_and_body_analysis?: {
-          pose_changed: boolean;
-      }
+    overall_pass: boolean;
+    failure_category: string | null;
+    pose_and_body_analysis?: {
+        pose_changed: boolean;
     }
   } | null;
 }
@@ -87,7 +85,7 @@ const VtoReports = () => {
       const summary = packs.get(report.vto_pack_job_id)!;
       summary.total_jobs++;
       
-      const reportData = report.comparative_report?.report;
+      const reportData = report.comparative_report;
 
       if (reportData?.overall_pass) {
         if (reportData.pose_and_body_analysis?.pose_changed) {

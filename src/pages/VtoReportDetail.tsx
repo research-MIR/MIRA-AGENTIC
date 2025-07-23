@@ -27,15 +27,13 @@ interface ReportDetail {
   status: string;
   comparative_report: {
     thinking?: string;
-    report?: {
-      overall_pass: boolean;
-      confidence_score: number;
-      failure_category: string | null;
-      mismatch_reason: string | null;
-      garment_comparison: any;
-      pose_and_body_analysis: any;
-      quality_analysis: any;
-    }
+    overall_pass: boolean;
+    confidence_score: number;
+    failure_category: string | null;
+    mismatch_reason: string | null;
+    garment_comparison: any;
+    pose_and_body_analysis: any;
+    quality_analysis: any;
   } | null;
   source_person_image_url: string;
   source_garment_image_url: string;
@@ -68,7 +66,7 @@ const BooleanIndicator = ({ value, label }: { value: boolean, label: string }) =
 const ReportDetailModal = ({ report, isOpen, onClose }: { report: ReportDetail | null, isOpen: boolean, onClose: () => void }) => {
   if (!isOpen || !report) return null;
 
-  const reportData = report.comparative_report?.report;
+  const reportData = report.comparative_report;
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -231,8 +229,8 @@ const VtoReportDetail = () => {
     }
   };
 
-  const passedJobs = reportDetails?.filter(j => j.comparative_report?.report?.overall_pass) || [];
-  const failedJobs = reportDetails?.filter(j => !j.comparative_report?.report?.overall_pass) || [];
+  const passedJobs = reportDetails?.filter(j => j.comparative_report?.overall_pass) || [];
+  const failedJobs = reportDetails?.filter(j => !j.comparative_report?.overall_pass) || [];
 
   const renderJobGrid = (jobs: ReportDetail[]) => (
     <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
@@ -243,8 +241,8 @@ const VtoReportDetail = () => {
           onClick={() => setSelectedReport(job)}
         >
           <SecureImageDisplay imageUrl={job.final_image_url} alt={`Job ${job.job_id}`} className="w-full h-full object-cover rounded-md" />
-          <Badge variant={job.comparative_report?.report?.overall_pass ? 'default' : 'destructive'} className="absolute top-2 right-2">
-            {job.comparative_report?.report?.overall_pass ? 'PASS' : 'FAIL'}
+          <Badge variant={job.comparative_report?.overall_pass ? 'default' : 'destructive'} className="absolute top-2 right-2">
+            {job.comparative_report?.overall_pass ? 'PASS' : 'FAIL'}
           </Badge>
         </Card>
       ))}
