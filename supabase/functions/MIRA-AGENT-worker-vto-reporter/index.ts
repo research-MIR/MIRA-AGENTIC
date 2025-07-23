@@ -42,65 +42,63 @@ const garmentAnalysisPrompt = `You are a forensic fashion analyst AI. Your task 
 const comparativeAnalysisPrompt = `You are a meticulous, final-stage Quality Assurance inspector AI acting as a "Forensic Scientist". You will be given two JSON reports and three images: a SOURCE PERSON image, a REFERENCE GARMENT image, and a FINAL RESULT image.
 
 ### Your Mission:
-Your primary task is to perform a deep, quantitative analysis and produce a structured JSON report. Your own visual inspection is the final authority.
+Your primary task is to use the provided images to **visually verify and expand upon** the initial text-based analyses. The JSON reports are a starting point, but **your own visual inspection is the final authority**.
 
-### YOUR OUTPUT FORMAT
-Your entire response MUST be a single, valid JSON object with two top-level keys: "thinking" and "report".
-
-**1. The "thinking" Field:**
-- This is your scratchpad. Before you construct the final report, you MUST perform your detailed analytical process here. Write down your step-by-step reasoning, observations, and score justifications in this field as a single, multi-line string.
-
-**2. The "report" Field:**
-- This field will contain the final, structured JSON report. After completing your analysis in the "thinking" field, synthesize your findings into the structured report format specified in the schema below.
-
-### ANALYTICAL PROCESS (To be performed in the "thinking" field)
-
-1.  **Forensic Garment Comparison:** Visually compare the garment in the FINAL RESULT against the REFERENCE GARMENT.
-    -   **Color Fidelity:** How close is the color? (1-10 score)
-    -   **Texture Realism:** Does the material look authentic? (1-10 score)
-    -   **Pattern Accuracy:** Is the pattern correctly replicated in scale and detail? (1-10 score)
-    -   **Fit & Shape:** Does the generated garment have the correct silhouette and fit? (1-10 score)
-    -   **Detail Fidelity:** Identify key details (zippers, buttons, logos) from the reference. For each, determine if it was matched, simplified, altered, or is missing in the final result.
-2.  **Pose & Scene Integrity:** Compare the FINAL RESULT to the SOURCE PERSON.
-    -   **Pose Preservation:** How well was the original pose maintained? (1-10 score)
-    -   **Anatomical Correctness:** Are there any anatomical errors (mangled hands, distorted limbs)? (1-10 score)
-3.  **Synthesize Final Report:** Based on your analysis, construct the final JSON report.
+### Your Process:
+1.  **Forensic Garment Comparison:** Visually compare the garment in the FINAL RESULT image against the REFERENCE GARMENT image. This is your most critical task.
+    -   **Fidelity Check:** Is it the *exact same garment*? Scrutinize color fidelity, texture, material sheen, pattern scale and accuracy, and details like stitching, buttons, or logos.
+    -   **Note Discrepancies:** If it's not an exact match, your notes must be specific (e.g., "The generated jacket is a lighter shade of blue and is missing the reference's silver zipper pulls.").
+2.  **Pose & Scene Integrity:** Compare the FINAL RESULT image to the SOURCE PERSON image.
+    -   Has the pose been altered?
+    -   Has the body shape been unnaturally changed?
+    -   Is the lighting consistent?
+    -   Are there anatomical errors (mangled hands, distorted limbs, unnatural proportions)?
+3.  **Synthesize Final Report:** Based on your direct visual analysis, generate the final JSON report.
 
 ### CRITICAL: Decision Logic for "overall_pass"
+The "overall_pass" field should ONLY be 'false' if there are significant TECHNICAL FLAWS in the generation. A simple mismatch in garment type or a change in pose are NOT failure conditions on their own, but they MUST be noted.
 - **FAIL (overall_pass: false)** if:
-  - The body type is unnaturally altered (\`failure_category\`: "Body Distortion").
-  - There are severe anatomical errors (\`failure_category\`: "Anatomical Error").
-  - The lighting or blending is extremely poor (\`failure_category\`: "Quality Issue").
-- **PASS (overall_pass: true)** for all other cases, including garment mismatches or pose changes, which must be noted.
+  - The body type is unnaturally altered. If so, set \`failure_category\` to "Body Distortion".
+  - There are severe anatomical incorrectness issues (e.g., mangled hands, distorted limbs, unnatural proportions). If so, set \`failure_category\` to "Anatomical Error".
+  - The lighting or blending is extremely poor. If so, set \`failure_category\` to "Quality Issue".
+- **PASS (overall_pass: true)** if:
+  - The image is technically sound, even if the garment type is wrong or the pose has changed. These deviations must be noted in their respective sections.
 
-### JSON Schema for the "report" Field:
+### NEW RULE: Handling Generated Outfits
+It is common for the AI to generate a complete, plausible outfit even if the reference is only a single item (e.g., generating a matching top and shoes when the reference is a skirt). This is **correct and desirable creative behavior**.
+1.  Set \`generated_extra_garments\` to \`true\` if the final image contains significant, *separate* clothing items not present in the reference analysis.
+2.  If \`true\`, you MUST populate the \`extra_garments_list\` with a short description of each additional item (e.g., "matching top", "heeled shoes").
+3.  **IMPORTANT:** \`generated_extra_garments: true\` should NOT cause \`overall_pass\` to be \`false\`. It is a creative success, not a failure. Differentiate between generating a *different* garment (e.g., a dress instead of a skirt, which would make \`type_match: false\`) and generating *additional* garments.
+
+### JSON Schema (Your Output):
 {
   "overall_pass": "boolean",
   "confidence_score": "number",
   "failure_category": "string | null",
   "mismatch_reason": "string | null",
   "garment_comparison": {
-    "notes": "string",
-    "scores": {
-      "color_fidelity": "number",
-      "texture_realism": "number",
-      "pattern_accuracy": "number",
-      "fit_and_shape": "number"
-    },
-    "detail_fidelity": [
-      {
-        "detail_type": "string",
-        "status": "string",
-        "notes": "string | null"
-      }
-    ]
+    "type_match": "boolean",
+    "color_match": "boolean",
+    "pattern_match": "boolean",
+    "fit_match": "boolean",
+    "generated_extra_garments": "boolean",
+    "extra_garments_list": ["string"],
+    "notes": "string"
   },
   "pose_and_body_analysis": {
-    "notes": "string",
-    "scores": {
-      "pose_preservation": "number",
-      "anatomical_correctness": "number"
-    }
+    "original_pose_description": "string",
+    "original_camera_angle": { "shot_type": "string", "camera_elevation": "string", "camera_position": "string" },
+    "pose_changed": "boolean",
+    "camera_angle_changed": "boolean",
+    "body_type_changed": "boolean",
+    "affected_body_parts": ["string"],
+    "notes": "string"
+  },
+  "quality_analysis": {
+      "anatomical_correctness": "boolean",
+      "lighting_match": "boolean",
+      "blending_quality": "string",
+      "notes": "string | null"
   }
 }`;
 

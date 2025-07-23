@@ -108,7 +108,17 @@ const ReportDetailModal = ({ report, isOpen, onClose }: { report: ReportDetail |
                       <BooleanIndicator value={reportData.garment_comparison?.type_match} label="Type Match" />
                       <BooleanIndicator value={reportData.garment_comparison?.generated_extra_garments} label="Generated Extra Garments" />
                     </div>
-                    <p className="text-xs italic text-muted-foreground">{reportData.garment_comparison?.notes}</p>
+                    {reportData.garment_comparison?.extra_garments_list && reportData.garment_comparison.extra_garments_list.length > 0 && (
+                      <div>
+                        <h4 className="text-xs font-semibold mt-3 mb-1">Extra Garments Generated:</h4>
+                        <ul className="list-disc list-inside text-xs text-muted-foreground space-y-1">
+                          {reportData.garment_comparison.extra_garments_list.map((item: string, index: number) => (
+                            <li key={index}>{item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    <p className="text-xs italic text-muted-foreground pt-2 border-t border-border/50">{reportData.garment_comparison?.notes}</p>
                   </AccordionContent>
                 </AccordionItem>
                 <AccordionItem value="pose">
