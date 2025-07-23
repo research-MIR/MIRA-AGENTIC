@@ -63,8 +63,8 @@ serve(async (req) => {
     if (!inpaintedPatchResponse.ok) throw new Error(`Failed to download inpainted patch: ${inpaintedPatchResponse.statusText}`);
 
     const [sourceImage, inpaintedPatchImg] = await Promise.all([
-        ISImage.decode(await sourceBlob.arrayBuffer()),
-        ISImage.decode(await inpaintedPatchResponse.arrayBuffer())
+        Image.decode(await sourceBlob.arrayBuffer()),
+        Image.decode(await inpaintedPatchResponse.arrayBuffer())
     ]);
 
     console.log(`${logPrefix} Compositing final image...`);
