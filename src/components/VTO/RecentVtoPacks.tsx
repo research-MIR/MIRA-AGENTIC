@@ -12,6 +12,7 @@ import { RealtimeChannel } from '@supabase/supabase-js';
 import { Button } from '../ui/button';
 import { showError, showLoading, dismissToast, showSuccess } from '@/utils/toast';
 import JSZip from 'jszip';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface VtoPackSummary {
   pack_id: string;
@@ -50,22 +51,47 @@ const VtoPackDetailView = ({ packId, isOpen }: { packId: string, isOpen: boolean
 
   return (
     <div className="flex flex-wrap gap-2">
-      {childJobs?.map(job => (
-        <div 
-          key={job.id} 
-          className="w-32 h-32 relative group cursor-pointer"
-          onClick={() => job.final_image_url && showImage({ images: [{ url: job.final_image_url }], currentIndex: 0 })}
-        >
-          <SecureImageDisplay 
-            imageUrl={job.final_image_url || job.source_person_image_url || null} 
-            alt="Job result" 
-            className="w-full h-full object-cover rounded-md"
-          />
-          {job.status === 'complete' && <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity" />}
-          {job.status === 'failed' && <div className="absolute inset-0 bg-destructive/70 flex items-center justify-center rounded-md"><XCircle className="h-8 w-8 text-destructive-foreground" /></div>}
-          {(job.status === 'processing' || job.status === 'queued') && <div className="absolute inset-0 bg-black/70 flex items-center justify-center rounded-md"><Loader2 className="h-8 w-8 animate-spin text-white" /></div>}
-        </div>
-      ))}
+      {childJobs?.map(job => {
+        const isFailed = job.status === 'failed' || job.status === 'permanently_failed';
+        const inProgressStatuses = ['processing', 'queued', 'segmenting', 'delegated', 'compositing', 'awaiting_fix', 'fixing', 'pending'];
+        const isInProgress = inProgressStatuses.includes(job.status);
+
+        return (
+          <div 
+            key={job.id} 
+            className="w-32 h-32 relative group cursor-pointer"
+            onClick={() => job.final_image_url && showImage({ images: [{ url: job.final_image_url }], currentIndex: 0 })}
+          >
+            <SecureImageDisplay 
+              imageUrl={job.final_image_url || job.source_person_image_url || null} 
+              alt="Job result" 
+              className="w-full h-full object-cover rounded-md"
+            />
+            {job.status === 'complete' && <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity" />}
+            {isFailed && (
+              job.final_image_url ? (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div className="absolute inset-0 bg-yellow-500/70 flex items-center justify-center rounded-md">
+                        <AlertTriangle className="h-8 w-8 text-white" />
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Job failed quality checks but produced an image.</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              ) : (
+                <div className="absolute inset-0 bg-destructive/70 flex items-center justify-center rounded-md">
+                  <XCircle className="h-8 w-8 text-destructive-foreground" />
+                </div>
+              )
+            )}
+            {isInProgress && <div className="absolute inset-0 bg-black/70 flex items-center justify-center rounded-md"><Loader2 className="h-8 w-8 animate-spin text-white" /></div>}
+          </div>
+        )
+      })}
     </div>
   );
 };
