@@ -56,12 +56,13 @@ Your primary task is to use the provided images to **visually verify and expand 
 3.  **Synthesize Final Report:** Based on your direct visual analysis, generate the final JSON report.
 
 ### CRITICAL: Decision Logic for "overall_pass"
-The "overall_pass" field should ONLY be 'false' if there are significant TECHNICAL FLAWS in the generation. A simple mismatch in garment type is NOT a failure condition on its own, but it MUST be noted.
+The "overall_pass" field should ONLY be 'false' if there are significant TECHNICAL FLAWS in the generation. A simple mismatch in garment type or a change in pose are NOT failure conditions on their own, but they MUST be noted.
 - **FAIL (overall_pass: false)** if:
-  - The pose is significantly changed or distorted. If so, set \`failure_category\` to "Pose Alteration".
   - The body type is unnaturally altered. If so, set \`failure_category\` to "Body Distortion".
   - There are severe anatomical incorrectness issues (e.g., mangled hands, distorted limbs, unnatural proportions). If so, set \`failure_category\` to "Anatomical Error".
   - The lighting or blending is extremely poor. If so, set \`failure_category\` to "Quality Issue".
+- **PASS (overall_pass: true)** if:
+  - The image is technically sound, even if the garment type is wrong or the pose has changed. These deviations must be noted in their respective sections.
 
 ### NEW RULE: Handling Generated Outfits
 It is common for the AI to generate a complete, plausible outfit even if the reference is only a single item (e.g., generating pants and shoes when the reference is a shirt). This is **correct and desirable behavior**. Your task is to detect this.

@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
 import { useLanguage } from "@/context/LanguageContext";
-import { BarChart, CheckCircle, XCircle, Loader2, AlertTriangle } from "lucide-react";
+import { BarChart, CheckCircle, XCircle, Loader2, AlertTriangle, UserCheck2 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -17,6 +17,9 @@ interface QaReport {
   comparative_report: {
     overall_pass: boolean;
     failure_category: string | null;
+    pose_and_body_analysis?: {
+        pose_changed: boolean;
+    }
   } | null;
 }
 
@@ -25,8 +28,8 @@ interface PackSummary {
   created_at: string;
   total_jobs: number;
   passed_jobs: number;
+  passed_with_pose_change: number;
   failed_jobs: number;
-  pose_failures: number;
   failure_summary: Record<string, number>;
 }
 
@@ -71,22 +74,23 @@ const VtoReports = () => {
           created_at: report.created_at,
           total_jobs: 0,
           passed_jobs: 0,
+          passed_with_pose_change: 0,
           failed_jobs: 0,
-          pose_failures: 0,
           failure_summary: {},
         });
       }
       const summary = packs.get(report.vto_pack_job_id)!;
       summary.total_jobs++;
       if (report.comparative_report?.overall_pass) {
-        summary.passed_jobs++;
+        if (report.comparative_report.pose_and_body_analysis?.pose_changed) {
+            summary.passed_with_pose_change++;
+        } else {
+            summary.passed_jobs++;
+        }
       } else {
         summary.failed_jobs++;
         const reason = report.comparative_report?.failure_category || "Unknown";
         summary.failure_summary[reason] = (summary.failure_summary[reason] || 0) + 1;
-        if (reason === "Pose Alteration" || reason === "Body Distortion" || reason === "Anatomical Error") {
-            summary.pose_failures++;
-        }
       }
     }
     return Array.from(packs.values()).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
@@ -108,11 +112,6 @@ const VtoReports = () => {
       </header>
       <div className="space-y-4">
         {packSummaries.map(report => {
-          const otherFailures = { ...report.failure_summary };
-          delete otherFailures['Pose Alteration'];
-          delete otherFailures['Body Distortion'];
-          delete otherFailures['Anatomical Error'];
-
           return (
             <Card key={report.pack_id}>
               <CardHeader>
@@ -132,25 +131,23 @@ const VtoReports = () => {
                       <span className="text-2xl font-bold">{report.passed_jobs}</span>
                       <span>Passed</span>
                     </div>
+                    <div className="flex items-center gap-2 text-yellow-500">
+                      <UserCheck2 className="h-5 w-5" />
+                      <span className="text-2xl font-bold">{report.passed_with_pose_change}</span>
+                      <span>Passed (Pose Change)</span>
+                    </div>
                     <div className="flex items-center gap-2 text-destructive">
                       <XCircle className="h-5 w-5" />
                       <span className="text-2xl font-bold">{report.failed_jobs}</span>
                       <span>Failed</span>
                     </div>
-                    {report.pose_failures > 0 && (
-                      <div className="flex items-center gap-2 text-yellow-500">
-                        <AlertTriangle className="h-5 w-5" />
-                        <span className="text-2xl font-bold">{report.pose_failures}</span>
-                        <span>Pose/Body Failures</span>
-                      </div>
-                    )}
                   </div>
                 </div>
                 <div className="space-y-2">
                   <h3 className="font-semibold text-sm">{t('failureReasons')}</h3>
-                  {Object.keys(otherFailures).length > 0 ? (
+                  {Object.keys(report.failure_summary).length > 0 ? (
                     <div className="text-xs text-muted-foreground space-y-1">
-                      {Object.entries(otherFailures).map(([reason, count]) => (
+                      {Object.entries(report.failure_summary).map(([reason, count]) => (
                         <div key={reason} className="flex justify-between">
                           <span>{reason}</span>
                           <span>{count}</span>
@@ -159,7 +156,7 @@ const VtoReports = () => {
                     </div>
                   ) : (
                     <div className="h-24 bg-muted rounded-md flex items-center justify-center text-muted-foreground">
-                      <p>No other failures recorded.</p>
+                      <p>No failures recorded.</p>
                     </div>
                   )}
                 </div>
