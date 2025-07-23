@@ -13,10 +13,53 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
 
-// Helper function to decode and re-encode any image into a standard PNG buffer
+// --- Instrumentation Helpers ---
+const logStep = (logPrefix: string, step: string, extra: Record<string, unknown> = {}) => {
+  console.log(JSON.stringify({ ts: new Date().toISOString(), prefix: logPrefix, step, ...extra }));
+};
+
+const probeBuffer = async (logPrefix: string, name: string, ab: ArrayBuffer) => {
+  const u8 = new Uint8Array(ab);
+  const head = Array.from(u8.slice(0, 16));
+  const len = u8.byteLength;
+  const hashBuf = await crypto.subtle.digest("SHA-256", ab);
+  const sha256 = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2,"0")).join("");
+  logStep(logPrefix, `${name}:buffer_probed`, { len, head, sha256 });
+  return { u8, len, head, sha256 };
+};
+
+const safeDecode = async (logPrefix: string, label: string, ab: ArrayBuffer) => {
+  try {
+    const img = await Image.decode(ab);
+    logStep(logPrefix, `${label}:decode_success`, { width: img.width, height: img.height });
+    return img;
+  } catch (e) {
+    logStep(logPrefix, `${label}:decode_error`, { message: (e as Error).message, stack: (e as Error).stack });
+    throw e;
+  }
+};
+
+// --- Core Logic Helpers ---
+async function uploadBufferToStorage(supabase: SupabaseClient, buffer: Uint8Array | null, userId: string, filename: string): Promise<string | null> {
+    if (!buffer) return null;
+    const filePath = `${userId}/vto-debug/${Date.now()}-${filename}`;
+    const { error } = await supabase.storage
+      .from(GENERATED_IMAGES_BUCKET)
+      .upload(filePath, buffer, { contentType: 'image/png', upsert: true });
+    if (error) {
+        console.error(`Storage upload failed for ${filename}: ${error.message}`);
+        throw new Error(`Storage upload failed for ${filename}: ${error.message}`);
+    }
+    const { data: { publicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
+    return publicUrl;
+}
+
 async function standardizeImageBuffer(buffer: Uint8Array): Promise<Uint8Array> {
-    const image = await Image.decode(buffer);
-    return await image.encode(0); // 0 for PNG
+    const image = await loadImage(buffer);
+    const canvas = createCanvas(image.width(), image.height());
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(image, 0, 0);
+    return canvas.toBuffer('image/png');
 }
 
 serve(async (req) => {
@@ -24,102 +67,222 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  const { job_id } = await req.json();
-  if (!job_id) throw new Error("job_id is required.");
+  const { job_id, final_image_url, job_type = 'bitstudio' } = await req.json();
+  if (!job_id || !final_image_url) throw new Error("job_id and final_image_url are required.");
   
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-  console.log(`[Compositor-Inpainting][${job_id}] Job started.`);
+  const logPrefix = `[Compositor-Inpaint][${job_id}]`;
+  logStep(logPrefix, "job_started", { type: job_type });
+
+  const tableName = job_type === 'bitstudio' ? 'mira-agent-bitstudio-jobs' : 'mira-agent-inpainting-jobs';
+  let problematicBuffer: ArrayBuffer | null = null;
 
   try {
     const { data: job, error: fetchError } = await supabase
-      .from('mira-agent-inpainting-jobs')
-      .select('final_result, metadata, user_id')
+      .from(tableName)
+      .select('metadata, user_id')
       .eq('id', job_id)
       .single();
 
     if (fetchError) throw fetchError;
-    if (!job.final_result?.publicUrl) throw new Error("Job is missing the final_result URL (inpainted crop).");
-
+    
     const metadata = job.metadata || {};
-    if (!metadata.full_source_image_base64 || !metadata.bbox || !metadata.cropped_dilated_mask_base64) {
-      throw new Error("Job is missing essential metadata (source image, bbox, or mask) for compositing.");
+    const { full_source_image_url, bbox, cropped_dilated_mask_base64 } = metadata;
+
+    if (!full_source_image_url || !bbox) {
+        logStep(logPrefix, "legacy_job_skipped", { reason: "Missing full_source_image_url or bbox in metadata." });
+        await supabase.from(tableName).update({ status: 'complete', final_image_url: final_image_url }).eq('id', job_id);
+        return new Response(JSON.stringify({ success: true, message: "Legacy job finalized without composition." }), { headers: corsHeaders });
     }
 
-    // Standardize all incoming images to PNG before processing
-    const fullSourceBuffer = await standardizeImageBuffer(decodeBase64(metadata.full_source_image_base64));
-    const fullSourceImage = await loadImage(fullSourceBuffer);
+    logStep(logPrefix, "assets_download_start");
+    const [sourceBlob, inpaintedPatchResponse] = await Promise.all([
+        downloadFromSupabase(supabase, full_source_image_url),
+        fetch(final_image_url)
+    ]);
 
-    const inpaintedCropResponse = await fetch(job.final_result.publicUrl);
-    if (!inpaintedCropResponse.ok) throw new Error(`Failed to download inpainted crop: ${inpaintedCropResponse.statusText}`);
-    const inpaintedCropArrayBuffer = await inpaintedCropResponse.arrayBuffer();
-    const standardizedInpaintedCropBuffer = await standardizeImageBuffer(new Uint8Array(inpaintedCropArrayBuffer));
-    const inpaintedCropImage = await loadImage(standardizedInpaintedCropBuffer);
-
-    const croppedMaskBuffer = await standardizeImageBuffer(decodeBase64(metadata.cropped_dilated_mask_base64));
-    const croppedMaskImage = await loadImage(croppedMaskBuffer);
-
-    // Main canvas for the final image
-    const canvas = createCanvas(fullSourceImage.width(), fullSourceImage.height());
-    const ctx = canvas.getContext('2d');
-
-    // 1. Draw the original image as the base layer
-    ctx.drawImage(fullSourceImage, 0, 0);
-
-    // 2. Create a temporary canvas for the feathered crop
-    const featheredCropCanvas = createCanvas(metadata.bbox.width, metadata.bbox.height);
-    const featheredCtx = featheredCropCanvas.getContext('2d');
-
-    // 3. Draw the inpainted crop onto the temp canvas
-    featheredCtx.drawImage(inpaintedCropImage, 0, 0, metadata.bbox.width, metadata.bbox.height);
-
-    // 4. Apply the mask with feathering
-    featheredCtx.globalCompositeOperation = 'destination-in';
-
-    // 5. Feather the mask by blurring it
-    const featherAmount = Math.max(5, Math.round(metadata.bbox.width * 0.05)); // Feather by 5% of width, with a minimum of 5px
-    featheredCtx.filter = `blur(${featherAmount}px)`;
-
-    // 6. Draw the mask onto the temp canvas. This will use the blur filter and the composite operation
-    // to create a feathered alpha channel on the inpainted crop.
-    featheredCtx.drawImage(croppedMaskImage, 0, 0, metadata.bbox.width, metadata.bbox.height);
-
-    // 7. Reset composite operation and filter for the main canvas
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.filter = 'none'; // Reset filter on the main context just in case
-
-    // 8. Draw the feathered crop onto the main canvas at the correct position
-    ctx.drawImage(featheredCropCanvas, metadata.bbox.x, metadata.bbox.y);
+    if (!inpaintedPatchResponse.ok) throw new Error(`Failed to download inpainted patch: ${inpaintedPatchResponse.statusText}`);
     
-    const finalImageBuffer = canvas.toBuffer('image/png');
-    const finalFilePath = `${job.user_id}/inpainting-final/${Date.now()}_final.png`;
-    
-    const { error: uploadError } = await supabase.storage
-      .from(GENERATED_IMAGES_BUCKET)
-      .upload(finalFilePath, finalImageBuffer, { contentType: 'image/png', upsert: true });
-    if (uploadError) throw uploadError;
-
-    const { data: { publicUrl: finalPublicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(finalFilePath);
-
-    await supabase.from('mira-agent-inpainting-jobs')
-      .update({ 
-          status: 'complete',
-          final_result: { publicUrl: finalPublicUrl, storagePath: finalFilePath },
-          metadata: { ...metadata, full_source_image_base64: null, cropped_dilated_mask_base64: null } // Clear large data
-      })
-      .eq('id', job_id);
-
-    console.log(`[Compositor-Inpainting][${job_id}] Compositing complete. Final URL: ${finalPublicUrl}`);
-    return new Response(JSON.stringify({ success: true, finalImageUrl: finalPublicUrl }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 200,
+    logStep(logPrefix, "patch_headers_received", {
+        contentType: inpaintedPatchResponse.headers.get('content-type'),
+        contentLength: inpaintedPatchResponse.headers.get('content-length')
     });
 
+    const patchBuffer = await inpaintedPatchResponse.arrayBuffer();
+    problematicBuffer = patchBuffer;
+    await probeBuffer(logPrefix, "patch_raw", patchBuffer);
+
+    const sourceBuffer = await sourceBlob.arrayBuffer();
+    await probeBuffer(logPrefix, "source_raw", sourceBuffer);
+
+    logStep(logPrefix, "standardization_start");
+    const standardizedPatchBuffer = await standardizeImageBuffer(new Uint8Array(patchBuffer));
+    await probeBuffer(logPrefix, "patch_standardized", standardizedPatchBuffer);
+    logStep(logPrefix, "standardization_complete");
+
+    let [sourceImage, inpaintedPatchImg] = await Promise.all([
+        safeDecode(logPrefix, "source", sourceBuffer),
+        safeDecode(logPrefix, "patch", standardizedPatchBuffer)
+    ]);
+
+    const croppedMaskBuffer = await standardizeImageBuffer(decodeBase64(cropped_dilated_mask_base64));
+    const croppedMaskImage = await loadImage(croppedMaskBuffer);
+
+    // --- START OF NEW DEBUG ASSET GENERATION ---
+    logStep(logPrefix, "debug_asset_generation_start");
+    const featherAmount = Math.max(5, Math.round(bbox.width * 0.05));
+
+    // Create and upload the un-blurred compositing mask
+    const finalCompositingMaskCanvas = createCanvas(sourceImage.width, sourceImage.height);
+    const finalCompositingMaskCtx = finalCompositingMaskCanvas.getContext('2d');
+    finalCompositingMaskCtx.drawImage(croppedMaskImage, bbox.x, bbox.y, bbox.width, bbox.height);
+    const finalCompositingMaskBuffer = finalCompositingMaskCanvas.toBuffer('image/png');
+    const final_compositing_mask_url = await uploadBufferToStorage(supabase, finalCompositingMaskBuffer, job.user_id, 'final_compositing_mask.png');
+
+    // Create and upload the blurred/feathered mask
+    const featheredMaskCanvas = createCanvas(sourceImage.width, sourceImage.height);
+    const featheredMaskCtx = featheredMaskCanvas.getContext('2d');
+    featheredMaskCtx.filter = `blur(${featherAmount}px)`;
+    featheredMaskCtx.drawImage(croppedMaskImage, bbox.x, bbox.y, bbox.width, bbox.height);
+    const featheredMaskBuffer = featheredMaskCanvas.toBuffer('image/png');
+    const feathered_mask_url = await uploadBufferToStorage(supabase, featheredMaskBuffer, job.user_id, 'feathered_mask.png');
+    
+    const updatedDebugAssets = {
+        ...metadata.debug_assets,
+        final_compositing_mask_url,
+        feathered_mask_url
+    };
+    // --- END OF NEW DEBUG ASSET GENERATION ---
+
+    logStep(logPrefix, "compositing_start_memory_efficient");
+
+    const sourceCropCanvas = createCanvas(bbox.width, bbox.height);
+    const sourceCropCtx = sourceCropCanvas.getContext('2d');
+    sourceCropCtx.drawImage(await loadImage(sourceImage.bitmap.data), bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, bbox.width, bbox.height);
+    logStep(logPrefix, "created_source_crop", { width: bbox.width, height: bbox.height });
+
+    const blendedPatchCanvas = createCanvas(bbox.width, bbox.height);
+    const blendedCtx = blendedPatchCanvas.getContext('2d');
+    blendedCtx.drawImage(sourceCropCanvas, 0, 0);
+    
+    const featheredPatchCanvas = createCanvas(bbox.width, bbox.height);
+    const featheredCtx = featheredPatchCanvas.getContext('2d');
+    featheredCtx.drawImage(await loadImage(inpaintedPatchImg.bitmap.data), 0, 0, bbox.width, bbox.height);
+
+    if (cropped_dilated_mask_base64) {
+        featheredCtx.globalCompositeOperation = 'destination-in';
+        featheredCtx.filter = `blur(${featherAmount}px)`;
+        featheredCtx.drawImage(croppedMaskImage, 0, 0, bbox.width, bbox.height);
+    }
+    
+    blendedCtx.drawImage(featheredPatchCanvas, 0, 0);
+    logStep(logPrefix, "composited_small_buffers");
+
+    const finalCanvas = createCanvas(sourceImage.width, sourceImage.height);
+    const finalCtx = finalCanvas.getContext('2d');
+    finalCtx.drawImage(await loadImage(sourceImage.bitmap.data), 0, 0);
+    finalCtx.drawImage(blendedPatchCanvas, bbox.x, bbox.y);
+    logStep(logPrefix, "final_image_reassembled");
+
+    const finalImageData = finalCtx.getImageData(0, 0, finalCanvas.width, finalCanvas.height);
+    const finalImage = new Image(finalCanvas.width, finalCanvas.height, finalImageData.data);
+    const finalImageBuffer = await finalImage.encode(0.75, 1); // Encode as JPEG with 75% quality
+    await probeBuffer(logPrefix, "final_encoded", finalImageBuffer);
+    
+    const finalFilePath = `${job.user_id}/vto-final/${Date.now()}_final_composite.jpeg`;
+    await uploadBufferToStorage(supabase, finalImageBuffer, job.user_id, 'final_composite.jpeg');
+    const { data: { publicUrl: finalPublicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(finalFilePath);
+    logStep(logPrefix, "composition_complete", { finalUrl: finalPublicUrl });
+
+    let verificationResult = null;
+    if (job.metadata?.reference_image_url) {
+        logStep(logPrefix, "verification_start");
+        const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-verify-garment-match', {
+            body: { original_garment_url: job.metadata.reference_image_url, final_generated_url: finalPublicUrl }
+        });
+        if (error) {
+            logStep(logPrefix, "verification_error", { error: error.message });
+            verificationResult = { error: error.message, is_match: false };
+        } else {
+            verificationResult = data;
+        }
+        logStep(logPrefix, "verification_complete", { is_match: verificationResult?.is_match });
+    }
+
+    const finalMetadata = { ...job.metadata, verification_result: verificationResult, debug_assets: updatedDebugAssets };
+
+    if (verificationResult && verificationResult.is_match === false) {
+        logStep(logPrefix, "qa_failed", { reason: verificationResult.mismatch_reason });
+        const qaHistory = job.metadata?.qa_history || [];
+        const newQaReportObject = { timestamp: new Date().toISOString(), report: verificationResult, failed_image_url: finalPublicUrl };
+        await supabase.from(tableName).update({ status: 'awaiting_fix', metadata: { ...finalMetadata, qa_history: [...qaHistory, newQaReportObject] } }).eq('id', job_id);
+        invokeNextStep(supabase, 'MIRA-AGENT-fixer-orchestrator', { job_id, qa_report_object: newQaReportObject });
+    } else {
+        logStep(logPrefix, "qa_passed_or_skipped");
+        const updatePayload: any = { status: 'complete', final_image_url: finalPublicUrl, metadata: finalMetadata };
+        if (tableName === 'mira-agent-inpainting-jobs') {
+            updatePayload.final_result = { publicUrl: finalPublicUrl };
+            delete updatePayload.final_image_url;
+        }
+        await supabase.from(tableName).update(updatePayload).eq('id', job_id);
+    }
+
+    logStep(logPrefix, "job_finished_successfully");
+    return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
+
   } catch (error) {
-    console.error(`[Compositor-Inpainting][${job_id}] Error:`, error);
-    await supabase.from('mira-agent-inpainting-jobs').update({ status: 'failed', error_message: `Compositor failed: ${error.message}` }).eq('id', job_id);
+    logStep(logPrefix, "job_failed", { error: error.message, stack: error.stack });
+    if (problematicBuffer) {
+        try {
+            const debugPath = await uploadBufferToStorage(supabase, new Uint8Array(problematicBuffer), job_id, 'problematic_patch_buffer.bin');
+            logStep(logPrefix, "panic_dump_success", { debugPath });
+            await supabase.from(tableName).update({ status: 'failed', error_message: `Compositor failed: ${error.message}. Debug file: ${debugPath}` }).eq('id', job_id);
+        } catch (dumpError) {
+            logStep(logPrefix, "panic_dump_failed", { error: dumpError.message });
+            await supabase.from(tableName).update({ status: 'failed', error_message: `Compositor failed: ${error.message}. Panic dump also failed.` }).eq('id', job_id);
+        }
+    } else {
+        await supabase.from(tableName).update({ status: 'failed', error_message: `Compositor failed: ${error.message}` }).eq('id', job_id);
+    }
+    
+    const { data: failedJob } = await supabase.from(tableName).select('metadata').eq('id', job_id).single();
+    if (failedJob?.metadata?.batch_pair_job_id) {
+        logStep(logPrefix, "propagating_failure", { parentJobId: failedJob.metadata.batch_pair_job_id });
+        await supabase.from('mira-agent-batch-inpaint-pair-jobs')
+            .update({ status: 'failed', error_message: `Compositor failed: ${error.message}` })
+            .eq('id', failedJob.metadata.batch_pair_job_id);
+    }
+
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,
     });
   }
 });
+
+async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
+    const url = new URL(publicUrl);
+    const pathSegments = url.pathname.split('/');
+    const publicSegmentIndex = pathSegments.indexOf('public');
+    if (publicSegmentIndex === -1 || publicSegmentIndex + 1 >= pathSegments.length) {
+        throw new Error(`Could not parse bucket name from URL: ${publicUrl}`);
+    }
+    const bucketName = pathSegments[publicSegmentIndex + 1];
+    const filePath = decodeURIComponent(pathSegments.slice(publicSegmentIndex + 2).join('/'));
+    if (!bucketName || !filePath) {
+        throw new Error(`Could not parse bucket or path from Supabase URL: ${publicUrl}`);
+    }
+    const { data, error } = await supabase.storage.from(bucketName).download(filePath);
+    if (error) {
+        throw new Error(`Failed to download from Supabase storage (${filePath}): ${error.message}`);
+    }
+    return data;
+}
+
+function invokeNextStep(supabase: SupabaseClient, functionName: string, payload: object) {
+  supabase.functions.invoke(functionName, {
+    body: payload
+  }).catch((err)=>{
+    console.error(`[invokeNextStep] Error invoking ${functionName}:`, err);
+  });
+}
