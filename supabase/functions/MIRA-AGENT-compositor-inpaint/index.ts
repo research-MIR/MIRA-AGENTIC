@@ -1,7 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { createCanvas, loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
-import { Image } from 'https://deno.land/x/imagescript@1.2.15/mod.ts';
 import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const corsHeaders = {
@@ -67,12 +66,6 @@ serve(async (req) => {
 
     if (!inpaintedPatchResponse.ok) throw new Error(`Failed to download inpainted patch: ${inpaintedPatchResponse.statusText}`);
 
-    // --- Memory Optimization: Decode sequentially ---
-    console.log(`${logPrefix} Decoding patch image...`);
-    let inpaintedPatchImg = await Image.decode(await inpaintedPatchResponse.arrayBuffer());
-    console.log(`${logPrefix} Decoding source image...`);
-    let sourceImage = await Image.decode(await sourceBlob.arrayBuffer());
-
     // --- Generate and Upload New Debug Assets ---
     let final_compositing_mask_url: string | null = null;
     let feathered_mask_url: string | null = null;
@@ -95,58 +88,33 @@ serve(async (req) => {
 
     console.log(`${logPrefix} Compositing final image...`);
     
-    // --- Memory Optimization: In-place compositing ---
-    const src = sourceImage;
-    const patch = inpaintedPatchImg;
-    const { x, y } = bbox;
+    // --- Refactored Compositing Logic using deno-canvas ---
+    const sourceImage = await loadImage(new Uint8Array(await sourceBlob.arrayBuffer()));
+    const inpaintedPatchImg = await loadImage(new Uint8Array(await inpaintedPatchResponse.arrayBuffer()));
+    console.log(`${logPrefix} Decoded images. Source: ${sourceImage.width()}x${sourceImage.height()}, Patch: ${inpaintedPatchImg.width()}x${inpaintedPatchImg.height()}`);
 
-    // --- SAFETY CHECK ---
-    if (!patch || !patch.bitmap || !patch.bitmap.data) {
-        throw new Error("Failed to decode the inpainted patch image. It may be corrupted or in an unsupported format.");
-    }
-    if (!src || !src.bitmap || !src.bitmap.data) {
-        throw new Error("Failed to decode the source image. It may be corrupted or in an unsupported format.");
-    }
-    // --- END SAFETY CHECK ---
+    const canvas = createCanvas(sourceImage.width(), sourceImage.height());
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(sourceImage, 0, 0);
 
-    if (x + patch.width > src.width || y + patch.height > src.height) {
-        throw new Error("Patch is outside the bounds of the source image.");
-    }
-
-    const srcData = src.bitmap.data;
-    const patchData = patch.bitmap.data;
-    const srcW = src.width;
-    const patchW = patch.width;
-    const patchH = patch.height;
-
-    for (let py = 0; py < patchH; py++) {
-        const srcRowStart = ((y + py) * srcW + x) * 4;
-        const patchRowStart = (py * patchW) * 4;
-        for (let px = 0; px < patchW; px++) {
-            const sIdx = srcRowStart + px * 4;
-            const pIdx = patchRowStart + px * 4;
-            const pa = patchData[pIdx + 3];
-            if (pa === 0) continue;
-            if (pa === 255) {
-                srcData[sIdx] = patchData[pIdx];
-                srcData[sIdx + 1] = patchData[pIdx + 1];
-                srcData[sIdx + 2] = patchData[pIdx + 2];
-                srcData[sIdx + 3] = 255;
-            } else {
-                const invA = 255 - pa;
-                srcData[sIdx] = (patchData[pIdx] * pa + srcData[sIdx] * invA) / 255;
-                srcData[sIdx + 1] = (patchData[pIdx + 1] * pa + srcData[sIdx + 1] * invA) / 255;
-                srcData[sIdx + 2] = (patchData[pIdx + 2] * pa + srcData[sIdx + 2] * invA) / 255;
-                srcData[sIdx + 3] = Math.min(255, pa + srcData[sIdx + 3] * invA / 255);
-            }
-        }
-    }
+    const featheredCropCanvas = createCanvas(bbox.width, bbox.height);
+    const featheredCtx = featheredCropCanvas.getContext('2d');
+    featheredCtx.drawImage(inpaintedPatchImg, 0, 0, bbox.width, bbox.height);
     
-    // --- Memory Optimization: Free patch memory before encoding ---
-    (inpaintedPatchImg.bitmap as any).data = null;
-    inpaintedPatchImg = null as any;
+    if (croppedMaskImage) {
+        featheredCtx.globalCompositeOperation = 'destination-in';
+        const featherAmount = Math.max(5, Math.round(bbox.width * 0.05));
+        featheredCtx.filter = `blur(${featherAmount}px)`;
+        featheredCtx.drawImage(croppedMaskImage, 0, 0, bbox.width, bbox.height);
+    }
 
-    const finalImageBuffer = await sourceImage.encode(0); // 0 for PNG
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.filter = 'none';
+    console.log(`${logPrefix} Drawing feathered patch at x:${bbox.x}, y:${bbox.y} with size ${bbox.width}x${bbox.height}`);
+    ctx.drawImage(featheredCropCanvas, bbox.x, bbox.y);
+    
+    const finalImageBuffer = canvas.toBuffer('image/png');
+    console.log(`${logPrefix} Final image buffer created. Size: ${(finalImageBuffer.length / 1024 / 1024).toFixed(2)} MB`);
     const finalFilePath = `${job.user_id}/vto-final/${Date.now()}_final_composite.png`;
     
     const { error: uploadError } = await supabase.storage
@@ -172,6 +140,7 @@ serve(async (req) => {
         } else {
             verificationResult = data;
         }
+        console.log(`${logPrefix} Verification result: is_match=${verificationResult?.is_match}`);
     }
 
     const finalMetadata = { 
