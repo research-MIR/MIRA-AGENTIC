@@ -50,9 +50,9 @@ const ScoreIndicator = ({ score, label }: { score: number, label: string }) => (
   <div>
     <div className="flex justify-between items-center mb-1">
       <span className="text-xs font-medium text-muted-foreground">{label}</span>
-      <span className="text-xs font-bold">{score?.toFixed(1)}/10</span>
+      <span className="text-xs font-bold">{score?.toFixed(1) || 'N/A'}/10</span>
     </div>
-    <Progress value={score * 10} className="h-2" />
+    <Progress value={score ? score * 10 : 0} className="h-2" />
   </div>
 );
 
@@ -83,6 +83,8 @@ const ReportDetailModal = ({ report, isOpen, onClose }: { report: ReportDetail |
   if (!isOpen || !report) return null;
 
   const reportData = report.comparative_report;
+  const confidenceScore = reportData?.confidence_score || 0;
+  const normalizedConfidence = confidenceScore > 1 ? confidenceScore / 10 : confidenceScore;
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -107,7 +109,7 @@ const ReportDetailModal = ({ report, isOpen, onClose }: { report: ReportDetail |
                     <CardHeader><CardTitle className="text-base">Overall Assessment</CardTitle></CardHeader>
                     <CardContent className="space-y-2 text-sm">
                       <BooleanIndicator value={reportData.overall_pass} label="Overall Pass" />
-                      <p><strong>Confidence:</strong> {(reportData.confidence_score * 100).toFixed(0)}%</p>
+                      <p><strong>Confidence:</strong> {(normalizedConfidence * 100).toFixed(0)}%</p>
                       {reportData.failure_category && <p><strong>Failure Category:</strong> <Badge variant="destructive">{reportData.failure_category}</Badge></p>}
                       {reportData.mismatch_reason && <p><strong>Reason:</strong> {reportData.mismatch_reason}</p>}
                     </CardContent>

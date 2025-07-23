@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { GoogleGenAI, Content, Part } from 'https://esm.sh/@google/genai@0.15.0';
+import { GoogleGenAI, Content, Part, HarmCategory, HarmBlockThreshold } from 'https://esm.sh/@google/genai@0.15.0';
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 
@@ -53,7 +53,8 @@ Your primary task is to use the provided images to **visually verify and expand 
     -   Has the body shape been unnaturally changed?
     -   Is the lighting consistent?
     -   Are there anatomical errors (mangled hands, distorted limbs, unnatural proportions)?
-3.  **Synthesize Final Report:** Based on your direct visual analysis, generate the final JSON report.
+3.  **Generate Quantitative Scores:** For the 'garment_comparison' and 'pose_and_body_analysis' sections, you MUST provide a 'scores' object. Each score should be a number from 0.0 to 10.0, where 10.0 is a perfect match or execution.
+4.  **Synthesize Final Report:** Based on your direct visual analysis, generate the final JSON report.
 
 ### CRITICAL: Decision Logic for "overall_pass" & "failure_category"
 The "overall_pass" field should ONLY be 'false' if there are significant TECHNICAL FLAWS in the generation. A simple mismatch in garment type or a change in pose are NOT failure conditions on their own, but they MUST be noted.
@@ -81,11 +82,14 @@ It is common for the AI to generate a complete, plausible outfit even if the ref
   "mismatch_reason": "string | null",
   "garment_comparison": {
     "type_match": "boolean",
-    "color_match": "boolean",
-    "pattern_match": "boolean",
-    "fit_match": "boolean",
     "generated_extra_garments": "boolean",
     "extra_garments_list": ["string"],
+    "scores": {
+      "color_fidelity": "number",
+      "texture_realism": "number",
+      "pattern_accuracy": "number",
+      "fit_and_shape": "number"
+    },
     "notes": "string"
   },
   "pose_and_body_analysis": {
@@ -95,10 +99,13 @@ It is common for the AI to generate a complete, plausible outfit even if the ref
     "camera_angle_changed": "boolean",
     "body_type_changed": "boolean",
     "affected_body_parts": ["string"],
+    "scores": {
+        "pose_preservation": "number",
+        "anatomical_correctness": "number"
+    },
     "notes": "string"
   },
   "quality_analysis": {
-      "anatomical_correctness": "boolean",
       "lighting_match": "boolean",
       "blending_quality": "string",
       "notes": "string | null"
