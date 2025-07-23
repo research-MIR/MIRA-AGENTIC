@@ -56,6 +56,11 @@ The "overall_pass" field should ONLY be 'false' if there are significant TECHNIC
 - **PASS (overall_pass: true)** if:
   - The image is technically sound, even if the garment type is wrong. For example, if the reference was a t-shirt but the AI generated a high-quality, realistic jacket, this is a PASS, but the 'garment_comparison.type_match' must be 'false'.
 
+### NEW RULE: Handling Generated Outfits
+It is common for the AI to generate a complete, plausible outfit even if the reference is only a single item (e.g., generating pants and shoes when the reference is a shirt). This is **correct and desirable behavior**. Your task is to detect this.
+- Set \`generated_extra_garments\` to \`true\` if the final image contains significant clothing items not present in the reference analysis. Otherwise, set it to \`false\`.
+- **IMPORTANT:** \`generated_extra_garments: true\` should NOT cause \`overall_pass\` to be \`false\`.
+
 ### Rules for 'pose_complexity':
 -   **standard A-pose**: Standing straight, facing camera, arms relaxed at sides.
 -   **casual standing**: Standing with minor variations (hands on hips, slight turn). Limbs are mostly visible.
@@ -73,6 +78,7 @@ The "overall_pass" field should ONLY be 'false' if there are significant TECHNIC
     "color_match": "boolean",
     "pattern_match": "boolean",
     "fit_match": "boolean",
+    "generated_extra_garments": "boolean",
     "notes": "string"
   },
   "pose_and_body_analysis": {

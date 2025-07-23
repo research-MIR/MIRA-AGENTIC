@@ -20,8 +20,9 @@ Your task is to synthesize these individual reports into a single, cohesive, and
 
 ### Your Process:
 1.  **Aggregate Quantitative Data:** Sum up all the numerical data from each report (Total Jobs, Passed, Failed) to get the grand totals for the entire pack. Recalculate the final pass rates based on these new totals.
-2.  **Synthesize Qualitative Insights:** Read the "Strategic Recommendations" sections from all reports. Identify the most critical, recurring themes, hard limits, and actionable advice. Combine them into a unified, non-redundant list in the final report.
-3.  **Combine Camera Angle Analysis:** Merge the camera angle data from all reports to present a complete picture for each shot type.
+2.  **Calculate Special Metrics:** Calculate the "Outfit Completion Rate": the percentage of *passed* jobs where \`garment_comparison.generated_extra_garments\` was true.
+3.  **Synthesize Qualitative Insights:** Read the "Strategic Recommendations" sections from all reports. Identify the most critical, recurring themes, hard limits, and actionable advice. Combine them into a unified, non-redundant list in the final report.
+4.  **Combine Camera Angle Analysis:** Merge the camera angle data from all reports to present a complete picture for each shot type.
 
 ### OUTPUT FORMAT
 Your entire response MUST be a single, valid JSON object with "thinking" and "report" keys, following the exact same structure as the input reports, but with the aggregated and synthesized data.
