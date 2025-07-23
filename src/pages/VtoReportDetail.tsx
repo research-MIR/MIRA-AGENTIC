@@ -33,11 +33,6 @@ interface ReportDetail {
   final_image_url: string;
 }
 
-interface AnalysisResult {
-  thinking: string;
-  report: string;
-}
-
 interface PackData {
   id: string;
   synthesis_report: string | null;
@@ -51,9 +46,8 @@ const VtoReportDetail = () => {
   const { showImage } = useImagePreview();
   const queryClient = useQueryClient();
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
 
-  const { data: packData } = useQuery<PackData | null>({
+  const { data: packData, isLoading: isLoadingPack } = useQuery<PackData | null>({
     queryKey: ['vtoPackData', packId],
     queryFn: async () => {
       if (!packId) return null;
@@ -64,16 +58,7 @@ const VtoReportDetail = () => {
     enabled: !!packId,
   });
 
-  useEffect(() => {
-    if (packData?.synthesis_report && packData?.synthesis_thinking) {
-      setAnalysisResult({
-        report: packData.synthesis_report,
-        thinking: packData.synthesis_thinking,
-      });
-    }
-  }, [packData]);
-
-  const { data: reportDetails, isLoading, error } = useQuery<ReportDetail[]>({
+  const { data: reportDetails, isLoading: isLoadingReports, error } = useQuery<ReportDetail[]>({
     queryKey: ['vtoReportDetail', packId],
     queryFn: async () => {
       if (!packId || !session?.user) return [];
@@ -112,16 +97,14 @@ const VtoReportDetail = () => {
   const handleGenerateAnalysis = async () => {
     if (!packId || !session?.user) return;
     setIsAnalyzing(true);
-    setAnalysisResult(null);
-    const toastId = showLoading("Generating strategic analysis...");
+    const toastId = showLoading("Starting analysis...");
     try {
-      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-analyzer-vto-report-synthesis', {
+      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-vto-report-synthesis', {
         body: { pack_id: packId, user_id: session.user.id }
       });
       if (error) throw error;
-      // The realtime subscription will handle updating the state
       dismissToast(toastId);
-      showSuccess("Analysis complete and saved!");
+      showSuccess(data.message);
     } catch (err: any) {
       dismissToast(toastId);
       showError(`Analysis failed: ${err.message}`);
@@ -150,6 +133,9 @@ const VtoReportDetail = () => {
     </div>
   );
 
+  const isLoading = isLoadingPack || isLoadingReports;
+  const analysisInProgress = packData?.synthesis_report === 'Analysis in progress...';
+
   if (isLoading) {
     return <div className="p-8"><Skeleton className="h-12 w-1/3" /><div className="grid grid-cols-6 gap-4 mt-8">{[...Array(12)].map((_, i) => <Skeleton key={i} className="h-40 w-full" />)}</div></div>;
   }
@@ -170,37 +156,39 @@ const VtoReportDetail = () => {
             <h1 className="text-3xl font-bold">{t('vtoReportDetailTitle')}</h1>
             <p className="text-muted-foreground">Pack ID: {packId}</p>
           </div>
-          <Button onClick={handleGenerateAnalysis} disabled={isAnalyzing}>
-            {isAnalyzing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <BarChart2 className="mr-2 h-4 w-4" />}
-            {analysisResult ? "Re-generate Analysis" : "Generate Strategic Analysis"}
+          <Button onClick={handleGenerateAnalysis} disabled={isAnalyzing || analysisInProgress}>
+            {(isAnalyzing || analysisInProgress) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <BarChart2 className="mr-2 h-4 w-4" />}
+            {analysisInProgress ? "Analyzing..." : packData?.synthesis_report ? "Re-generate Analysis" : "Generate Strategic Analysis"}
           </Button>
         </div>
       </header>
 
       <div className="flex-1 overflow-y-auto">
-        {isAnalyzing && <div className="flex justify-center p-8"><Loader2 className="h-8 w-8 animate-spin" /></div>}
+        {(isAnalyzing || analysisInProgress) && <div className="flex justify-center p-8"><Loader2 className="h-8 w-8 animate-spin" /></div>}
         
-        {analysisResult && (
+        {packData?.synthesis_report && !analysisInProgress && (
           <Card className="mb-8">
             <CardContent className="p-6">
               <div className="markdown-content">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{analysisResult.report}</ReactMarkdown>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{packData.synthesis_report}</ReactMarkdown>
               </div>
-              <Accordion type="single" collapsible className="w-full mt-4">
-                <AccordionItem value="item-1">
-                  <AccordionTrigger>
-                    <div className="flex items-center gap-2 text-sm font-semibold">
-                      <BrainCircuit className="h-4 w-4" />
-                      View AI's Thought Process
-                    </div>
-                  </AccordionTrigger>
-                  <AccordionContent>
-                    <div className="markdown-content p-4 bg-muted rounded-md mt-2 text-sm">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{analysisResult.thinking}</ReactMarkdown>
-                    </div>
-                  </AccordionContent>
-                </AccordionItem>
-              </Accordion>
+              {packData.synthesis_thinking && (
+                <Accordion type="single" collapsible className="w-full mt-4">
+                  <AccordionItem value="item-1">
+                    <AccordionTrigger>
+                      <div className="flex items-center gap-2 text-sm font-semibold">
+                        <BrainCircuit className="h-4 w-4" />
+                        View AI's Thought Process
+                      </div>
+                    </AccordionTrigger>
+                    <AccordionContent>
+                      <div className="markdown-content p-4 bg-muted rounded-md mt-2 text-sm">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{packData.synthesis_thinking}</ReactMarkdown>
+                      </div>
+                    </AccordionContent>
+                  </AccordionItem>
+                </Accordion>
+              )}
             </CardContent>
           </Card>
         )}

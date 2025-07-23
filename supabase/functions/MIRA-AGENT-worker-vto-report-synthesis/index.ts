@@ -78,16 +78,16 @@ const extractJson = (text: string): any => {
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
+  
+  const { pack_id, user_id } = await req.json();
+  const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
+  const logPrefix = `[VTO-Report-Worker][${pack_id}]`;
 
   try {
-    const { pack_id, user_id } = await req.json();
     if (!pack_id || !user_id) {
       throw new Error("pack_id and user_id are required.");
     }
-
-    const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-    const logPrefix = `[VTO-Report-Synthesizer][${pack_id}]`;
-    console.log(`${logPrefix} Starting synthesis orchestration.`);
+    console.log(`${logPrefix} Worker started.`);
 
     const { data: reports, error: rpcError } = await supabase.rpc('get_vto_report_details_for_pack', {
       p_pack_id: pack_id,
@@ -104,7 +104,7 @@ serve(async (req) => {
         throw new Error("No valid comparative reports found in the fetched data.");
     }
 
-    console.log(`${logPrefix} Found ${comparativeReports.length} reports. Chunking and dispatching to workers...`);
+    console.log(`${logPrefix} Found ${comparativeReports.length} reports. Chunking and dispatching to sub-workers...`);
 
     const chunks = [];
     for (let i = 0; i < comparativeReports.length; i += CHUNK_SIZE) {
@@ -144,7 +144,9 @@ serve(async (req) => {
       .from('mira-agent-vto-packs-jobs')
       .update({
         synthesis_report: finalAnalysis.report,
-        synthesis_thinking: finalAnalysis.thinking
+        synthesis_thinking: finalAnalysis.thinking,
+        // A field to indicate completion, could be a status or a timestamp
+        // For now, just populating the report is the indicator.
       })
       .eq('id', pack_id);
 
@@ -152,13 +154,17 @@ serve(async (req) => {
       console.error(`${logPrefix} Failed to save final analysis to DB:`, updateError);
     }
 
-    return new Response(JSON.stringify(finalAnalysis), {
+    return new Response(JSON.stringify({ success: true }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });
 
   } catch (error) {
-    console.error("[VTO-Report-Synthesizer] Error:", error);
+    console.error(`[VTO-Report-Worker][${pack_id}] Error:`, error);
+    // Update the job with an error message
+    await supabase.from('mira-agent-vto-packs-jobs').update({
+        synthesis_report: `# Analysis Failed\n\nAn error occurred during the report synthesis: ${error.message}`
+    }).eq('id', pack_id);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,
