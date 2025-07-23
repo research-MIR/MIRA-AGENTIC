@@ -15,7 +15,7 @@ const STALLED_GOOGLE_VTO_THRESHOLD_MINUTES = 2;
 const STALLED_QUEUED_VTO_THRESHOLD_SECONDS = 30;
 const STALLED_REFRAME_THRESHOLD_MINUTES = 2;
 
-serve(async (req)=>{
+serve(async (req) => {
   const requestId = `watchdog-bg-${Date.now()}`;
   console.log(`[Watchdog-BG][${requestId}] Invocation attempt.`);
 
@@ -47,7 +47,7 @@ serve(async (req)=>{
       .select('id')
       .in('status', ['queued', 'processing'])
       .lt('last_polled_at', pollerThreshold)
-      .or("metadata->>engine.neq.google,metadata->>engine.is.null"); // Catch jobs where engine is not 'google' OR is not set at all
+      .not('bitstudio_task_id', 'is', null); // More efficient: Select jobs that have a BitStudio task ID, which are the ones to be polled.
 
     if (stalledError) {
       console.error(`[Watchdog-BG][${requestId}] Error querying for stalled jobs:`, stalledError.message);
