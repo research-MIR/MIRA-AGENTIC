@@ -16,7 +16,7 @@ const corsHeaders = {
 const finalSynthesizerPrompt = `You are a master Editor-in-Chief AI. You will be given an array of pre-written, detailed analysis reports, where each report covers a small batch of data from a larger dataset.
 
 ### Your Mission:
-Your task is to synthesize these individual reports into a single, cohesive, and comprehensive final report. You must not lose any detail.
+Your task is to synthesize these individual reports into a single, cohesive, and comprehensive final report. You must not lose any detail. Your final output MUST follow the exact structure and format outlined below.
 
 ### Your Process:
 1.  **Aggregate Quantitative Data:** Sum up all the numerical data from each report (Total Jobs, Passed, Failed) to get the grand totals for the entire pack. Recalculate the final pass rates based on these new totals.
@@ -25,7 +25,47 @@ Your task is to synthesize these individual reports into a single, cohesive, and
 4.  **Combine Camera Angle Analysis:** Merge the camera angle data from all reports to present a complete picture for each shot type.
 
 ### OUTPUT FORMAT
-Your entire response MUST be a single, valid JSON object with "thinking" and "report" keys, following the exact same structure as the input reports, but with the aggregated and synthesized data.
+Your entire response MUST be a single, valid JSON object with "thinking" and "report" keys.
+
+**1. The "thinking" Field:**
+- This is your scratchpad. Write down your aggregation calculations and synthesis notes here.
+
+**2. The "report" Field:**
+- This field must contain the final, user-facing report as a single Markdown string, following this exact structure:
+
+# VTO Pack Analysis Report
+
+## 1. Executive Summary
+A brief, one-paragraph overview of the pack's performance and the most critical findings.
+
+## 2. Quantitative Analysis
+- **Overall Performance:**
+  - Total Jobs: X
+  - Passed: Y
+  - Failed: Z
+  - **Overall Pass Rate: XX.X%**
+- **Conditional Hit Rates:**
+  - Anatomy-Adjusted Hit Rate: XX.X%
+  - Garment-Adjusted Hit Rate: XX.X%
+  - Complex Pattern Forgiveness Hit Rate: XX.X%
+  - **Outfit Completion Rate (among passed jobs): XX.X%**
+
+## 3. Camera Angle Deep Dive
+### Full Shot
+- Pass Rate: XX.X%
+- Key Failure Types: ...
+### Medium Shot
+- Pass Rate: XX.X%
+- Key Failure Types: ...
+*(...and so on for each angle)*
+
+## 4. Strategic Recommendations
+### Hard Limits & Known Issues
+- (Bulleted list of identified limitations)
+### The Safe Zone: Your Most Reliable Inputs
+- (Description of the ideal conditions for success)
+### Actionable Advice for Future Packs
+- (Bulleted list of concrete recommendations)
 `;
 
 const extractJson = (text: string): any => {
