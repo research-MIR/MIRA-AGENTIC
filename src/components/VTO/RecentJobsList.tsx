@@ -59,7 +59,7 @@ export const RecentJobsList = ({ jobs, isLoading, selectedJobId, onSelectJob, mo
                                 const isFailed = job.status === 'failed' || job.status === 'permanently_failed';
                                 return (
                                     <button key={job.id} onClick={() => handleThumbnailClick(job)} className={cn("border-2 rounded-lg p-0.5 flex-shrink-0 w-24 h-24 relative", selectedJobId === job.id ? "border-primary" : "border-transparent")}>
-                                        <SecureImageDisplay imageUrl={urlToPreview || null} alt="Recent job" />
+                                        <SecureImageDisplay imageUrl={urlToPreview || null} alt="Recent job" className="w-full h-full object-cover" />
                                         {isFailed && (
                                             <div className="absolute inset-0 bg-destructive/70 flex items-center justify-center rounded-md">
                                                 <XCircle className="h-8 w-8 text-destructive-foreground" />
