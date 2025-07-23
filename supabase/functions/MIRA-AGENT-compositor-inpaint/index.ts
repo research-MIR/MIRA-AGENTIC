@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { createCanvas, loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
+import { Image } from 'https://deno.land/x/imagescript@1.2.15/mod.ts';
 import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const corsHeaders = {
@@ -66,15 +67,20 @@ serve(async (req) => {
 
     if (!inpaintedPatchResponse.ok) throw new Error(`Failed to download inpainted patch: ${inpaintedPatchResponse.statusText}`);
 
+    // --- Memory Optimization: Decode sequentially ---
+    console.log(`${logPrefix} Decoding patch image...`);
+    let inpaintedPatchImg = await Image.decode(await inpaintedPatchResponse.arrayBuffer());
+    console.log(`${logPrefix} Decoding source image...`);
+    let sourceImage = await Image.decode(await sourceBlob.arrayBuffer());
+
     // --- Generate and Upload New Debug Assets ---
     let final_compositing_mask_url: string | null = null;
     let feathered_mask_url: string | null = null;
-    let croppedMaskImage: any = null;
-
+    
     if (cropped_dilated_mask_base64) {
         const croppedMaskBuffer = decodeBase64(cropped_dilated_mask_base64);
         final_compositing_mask_url = await uploadBufferToStorage(supabase, croppedMaskBuffer, job.user_id, 'final_compositing_mask.png');
-        croppedMaskImage = await loadImage(croppedMaskBuffer);
+        const croppedMaskImage = await loadImage(croppedMaskBuffer);
 
         const featheredCanvas = createCanvas(croppedMaskImage.width(), croppedMaskImage.height());
         const featheredCtx = featheredCanvas.getContext('2d');
@@ -88,32 +94,28 @@ serve(async (req) => {
 
     console.log(`${logPrefix} Compositing final image...`);
     
-    // --- Refactored Compositing Logic using deno-canvas ---
-    const sourceImage = await loadImage(new Uint8Array(await sourceBlob.arrayBuffer()));
-    const inpaintedPatchImg = await loadImage(new Uint8Array(await inpaintedPatchResponse.arrayBuffer()));
-    console.log(`${logPrefix} Decoded images. Source: ${sourceImage.width()}x${sourceImage.height()}, Patch: ${inpaintedPatchImg.width()}x${inpaintedPatchImg.height()}`);
+    // --- Reverted to imagescript for stability ---
+    const src = sourceImage;
+    const patch = inpaintedPatchImg;
+    const { x, y } = bbox;
 
-    const canvas = createCanvas(sourceImage.width(), sourceImage.height());
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(sourceImage, 0, 0);
-
-    const featheredCropCanvas = createCanvas(bbox.width, bbox.height);
-    const featheredCtx = featheredCropCanvas.getContext('2d');
-    featheredCtx.drawImage(inpaintedPatchImg, 0, 0, bbox.width, bbox.height);
-    
-    if (croppedMaskImage) {
-        featheredCtx.globalCompositeOperation = 'destination-in';
-        const featherAmount = Math.max(5, Math.round(bbox.width * 0.05));
-        featheredCtx.filter = `blur(${featherAmount}px)`;
-        featheredCtx.drawImage(croppedMaskImage, 0, 0, bbox.width, bbox.height);
+    if (!patch || !patch.bitmap || !patch.bitmap.data) {
+        throw new Error("Failed to decode the inpainted patch image. It may be corrupted or in an unsupported format.");
+    }
+    if (!src || !src.bitmap || !src.bitmap.data) {
+        throw new Error("Failed to decode the source image. It may be corrupted or in an unsupported format.");
     }
 
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.filter = 'none';
-    console.log(`${logPrefix} Drawing feathered patch at x:${bbox.x}, y:${bbox.y} with size ${bbox.width}x${bbox.height}`);
-    ctx.drawImage(featheredCropCanvas, bbox.x, bbox.y);
+    if (x + patch.width > src.width || y + patch.height > src.height) {
+        throw new Error("Patch is outside the bounds of the source image.");
+    }
+
+    src.composite(patch, x, y);
     
-    const finalImageBuffer = canvas.toBuffer('image/png');
+    (inpaintedPatchImg.bitmap as any).data = null;
+    inpaintedPatchImg = null as any;
+
+    const finalImageBuffer = await sourceImage.encode(0); // 0 for PNG
     console.log(`${logPrefix} Final image buffer created. Size: ${(finalImageBuffer.length / 1024 / 1024).toFixed(2)} MB`);
     const finalFilePath = `${job.user_id}/vto-final/${Date.now()}_final_composite.png`;
     
