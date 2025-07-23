@@ -3,13 +3,12 @@ import { useLanguage } from "@/context/LanguageContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, AlertTriangle, Loader2, BrainCircuit, BarChart2 } from "lucide-react";
+import { ArrowLeft, AlertTriangle, Loader2, BrainCircuit, BarChart2, CheckCircle, XCircle } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { SecureImageDisplay } from "@/components/VTO/SecureImageDisplay";
-import { useImagePreview } from "@/context/ImagePreviewContext";
 import { useEffect, useState } from "react";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
@@ -19,6 +18,8 @@ import remarkGfm from "remark-gfm";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Progress } from "@/components/ui/progress";
+import { cn } from "@/lib/utils";
 
 interface ReportDetail {
   report_id: string;
@@ -28,7 +29,12 @@ interface ReportDetail {
     thinking?: string;
     report?: {
       overall_pass: boolean;
-      [key: string]: any; // Allow other properties
+      confidence_score: number;
+      failure_category: string | null;
+      mismatch_reason: string | null;
+      garment_comparison: any;
+      pose_and_body_analysis: any;
+      quality_analysis: any;
     }
   } | null;
   source_person_image_url: string;
@@ -42,8 +48,27 @@ interface PackData {
   synthesis_thinking: string | null;
 }
 
+const ScoreIndicator = ({ score, label }: { score: number, label: string }) => (
+  <div>
+    <div className="flex justify-between items-center mb-1">
+      <span className="text-xs font-medium text-muted-foreground">{label}</span>
+      <span className="text-xs font-bold">{score?.toFixed(1)}/10</span>
+    </div>
+    <Progress value={score * 10} className="h-2" />
+  </div>
+);
+
+const BooleanIndicator = ({ value, label }: { value: boolean, label: string }) => (
+  <div className="flex items-center justify-between text-xs p-2 bg-muted rounded-md">
+    <span className="font-medium">{label}</span>
+    {value ? <CheckCircle className="h-4 w-4 text-green-500" /> : <XCircle className="h-4 w-4 text-destructive" />}
+  </div>
+);
+
 const ReportDetailModal = ({ report, isOpen, onClose }: { report: ReportDetail | null, isOpen: boolean, onClose: () => void }) => {
   if (!isOpen || !report) return null;
+
+  const reportData = report.comparative_report?.report;
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -57,10 +82,62 @@ const ReportDetailModal = ({ report, isOpen, onClose }: { report: ReportDetail |
           <SecureImageDisplay imageUrl={report.source_garment_image_url} alt="Reference Garment" />
           <SecureImageDisplay imageUrl={report.final_image_url} alt="Final Result" />
         </div>
-        <ScrollArea className="max-h-[50vh]">
-          <pre className="bg-muted p-4 rounded-md text-xs overflow-x-auto">
-            {JSON.stringify(report.comparative_report, null, 2)}
-          </pre>
+        <ScrollArea className="max-h-[50vh] pr-4">
+          {reportData ? (
+            <div className="space-y-4">
+              <Card>
+                <CardHeader><CardTitle className="text-base">Overall Assessment</CardTitle></CardHeader>
+                <CardContent className="space-y-2 text-sm">
+                  <BooleanIndicator value={reportData.overall_pass} label="Overall Pass" />
+                  <p><strong>Confidence:</strong> {(reportData.confidence_score * 100).toFixed(0)}%</p>
+                  {reportData.failure_category && <p><strong>Failure Category:</strong> <Badge variant="destructive">{reportData.failure_category}</Badge></p>}
+                  {reportData.mismatch_reason && <p><strong>Reason:</strong> {reportData.mismatch_reason}</p>}
+                </CardContent>
+              </Card>
+              <Accordion type="multiple" defaultValue={['garment', 'pose', 'quality']}>
+                <AccordionItem value="garment">
+                  <AccordionTrigger>Garment Comparison</AccordionTrigger>
+                  <AccordionContent className="space-y-3">
+                    <div className="grid grid-cols-2 gap-4">
+                      <ScoreIndicator score={reportData.garment_comparison?.scores?.color_fidelity} label="Color Fidelity" />
+                      <ScoreIndicator score={reportData.garment_comparison?.scores?.texture_realism} label="Texture Realism" />
+                      <ScoreIndicator score={reportData.garment_comparison?.scores?.pattern_accuracy} label="Pattern Accuracy" />
+                      <ScoreIndicator score={reportData.garment_comparison?.scores?.fit_and_shape} label="Fit & Shape" />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <BooleanIndicator value={reportData.garment_comparison?.type_match} label="Type Match" />
+                      <BooleanIndicator value={reportData.garment_comparison?.generated_extra_garments} label="Generated Extra Garments" />
+                    </div>
+                    <p className="text-xs italic text-muted-foreground">{reportData.garment_comparison?.notes}</p>
+                  </AccordionContent>
+                </AccordionItem>
+                <AccordionItem value="pose">
+                  <AccordionTrigger>Pose & Body Analysis</AccordionTrigger>
+                  <AccordionContent className="space-y-3">
+                    <div className="grid grid-cols-2 gap-4">
+                      <ScoreIndicator score={reportData.pose_and_body_analysis?.scores?.pose_preservation} label="Pose Preservation" />
+                      <ScoreIndicator score={reportData.pose_and_body_analysis?.scores?.anatomical_correctness} label="Anatomical Correctness" />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <BooleanIndicator value={!reportData.pose_and_body_analysis?.pose_changed} label="Pose Maintained" />
+                      <BooleanIndicator value={!reportData.pose_and_body_analysis?.body_type_changed} label="Body Type Maintained" />
+                    </div>
+                    <p className="text-xs italic text-muted-foreground">{reportData.pose_and_body_analysis?.notes}</p>
+                  </AccordionContent>
+                </AccordionItem>
+                <AccordionItem value="quality">
+                  <AccordionTrigger>Quality Analysis</AccordionTrigger>
+                  <AccordionContent className="space-y-3">
+                    <BooleanIndicator value={reportData.quality_analysis?.lighting_match} label="Lighting Match" />
+                    <p className="text-xs"><strong>Blending Quality:</strong> {reportData.quality_analysis?.blending_quality}</p>
+                    <p className="text-xs italic text-muted-foreground">{reportData.quality_analysis?.notes}</p>
+                  </AccordionContent>
+                </AccordionItem>
+              </Accordion>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">No detailed report data available.</p>
+          )}
         </ScrollArea>
         <DialogFooter>
           <Button onClick={onClose}>Close</Button>
@@ -152,7 +229,7 @@ const VtoReportDetail = () => {
       {jobs.map(job => (
         <Card 
           key={job.job_id} 
-          className="relative group cursor-pointer"
+          className="relative group cursor-pointer aspect-square"
           onClick={() => setSelectedReport(job)}
         >
           <SecureImageDisplay imageUrl={job.final_image_url} alt={`Job ${job.job_id}`} className="w-full h-full object-cover rounded-md" />
