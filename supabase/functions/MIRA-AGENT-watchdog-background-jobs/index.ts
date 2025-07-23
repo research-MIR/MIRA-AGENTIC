@@ -47,7 +47,7 @@ serve(async (req)=>{
       .select('id')
       .in('status', ['queued', 'processing'])
       .lt('last_polled_at', pollerThreshold)
-      .neq('metadata->>engine', 'google'); // IMPORTANT: Exclude Google jobs from this check
+      .or("metadata->>engine.neq.google,metadata->>engine.is.null"); // Catch jobs where engine is not 'google' OR is not set at all
 
     if (stalledError) {
       console.error(`[Watchdog-BG][${requestId}] Error querying for stalled jobs:`, stalledError.message);

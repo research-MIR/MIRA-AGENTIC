@@ -58,6 +58,8 @@ async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string)
         throw new Error(`Could not parse bucket or path from Supabase URL: ${publicUrl}`);
     }
 
+    console.log(`[Downloader] Attempting to download from bucket: '${bucketName}', path: '${filePath}'`);
+
     const { data, error } = await supabase.storage.from(bucketName).download(filePath);
     if (error) {
         throw new Error(`Failed to download from Supabase storage: ${error.message}`);
@@ -160,7 +162,7 @@ serve(async (req) => {
         status: 'queued',
         bitstudio_person_image_id: new_source_image_id || jobToRetry.bitstudio_person_image_id,
         bitstudio_task_id: newTaskId,
-        metadata: { ...jobToRetry.metadata, prompt_used: retryPayload.prompt, retry_count: (jobToRetry.metadata.retry_count || 0) + 1 },
+        metadata: { ...jobToRetry.metadata, engine: 'bitstudio', prompt_used: retryPayload.prompt, retry_count: (jobToRetry.metadata.retry_count || 0) + 1 },
         error_message: null,
         last_polled_at: new Date().toISOString(),
       }).eq('id', retry_job_id);
@@ -251,6 +253,7 @@ serve(async (req) => {
           bitstudio_person_image_id: sourceImageId, bitstudio_garment_image_id: referenceImageId, bitstudio_task_id: taskId, batch_pair_job_id: batch_pair_job_id, vto_pack_job_id: vto_pack_job_id,
           metadata: { 
             ...metadata,
+            engine: 'bitstudio',
             prompt_used: prompt,
             original_request_payload: inpaintPayload,
           }
@@ -301,6 +304,7 @@ serve(async (req) => {
                 bitstudio_task_id: taskId,
                 metadata: {
                   ...metadata,
+                  engine: 'bitstudio',
                   original_request_payload: vtoPayload
                 }
             }).eq('id', existing_job_id);
@@ -313,6 +317,7 @@ serve(async (req) => {
               batch_pair_job_id: batch_pair_job_id,
               vto_pack_job_id: vto_pack_job_id,
               metadata: {
+                engine: 'bitstudio',
                 original_request_payload: vtoPayload
               }
             }).select('id').single();
