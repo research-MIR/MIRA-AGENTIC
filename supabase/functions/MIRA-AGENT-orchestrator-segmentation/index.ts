@@ -1,9 +1,11 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const NUM_WORKERS = 5;
+const UPLOAD_BUCKET = 'mira-agent-user-uploads';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -31,13 +33,25 @@ serve(async (req) => {
       throw new Error("Missing required parameters for new job.");
     }
 
+    // 1. Upload the large image data to storage first to avoid timeouts
+    const imageBuffer = decodeBase64(image_base64);
+    const filePath = `${user_id}/segmentation-sources/${Date.now()}.png`;
+    const { error: uploadError } = await supabase.storage
+      .from(UPLOAD_BUCKET)
+      .upload(filePath, imageBuffer, { contentType: 'image/png', upsert: true });
+    if (uploadError) throw uploadError;
+    
+    const { data: { publicUrl } } = supabase.storage.from(UPLOAD_BUCKET).getPublicUrl(filePath);
+    console.log(`[Orchestrator][${requestId}] Source image uploaded to storage: ${publicUrl}`);
+
+    // 2. Insert the job with a reference to the storage path, not the raw data
     const { data: newJob, error: insertError } = await supabase
       .from('mira-agent-mask-aggregation-jobs')
       .insert({ 
           user_id, 
           status: 'aggregating',
           source_image_dimensions: image_dimensions,
-          source_image_base64: image_base64, // Directly use the base64 from the client
+          metadata: { source_image_storage_path: publicUrl }, // Store the path in metadata
           results: [] 
       })
       .select('id')
@@ -52,7 +66,7 @@ serve(async (req) => {
         const promise = supabase.functions.invoke('MIRA-AGENT-worker-segmentation', {
             body: {
                 aggregation_job_id: aggregationJobId,
-                mime_type: 'image/png', // Client now guarantees PNG
+                // The worker will now fetch the source image from the path stored in the job's metadata
                 reference_image_base64,
                 reference_mime_type,
             }

@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { GoogleGenAI, Content, Part, HarmCategory, HarmBlockThreshold } from 'https://esm.sh/@google/genai@0.15.0';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const MODEL_NAME = "gemini-2.5-flash-preview-05-20";
@@ -68,7 +69,7 @@ serve(async (req) => {
   await new Promise(resolve => setTimeout(resolve, delay));
   // ----------------------------------------------------
 
-  const { aggregation_job_id, mime_type, reference_image_base64, reference_mime_type } = await req.json();
+  const { aggregation_job_id, reference_image_base64, reference_mime_type } = await req.json();
   const requestId = `segment-worker-${aggregation_job_id}-${Math.random().toString(36).substring(2, 8)}`;
   console.log(`[SegmentWorker][${requestId}] Invoked for aggregation job ${aggregation_job_id}.`);
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
@@ -80,20 +81,28 @@ serve(async (req) => {
 
     const { data: jobData, error: fetchError } = await supabase
         .from('mira-agent-mask-aggregation-jobs')
-        .select('source_image_base64')
+        .select('metadata')
         .eq('id', aggregation_job_id)
         .single();
     
     if (fetchError) throw fetchError;
-    if (!jobData || !jobData.source_image_base64) {
-        throw new Error(`Could not retrieve source image data for job ${aggregation_job_id}`);
+    const sourceImageUrl = jobData?.metadata?.source_image_storage_path;
+    if (!sourceImageUrl) {
+        throw new Error(`Could not retrieve source image path from metadata for job ${aggregation_job_id}`);
     }
+
+    const imageResponse = await fetch(sourceImageUrl);
+    if (!imageResponse.ok) throw new Error(`Failed to download source image from ${sourceImageUrl}`);
+    const imageBlob = await imageResponse.blob();
+    const imageBuffer = await imageBlob.arrayBuffer();
+    const image_base64 = encodeBase64(imageBuffer);
+    const mime_type = imageBlob.type || 'image/png';
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
     const userParts: Part[] = [
         { text: "SOURCE IMAGE:" },
-        { inlineData: { mimeType: mime_type, data: jobData.source_image_base64 } },
+        { inlineData: { mimeType: mime_type, data: image_base64 } },
     ];
 
     if (reference_image_base64 && reference_mime_type) {
@@ -164,7 +173,7 @@ serve(async (req) => {
     throw lastError || new Error("Worker failed after all retries without a specific error.");
 
   } catch (error) {
-    console.error(`[SegmentWorker][${requestId}] Unhandled Error:`, error);
+    console.error(`[SegmentWorker][${aggregation_job_id || 'unknown'}] Unhandled Error:`, error);
     await appendResultToJob(supabase, aggregation_job_id, { error: `Worker failed: ${error.message}` });
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
