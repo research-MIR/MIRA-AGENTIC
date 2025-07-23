@@ -141,7 +141,20 @@ serve(async (req) => {
         throw new Error("AI did not return the expected JSON structure with 'thinking' and 'report' keys.");
     }
 
-    console.log(`${logPrefix} Synthesis complete.`);
+    console.log(`${logPrefix} Synthesis complete. Saving to database...`);
+    const { error: updateError } = await supabase
+      .from('mira-agent-vto-packs-jobs')
+      .update({
+        synthesis_report: analysisResult.report,
+        synthesis_thinking: analysisResult.thinking
+      })
+      .eq('id', pack_id);
+
+    if (updateError) {
+      console.error(`${logPrefix} Failed to save analysis to DB:`, updateError);
+      // Don't throw, still return the result to the user
+    }
+
     return new Response(JSON.stringify(analysisResult), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,

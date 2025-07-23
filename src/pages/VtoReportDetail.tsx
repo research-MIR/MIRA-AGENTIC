@@ -1,7 +1,7 @@
 import { useParams, Link } from "react-router-dom";
 import { useLanguage } from "@/context/LanguageContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, AlertTriangle, Loader2, BrainCircuit, BarChart2 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -35,6 +35,12 @@ interface AnalysisResult {
   report: string;
 }
 
+interface PackData {
+  id: string;
+  synthesis_report: string | null;
+  synthesis_thinking: string | null;
+}
+
 const VtoReportDetail = () => {
   const { packId } = useParams();
   const { t } = useLanguage();
@@ -43,6 +49,26 @@ const VtoReportDetail = () => {
   const queryClient = useQueryClient();
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
+
+  const { data: packData } = useQuery<PackData | null>({
+    queryKey: ['vtoPackData', packId],
+    queryFn: async () => {
+      if (!packId) return null;
+      const { data, error } = await supabase.from('mira-agent-vto-packs-jobs').select('id, synthesis_report, synthesis_thinking').eq('id', packId).single();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!packId,
+  });
+
+  useEffect(() => {
+    if (packData?.synthesis_report && packData?.synthesis_thinking) {
+      setAnalysisResult({
+        report: packData.synthesis_report,
+        thinking: packData.synthesis_thinking,
+      });
+    }
+  }, [packData]);
 
   const { data: reportDetails, isLoading, error } = useQuery<ReportDetail[]>({
     queryKey: ['vtoReportDetail', packId],
@@ -69,6 +95,13 @@ const VtoReportDetail = () => {
           queryClient.invalidateQueries({ queryKey: ['vtoReportDetail', packId] });
         }
       )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'mira-agent-vto-packs-jobs', filter: `id=eq.${packId}` },
+        (payload) => {
+          queryClient.setQueryData(['vtoPackData', packId], payload.new);
+        }
+      )
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [packId, session?.user?.id, supabase, queryClient]);
@@ -83,9 +116,9 @@ const VtoReportDetail = () => {
         body: { pack_id: packId, user_id: session.user.id }
       });
       if (error) throw error;
-      setAnalysisResult(data);
+      // The realtime subscription will handle updating the state
       dismissToast(toastId);
-      showSuccess("Analysis complete!");
+      showSuccess("Analysis complete and saved!");
     } catch (err: any) {
       dismissToast(toastId);
       showError(`Analysis failed: ${err.message}`);
@@ -136,7 +169,7 @@ const VtoReportDetail = () => {
           </div>
           <Button onClick={handleGenerateAnalysis} disabled={isAnalyzing}>
             {isAnalyzing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <BarChart2 className="mr-2 h-4 w-4" />}
-            Generate Strategic Analysis
+            {analysisResult ? "Re-generate Analysis" : "Generate Strategic Analysis"}
           </Button>
         </div>
       </header>
