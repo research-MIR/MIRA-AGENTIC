@@ -1,6 +1,8 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { Image as ISImage } from "https://deno.land/x/imagescript@1.2.15/mod.ts";
+import { createCanvas, loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
+import { Image } from 'https://deno.land/x/imagescript@1.2.15/mod.ts';
+import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -11,31 +13,11 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
 
-async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
-    const url = new URL(publicUrl);
-    const pathSegments = url.pathname.split('/');
-    
-    const objectSegmentIndex = pathSegments.indexOf('object');
-    if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) {
-        throw new Error(`Could not parse bucket name from Supabase URL: ${publicUrl}`);
-    }
-    
-    const bucketName = pathSegments[objectSegmentIndex + 2];
-    const filePath = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
-
-    if (!bucketName || !filePath) {
-        throw new Error(`Could not parse bucket or path from Supabase URL: ${publicUrl}`);
-    }
-
-    console.log(`[Downloader] Attempting to download from bucket: '${bucketName}', path: '${filePath}'`);
-
-    const { data, error } = await supabase.storage.from(bucketName).download(filePath);
-    if (error) {
-        throw new Error(`Failed to download from Supabase storage (${filePath}): ${error.message}`);
-    }
-    return data;
+// Helper function to decode and re-encode any image into a standard PNG buffer
+async function standardizeImageBuffer(buffer: Uint8Array): Promise<Uint8Array> {
+    const image = await Image.decode(buffer);
+    return await image.encode(0); // 0 for PNG
 }
-
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -57,8 +39,9 @@ serve(async (req) => {
       .select('metadata, user_id')
       .eq('id', job_id)
       .single();
-    if (fetchError) throw fetchError;
 
+    if (fetchError) throw fetchError;
+    
     const metadata = job.metadata || {};
     const { full_source_image_url, bbox } = metadata;
 
@@ -180,3 +163,29 @@ serve(async (req) => {
     });
   }
 });
+
+async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
+    const url = new URL(publicUrl);
+    const pathSegments = url.pathname.split('/');
+    
+    const publicSegmentIndex = pathSegments.indexOf('public');
+    
+    if (publicSegmentIndex === -1 || publicSegmentIndex + 1 >= pathSegments.length) {
+        throw new Error(`Could not parse bucket name from URL: ${publicUrl}`);
+    }
+
+    const bucketName = pathSegments[publicSegmentIndex + 1];
+    const filePath = decodeURIComponent(pathSegments.slice(publicSegmentIndex + 2).join('/'));
+
+    if (!bucketName || !filePath) {
+        throw new Error(`Could not parse bucket or path from Supabase URL: ${publicUrl}`);
+    }
+
+    console.log(`[Downloader] Attempting to download from bucket: '${bucketName}', path: '${filePath}'`);
+
+    const { data, error } = await supabase.storage.from(bucketName).download(filePath);
+    if (error) {
+        throw new Error(`Failed to download from Supabase storage (${filePath}): ${error.message}`);
+    }
+    return data;
+}
