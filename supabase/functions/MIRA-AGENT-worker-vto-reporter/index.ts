@@ -39,35 +39,31 @@ const garmentAnalysisPrompt = `You are a forensic fashion analyst AI. Your task 
   "complexity": "string"
 }`;
 
-const comparativeAnalysisPrompt = `You are a senior Quality Assurance inspector AI. You will be given a JSON object describing a REFERENCE garment, a JSON object describing a FINAL garment, and the original person's image. Your task is to compare them and produce a final QA report.
+const comparativeAnalysisPrompt = `You are a meticulous, final-stage Quality Assurance inspector AI. You will be given two JSON reports and three images: a SOURCE PERSON image, a REFERENCE GARMENT image, and a FINAL RESULT image.
 
-### Instructions:
-1.  Compare the 'final_analysis' against the 'reference_analysis' to determine accuracy.
-2.  Analyze the original person's image to assess pose and scene characteristics.
-3.  Your entire response MUST be a single, valid JSON object.
+### Your Mission:
+Your primary task is to use the provided images to **visually verify and expand upon** the initial text-based analyses. The JSON reports are a starting point, but **your own visual inspection is the final authority**.
+
+### Your Process:
+1.  **Forensic Garment Comparison:** Visually compare the garment in the FINAL RESULT image against the REFERENCE GARMENT image. This is your most critical task.
+    -   **Fidelity Check:** Is it the *exact same garment*? Scrutinize color fidelity, texture, material sheen, pattern scale and accuracy, and details like stitching, buttons, or logos.
+    -   **Note Discrepancies:** If it's not an exact match, your notes must be specific (e.g., "The generated jacket is a lighter shade of blue and is missing the reference's silver zipper pulls.").
+2.  **Pose & Scene Integrity:** Compare the FINAL RESULT image to the SOURCE PERSON image.
+    -   Has the pose been altered?
+    -   Has the body shape been unnaturally changed?
+    -   Is the lighting consistent?
+3.  **Synthesize Final Report:** Based on your direct visual analysis, generate the final JSON report.
 
 ### CRITICAL: Decision Logic for "overall_pass"
-The "overall_pass" field should ONLY be 'false' if there are significant TECHNICAL FLAWS in the generation. A simple mismatch in garment type is NOT a failure condition on its own, but it MUST be noted.
-- **FAIL (overall_pass: false)** if:
-  - The pose is significantly changed or distorted.
-  - The body type is unnaturally altered.
-  - There are severe anatomical incorrectness issues (e.g., mangled hands).
-  - The lighting or blending is extremely poor.
-- **PASS (overall_pass: true)** if:
-  - The image is technically sound, even if the garment type is wrong. For example, if the reference was a t-shirt but the AI generated a high-quality, realistic jacket, this is a PASS, but the 'garment_comparison.type_match' must be 'false'.
+- **FAIL (overall_pass: false)** if there are significant TECHNICAL FLAWS: distorted pose, unnatural body shape, severe anatomical errors (mangled hands), or poor lighting/blending.
+- **PASS (overall_pass: true)** if the image is technically sound. A garment mismatch is NOT a technical failure, but it MUST be noted in the \`garment_comparison\` fields.
 
 ### NEW RULE: Handling Generated Outfits
-It is common for the AI to generate a complete, plausible outfit even if the reference is only a single item (e.g., generating pants and shoes when the reference is a shirt). This is **correct and desirable behavior**. Your task is to detect this.
-- Set \`generated_extra_garments\` to \`true\` if the final image contains significant clothing items not present in the reference analysis. Otherwise, set it to \`false\`.
+It is common for the AI to generate a complete, plausible outfit even if the reference is only a single item. This is **correct and desirable behavior**.
+- Set \`generated_extra_garments\` to \`true\` if the final image contains significant clothing items not present in the reference analysis.
 - **IMPORTANT:** \`generated_extra_garments: true\` should NOT cause \`overall_pass\` to be \`false\`.
 
-### Rules for 'pose_complexity':
--   **standard A-pose**: Standing straight, facing camera, arms relaxed at sides.
--   **casual standing**: Standing with minor variations (hands on hips, slight turn). Limbs are mostly visible.
--   **dynamic/action**: Involves clear movement (walking, jumping, arms raised).
--   **seated**: The model is sitting on any surface.
-
-### JSON Schema:
+### JSON Schema (Your Output):
 {
   "overall_pass": "boolean",
   "confidence_score": "number",
@@ -83,11 +79,7 @@ It is common for the AI to generate a complete, plausible outfit even if the ref
   },
   "pose_and_body_analysis": {
     "original_pose_description": "string",
-    "original_camera_angle": {
-        "shot_type": "string",
-        "camera_elevation": "string",
-        "camera_position": "string"
-    },
+    "original_camera_angle": { "shot_type": "string", "camera_elevation": "string", "camera_position": "string" },
     "pose_changed": "boolean",
     "camera_angle_changed": "boolean",
     "body_type_changed": "boolean",
@@ -161,15 +153,24 @@ serve(async (req) => {
     await supabase.from('mira-agent-vto-qa-reports').update({ reference_garment_analysis, final_result_analysis }).eq('id', qa_job_id);
     console.log(`${logPrefix} Stage 1 complete.`);
 
-    console.log(`${logPrefix} Stage 2: Performing comparative analysis...`);
-    const personImageParts = await downloadImageAsPart(supabase, vtoJob.source_person_image_url, "SOURCE PERSON");
+    console.log(`${logPrefix} Stage 2: Performing comparative analysis with all visual evidence...`);
+    const [personImageParts, referenceGarmentParts, finalResultParts] = await Promise.all([
+        downloadImageAsPart(supabase, vtoJob.source_person_image_url, "SOURCE PERSON"),
+        downloadImageAsPart(supabase, vtoJob.source_garment_image_url, "REFERENCE GARMENT"),
+        downloadImageAsPart(supabase, vtoJob.final_image_url, "FINAL RESULT")
+    ]);
+
     const comparisonParts: Part[] = [
         { text: "--- REFERENCE GARMENT ANALYSIS (JSON) ---" },
         { text: JSON.stringify(reference_garment_analysis) },
         { text: "--- FINAL RESULT ANALYSIS (JSON) ---" },
         { text: JSON.stringify(final_result_analysis) },
-        { text: "--- ORIGINAL PERSON IMAGE ---" },
-        ...personImageParts
+        { text: "--- SOURCE PERSON IMAGE ---" },
+        ...personImageParts,
+        { text: "--- REFERENCE GARMENT IMAGE ---" },
+        ...referenceGarmentParts,
+        { text: "--- FINAL RESULT IMAGE ---" },
+        ...finalResultParts
     ];
     const comparisonResult = await ai.models.generateContent({
         model: MODEL_NAME,
