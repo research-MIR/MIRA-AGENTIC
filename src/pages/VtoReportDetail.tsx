@@ -124,7 +124,7 @@ const VtoReportDetail = () => {
 
   return (
     <div className="p-4 md:p-8 h-screen flex flex-col">
-      <header className="pb-4 mb-4 border-b">
+      <header className="pb-4 mb-4 border-b shrink-0">
         <Link to="/vto-reports" className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground mb-2">
           <ArrowLeft className="h-4 w-4" />
           Back to All Reports
@@ -141,51 +141,51 @@ const VtoReportDetail = () => {
         </div>
       </header>
 
-      {isAnalyzing && <div className="flex justify-center p-8"><Loader2 className="h-8 w-8 animate-spin" /></div>}
-      
-      {analysisResult && (
-        <Card className="mb-8">
-          <CardContent className="p-6">
-            <div className="markdown-content">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{analysisResult.report}</ReactMarkdown>
-            </div>
-            <Accordion type="single" collapsible className="w-full mt-4">
-              <AccordionItem value="item-1">
-                <AccordionTrigger>
-                  <div className="flex items-center gap-2 text-sm font-semibold">
-                    <BrainCircuit className="h-4 w-4" />
-                    View AI's Thought Process
-                  </div>
-                </AccordionTrigger>
-                <AccordionContent>
-                  <div className="markdown-content p-4 bg-muted rounded-md mt-2 text-sm">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{analysisResult.thinking}</ReactMarkdown>
-                  </div>
-                </AccordionContent>
-              </AccordionItem>
-            </Accordion>
-          </CardContent>
-        </Card>
-      )}
+      <div className="flex-1 overflow-y-auto">
+        {isAnalyzing && <div className="flex justify-center p-8"><Loader2 className="h-8 w-8 animate-spin" /></div>}
+        
+        {analysisResult && (
+          <Card className="mb-8">
+            <CardContent className="p-6">
+              <div className="markdown-content">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{analysisResult.report}</ReactMarkdown>
+              </div>
+              <Accordion type="single" collapsible className="w-full mt-4">
+                <AccordionItem value="item-1">
+                  <AccordionTrigger>
+                    <div className="flex items-center gap-2 text-sm font-semibold">
+                      <BrainCircuit className="h-4 w-4" />
+                      View AI's Thought Process
+                    </div>
+                  </AccordionTrigger>
+                  <AccordionContent>
+                    <div className="markdown-content p-4 bg-muted rounded-md mt-2 text-sm">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{analysisResult.thinking}</ReactMarkdown>
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+              </Accordion>
+            </CardContent>
+          </Card>
+        )}
 
-      <Tabs defaultValue="all" className="w-full flex-1 flex flex-col">
-        <TabsList>
-          <TabsTrigger value="all">{t('allJobs')} ({reportDetails?.length || 0})</TabsTrigger>
-          <TabsTrigger value="passed">{t('passedJobs')} ({passedJobs.length})</TabsTrigger>
-          <TabsTrigger value="failed">{t('failedJobs')} ({failedJobs.length})</TabsTrigger>
-        </TabsList>
-        <div className="flex-1 overflow-y-auto mt-4">
-          <TabsContent value="all">
+        <Tabs defaultValue="all" className="w-full">
+          <TabsList>
+            <TabsTrigger value="all">{t('allJobs')} ({reportDetails?.length || 0})</TabsTrigger>
+            <TabsTrigger value="passed">{t('passedJobs')} ({passedJobs.length})</TabsTrigger>
+            <TabsTrigger value="failed">{t('failedJobs')} ({failedJobs.length})</TabsTrigger>
+          </TabsList>
+          <TabsContent value="all" className="mt-4">
             {renderJobGrid(reportDetails || [])}
           </TabsContent>
-          <TabsContent value="passed">
+          <TabsContent value="passed" className="mt-4">
             {renderJobGrid(passedJobs)}
           </TabsContent>
-          <TabsContent value="failed">
+          <TabsContent value="failed" className="mt-4">
             {renderJobGrid(failedJobs)}
           </TabsContent>
-        </div>
-      </Tabs>
+        </Tabs>
+      </div>
     </div>
   );
 };
