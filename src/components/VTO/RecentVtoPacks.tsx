@@ -227,11 +227,21 @@ export const RecentVtoPacks = () => {
 
           const drawImageWithLabel = (img: ImageBitmap | null, x: number, label: string) => {
             ctx.fillText(label, x + imgWidth / 2, padding + 15);
+            const targetX = x;
+            const targetY = padding + labelHeight;
+            
             if (img) {
-              ctx.drawImage(img, x, padding + labelHeight, imgWidth, imgHeight);
+              const hRatio = imgWidth / img.width;
+              const vRatio = imgHeight / img.height;
+              const ratio = Math.min(hRatio, vRatio);
+              const scaledWidth = img.width * ratio;
+              const scaledHeight = img.height * ratio;
+              const xOffset = (imgWidth - scaledWidth) / 2;
+              const yOffset = (imgHeight - scaledHeight) / 2;
+              ctx.drawImage(img, targetX + xOffset, targetY + yOffset, scaledWidth, scaledHeight);
             } else {
               ctx.fillStyle = '#ddd';
-              ctx.fillRect(x, padding + labelHeight, imgWidth, imgHeight);
+              ctx.fillRect(targetX, targetY, imgWidth, imgHeight);
             }
           };
 
@@ -248,7 +258,7 @@ export const RecentVtoPacks = () => {
         }
       });
 
-      await Promise.all(imagePromises);
+      await Promise.all(jobPromises);
 
       dismissToast(toastId);
       showLoading("Zipping debug files...");
