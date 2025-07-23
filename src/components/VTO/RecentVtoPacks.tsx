@@ -102,6 +102,7 @@ export const RecentVtoPacks = () => {
   const [openPackId, setOpenPackId] = useState<string | null>(null);
   const [isDownloadingResults, setIsDownloadingResults] = useState<string | null>(null);
   const [isDownloadingDebug, setIsDownloadingDebug] = useState<string | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState<string | null>(null);
 
   const { data: packs, isLoading: isLoadingPacks, error: packsError } = useQuery<VtoPackSummary[]>({
     queryKey: ['recentVtoPackSummaries', session?.user?.id],
@@ -160,6 +161,25 @@ export const RecentVtoPacks = () => {
     } catch (e) {
         console.error(`Error in downloadFromSupabase for URL ${url}:`, e);
         return null;
+    }
+  };
+
+  const handleAnalyzePack = async (packId: string) => {
+    if (!session?.user) return;
+    setIsAnalyzing(packId);
+    const toastId = showLoading("Starting analysis...");
+    try {
+      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-vto-reporter', {
+        body: { pack_id: packId, user_id: session.user.id }
+      });
+      if (error) throw error;
+      dismissToast(toastId);
+      showSuccess(data.message);
+    } catch (err: any) {
+      dismissToast(toastId);
+      showError(`Analysis failed: ${err.message}`);
+    } finally {
+      setIsAnalyzing(null);
     }
   };
 
@@ -367,8 +387,8 @@ export const RecentVtoPacks = () => {
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); console.log(`Analyze pack ${pack.pack_id}`); }}>
-                    <BarChart2 className="h-4 w-4 mr-2" />
+                  <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleAnalyzePack(pack.pack_id); }} disabled={isAnalyzing === pack.pack_id}>
+                    {isAnalyzing === pack.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <BarChart2 className="h-4 w-4 mr-2" />}
                     Analyze Pack
                   </Button>
                   <Button variant="outline" size="icon" className="h-8 w-8" onClick={(e) => { e.stopPropagation(); handleDownloadResults(pack.pack_id); }} disabled={isDownloadingResults === pack.pack_id}>
