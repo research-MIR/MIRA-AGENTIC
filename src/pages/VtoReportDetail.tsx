@@ -3,7 +3,7 @@ import { useLanguage } from "@/context/LanguageContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, AlertTriangle, Loader2, BrainCircuit, BarChart2, CheckCircle, XCircle } from "lucide-react";
+import { ArrowLeft, AlertTriangle, Loader2, BrainCircuit, BarChart2, CheckCircle, XCircle, ImageIcon } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -19,7 +19,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Progress } from "@/components/ui/progress";
-import { cn } from "@/lib/utils";
+import { useSecureImage } from "@/hooks/useSecureImage";
 
 interface ReportDetail {
   report_id: string;
@@ -63,6 +63,22 @@ const BooleanIndicator = ({ value, label }: { value: boolean, label: string }) =
   </div>
 );
 
+const ImageCard = ({ title, url }: { title: string, url?: string }) => {
+  const { displayUrl, isLoading, error } = useSecureImage(url);
+  return (
+    <div className="space-y-1">
+      <h3 className="text-sm font-semibold text-center text-muted-foreground">{title}</h3>
+      <div className="aspect-square bg-muted rounded-md flex items-center justify-center overflow-hidden">
+        {!url ? <p className="text-xs text-muted-foreground">Not available</p> :
+         isLoading ? <Loader2 className="h-8 w-8 animate-spin" /> :
+         error ? <AlertTriangle className="h-8 w-8 text-destructive" /> :
+         displayUrl ? <img src={displayUrl} alt={title} className="max-w-full max-h-full object-contain" /> : null
+        }
+      </div>
+    </div>
+  );
+};
+
 const ReportDetailModal = ({ report, isOpen, onClose }: { report: ReportDetail | null, isOpen: boolean, onClose: () => void }) => {
   if (!isOpen || !report) return null;
 
@@ -70,83 +86,87 @@ const ReportDetailModal = ({ report, isOpen, onClose }: { report: ReportDetail |
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-4xl">
+      <DialogContent className="max-w-6xl">
         <DialogHeader>
           <DialogTitle>Forensic Analysis Report</DialogTitle>
           <DialogDescription>Job ID: {report.job_id}</DialogDescription>
         </DialogHeader>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 py-4">
-          <SecureImageDisplay imageUrl={report.source_person_image_url} alt="Source Person" />
-          <SecureImageDisplay imageUrl={report.source_garment_image_url} alt="Reference Garment" />
-          <SecureImageDisplay imageUrl={report.final_image_url} alt="Final Result" />
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 py-4">
+          <div className="md:col-span-1 space-y-4">
+            <ImageCard title="Source Person" url={report.source_person_image_url} />
+            <ImageCard title="Reference Garment" url={report.source_garment_image_url} />
+            <ImageCard title="Final Result" url={report.final_image_url} />
+          </div>
+          <div className="md:col-span-2">
+            <ScrollArea className="h-[70vh] pr-4">
+              {reportData ? (
+                <div className="space-y-4">
+                  <Card>
+                    <CardHeader><CardTitle className="text-base">Overall Assessment</CardTitle></CardHeader>
+                    <CardContent className="space-y-2 text-sm">
+                      <BooleanIndicator value={reportData.overall_pass} label="Overall Pass" />
+                      <p><strong>Confidence:</strong> {(reportData.confidence_score * 100).toFixed(0)}%</p>
+                      {reportData.failure_category && <p><strong>Failure Category:</strong> <Badge variant="destructive">{reportData.failure_category}</Badge></p>}
+                      {reportData.mismatch_reason && <p><strong>Reason:</strong> {reportData.mismatch_reason}</p>}
+                    </CardContent>
+                  </Card>
+                  <Accordion type="multiple" defaultValue={['garment', 'pose', 'quality']}>
+                    <AccordionItem value="garment">
+                      <AccordionTrigger>Garment Comparison</AccordionTrigger>
+                      <AccordionContent className="space-y-3">
+                        <div className="grid grid-cols-2 gap-4">
+                          <ScoreIndicator score={reportData.garment_comparison?.scores?.color_fidelity} label="Color Fidelity" />
+                          <ScoreIndicator score={reportData.garment_comparison?.scores?.texture_realism} label="Texture Realism" />
+                          <ScoreIndicator score={reportData.garment_comparison?.scores?.pattern_accuracy} label="Pattern Accuracy" />
+                          <ScoreIndicator score={reportData.garment_comparison?.scores?.fit_and_shape} label="Fit & Shape" />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <BooleanIndicator value={reportData.garment_comparison?.type_match} label="Type Match" />
+                          <BooleanIndicator value={reportData.garment_comparison?.generated_extra_garments} label="Generated Extra Garments" />
+                        </div>
+                        {reportData.garment_comparison?.extra_garments_list && reportData.garment_comparison.extra_garments_list.length > 0 && (
+                          <div>
+                            <h4 className="text-xs font-semibold mt-3 mb-1">Extra Garments Generated:</h4>
+                            <ul className="list-disc list-inside text-xs text-muted-foreground space-y-1">
+                              {reportData.garment_comparison.extra_garments_list.map((item: string, index: number) => (
+                                <li key={index}>{item}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        <p className="text-xs italic text-muted-foreground pt-2 border-t border-border/50">{reportData.garment_comparison?.notes}</p>
+                      </AccordionContent>
+                    </AccordionItem>
+                    <AccordionItem value="pose">
+                      <AccordionTrigger>Pose & Body Analysis</AccordionTrigger>
+                      <AccordionContent className="space-y-3">
+                        <div className="grid grid-cols-2 gap-4">
+                          <ScoreIndicator score={reportData.pose_and_body_analysis?.scores?.pose_preservation} label="Pose Preservation" />
+                          <ScoreIndicator score={reportData.pose_and_body_analysis?.scores?.anatomical_correctness} label="Anatomical Correctness" />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <BooleanIndicator value={!reportData.pose_and_body_analysis?.pose_changed} label="Pose Maintained" />
+                          <BooleanIndicator value={!reportData.pose_and_body_analysis?.body_type_changed} label="Body Type Maintained" />
+                        </div>
+                        <p className="text-xs italic text-muted-foreground">{reportData.pose_and_body_analysis?.notes}</p>
+                      </AccordionContent>
+                    </AccordionItem>
+                    <AccordionItem value="quality">
+                      <AccordionTrigger>Quality Analysis</AccordionTrigger>
+                      <AccordionContent className="space-y-3">
+                        <BooleanIndicator value={reportData.quality_analysis?.lighting_match} label="Lighting Match" />
+                        <p className="text-xs"><strong>Blending Quality:</strong> {reportData.quality_analysis?.blending_quality}</p>
+                        <p className="text-xs italic text-muted-foreground">{reportData.quality_analysis?.notes}</p>
+                      </AccordionContent>
+                    </AccordionItem>
+                  </Accordion>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">No detailed report data available.</p>
+              )}
+            </ScrollArea>
+          </div>
         </div>
-        <ScrollArea className="max-h-[50vh] pr-4">
-          {reportData ? (
-            <div className="space-y-4">
-              <Card>
-                <CardHeader><CardTitle className="text-base">Overall Assessment</CardTitle></CardHeader>
-                <CardContent className="space-y-2 text-sm">
-                  <BooleanIndicator value={reportData.overall_pass} label="Overall Pass" />
-                  <p><strong>Confidence:</strong> {(reportData.confidence_score * 100).toFixed(0)}%</p>
-                  {reportData.failure_category && <p><strong>Failure Category:</strong> <Badge variant="destructive">{reportData.failure_category}</Badge></p>}
-                  {reportData.mismatch_reason && <p><strong>Reason:</strong> {reportData.mismatch_reason}</p>}
-                </CardContent>
-              </Card>
-              <Accordion type="multiple" defaultValue={['garment', 'pose', 'quality']}>
-                <AccordionItem value="garment">
-                  <AccordionTrigger>Garment Comparison</AccordionTrigger>
-                  <AccordionContent className="space-y-3">
-                    <div className="grid grid-cols-2 gap-4">
-                      <ScoreIndicator score={reportData.garment_comparison?.scores?.color_fidelity} label="Color Fidelity" />
-                      <ScoreIndicator score={reportData.garment_comparison?.scores?.texture_realism} label="Texture Realism" />
-                      <ScoreIndicator score={reportData.garment_comparison?.scores?.pattern_accuracy} label="Pattern Accuracy" />
-                      <ScoreIndicator score={reportData.garment_comparison?.scores?.fit_and_shape} label="Fit & Shape" />
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <BooleanIndicator value={reportData.garment_comparison?.type_match} label="Type Match" />
-                      <BooleanIndicator value={reportData.garment_comparison?.generated_extra_garments} label="Generated Extra Garments" />
-                    </div>
-                    {reportData.garment_comparison?.extra_garments_list && reportData.garment_comparison.extra_garments_list.length > 0 && (
-                      <div>
-                        <h4 className="text-xs font-semibold mt-3 mb-1">Extra Garments Generated:</h4>
-                        <ul className="list-disc list-inside text-xs text-muted-foreground space-y-1">
-                          {reportData.garment_comparison.extra_garments_list.map((item: string, index: number) => (
-                            <li key={index}>{item}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                    <p className="text-xs italic text-muted-foreground pt-2 border-t border-border/50">{reportData.garment_comparison?.notes}</p>
-                  </AccordionContent>
-                </AccordionItem>
-                <AccordionItem value="pose">
-                  <AccordionTrigger>Pose & Body Analysis</AccordionTrigger>
-                  <AccordionContent className="space-y-3">
-                    <div className="grid grid-cols-2 gap-4">
-                      <ScoreIndicator score={reportData.pose_and_body_analysis?.scores?.pose_preservation} label="Pose Preservation" />
-                      <ScoreIndicator score={reportData.pose_and_body_analysis?.scores?.anatomical_correctness} label="Anatomical Correctness" />
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <BooleanIndicator value={!reportData.pose_and_body_analysis?.pose_changed} label="Pose Maintained" />
-                      <BooleanIndicator value={!reportData.pose_and_body_analysis?.body_type_changed} label="Body Type Maintained" />
-                    </div>
-                    <p className="text-xs italic text-muted-foreground">{reportData.pose_and_body_analysis?.notes}</p>
-                  </AccordionContent>
-                </AccordionItem>
-                <AccordionItem value="quality">
-                  <AccordionTrigger>Quality Analysis</AccordionTrigger>
-                  <AccordionContent className="space-y-3">
-                    <BooleanIndicator value={reportData.quality_analysis?.lighting_match} label="Lighting Match" />
-                    <p className="text-xs"><strong>Blending Quality:</strong> {reportData.quality_analysis?.blending_quality}</p>
-                    <p className="text-xs italic text-muted-foreground">{reportData.quality_analysis?.notes}</p>
-                  </AccordionContent>
-                </AccordionItem>
-              </Accordion>
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">No detailed report data available.</p>
-          )}
-        </ScrollArea>
         <DialogFooter>
           <Button onClick={onClose}>Close</Button>
         </DialogFooter>
