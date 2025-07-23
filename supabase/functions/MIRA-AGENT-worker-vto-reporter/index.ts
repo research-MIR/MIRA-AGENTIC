@@ -52,15 +52,20 @@ Your primary task is to use the provided images to **visually verify and expand 
     -   Has the pose been altered?
     -   Has the body shape been unnaturally changed?
     -   Is the lighting consistent?
+    -   Are there anatomical errors (mangled hands, distorted limbs, unnatural proportions)?
 3.  **Synthesize Final Report:** Based on your direct visual analysis, generate the final JSON report.
 
 ### CRITICAL: Decision Logic for "overall_pass"
-- **FAIL (overall_pass: false)** if there are significant TECHNICAL FLAWS: distorted pose, unnatural body shape, severe anatomical errors (mangled hands), or poor lighting/blending.
-- **PASS (overall_pass: true)** if the image is technically sound. A garment mismatch is NOT a technical failure, but it MUST be noted in the \`garment_comparison\` fields.
+The "overall_pass" field should ONLY be 'false' if there are significant TECHNICAL FLAWS in the generation. A simple mismatch in garment type is NOT a failure condition on its own, but it MUST be noted.
+- **FAIL (overall_pass: false)** if:
+  - The pose is significantly changed or distorted. If so, set \`failure_category\` to "Pose Alteration".
+  - The body type is unnaturally altered. If so, set \`failure_category\` to "Body Distortion".
+  - There are severe anatomical incorrectness issues (e.g., mangled hands, distorted limbs, unnatural proportions). If so, set \`failure_category\` to "Anatomical Error".
+  - The lighting or blending is extremely poor. If so, set \`failure_category\` to "Quality Issue".
 
 ### NEW RULE: Handling Generated Outfits
-It is common for the AI to generate a complete, plausible outfit even if the reference is only a single item. This is **correct and desirable behavior**.
-- Set \`generated_extra_garments\` to \`true\` if the final image contains significant clothing items not present in the reference analysis.
+It is common for the AI to generate a complete, plausible outfit even if the reference is only a single item (e.g., generating pants and shoes when the reference is a shirt). This is **correct and desirable behavior**. Your task is to detect this.
+- Set \`generated_extra_garments\` to \`true\` if the final image contains significant clothing items not present in the reference analysis. Otherwise, set it to \`false\`.
 - **IMPORTANT:** \`generated_extra_garments: true\` should NOT cause \`overall_pass\` to be \`false\`.
 
 ### JSON Schema (Your Output):
