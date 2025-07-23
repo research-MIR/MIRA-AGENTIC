@@ -4,11 +4,14 @@ import { useSession } from '@/components/Auth/SessionContextProvider';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
-import { AlertTriangle, CheckCircle, Loader2, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle, Loader2, XCircle, Download, HardDriveDownload } from 'lucide-react';
 import { useImagePreview } from '@/context/ImagePreviewContext';
 import { SecureImageDisplay } from './SecureImageDisplay';
 import { BitStudioJob } from '@/types/vto';
 import { RealtimeChannel } from '@supabase/supabase-js';
+import { Button } from '../ui/button';
+import { showError, showLoading, dismissToast, showSuccess } from '@/utils/toast';
+import JSZip from 'jszip';
 
 interface VtoPackSummary {
   pack_id: string;
@@ -71,6 +74,8 @@ export const RecentVtoPacks = () => {
   const { supabase, session } = useSession();
   const queryClient = useQueryClient();
   const [openPackId, setOpenPackId] = useState<string | null>(null);
+  const [isDownloadingResults, setIsDownloadingResults] = useState<string | null>(null);
+  const [isDownloadingDebug, setIsDownloadingDebug] = useState<string | null>(null);
 
   const { data: packs, isLoading: isLoadingPacks, error: packsError } = useQuery<VtoPackSummary[]>({
     queryKey: ['recentVtoPackSummaries', session?.user?.id],
@@ -106,6 +111,167 @@ export const RecentVtoPacks = () => {
     };
   }, [session?.user?.id, supabase, queryClient]);
 
+  const handleDownloadResults = async (packId: string) => {
+    setIsDownloadingResults(packId);
+    const toastId = showLoading("Fetching job results...");
+    try {
+      const { data: jobs, error } = await supabase
+        .from('mira-agent-bitstudio-jobs')
+        .select('id, final_image_url')
+        .eq('vto_pack_job_id', packId)
+        .eq('status', 'complete')
+        .not('final_image_url', 'is', null);
+      if (error) throw error;
+
+      if (jobs.length === 0) {
+        dismissToast(toastId);
+        showSuccess("No completed images to download for this pack.");
+        return;
+      }
+
+      dismissToast(toastId);
+      showLoading(`Downloading ${jobs.length} images...`);
+
+      const zip = new JSZip();
+      const imagePromises = jobs.map(async (job) => {
+        try {
+          const response = await fetch(job.final_image_url!);
+          if (!response.ok) return null;
+          const blob = await response.blob();
+          zip.file(`result_${job.id}.png`, blob);
+        } catch (e) {
+          console.error(`Failed to fetch ${job.final_image_url}`, e);
+        }
+      });
+      await Promise.all(imagePromises);
+
+      dismissToast(toastId);
+      showLoading("Zipping files...");
+
+      const content = await zip.generateAsync({ type: "blob" });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(content);
+      link.download = `results_pack_${packId}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(link.href);
+
+      dismissToast(toastId);
+      showSuccess("Download started!");
+    } catch (err: any) {
+      dismissToast(toastId);
+      showError(`Download failed: ${err.message}`);
+    } finally {
+      setIsDownloadingResults(null);
+    }
+  };
+
+  const handleDownloadDebugPack = async (packId: string) => {
+    setIsDownloadingDebug(packId);
+    const toastId = showLoading("Fetching all job assets...");
+    try {
+      const { data: jobs, error } = await supabase
+        .from('mira-agent-bitstudio-jobs')
+        .select('id, source_person_image_url, source_garment_image_url, final_image_url')
+        .eq('vto_pack_job_id', packId);
+      if (error) throw error;
+
+      if (jobs.length === 0) {
+        dismissToast(toastId);
+        showSuccess("No jobs found in this pack.");
+        return;
+      }
+
+      dismissToast(toastId);
+      showLoading(`Processing ${jobs.length} jobs for debug pack...`);
+
+      const zip = new JSZip();
+      const individualAssetsFolder = zip.folder("individual_assets");
+      const comparisonSheetsFolder = zip.folder("_comparison_sheets");
+
+      const jobPromises = jobs.map(async (job) => {
+        try {
+          const [personBlob, garmentBlob, resultBlob] = await Promise.all([
+            fetch(job.source_person_image_url!).then(res => res.ok ? res.blob() : null),
+            fetch(job.source_garment_image_url!).then(res => res.ok ? res.blob() : null),
+            job.final_image_url ? fetch(job.final_image_url).then(res => res.ok ? res.blob() : null) : Promise.resolve(null)
+          ]);
+
+          const jobFolder = individualAssetsFolder!.folder(job.id);
+          if (personBlob) jobFolder!.file("source_person.png", personBlob);
+          if (garmentBlob) jobFolder!.file("source_garment.png", garmentBlob);
+          if (resultBlob) jobFolder!.file("final_result.png", resultBlob);
+
+          // Create comparison sheet
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return;
+
+          const personImg = personBlob ? await createImageBitmap(personBlob) : null;
+          const garmentImg = garmentBlob ? await createImageBitmap(garmentBlob) : null;
+          const resultImg = resultBlob ? await createImageBitmap(resultBlob) : null;
+
+          const imgWidth = 512;
+          const imgHeight = 512;
+          const padding = 20;
+          const labelHeight = 40;
+
+          canvas.width = (imgWidth * 3) + (padding * 4);
+          canvas.height = imgHeight + (padding * 2) + labelHeight;
+          ctx.fillStyle = '#f0f0f0';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.fillStyle = '#333';
+          ctx.font = '20px sans-serif';
+          ctx.textAlign = 'center';
+
+          const drawImageWithLabel = (img: ImageBitmap | null, x: number, label: string) => {
+            ctx.fillText(label, x + imgWidth / 2, padding + 15);
+            if (img) {
+              ctx.drawImage(img, x, padding + labelHeight, imgWidth, imgHeight);
+            } else {
+              ctx.fillStyle = '#ddd';
+              ctx.fillRect(x, padding + labelHeight, imgWidth, imgHeight);
+            }
+          };
+
+          drawImageWithLabel(personImg, padding, "Source Person");
+          drawImageWithLabel(garmentImg, imgWidth + padding * 2, "Garment");
+          drawImageWithLabel(resultImg, (imgWidth * 2) + padding * 3, "Final Result");
+
+          const comparisonBlob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
+          if (comparisonBlob) {
+            comparisonSheetsFolder!.file(`${job.id}_comparison.png`, comparisonBlob);
+          }
+        } catch (e) {
+          console.error(`Failed to process job ${job.id}:`, e);
+        }
+      });
+
+      await Promise.all(jobPromises);
+
+      dismissToast(toastId);
+      showLoading("Zipping debug files...");
+
+      const content = await zip.generateAsync({ type: "blob" });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(content);
+      link.download = `debug_pack_${packId}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(link.href);
+
+      dismissToast(toastId);
+      showSuccess("Debug pack download started!");
+    } catch (err: any) {
+      dismissToast(toastId);
+      showError(`Download failed: ${err.message}`);
+    } finally {
+      setIsDownloadingDebug(null);
+    }
+  };
+
   if (isLoadingPacks) {
     return <div className="space-y-4"><Skeleton className="h-20 w-full" /><Skeleton className="h-20 w-full" /></div>;
   }
@@ -136,6 +302,12 @@ export const RecentVtoPacks = () => {
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
+                  <Button variant="outline" size="icon" className="h-8 w-8" onClick={(e) => { e.stopPropagation(); handleDownloadResults(pack.pack_id); }} disabled={isDownloadingResults === pack.pack_id}>
+                    {isDownloadingResults === pack.pack_id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                  </Button>
+                  <Button variant="outline" size="icon" className="h-8 w-8" onClick={(e) => { e.stopPropagation(); handleDownloadDebugPack(pack.pack_id); }} disabled={isDownloadingDebug === pack.pack_id}>
+                    {isDownloadingDebug === pack.pack_id ? <Loader2 className="h-4 w-4 animate-spin" /> : <HardDriveDownload className="h-4 w-4" />}
+                  </Button>
                   {inProgress && <Loader2 className="h-5 w-5 animate-spin text-primary" />}
                   {hasFailures && <XCircle className="h-5 w-5 text-destructive" />}
                   {isComplete && !hasFailures && <CheckCircle className="h-5 w-5 text-green-600" />}
