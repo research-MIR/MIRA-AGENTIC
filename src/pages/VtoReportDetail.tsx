@@ -1,17 +1,22 @@
 import { useParams, Link } from "react-router-dom";
 import { useLanguage } from "@/context/LanguageContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Card } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, AlertTriangle, Loader2 } from "lucide-react";
+import { ArrowLeft, AlertTriangle, Loader2, BrainCircuit, BarChart2 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { SecureImageDisplay } from "@/components/VTO/SecureImageDisplay";
 import { useImagePreview } from "@/context/ImagePreviewContext";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { RealtimeChannel } from "@supabase/supabase-js";
+import { Button } from "@/components/ui/button";
+import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 
 interface ReportDetail {
   report_id: string;
@@ -25,12 +30,19 @@ interface ReportDetail {
   final_image_url: string;
 }
 
+interface AnalysisResult {
+  thinking: string;
+  report: string;
+}
+
 const VtoReportDetail = () => {
   const { packId } = useParams();
   const { t } = useLanguage();
   const { supabase, session } = useSession();
   const { showImage } = useImagePreview();
   const queryClient = useQueryClient();
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
 
   const { data: reportDetails, isLoading, error } = useQuery<ReportDetail[]>({
     queryKey: ['vtoReportDetail', packId],
@@ -60,6 +72,27 @@ const VtoReportDetail = () => {
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [packId, session?.user?.id, supabase, queryClient]);
+
+  const handleGenerateAnalysis = async () => {
+    if (!packId || !session?.user) return;
+    setIsAnalyzing(true);
+    setAnalysisResult(null);
+    const toastId = showLoading("Generating strategic analysis...");
+    try {
+      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-analyzer-vto-report-synthesis', {
+        body: { pack_id: packId, user_id: session.user.id }
+      });
+      if (error) throw error;
+      setAnalysisResult(data);
+      dismissToast(toastId);
+      showSuccess("Analysis complete!");
+    } catch (err: any) {
+      dismissToast(toastId);
+      showError(`Analysis failed: ${err.message}`);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
 
   const passedJobs = reportDetails?.filter(j => j.comparative_report?.overall_pass) || [];
   const failedJobs = reportDetails?.filter(j => !j.comparative_report?.overall_pass) || [];
@@ -91,14 +124,50 @@ const VtoReportDetail = () => {
 
   return (
     <div className="p-4 md:p-8 h-screen flex flex-col">
-      <header className="pb-4 mb-8 border-b">
+      <header className="pb-4 mb-4 border-b">
         <Link to="/vto-reports" className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground mb-2">
           <ArrowLeft className="h-4 w-4" />
           Back to All Reports
         </Link>
-        <h1 className="text-3xl font-bold">{t('vtoReportDetailTitle')}</h1>
-        <p className="text-muted-foreground">Pack ID: {packId}</p>
+        <div className="flex justify-between items-center">
+          <div>
+            <h1 className="text-3xl font-bold">{t('vtoReportDetailTitle')}</h1>
+            <p className="text-muted-foreground">Pack ID: {packId}</p>
+          </div>
+          <Button onClick={handleGenerateAnalysis} disabled={isAnalyzing}>
+            {isAnalyzing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <BarChart2 className="mr-2 h-4 w-4" />}
+            Generate Strategic Analysis
+          </Button>
+        </div>
       </header>
+
+      {isAnalyzing && <div className="flex justify-center p-8"><Loader2 className="h-8 w-8 animate-spin" /></div>}
+      
+      {analysisResult && (
+        <Card className="mb-8">
+          <CardContent className="p-6">
+            <div className="markdown-content">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{analysisResult.report}</ReactMarkdown>
+            </div>
+            <Accordion type="single" collapsible className="w-full mt-4">
+              <AccordionItem value="item-1">
+                <AccordionTrigger>
+                  <div className="flex items-center gap-2 text-sm font-semibold">
+                    <BrainCircuit className="h-4 w-4" />
+                    View AI's Thought Process
+                  </div>
+                </AccordionTrigger>
+                <AccordionContent>
+                  <div className="markdown-content p-4 bg-muted rounded-md mt-2 text-sm">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{analysisResult.thinking}</ReactMarkdown>
+                  </div>
+                </AccordionContent>
+              </AccordionItem>
+            </Accordion>
+          </CardContent>
+        </Card>
+      )}
+
       <Tabs defaultValue="all" className="w-full flex-1 flex flex-col">
         <TabsList>
           <TabsTrigger value="all">{t('allJobs')} ({reportDetails?.length || 0})</TabsTrigger>
