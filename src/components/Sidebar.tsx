@@ -62,11 +62,10 @@ export const Sidebar = () => {
     queryFn: async () => {
       if (!session?.user) return [];
       const { data, error } = await supabase
-        .from("mira-agent-jobs")
-        .select("id, original_prompt, project_id, context")
-        .eq("user_id", session.user.id)
-        .or(`context->>source.not.in.("direct_generator","refiner","project_upload","project_gallery_add","reframe","reframe_from_recontext"),context->>source.is.null`)
-        .order(sortOrder, { ascending: false });
+        .rpc('get_chat_history', { 
+            p_user_id: session.user.id, 
+            sort_on_update: sortOrder === 'updated_at' 
+        });
       if (error) throw new Error(error.message);
       return data as JobHistory[];
     },
