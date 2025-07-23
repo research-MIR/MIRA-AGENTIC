@@ -67,16 +67,24 @@ serve(async (req) => {
 
     const { data: job, error: fetchError } = await supabase
       .from('mira-agent-mask-aggregation-jobs')
-      .select('results, source_image_base64, user_id')
+      .select('results, metadata, user_id')
       .eq('id', aggregationJobId)
       .single();
 
     if (fetchError) throw fetchError;
-    if (!job || !job.source_image_base64) {
-      throw new Error("Job data or source image is missing.");
+    const sourceImageUrl = job?.metadata?.source_image_storage_path;
+    if (!job || !sourceImageUrl) {
+      throw new Error("Job data or source image path is missing from metadata.");
     }
 
-    const sourceImageBuffer = decodeBase64(job.source_image_base64);
+    const url = new URL(sourceImageUrl);
+    const pathSegments = url.pathname.split('/');
+    const bucketName = pathSegments[pathSegments.indexOf('public') + 1];
+    const filePath = pathSegments.slice(pathSegments.indexOf(bucketName) + 1).join('/');
+    const { data: imageBlob, error: downloadError } = await supabase.storage.from(bucketName).download(decodeURIComponent(filePath));
+    if (downloadError) throw new Error(`Failed to download source image from storage: ${downloadError.message}`);
+    const sourceImageBuffer = new Uint8Array(await imageBlob.arrayBuffer());
+
     const sourceImage = await loadImage(sourceImageBuffer);
     const width = sourceImage.width();
     const height = sourceImage.height();
@@ -132,7 +140,7 @@ serve(async (req) => {
     }
 
     await supabase.from('mira-agent-mask-aggregation-jobs')
-      .update({ status: 'complete', metadata: { raw_mask_url: rawMaskUrl } })
+      .update({ status: 'complete', metadata: { ...job.metadata, raw_mask_url: rawMaskUrl } })
       .eq('id', aggregationJobId);
     
     return new Response(JSON.stringify({ success: true, rawMaskUrl }), {
