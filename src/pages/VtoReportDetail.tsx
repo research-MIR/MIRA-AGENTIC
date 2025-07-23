@@ -86,12 +86,12 @@ const ReportDetailModal = ({ report, isOpen, onClose }: { report: ReportDetail |
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-7xl w-full h-[90vh] flex flex-col">
+      <DialogContent className="max-w-[90vw] w-full h-[90vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>Forensic Analysis Report</DialogTitle>
           <DialogDescription>Job ID: {report.job_id}</DialogDescription>
         </DialogHeader>
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-6 py-4 flex-1 overflow-hidden">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 py-4 flex-1 overflow-hidden">
           {/* Column 1: Inputs */}
           <div className="md:col-span-1 space-y-4 flex flex-col">
             <div className="aspect-square">
@@ -103,7 +103,7 @@ const ReportDetailModal = ({ report, isOpen, onClose }: { report: ReportDetail |
           </div>
           
           {/* Column 2: Analysis */}
-          <div className="md:col-span-3 h-full overflow-hidden">
+          <div className="md:col-span-2 h-full overflow-hidden">
             <ScrollArea className="h-full pr-4">
               {reportData ? (
                 <div className="space-y-4">
