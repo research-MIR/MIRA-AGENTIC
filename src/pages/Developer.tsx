@@ -3,7 +3,7 @@ import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useLanguage } from "@/context/LanguageContext";
-import { Loader2, AlertTriangle, RefreshCw, Layers, Skull, BoxSelect } from "lucide-react";
+import { Loader2, AlertTriangle, RefreshCw, Layers, Skull, BoxSelect, ClipboardCheck } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
@@ -102,6 +102,7 @@ const Developer = () => {
   const [isCancellingVTO, setIsCancellingVTO] = useState(false);
   const [isShuttingDown, setIsShuttingDown] = useState(false);
   const [isResettingVtoPacks, setIsResettingVtoPacks] = useState(false);
+  const [isClearingFailedJobs, setIsClearingFailedJobs] = useState(false);
 
   const handleCancelAllSegmentationJobs = async () => {
     setIsCancelling(true);
@@ -164,6 +165,22 @@ const Developer = () => {
         showError(`Failed to reset packs: ${err.message}`);
     } finally {
         setIsResettingVtoPacks(false);
+    }
+  };
+
+  const handleClearFailedVTOJobs = async () => {
+    setIsClearingFailedJobs(true);
+    const toastId = showLoading("Deleting all failed VTO jobs...");
+    try {
+        const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-admin-clear-failed-vto-jobs');
+        if (error) throw error;
+        dismissToast(toastId);
+        showSuccess(data.message);
+    } catch (err: any) {
+        dismissToast(toastId);
+        showError(`Failed to clear jobs: ${err.message}`);
+    } finally {
+        setIsClearingFailedJobs(false);
     }
   };
 
@@ -238,6 +255,26 @@ const Developer = () => {
                     <AlertDialogAction onClick={handleResetVtoPacks} disabled={isResettingVtoPacks}>
                       {isResettingVtoPacks && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                       Yes, reset VTO packs
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="destructive">Clear All Failed VTO Jobs</Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This will permanently DELETE all jobs from the 'mira-agent-bitstudio-jobs' table with a status of 'failed' or 'permanently_failed'. This can improve query performance but is irreversible.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={handleClearFailedVTOJobs} disabled={isClearingFailedJobs}>
+                      {isClearingFailedJobs && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      Yes, clear failed jobs
                     </AlertDialogAction>
                   </AlertDialogFooter>
                 </AlertDialogContent>
