@@ -92,12 +92,14 @@ const ReportDetailModal = ({ report, isOpen, onClose }: { report: ReportDetail |
           <DialogDescription>Job ID: {report.job_id}</DialogDescription>
         </DialogHeader>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8 py-4">
-          <div className="md:col-span-1 space-y-4">
+          {/* Column 1: Inputs */}
+          <div className="space-y-4">
             <ImageCard title="Source Person" url={report.source_person_image_url} />
             <ImageCard title="Reference Garment" url={report.source_garment_image_url} />
-            <ImageCard title="Final Result" url={report.final_image_url} />
           </div>
-          <div className="md:col-span-2">
+          
+          {/* Column 2: Analysis */}
+          <div className="md:col-span-1">
             <ScrollArea className="h-[70vh] pr-4">
               {reportData ? (
                 <div className="space-y-4">
@@ -165,6 +167,11 @@ const ReportDetailModal = ({ report, isOpen, onClose }: { report: ReportDetail |
                 <p className="text-sm text-muted-foreground">No detailed report data available.</p>
               )}
             </ScrollArea>
+          </div>
+
+          {/* Column 3: Output */}
+          <div className="space-y-4">
+            <ImageCard title="Final Result" url={report.final_image_url} />
           </div>
         </div>
         <DialogFooter>
