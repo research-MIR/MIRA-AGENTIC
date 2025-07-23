@@ -4,7 +4,7 @@ import { useSession } from '@/components/Auth/SessionContextProvider';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
-import { AlertTriangle, CheckCircle, Loader2, XCircle, Download, HardDriveDownload } from 'lucide-react';
+import { AlertTriangle, CheckCircle, Loader2, XCircle, Download, HardDriveDownload, BarChart2 } from 'lucide-react';
 import { useImagePreview } from '@/context/ImagePreviewContext';
 import { SecureImageDisplay } from './SecureImageDisplay';
 import { BitStudioJob } from '@/types/vto';
@@ -341,6 +341,10 @@ export const RecentVtoPacks = () => {
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); console.log(`Analyze pack ${pack.pack_id}`); }}>
+                    <BarChart2 className="h-4 w-4 mr-2" />
+                    Analyze Pack
+                  </Button>
                   <Button variant="outline" size="icon" className="h-8 w-8" onClick={(e) => { e.stopPropagation(); handleDownloadResults(pack.pack_id); }} disabled={isDownloadingResults === pack.pack_id}>
                     {isDownloadingResults === pack.pack_id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
                   </Button>

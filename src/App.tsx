@@ -28,6 +28,8 @@ import EditWithWords from "./pages/EditWithWords.tsx";
 import Experimental from "./pages/Experimental.tsx";
 import ProductRecontext from "./pages/ProductRecontext.tsx";
 import Reframe from "./pages/Reframe.tsx";
+import VtoReports from "./pages/VtoReports.tsx";
+import VtoReportDetail from "./pages/VtoReportDetail.tsx";
 
 const App = () => {
   const { isTourOpen, closeTour, isTourPending, openTour, startTour } = useOnboardingTour();
@@ -114,6 +116,8 @@ const App = () => {
             <Route path="/model-packs" element={<ModelPacks />} />
             <Route path="/model-packs/:packId" element={<ModelPackDetail />} />
             <Route path="/experimental" element={<Experimental />} />
+            <Route path="/vto-reports" element={<VtoReports />} />
+            <Route path="/vto-reports/:packId" element={<VtoReportDetail />} />
           </Route>
         </Route>
         <Route path="*" element={<NotFound />} />

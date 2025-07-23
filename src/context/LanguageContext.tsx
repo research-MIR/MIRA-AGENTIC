@@ -14,6 +14,7 @@ import { generateModelsTranslations } from '@/lib/translations/generateModels';
 import { editWithWordsTranslations } from '@/lib/translations/editWithWords';
 import { experimentalTranslations } from '@/lib/translations/experimental';
 import { reframeTranslations } from '@/lib/translations/reframe';
+import { reportsTranslations } from '@/lib/translations/reports';
 
 // Aggregate translations directly in this file
 const modules = [
@@ -32,6 +33,7 @@ const modules = [
   editWithWordsTranslations,
   experimentalTranslations,
   reframeTranslations,
+  reportsTranslations,
 ];
 
 const translations = modules.reduce((acc, module) => {
