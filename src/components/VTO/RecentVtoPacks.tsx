@@ -8,7 +8,7 @@ import { AlertTriangle, CheckCircle, Loader2, XCircle, Download, HardDriveDownlo
 import { useImagePreview } from '@/context/ImagePreviewContext';
 import { SecureImageDisplay } from './SecureImageDisplay';
 import { BitStudioJob } from '@/types/vto';
-import { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js';
+import { RealtimeChannel } from '@supabase/supabase-js';
 import { Button } from '../ui/button';
 import { showError, showLoading, dismissToast, showSuccess } from '@/utils/toast';
 import JSZip from 'jszip';
@@ -234,42 +234,49 @@ export const RecentVtoPacks = () => {
           const garmentImg = garmentBlob ? await createImageBitmap(garmentBlob) : null;
           const resultImg = resultBlob ? await createImageBitmap(resultBlob) : null;
 
-          const imgWidth = 512;
-          const imgHeight = 512;
-          const padding = 20;
-          const labelHeight = 40;
+          const images = [personImg, garmentImg, resultImg];
+          const maxWidth = Math.max(...images.map(img => img?.width || 0));
+          const maxHeight = Math.max(...images.map(img => img?.height || 0));
 
-          canvas.width = (imgWidth * 3) + (padding * 4);
-          canvas.height = imgHeight + (padding * 2) + labelHeight;
+          if (maxWidth === 0 || maxHeight === 0) {
+            console.warn(`Skipping comparison sheet for job ${job.id} as no images could be loaded.`);
+            return;
+          }
+
+          const padding = 40;
+          const labelHeight = 60;
+          const fontSize = 30;
+
+          canvas.width = (maxWidth * 3) + (padding * 4);
+          canvas.height = maxHeight + (padding * 2) + labelHeight;
+          
           ctx.fillStyle = '#f0f0f0';
           ctx.fillRect(0, 0, canvas.width, canvas.height);
           ctx.fillStyle = '#333';
-          ctx.font = '20px sans-serif';
+          ctx.font = `${fontSize}px sans-serif`;
           ctx.textAlign = 'center';
 
-          const drawImageWithLabel = (img: ImageBitmap | null, x: number, label: string) => {
-            ctx.fillText(label, x + imgWidth / 2, padding + 15);
-            const targetX = x;
+          const drawImageWithLabel = (img: ImageBitmap | null, slotIndex: number, label: string) => {
+            const slotX = padding + (maxWidth + padding) * slotIndex;
+            
+            ctx.fillText(label, slotX + maxWidth / 2, padding + fontSize);
+            
+            const targetX = slotX;
             const targetY = padding + labelHeight;
             
             if (img) {
-              const hRatio = imgWidth / img.width;
-              const vRatio = imgHeight / img.height;
-              const ratio = Math.min(hRatio, vRatio);
-              const scaledWidth = img.width * ratio;
-              const scaledHeight = img.height * ratio;
-              const xOffset = (imgWidth - scaledWidth) / 2;
-              const yOffset = (imgHeight - scaledHeight) / 2;
-              ctx.drawImage(img, targetX + xOffset, targetY + yOffset, scaledWidth, scaledHeight);
+              const xOffset = (maxWidth - img.width) / 2;
+              const yOffset = (maxHeight - img.height) / 2;
+              ctx.drawImage(img, targetX + xOffset, targetY + yOffset);
             } else {
               ctx.fillStyle = '#ddd';
-              ctx.fillRect(targetX, targetY, imgWidth, imgHeight);
+              ctx.fillRect(targetX, targetY, maxWidth, maxHeight);
             }
           };
 
-          drawImageWithLabel(personImg, padding, "Source Person");
-          drawImageWithLabel(garmentImg, imgWidth + padding * 2, "Garment");
-          drawImageWithLabel(resultImg, (imgWidth * 2) + padding * 3, "Final Result");
+          drawImageWithLabel(personImg, 0, "Source Person");
+          drawImageWithLabel(garmentImg, 1, "Garment");
+          drawImageWithLabel(resultImg, 2, "Final Result");
 
           const comparisonBlob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
           if (comparisonBlob) {
