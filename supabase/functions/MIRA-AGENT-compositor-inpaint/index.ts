@@ -67,10 +67,11 @@ serve(async (req) => {
 
     if (!inpaintedPatchResponse.ok) throw new Error(`Failed to download inpainted patch: ${inpaintedPatchResponse.statusText}`);
 
-    const [sourceImage, inpaintedPatchImg] = await Promise.all([
-        Image.decode(await sourceBlob.arrayBuffer()),
-        Image.decode(await inpaintedPatchResponse.arrayBuffer())
-    ]);
+    // --- Memory Optimization: Decode sequentially ---
+    console.log(`${logPrefix} Decoding patch image...`);
+    let inpaintedPatchImg = await Image.decode(await inpaintedPatchResponse.arrayBuffer());
+    console.log(`${logPrefix} Decoding source image...`);
+    let sourceImage = await Image.decode(await sourceBlob.arrayBuffer());
 
     // --- Generate and Upload New Debug Assets ---
     let final_compositing_mask_url: string | null = null;
@@ -94,26 +95,49 @@ serve(async (req) => {
 
     console.log(`${logPrefix} Compositing final image...`);
     
-    const canvas = createCanvas(sourceImage.width, sourceImage.height);
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(await loadImage(await sourceImage.encode(0)), 0, 0);
+    // --- Memory Optimization: In-place compositing ---
+    const src = sourceImage;
+    const patch = inpaintedPatchImg;
+    const { x, y } = bbox;
 
-    const featheredCropCanvas = createCanvas(bbox.width, bbox.height);
-    const featheredCtx = featheredCropCanvas.getContext('2d');
-    featheredCtx.drawImage(await loadImage(await inpaintedPatchImg.encode(0)), 0, 0, bbox.width, bbox.height);
-    
-    if (croppedMaskImage) {
-        featheredCtx.globalCompositeOperation = 'destination-in';
-        const featherAmount = Math.max(5, Math.round(bbox.width * 0.05));
-        featheredCtx.filter = `blur(${featherAmount}px)`;
-        featheredCtx.drawImage(croppedMaskImage, 0, 0, bbox.width, bbox.height);
+    if (x + patch.width > src.width || y + patch.height > src.height) {
+        throw new Error("Patch is outside the bounds of the source image.");
     }
 
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.filter = 'none';
-    ctx.drawImage(featheredCropCanvas, bbox.x, bbox.y);
+    const srcData = src.bitmap.data;
+    const patchData = patch.bitmap.data;
+    const srcW = src.width;
+    const patchW = patch.width;
+    const patchH = patch.height;
+
+    for (let py = 0; py < patchH; py++) {
+        const srcRowStart = ((y + py) * srcW + x) * 4;
+        const patchRowStart = (py * patchW) * 4;
+        for (let px = 0; px < patchW; px++) {
+            const sIdx = srcRowStart + px * 4;
+            const pIdx = patchRowStart + px * 4;
+            const pa = patchData[pIdx + 3];
+            if (pa === 0) continue;
+            if (pa === 255) {
+                srcData[sIdx] = patchData[pIdx];
+                srcData[sIdx + 1] = patchData[pIdx + 1];
+                srcData[sIdx + 2] = patchData[pIdx + 2];
+                srcData[sIdx + 3] = 255;
+            } else {
+                const invA = 255 - pa;
+                srcData[sIdx] = (patchData[pIdx] * pa + srcData[sIdx] * invA) / 255;
+                srcData[sIdx + 1] = (patchData[pIdx + 1] * pa + srcData[sIdx + 1] * invA) / 255;
+                srcData[sIdx + 2] = (patchData[pIdx + 2] * pa + srcData[sIdx + 2] * invA) / 255;
+                srcData[sIdx + 3] = Math.min(255, pa + srcData[sIdx + 3] * invA / 255);
+            }
+        }
+    }
     
-    const finalImageBuffer = canvas.toBuffer('image/png');
+    // --- Memory Optimization: Free patch memory before encoding ---
+    (inpaintedPatchImg.bitmap as any).data = null;
+    inpaintedPatchImg = null as any;
+
+    const finalImageBuffer = await sourceImage.encode(0); // 0 for PNG
     const finalFilePath = `${job.user_id}/vto-final/${Date.now()}_final_composite.png`;
     
     const { error: uploadError } = await supabase.storage
