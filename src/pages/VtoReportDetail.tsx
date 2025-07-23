@@ -66,13 +66,13 @@ const BooleanIndicator = ({ value, label }: { value: boolean, label: string }) =
 const ImageCard = ({ title, url }: { title: string, url?: string }) => {
   const { displayUrl, isLoading, error } = useSecureImage(url);
   return (
-    <div className="space-y-1 flex flex-col h-full">
-      <h3 className="text-sm font-semibold text-center text-muted-foreground shrink-0">{title}</h3>
-      <div className="bg-muted rounded-md flex items-center justify-center overflow-hidden flex-1 relative">
+    <div className="space-y-1">
+      <h3 className="text-sm font-semibold text-center text-muted-foreground">{title}</h3>
+      <div className="aspect-square bg-muted rounded-md flex items-center justify-center overflow-hidden">
         {!url ? <p className="text-xs text-muted-foreground">Not available</p> :
          isLoading ? <Loader2 className="h-8 w-8 animate-spin" /> :
          error ? <AlertTriangle className="h-8 w-8 text-destructive" /> :
-         displayUrl ? <img src={displayUrl} alt={title} className="w-full h-full object-contain" /> : null
+         displayUrl ? <img src={displayUrl} alt={title} className="max-w-full max-h-full object-contain" /> : null
         }
       </div>
     </div>
@@ -91,19 +91,15 @@ const ReportDetailModal = ({ report, isOpen, onClose }: { report: ReportDetail |
           <DialogTitle>Forensic Analysis Report</DialogTitle>
           <DialogDescription>Job ID: {report.job_id}</DialogDescription>
         </DialogHeader>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 py-4 flex-1 overflow-hidden">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-6 py-4 flex-1 overflow-hidden">
           {/* Column 1: Inputs */}
           <div className="md:col-span-1 space-y-4 flex flex-col">
-            <div className="aspect-square">
-              <ImageCard title="Source Person" url={report.source_person_image_url} />
-            </div>
-            <div className="aspect-square">
-              <ImageCard title="Reference Garment" url={report.source_garment_image_url} />
-            </div>
+            <ImageCard title="Source Person" url={report.source_person_image_url} />
+            <ImageCard title="Reference Garment" url={report.source_garment_image_url} />
           </div>
           
           {/* Column 2: Analysis */}
-          <div className="md:col-span-2 h-full overflow-hidden">
+          <div className="md:col-span-3 h-full overflow-hidden">
             <ScrollArea className="h-full pr-4">
               {reportData ? (
                 <div className="space-y-4">
@@ -174,7 +170,7 @@ const ReportDetailModal = ({ report, isOpen, onClose }: { report: ReportDetail |
           </div>
 
           {/* Column 3: Output */}
-          <div className="md:col-span-1 flex flex-col">
+          <div className="md:col-span-1 space-y-4 flex flex-col">
             <ImageCard title="Final Result" url={report.final_image_url} />
           </div>
         </div>
