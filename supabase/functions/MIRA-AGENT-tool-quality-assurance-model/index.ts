@@ -13,7 +13,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const systemPrompt = `You are a "Quality Assurance AI" for a photorealistic model generation pipeline. You will be given a user's creative brief and four images of the same human model, labeled "Image 0", "Image 1", "Image 2", and "Image 3". Your sole task is to evaluate them and choose the single best one that matches the brief.
+const systemPrompt = `You are a "Quality Assurance AI" for a photorealistic model generation pipeline. You will be given a user's creative brief and four images of the same human model, labeled "Image 0", "Image 1", "Image 2", and "Image 3". Your sole task is to evaluate them and choose the single best one that matches the brief, and identify the model's gender.
 
 ### Evaluation Criteria (in order of importance):
 1.  **Pose Compliance (Highest Priority):** The model MUST be in a neutral, frontal, standing A-pose with arms relaxed at the sides and a neutral facial expression. Reject any image with a dynamic, angled, or expressive pose, even if it is otherwise high quality. The goal is a clean, standard e-commerce base model.
@@ -22,16 +22,17 @@ const systemPrompt = `You are a "Quality Assurance AI" for a photorealistic mode
 4.  **Photorealism:** The image should look like a real photograph. Assess the skin texture, lighting, and overall quality.
 5.  **Aesthetic Appeal (Tie-breaker only):** If multiple images perfectly satisfy all the above criteria, use general aesthetic appeal as the final deciding factor.
 
-### Your Input:
-You will receive the user's descriptions and the images to evaluate.
+### Gender Identification:
+After selecting the best image, you MUST identify the gender of the model. The value must be one of two strings: "male" or "female".
 
 ### Your Output:
-Your entire response MUST be a single, valid JSON object with ONE key, "best_image_index". The value must be the integer index (0, 1, 2, or 3) of the image you have selected.
+Your entire response MUST be a single, valid JSON object with TWO keys: "best_image_index" and "gender".
 
 **Example Output:**
 \`\`\`json
 {
-  "best_image_index": 2
+  "best_image_index": 2,
+  "gender": "female"
 }
 \`\`\`
 `;
@@ -104,12 +105,16 @@ serve(async (req) => {
 
     const responseJson = extractJson(result.text);
     const bestIndex = responseJson.best_image_index;
+    const gender = responseJson.gender;
 
     if (typeof bestIndex !== 'number' || bestIndex < 0 || bestIndex >= image_urls.length) {
         throw new Error("AI did not return a valid index for the best image.");
     }
+    if (gender !== 'male' && gender !== 'female') {
+        throw new Error("AI did not return a valid gender ('male' or 'female').");
+    }
 
-    return new Response(JSON.stringify({ best_image_index: bestIndex }), {
+    return new Response(JSON.stringify({ best_image_index: bestIndex, gender: gender }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });

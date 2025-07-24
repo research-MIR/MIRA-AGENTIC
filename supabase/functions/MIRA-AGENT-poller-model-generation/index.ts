@@ -889,10 +889,11 @@ async function handleBaseGenerationCompleteState(supabase: any, job: any) {
         const bestImage = job.base_generation_results[qaData.best_image_index];
         await supabase.from('mira-agent-model-generation-jobs').update({
             status: 'generating_poses',
-            base_model_image_url: bestImage.url
+            base_model_image_url: bestImage.url,
+            gender: qaData.gender
         }).eq('id', job.id);
         
-        console.log(`[ModelGenPoller][${job.id}] AI selected image. Re-invoking poller to generate poses.`);
+        console.log(`[ModelGenPoller][${job.id}] AI selected image and tagged gender as '${qaData.gender}'. Re-invoking poller to generate poses.`);
         supabase.functions.invoke('MIRA-AGENT-poller-model-generation', { body: { job_id: job.id } }).catch(console.error);
     } else {
         console.log(`[ModelGenPoller][${job.id}] Awaiting manual user approval.`);

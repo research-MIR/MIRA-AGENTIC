@@ -17,7 +17,11 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { JobPoseDisplay } from "@/components/GenerateModels/JobPoseDisplay";
 import { UpscaledPosesGallery } from "@/components/GenerateModels/UpscaledPosesGallery";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { ResultsDisplay } from "@/components/GenerateModels/ResultsDisplay";
+import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { showError, showSuccess } from "@/utils/toast";
 
 interface Pose {
   final_url: string;
@@ -43,6 +47,8 @@ const ModelPackDetail = () => {
   const { t } = useLanguage();
   const [isUpscaleModalOpen, setIsUpscaleModalOpen] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [selectedBaseModelId, setSelectedBaseModelId] = useState<string | null>(null);
+  const [selectedGender, setSelectedGender] = useState<'male' | 'female' | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
 
   const { data: pack, isLoading: isLoadingPack, error: packError } = useQuery({
@@ -72,6 +78,38 @@ const ModelPackDetail = () => {
   });
 
   const selectedJob = useMemo(() => jobs?.find(j => j.id === selectedJobId), [jobs, selectedJobId]);
+
+  useEffect(() => {
+    if (selectedJob?.status !== 'awaiting_approval') {
+      setSelectedBaseModelId(null);
+      setSelectedGender(null);
+    }
+  }, [selectedJob]);
+
+  const handleApproveBaseModel = async () => {
+    if (!selectedJobId || !selectedBaseModelId || !selectedGender) {
+      showError("Please select a base model image AND a gender.");
+      return;
+    }
+    const selectedImage = selectedJob?.base_generation_results?.find(img => img.id === selectedBaseModelId);
+    if (!selectedImage) {
+      showError("Selected image not found.");
+      return;
+    }
+
+    const { error } = await supabase.from('mira-agent-model-generation-jobs').update({
+      status: 'generating_poses',
+      base_model_image_url: selectedImage.url,
+      gender: selectedGender
+    }).eq('id', selectedJobId);
+
+    if (error) {
+      showError(`Failed to approve model: ${error.message}`);
+    } else {
+      showSuccess("Model approved. Generating poses...");
+      queryClient.invalidateQueries({ queryKey: ['modelsForPack', packId] });
+    }
+  };
 
   const packStatus = useMemo(() => {
     if (!jobs || jobs.length === 0) {
@@ -182,6 +220,43 @@ const ModelPackDetail = () => {
                       )}
                     </CardContent>
                   </Card>
+                  {selectedJob && selectedJob.status === 'awaiting_approval' && (
+                    <Card>
+                      <CardHeader>
+                        <CardTitle>{t('resultsTitle')}</CardTitle>
+                        <CardDescription>{t('resultsDescriptionManual')}</CardDescription>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <ResultsDisplay
+                          images={selectedJob.base_generation_results?.map(img => ({ id: img.id, url: img.url })) || []}
+                          isLoading={false}
+                          autoApprove={false}
+                          selectedImageId={selectedBaseModelId}
+                          onSelectImage={setSelectedBaseModelId}
+                        />
+                        <div>
+                          <Label>Select Model Gender</Label>
+                          <RadioGroup onValueChange={(value) => setSelectedGender(value as 'male' | 'female')} value={selectedGender || ""}>
+                            <div className="flex items-center space-x-2">
+                              <RadioGroupItem value="male" id="gender-male" />
+                              <Label htmlFor="gender-male">Male</Label>
+                            </div>
+                            <div className="flex items-center space-x-2">
+                              <RadioGroupItem value="female" id="gender-female" />
+                              <Label htmlFor="gender-female">Female</Label>
+                            </div>
+                          </RadioGroup>
+                        </div>
+                        <Button 
+                          className="w-full" 
+                          onClick={handleApproveBaseModel}
+                          disabled={!selectedBaseModelId || !selectedGender}
+                        >
+                          Approve & Generate Poses
+                        </Button>
+                      </CardContent>
+                    </Card>
+                  )}
                   <JobPoseDisplay job={selectedJob} />
                 </div>
               </TabsContent>
