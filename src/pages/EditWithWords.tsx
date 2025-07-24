@@ -15,7 +15,7 @@ import { RecentJobThumbnail } from "@/components/Jobs/RecentJobThumbnail";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useSecureImage } from "@/hooks/useSecureImage";
 import { useDropzone } from "@/hooks/useDropzone";
-import { cn } from "@/lib/utils";
+import { cn, optimizeImage, sanitizeFilename } from "@/lib/utils";
 
 interface EditJob {
   id: string;
@@ -116,9 +116,15 @@ const EditWithWords = () => {
 
     try {
         const uploadFile = async (file: File, type: 'source' | 'reference') => {
+            const optimizedFile = await optimizeImage(file);
+            const sanitizedName = sanitizeFilename(optimizedFile.name);
+            const filePath = `${session?.user?.id}/edit-${type}/${Date.now()}-${sanitizedName}`;
             const { data, error } = await supabase.storage
                 .from('mira-agent-user-uploads')
-                .upload(`${session?.user?.id}/edit-${type}/${Date.now()}-${file.name}`, file);
+                .upload(filePath, optimizedFile, {
+                    contentType: 'image/png',
+                    upsert: true,
+                });
             if (error) throw error;
             return supabase.storage.from('mira-agent-user-uploads').getPublicUrl(data.path).data.publicUrl;
         };

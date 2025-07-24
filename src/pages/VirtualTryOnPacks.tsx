@@ -67,7 +67,10 @@ const VirtualTryOnPacks = () => {
         
         const { error } = await supabase.storage
           .from('mira-agent-user-uploads')
-          .upload(filePath, optimizedFile);
+          .upload(filePath, optimizedFile, {
+            contentType: 'image/png',
+            upsert: true,
+          });
         
         if (error) throw new Error(`Failed to upload ${type} image: ${error.message}`);
         

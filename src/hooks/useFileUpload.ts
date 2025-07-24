@@ -101,7 +101,10 @@ export const useFileUpload = () => {
           const optimizedFile = await optimizeImage(file);
           const sanitized = sanitizeFilename(optimizedFile.name);
           const filePath = `${session?.user.id}/${Date.now()}-${sanitized}`;
-          const { error } = await supabaseClient.storage.from(bucket).upload(filePath, optimizedFile);
+          const { error } = await supabaseClient.storage.from(bucket).upload(filePath, optimizedFile, {
+            contentType: 'image/png',
+            upsert: true,
+          });
           if (error) throw error;
           const { data: { publicUrl } } = supabaseClient.storage.from(bucket).getPublicUrl(filePath);
           dismissToast(toastId);
