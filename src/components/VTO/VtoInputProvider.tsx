@@ -22,7 +22,7 @@ import { GarmentSelector } from './GarmentSelector';
 import { calculateFileHash } from '@/lib/utils';
 
 interface AnalyzedGarment {
-  file: File;
+  file?: File;
   previewUrl: string;
   analysis: {
     intended_gender: 'male' | 'female' | 'unisex';
@@ -226,7 +226,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
         if (existingGarment) {
             showSuccess("Found matching garment in your wardrobe.");
             setAnalyzedGarment({
-                file: new File([], existingGarment.name),
+                file: undefined,
                 previewUrl: existingGarment.storage_path,
                 analysis: existingGarment.attributes,
                 isAnalyzing: false,
@@ -253,7 +253,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
 
     newGarments.forEach(async (garment) => {
         try {
-            const hash = await calculateFileHash(garment.file);
+            const hash = await calculateFileHash(garment.file!);
             const { data: existingGarment, error: checkError } = await supabase
                 .from('mira-agent-garments')
                 .select('id, storage_path, attributes, name')
@@ -272,17 +272,17 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
                         analysis: existingGarment.attributes, 
                         isAnalyzing: false, 
                         hash: hash,
-                        file: new File([], existingGarment.name)
+                        file: undefined
                     } : g
                 ));
             } else {
-                const analysisResult = await analyzeGarment(garment.file);
+                const analysisResult = await analyzeGarment(garment.file!);
                 setAnalyzedRandomGarments(prev => prev.map(g => 
                     g.file === garment.file ? { ...g, analysis: analysisResult, isAnalyzing: false, hash: hash } : g
                 ));
             }
         } catch (err: any) {
-            showError(`Failed to process garment ${garment.file.name}: ${err.message}`);
+            showError(`Failed to process garment ${garment.file!.name}: ${err.message}`);
             setAnalyzedRandomGarments(prev => prev.filter(g => g.file !== garment.file));
         }
     });
@@ -290,7 +290,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
 
   const handleSelectFromWardrobe = (garments: any[]) => {
     const newAnalyzedGarments = garments.map(g => ({
-      file: new File([], g.name),
+      file: undefined,
       previewUrl: g.storage_path,
       analysis: g.attributes,
       isAnalyzing: false,
@@ -345,7 +345,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
         if (checkError && checkError.code !== 'PGRST116') throw checkError;
 
         let finalAnalysis: AnalyzedGarment['analysis'];
-        let finalUrl = URL.createObjectURL(tempPairGarmentFile);
+        let finalUrl = URL.createObjectURL(tempPairGarmentFile!);
         let finalFile: File | undefined = tempPairGarmentFile;
 
         if (existingGarment) {
@@ -354,7 +354,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
             finalUrl = existingGarment.storage_path;
             finalFile = undefined;
         } else {
-            finalAnalysis = await analyzeGarment(tempPairGarmentFile);
+            finalAnalysis = await analyzeGarment(tempPairGarmentFile!);
         }
 
         const newPair: QueueItem = {
@@ -404,7 +404,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
                 .filter(pose => selectedModelUrls.has(pose.final_url))
                 .map(pose => ({
                     person: { url: pose.final_url, model_job_id: model.jobId },
-                    garment: { url: garment.previewUrl, file: garment.file, analysis: { ...garment.analysis, hash: garment.hash } },
+                    garment: { url: garment.previewUrl, file: garment.file, analysis: garment.analysis || undefined, hash: garment.hash },
                     appendix: generalAppendix,
                 }))
         );
@@ -422,7 +422,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
                     const model = maleModels[i % maleModels.length];
                     model.poses.forEach(pose => {
                         if (selectedModelUrls.has(pose.final_url)) {
-                            queue.push({ person: { url: pose.final_url, model_job_id: model.jobId }, garment: { url: garment.previewUrl, file: garment.file, analysis: { ...garment.analysis, hash: garment.hash } }, appendix: generalAppendix });
+                            queue.push({ person: { url: pose.final_url, model_job_id: model.jobId }, garment: { url: garment.previewUrl, file: garment.file, analysis: garment.analysis || undefined, hash: garment.hash }, appendix: generalAppendix });
                         }
                     });
                 }
@@ -432,7 +432,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
                     const model = femaleModels[i % femaleModels.length];
                     model.poses.forEach(pose => {
                         if (selectedModelUrls.has(pose.final_url)) {
-                            queue.push({ person: { url: pose.final_url, model_job_id: model.jobId }, garment: { url: garment.previewUrl, file: garment.file, analysis: { ...garment.analysis, hash: garment.hash } }, appendix: generalAppendix });
+                            queue.push({ person: { url: pose.final_url, model_job_id: model.jobId }, garment: { url: garment.previewUrl, file: garment.file, analysis: garment.analysis || undefined, hash: garment.hash }, appendix: generalAppendix });
                         }
                     });
                 }
@@ -450,7 +450,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
                 const model = maleModels[i];
                 model.poses.forEach(pose => {
                     if (selectedModelUrls.has(pose.final_url)) {
-                        queue.push({ person: { url: pose.final_url, model_job_id: model.jobId }, garment: { url: garment.previewUrl, file: garment.file, analysis: { ...garment.analysis, hash: garment.hash } }, appendix: generalAppendix });
+                        queue.push({ person: { url: pose.final_url, model_job_id: model.jobId }, garment: { url: garment.previewUrl, file: garment.file, analysis: garment.analysis || undefined, hash: garment.hash }, appendix: generalAppendix });
                     }
                 });
             });
@@ -458,7 +458,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
                 const model = femaleModels[i];
                 model.poses.forEach(pose => {
                     if (selectedModelUrls.has(pose.final_url)) {
-                        queue.push({ person: { url: pose.final_url, model_job_id: model.jobId }, garment: { url: garment.previewUrl, file: garment.file, analysis: { ...garment.analysis, hash: garment.hash } }, appendix: generalAppendix });
+                        queue.push({ person: { url: pose.final_url, model_job_id: model.jobId }, garment: { url: garment.previewUrl, file: garment.file, analysis: garment.analysis || undefined, hash: garment.hash }, appendix: generalAppendix });
                     }
                 });
             });
