@@ -19,13 +19,13 @@ serve(async (req) => {
   }
 
   try {
-    const { pairs, user_id } = await req.json();
+    const { pairs, user_id, skip_qa_check } = await req.json();
     if (!pairs || !Array.isArray(pairs) || pairs.length === 0 || !user_id) {
       throw new Error("`pairs` array and `user_id` are required.");
     }
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-    console.log(`[BatchInpaintProxy] Received request with ${pairs.length} pairs for user ${user_id}.`);
+    console.log(`[BatchInpaintProxy] Received request with ${pairs.length} pairs for user ${user_id}. Skip QA: ${skip_qa_check}`);
 
     // 1. Create the main batch job entry
     const { data: batchJob, error: batchError } = await supabase
@@ -46,7 +46,10 @@ serve(async (req) => {
       source_person_image_url: pair.person_url,
       source_garment_image_url: pair.garment_url,
       prompt_appendix: pair.appendix,
-      metadata: { is_helper_enabled: pair.is_helper_enabled }
+      metadata: { 
+        is_helper_enabled: pair.is_helper_enabled,
+        skip_qa_check: skip_qa_check || false
+      }
     }));
 
     const { error: pairsError } = await supabase

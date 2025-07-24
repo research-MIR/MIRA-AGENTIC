@@ -179,9 +179,9 @@ serve(async (req) => {
     if (uploadError) throw uploadError;
     const { data: { publicUrl: finalPublicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(finalFilePath);
     console.log(`${logPrefix} Composition complete. Final URL: ${finalPublicUrl}`);
-    // ---- Optional verification step -----------------------------------------
+    
     let verificationResult = null;
-    if (job.metadata?.reference_image_url) {
+    if (job.metadata?.reference_image_url && !job.metadata?.skip_qa_check) {
       console.log(`${logPrefix} Triggering verification tool...`);
       const { data, error } = await supabase.functions.invoke("MIRA-AGENT-tool-verify-garment-match", {
         body: {
@@ -198,6 +198,8 @@ serve(async (req) => {
       } else {
         verificationResult = data;
       }
+    } else {
+        console.log(`${logPrefix} Skipping verification tool because reference_image_url is missing or skip_qa_check is true.`);
     }
 
     const finalMetadata = {
