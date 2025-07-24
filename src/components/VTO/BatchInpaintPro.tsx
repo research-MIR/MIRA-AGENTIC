@@ -53,7 +53,6 @@ export const BatchInpaintPro = () => {
     const [isHelperEnabled, setIsHelperEnabled] = useState(true);
     const [isLoading, setIsLoading] = useState(false);
     const [isGuidanceModalOpen, setIsGuidanceModalOpen] = useState(false);
-    const [skipQa, setSkipQa] = useState(false);
 
     const uploadFile = async (file: File, type: 'person' | 'garment') => {
         if (!session?.user) throw new Error("User session not found.");
@@ -99,8 +98,7 @@ export const BatchInpaintPro = () => {
             const { error } = await supabase.functions.invoke('MIRA-AGENT-proxy-batch-inpaint', {
                 body: {
                     pairs: uploadedPairs,
-                    user_id: session?.user?.id,
-                    skip_qa_check: skipQa,
+                    user_id: session?.user?.id
                 }
             });
 
@@ -162,22 +160,6 @@ export const BatchInpaintPro = () => {
                                     </Tooltip>
                                 </TooltipProvider>
                                 <Switch id="ai-prompt-helper" checked={isHelperEnabled} onCheckedChange={setIsHelperEnabled} />
-                            </div>
-                            <div className="flex items-center justify-between p-2 rounded-md bg-muted/50">
-                                <Label htmlFor="skip-qa" className="flex items-center gap-2">
-                                    Skip QA Check
-                                </Label>
-                                <TooltipProvider>
-                                    <Tooltip>
-                                        <TooltipTrigger asChild>
-                                            <Info className="h-4 w-4 text-muted-foreground cursor-help" />
-                                        </TooltipTrigger>
-                                        <TooltipContent>
-                                            <p>If enabled, the automated quality check will be skipped and jobs will not enter the auto-fix loop.</p>
-                                        </TooltipContent>
-                                    </Tooltip>
-                                </TooltipProvider>
-                                <Switch id="skip-qa" checked={skipQa} onCheckedChange={setSkipQa} />
                             </div>
                             <Button className="w-full" onClick={addPrecisePair} disabled={!tempPairPerson || !tempPairGarment}>{t('addPair')}</Button>
                         </CardContent>

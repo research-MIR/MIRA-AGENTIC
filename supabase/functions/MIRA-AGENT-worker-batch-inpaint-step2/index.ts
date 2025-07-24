@@ -182,7 +182,6 @@ serve(async (req) => {
             resolution: 'standard',
             num_images: 1,
             batch_pair_job_id: pair_job_id,
-            skip_qa_check: metadata?.skip_qa_check || false,
             metadata: {
                 ...metadata,
                 bbox: bbox,

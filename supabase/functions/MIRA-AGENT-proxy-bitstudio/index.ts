@@ -173,7 +173,7 @@ serve(async (req) => {
 
     } else {
       // --- NEW JOB LOGIC ---
-      const { user_id, mode, batch_pair_job_id, vto_pack_job_id, metadata, skip_qa_check } = body;
+      const { user_id, mode, batch_pair_job_id, vto_pack_job_id, metadata } = body;
       if (!user_id || !mode) throw new Error("user_id and mode are required for new jobs.");
 
       const jobIds: string[] = [];
@@ -256,8 +256,6 @@ serve(async (req) => {
             engine: 'bitstudio',
             prompt_used: prompt,
             original_request_payload: inpaintPayload,
-            reference_image_url: reference_image_url,
-            skip_qa_check: skip_qa_check || false,
           }
         }).select('id').single();
         if (insertError) throw insertError;
