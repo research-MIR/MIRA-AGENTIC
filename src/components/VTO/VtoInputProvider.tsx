@@ -156,6 +156,21 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
     return false;
   }, [mode, analyzedGarment, analyzedRandomGarments]);
 
+  const isProceedDisabled = useMemo(() => {
+    if (isAnalyzingGarments) return true;
+
+    if (mode === 'one-to-many') {
+        return selectedModelUrls.size === 0 || !analyzedGarment || !analyzedGarment.analysis;
+    }
+    if (mode === 'random-pairs') {
+        return selectedModelUrls.size === 0 || analyzedRandomGarments.length === 0 || analyzedRandomGarments.some(g => !g.analysis);
+    }
+    if (mode === 'precise-pairs') {
+        return precisePairs.length === 0;
+    }
+    return true;
+  }, [isAnalyzingGarments, mode, selectedModelUrls, analyzedGarment, analyzedRandomGarments, precisePairs]);
+
   const analyzeGarment = async (file: File): Promise<AnalyzedGarment['analysis']> => {
     try {
         const base64 = await fileToBase64(file);
@@ -333,11 +348,12 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
     onQueueReady(queue);
   };
 
-  const isProceedDisabled = isAnalyzingGarments || (mode === 'one-to-many' 
-    ? (selectedModelUrls.size === 0 || !analyzedGarment || !analyzedGarment.analysis)
-    : mode === 'random-pairs'
-    ? (selectedModelUrls.size === 0 || analyzedRandomGarments.length === 0 || analyzedRandomGarments.some(g => g.isAnalyzing))
-    : precisePairs.length === 0);
+  const queueCount = useMemo(() => {
+    if (mode === 'one-to-many') return selectedModelUrls.size;
+    if (mode === 'random-pairs') return analyzedRandomGarments.length;
+    if (mode === 'precise-pairs') return precisePairs.length;
+    return 0;
+  }, [mode, selectedModelUrls, analyzedRandomGarments, precisePairs]);
 
   const renderOneToMany = () => (
     <Card>
@@ -503,7 +519,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
               )}
               {isAnalyzingGarments 
                 ? "Analyzing Garments..." 
-                : t('reviewQueue', { count: mode === 'precise-pairs' ? precisePairs.length : selectedModelUrls.size })}
+                : t('reviewQueue', { count: queueCount })}
             </Button>
             <Button variant="outline" onClick={onGoBack}>{t('goBack')}</Button>
           </div>
