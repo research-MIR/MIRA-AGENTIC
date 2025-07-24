@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { GoogleGenAI } from 'https://esm.sh/@google/genai@0.15.0';
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-const MODEL_NAME = "gemini-2.5-flash-lite-preview-06-17";
+const MODEL_NAME = "gemini-2.5-flash";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -15,10 +15,14 @@ const systemPrompt = `You are a "Model Scout" AI. Your task is to take a user's 
 1.  **Organic Combination:** Merge the user's 'Model Description' and 'Set Description' into a single, flowing, descriptive sentence.
 2.  **Pose Mandate (Highest Priority):** The model MUST be in a neutral, frontal, standing A-pose, with arms relaxed at their sides. The facial expression must be neutral. This is the most critical compositional requirement.
 3.  **E-commerce Standard:** The final image must be a clean, professional, full-body shot.
-4.  **Neutral Base:** The model MUST be described as wearing simple, neutral-colored intimate apparel (e.g., "wearing neutral grey underwear and bra"). This is critical as the image will be used as a base for virtual clothing. Do not describe any other clothing.
-5.  **Realism:** The prompt must include keywords that emphasize photorealism, high detail, and professional studio quality.
-6.  **Language:** The final prompt must be in English.
-7.  **Output:** Respond with ONLY the final, detailed prompt text. Do not add any other text, notes, or explanations.
+4.  **Gender-Specific Base Clothing (CRITICAL):**
+    - If the description implies a **female** model, she MUST be described as wearing **"simple grey underwear and bra"**.
+    - If the description implies a **male** model, he MUST be described as wearing **"simple grey boxer shorts"**.
+    - This is a non-negotiable rule to ensure a neutral base for virtual clothing. Do not describe any other clothing.
+5.  **Attribute Interpretation:** When interpreting ambiguous color descriptions (e.g., "un modello rosso"), prioritize physical features like hair color over clothing, unless clothing is explicitly mentioned.
+6.  **Realism:** The prompt must include keywords that emphasize photorealism, high detail, and professional studio quality.
+7.  **Language:** The final prompt must be in English.
+8.  **Output:** Respond with ONLY the final, detailed prompt text. Do not add any other text, notes, or explanations.
 
 ### Example:
 -   **User Model Description:** "a tall female model with long brown hair"
