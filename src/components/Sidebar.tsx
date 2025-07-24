@@ -160,6 +160,10 @@ export const Sidebar = () => {
             <GalleryHorizontal size={20} />
             {t('gallery')}
           </NavLink>
+          <NavLink id="wardrobe-nav-link" to="/wardrobe" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
+            <ClipboardCheck size={20} />
+            {t('wardrobe')}
+          </NavLink>
           
           <Collapsible open={isAdvancedOpen} onOpenChange={setIsAdvancedOpen}>
             <CollapsibleTrigger asChild>

@@ -74,7 +74,40 @@ serve(async (req) => {
         throw new Error(`Mismatch in job creation. Expected ${pairs.length}, but only created ${totalInserted}.`);
     }
 
-    console.log(`[VTO-Packs-Orchestrator] Successfully inserted all ${totalInserted} pair jobs with 'pending' status. The watchdog will start processing them shortly.`);
+    console.log(`[VTO-Packs-Orchestrator] Successfully inserted all ${totalInserted} pair jobs with 'pending' status.`);
+
+    // --- NEW: Log unique garments to the Armadio ---
+    console.log(`[VTO-Packs-Orchestrator] Logging unique garments to the Armadio...`);
+    const uniqueGarments = new Map<string, any>();
+    pairs.forEach((pair: any) => {
+        if (pair.garment_url && !uniqueGarments.has(pair.garment_url)) {
+            uniqueGarments.set(pair.garment_url, {
+                storage_path: pair.garment_url,
+                attributes: pair.metadata?.garment_analysis || null,
+                name: pair.garment_url.split('/').pop()?.split('-').slice(1).join('-') || 'Untitled Garment'
+            });
+        }
+    });
+
+    if (uniqueGarments.size > 0) {
+        const garmentsToInsert = Array.from(uniqueGarments.values()).map(g => ({
+            user_id: user_id,
+            storage_path: g.storage_path,
+            attributes: g.attributes,
+            name: g.name
+        }));
+
+        const { error: garmentInsertError } = await supabase
+            .from('mira-agent-garments')
+            .insert(garmentsToInsert, { onConflict: 'user_id, storage_path' });
+
+        if (garmentInsertError) {
+            console.error(`[VTO-Packs-Orchestrator] Non-critical error logging garments to Armadio:`, garmentInsertError.message);
+        } else {
+            console.log(`[VTO-Packs-Orchestrator] Successfully logged ${garmentsToInsert.length} unique garments.`);
+        }
+    }
+    // --- END OF NEW LOGIC ---
 
     return new Response(JSON.stringify({ success: true, message: `${totalInserted} jobs have been queued for processing.` }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

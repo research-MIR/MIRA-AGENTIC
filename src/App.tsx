@@ -30,6 +30,7 @@ import ProductRecontext from "./pages/ProductRecontext.tsx";
 import Reframe from "./pages/Reframe.tsx";
 import VtoReports from "./pages/VtoReports.tsx";
 import VtoReportDetail from "./pages/VtoReportDetail.tsx";
+import Wardrobe from "./pages/Wardrobe.tsx";
 
 const App = () => {
   const { isTourOpen, closeTour, isTourPending, openTour, startTour } = useOnboardingTour();
@@ -110,6 +111,7 @@ const App = () => {
             <Route path="/settings" element={<Settings />} />
             <Route path="/virtual-try-on" element={<VirtualTryOn />} />
             <Route path="/virtual-try-on-packs" element={<VirtualTryOnPacks />} />
+            <Route path="/wardrobe" element={<Wardrobe />} />
             <Route path="/developer" element={<Developer />} />
             <Route path="/developer/segmentation" element={<SegmentationTool />} />
             <Route path="/developer/bounding-box-tester" element={<BoundingBoxTester />} />
