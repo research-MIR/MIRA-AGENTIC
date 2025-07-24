@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { GoogleGenAI, Content, Part, HarmCategory, HarmBlockThreshold } from 'https://esm.sh/@google/genai@0.15.0';
+import { GoogleGenAI, Content, Part } from 'https://esm.sh/@google/genai@0.15.0';
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 
@@ -13,102 +13,46 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const garmentAnalysisPrompt = `You are a forensic fashion analyst AI. Your task is to analyze the provided image and extract a detailed, structured description of the primary garment.
+const garmentAnalysisPrompt = `You are a fashion cataloger. Analyze the provided garment image and return a JSON object with the keys \`garment_type\`, \`pattern_type\`, \`has_logo\`, and \`notes\`.
+- \`garment_type\` must be one of: 't-shirt', 'jacket', 'dress', 'pants', 'skirt', 'shoes', 'accessory', 'other'.
+- \`pattern_type\` must be one of: 'solid', 'striped', 'plaid', 'floral', 'graphic', 'complex', 'other'.
+- \`has_logo\` must be a boolean.
+- \`notes\` must be a brief, qualitative description of the reference garment.
+Your entire response must be only the valid JSON object.`;
 
-### Instructions:
-1.  Identify the single main garment worn by the person.
-2.  Analyze its visual properties with extreme precision based on the provided rules.
-3.  Your entire response MUST be a single, valid JSON object.
-
-### Rules for 'garment_complexity':
--   **simple**: Basic silhouette (t-shirt, leggings), uniform texture (cotton, denim), solid color or simple pattern.
--   **moderate**: Tailored elements (blazer, trousers), subtle textures (silk, leather), or moderately complex patterns (plaid, florals).
--   **complex**: Intricate construction (draping, ruching), challenging textures (lace, sheer fabrics, sequins, heavy embroidery), or fine, non-repeating graphic prints.
-
-### JSON Schema:
-{
-  "garment_type": "string",
-  "primary_color": "string",
-  "material_texture": "string",
-  "pattern_analysis": {
-    "has_pattern": "boolean",
-    "pattern_type": "string | null",
-    "pattern_description": "string | null"
-  },
-  "details": ["string"],
-  "complexity": "string"
-}`;
-
-const comparativeAnalysisPrompt = `You are a meticulous, final-stage Quality Assurance inspector AI acting as a "Forensic Scientist". You will be given two JSON reports and three images: a SOURCE PERSON image, a REFERENCE GARMENT image, and a FINAL RESULT image.
+const comparativeAnalysisPrompt = `You are a meticulous, final-stage Quality Assurance inspector AI acting as a "Forensic Scientist". You will be given a preliminary JSON analysis of the reference garment, and three images: a SOURCE PERSON image, a REFERENCE GARMENT image, and a FINAL RESULT image.
 
 ### Your Mission:
-Your primary task is to use the provided images to **visually verify and expand upon** the initial text-based analyses. The JSON reports are a starting point, but **your own visual inspection is the final authority**.
+Your primary task is to use the provided images and preliminary analysis to visually verify and expand upon the initial findings. The preliminary analysis is a starting point, but **your own visual inspection is the final authority**. Your final output MUST be a single, valid JSON object following the specified schema.
 
-### Your Process:
-1.  **Forensic Garment Comparison:** Visually compare the garment in the FINAL RESULT image against the REFERENCE GARMENT image. This is your most critical task.
-    -   **Fidelity Check:** Is it the *exact same garment*? Scrutinize color fidelity, texture, material sheen, pattern scale and accuracy, and details like stitching, buttons, or logos.
-    -   **Note Discrepancies:** If it's not an exact match, your notes must be specific (e.g., "The generated jacket is a lighter shade of blue and is missing the reference's silver zipper pulls.").
-2.  **Pose & Scene Integrity:** Compare the FINAL RESULT image to the SOURCE PERSON image.
-    -   Has the pose been altered?
-    -   Has the body shape been unnaturally changed?
-    -   Is the lighting consistent?
-    -   Are there anatomical errors (mangled hands, distorted limbs, unnatural proportions)?
-3.  **Generate Quantitative Scores:** For the 'garment_comparison' and 'pose_and_body_analysis' sections, you MUST provide a 'scores' object. Each score should be a number from 0.0 to 10.0, where 10.0 is a perfect match or execution.
-4.  **Synthesize Final Report:** Based on your direct visual analysis, generate the final JSON report.
-
-### CRITICAL: Decision Logic for "overall_pass" & "failure_category"
-The "overall_pass" field should ONLY be 'false' if there are significant TECHNICAL FLAWS in the generation. A simple mismatch in garment type or a change in pose are NOT failure conditions on their own, but they MUST be noted.
-
-- **FAIL (overall_pass: false)** if:
-  - The body type is unnaturally altered. Set \`failure_category\` to "Body Distortion".
-  - There are severe anatomical incorrectness issues (e.g., mangled hands, distorted limbs, unnatural proportions). Set \`failure_category\` to "Anatomical Error".
-  - The lighting or blending is extremely poor. Set \`failure_category\` to "Quality Issue".
-- **PASS (overall_pass: true)** if:
-  - The image is technically sound, even if the garment type is wrong or the pose has changed. These deviations must be noted in their respective sections.
-
-**MANDATORY RULE:** If you set \`overall_pass\` to \`false\`, you MUST set \`failure_category\` to one of the three specified values ("Body Distortion", "Anatomical Error", "Quality Issue"). If multiple issues are present, choose the most severe one. If none of these three specific categories fit perfectly but the image is still a technical failure, you MUST set \`failure_category\` to "Other". The \`failure_category\` field can only be \`null\` if \`overall_pass\` is \`true\`.
-
-### NEW RULE: Handling Generated Outfits
-It is common for the AI to generate a complete, plausible outfit even if the reference is only a single item (e.g., generating a matching top and shoes when the reference is a skirt). This is **correct and desirable creative behavior**.
-1.  Set \`generated_extra_garments\` to \`true\` if the final image contains significant, *separate* clothing items not present in the reference analysis.
-2.  If \`true\`, you MUST populate the \`extra_garments_list\` with a short description of each additional item (e.g., "matching top", "heeled shoes").
-3.  **IMPORTANT:** \`generated_extra_garments: true\` should NOT cause \`overall_pass\` to be \`false\`. It is a creative success, not a failure. Differentiate between generating a *different* garment (e.g., a dress instead of a skirt, which would make \`type_match: false\`) and generating *additional* garments.
+### Your Process & Rules:
+1.  **Forensic Garment Comparison:** Visually compare the garment in the FINAL RESULT against the REFERENCE GARMENT.
+2.  **Pose & Scene Integrity:** Compare the FINAL RESULT to the SOURCE PERSON image.
+3.  **Quantitative Scoring (MANDATORY):** You MUST provide a \`scores\` object for both \`garment_comparison\` and \`pose_and_body_analysis\`. Each score MUST be a number from 0.0 to 10.0.
+4.  **Qualitative Notes (MANDATORY):** For each section (\`garment_comparison\`, \`pose_and_body_analysis\`), you MUST write a detailed, human-readable \`notes\` string that justifies your scores and describes your observations. For example, if you give \`logo_fidelity\` a score of 2.0, your \`notes\` must explain *why* (e.g., 'The logo is present but heavily distorted and misspelled').
+5.  **Nuanced Pass/Fail Logic (CRITICAL):**
+    - **FAIL (\`overall_pass: false\`)** ONLY for significant TECHNICAL FLAWS. A simple mismatch in garment type or a change in pose are NOT failure conditions on their own, but they MUST be noted.
+    - **FAIL IF:** The body is unnaturally altered (\`failure_category: "body_distortion"\`), there are severe anatomical errors (\`failure_category: "anatomical_error"\`), the lighting/blending is poor (\`failure_category: "quality_issue"\`), or the garment fit is fundamentally wrong (\`failure_category: "fitting_issue"\`).
+    - **PASS (\`overall_pass: true\`)** if the image is technically sound.
+    - **PASS WITH NOTES (\`pass_with_notes: true\`)** if the image is a PASS but has minor, specific flaws. If true, you MUST set \`pass_notes_category\` to one of: \`'logo_fidelity'\`, \`'detail_accuracy'\`, or \`'minor_artifact'\`.
+6.  **Camera & Pose Analysis:** You MUST analyze the \`original_camera_angle\` and populate the \`shot_type\`, \`camera_elevation\`, and \`camera_position\` fields with the most appropriate values from the provided enums.
 
 ### JSON Schema (Your Output):
 {
   "overall_pass": "boolean",
+  "pass_with_notes": "boolean",
+  "pass_notes_category": "logo_fidelity" | "detail_accuracy" | "minor_artifact" | null,
+  "failure_category": "fitting_issue" | "body_distortion" | "anatomical_error" | "quality_issue" | "other" | null,
   "confidence_score": "number",
-  "failure_category": "string | null",
-  "mismatch_reason": "string | null",
   "garment_comparison": {
-    "type_match": "boolean",
-    "generated_extra_garments": "boolean",
-    "extra_garments_list": ["string"],
-    "scores": {
-      "color_fidelity": "number",
-      "texture_realism": "number",
-      "pattern_accuracy": "number",
-      "fit_and_shape": "number"
-    },
+    "scores": { "color_fidelity": "number", "texture_realism": "number", "pattern_accuracy": "number", "fit_and_shape": "number", "logo_fidelity": "number", "detail_accuracy": "number" },
     "notes": "string"
   },
   "pose_and_body_analysis": {
-    "original_pose_description": "string",
-    "original_camera_angle": { "shot_type": "string", "camera_elevation": "string", "camera_position": "string" },
+    "original_camera_angle": { "shot_type": "full_shot" | "medium_shot" | "close_up" | "other", "camera_elevation": "eye_level" | "high_angle" | "low_angle", "camera_position": "frontal" | "three_quarter" | "profile" },
     "pose_changed": "boolean",
-    "camera_angle_changed": "boolean",
-    "body_type_changed": "boolean",
-    "affected_body_parts": ["string"],
-    "scores": {
-        "pose_preservation": "number",
-        "anatomical_correctness": "number"
-    },
+    "scores": { "pose_preservation": "number", "anatomical_correctness": "number" },
     "notes": "string"
-  },
-  "quality_analysis": {
-      "lighting_match": "boolean",
-      "blending_quality": "string",
-      "notes": "string | null"
   }
 }`;
 
@@ -163,12 +107,9 @@ serve(async (req) => {
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
 
-    console.log(`${logPrefix} Stage 1: Analyzing images independently...`);
-    const [reference_garment_analysis, final_result_analysis] = await Promise.all([
-        analyzeGarment(ai, supabase, vtoJob.source_garment_image_url, "REFERENCE GARMENT"),
-        analyzeGarment(ai, supabase, vtoJob.final_image_url, "FINAL RESULT")
-    ]);
-    await supabase.from('mira-agent-vto-qa-reports').update({ reference_garment_analysis, final_result_analysis }).eq('id', qa_job_id);
+    console.log(`${logPrefix} Stage 1: Analyzing reference garment...`);
+    const garment_analysis = await analyzeGarment(ai, supabase, vtoJob.source_garment_image_url, "REFERENCE GARMENT");
+    await supabase.from('mira-agent-vto-qa-reports').update({ reference_garment_analysis: garment_analysis }).eq('id', qa_job_id);
     console.log(`${logPrefix} Stage 1 complete.`);
 
     console.log(`${logPrefix} Stage 2: Performing comparative analysis with all visual evidence...`);
@@ -179,10 +120,8 @@ serve(async (req) => {
     ]);
 
     const comparisonParts: Part[] = [
-        { text: "--- REFERENCE GARMENT ANALYSIS (JSON) ---" },
-        { text: JSON.stringify(reference_garment_analysis) },
-        { text: "--- FINAL RESULT ANALYSIS (JSON) ---" },
-        { text: JSON.stringify(final_result_analysis) },
+        { text: "--- PRELIMINARY REFERENCE GARMENT ANALYSIS (JSON) ---" },
+        { text: JSON.stringify(garment_analysis) },
         { text: "--- SOURCE PERSON IMAGE ---" },
         ...personImageParts,
         { text: "--- REFERENCE GARMENT IMAGE ---" },
@@ -196,7 +135,10 @@ serve(async (req) => {
         generationConfig: { responseMimeType: "application/json" },
         config: { systemInstruction: { role: "system", parts: [{ text: comparativeAnalysisPrompt }] } }
     });
-    const comparative_report = extractJson(comparisonResult.text);
+    const comparative_report = {
+        ...extractJson(comparisonResult.text),
+        garment_analysis: garment_analysis // Inject the preliminary analysis into the final report
+    };
     console.log(`${logPrefix} Stage 2 complete.`);
 
     await supabase.from('mira-agent-vto-qa-reports').update({ comparative_report, status: 'complete' }).eq('id', qa_job_id);

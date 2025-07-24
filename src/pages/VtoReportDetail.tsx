@@ -28,9 +28,12 @@ interface ReportDetail {
   comparative_report: {
     thinking?: string;
     overall_pass: boolean;
+    pass_with_notes: boolean;
+    pass_notes_category: string | null;
     confidence_score: number;
     failure_category: string | null;
     mismatch_reason: string | null;
+    garment_analysis: any;
     garment_comparison: any;
     pose_and_body_analysis: any;
     quality_analysis: any;
@@ -94,13 +97,11 @@ const ReportDetailModal = ({ report, isOpen, onClose }: { report: ReportDetail |
           <DialogDescription>Job ID: {report.job_id}</DialogDescription>
         </DialogHeader>
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 py-4 flex-1 overflow-hidden">
-          {/* Column 1: Inputs */}
           <div className="lg:col-span-1 space-y-4 flex flex-col">
             <ImageCard title="Source Person" url={report.source_person_image_url} />
             <ImageCard title="Reference Garment" url={report.source_garment_image_url} />
           </div>
           
-          {/* Column 2: Analysis */}
           <div className="lg:col-span-3 h-full overflow-hidden">
             <ScrollArea className="h-full pr-4">
               {reportData ? (
@@ -109,9 +110,9 @@ const ReportDetailModal = ({ report, isOpen, onClose }: { report: ReportDetail |
                     <CardHeader><CardTitle className="text-base">Overall Assessment</CardTitle></CardHeader>
                     <CardContent className="space-y-2 text-sm">
                       <BooleanIndicator value={reportData.overall_pass} label="Overall Pass" />
+                      {reportData.pass_with_notes && <p><strong>Note:</strong> <Badge variant="secondary">{reportData.pass_notes_category?.replace(/_/g, ' ')}</Badge></p>}
                       <p><strong>Confidence:</strong> {(normalizedConfidence * 100).toFixed(0)}%</p>
-                      {reportData.failure_category && <p><strong>Failure Category:</strong> <Badge variant="destructive">{reportData.failure_category}</Badge></p>}
-                      {reportData.mismatch_reason && <p><strong>Reason:</strong> {reportData.mismatch_reason}</p>}
+                      {reportData.failure_category && <p><strong>Failure Category:</strong> <Badge variant="destructive">{reportData.failure_category.replace(/_/g, ' ')}</Badge></p>}
                     </CardContent>
                   </Card>
                   <Accordion type="multiple" defaultValue={['garment', 'pose', 'quality']}>
@@ -123,22 +124,10 @@ const ReportDetailModal = ({ report, isOpen, onClose }: { report: ReportDetail |
                           <ScoreIndicator score={reportData.garment_comparison?.scores?.texture_realism} label="Texture Realism" />
                           <ScoreIndicator score={reportData.garment_comparison?.scores?.pattern_accuracy} label="Pattern Accuracy" />
                           <ScoreIndicator score={reportData.garment_comparison?.scores?.fit_and_shape} label="Fit & Shape" />
+                          <ScoreIndicator score={reportData.garment_comparison?.scores?.logo_fidelity} label="Logo Fidelity" />
+                          <ScoreIndicator score={reportData.garment_comparison?.scores?.detail_accuracy} label="Detail Accuracy" />
                         </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <BooleanIndicator value={reportData.garment_comparison?.type_match} label="Type Match" />
-                          <BooleanIndicator value={reportData.garment_comparison?.generated_extra_garments} label="Generated Extra Garments" />
-                        </div>
-                        {reportData.garment_comparison?.extra_garments_list && reportData.garment_comparison.extra_garments_list.length > 0 && (
-                          <div>
-                            <h4 className="text-xs font-semibold mt-3 mb-1">Extra Garments Generated:</h4>
-                            <ul className="list-disc list-inside text-xs text-muted-foreground space-y-1">
-                              {reportData.garment_comparison.extra_garments_list.map((item: string, index: number) => (
-                                <li key={index}>{item}</li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-                        <p className="text-xs italic text-muted-foreground pt-2 border-t border-border/50">{reportData.garment_comparison?.notes}</p>
+                        <p className="text-xs italic text-muted-foreground pt-2 border-t border-border/50"><strong>Inspector Notes:</strong> {reportData.garment_comparison?.notes}</p>
                       </AccordionContent>
                     </AccordionItem>
                     <AccordionItem value="pose">
@@ -148,19 +137,8 @@ const ReportDetailModal = ({ report, isOpen, onClose }: { report: ReportDetail |
                           <ScoreIndicator score={reportData.pose_and_body_analysis?.scores?.pose_preservation} label="Pose Preservation" />
                           <ScoreIndicator score={reportData.pose_and_body_analysis?.scores?.anatomical_correctness} label="Anatomical Correctness" />
                         </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <BooleanIndicator value={!reportData.pose_and_body_analysis?.pose_changed} label="Pose Maintained" />
-                          <BooleanIndicator value={!reportData.pose_and_body_analysis?.body_type_changed} label="Body Type Maintained" />
-                        </div>
-                        <p className="text-xs italic text-muted-foreground">{reportData.pose_and_body_analysis?.notes}</p>
-                      </AccordionContent>
-                    </AccordionItem>
-                    <AccordionItem value="quality">
-                      <AccordionTrigger>Quality Analysis</AccordionTrigger>
-                      <AccordionContent className="space-y-3">
-                        <BooleanIndicator value={reportData.quality_analysis?.lighting_match} label="Lighting Match" />
-                        <p className="text-xs"><strong>Blending Quality:</strong> {reportData.quality_analysis?.blending_quality}</p>
-                        <p className="text-xs italic text-muted-foreground">{reportData.quality_analysis?.notes}</p>
+                        <BooleanIndicator value={!reportData.pose_and_body_analysis?.pose_changed} label="Pose Maintained" />
+                        <p className="text-xs italic text-muted-foreground"><strong>Inspector Notes:</strong> {reportData.pose_and_body_analysis?.notes}</p>
                       </AccordionContent>
                     </AccordionItem>
                   </Accordion>
@@ -171,7 +149,6 @@ const ReportDetailModal = ({ report, isOpen, onClose }: { report: ReportDetail |
             </ScrollArea>
           </div>
 
-          {/* Column 3: Output */}
           <div className="lg:col-span-1 flex flex-col space-y-1">
             <h3 className="text-sm font-semibold text-center text-muted-foreground">Final Result</h3>
             <div className="flex-1 bg-muted rounded-md flex items-center justify-center overflow-hidden">

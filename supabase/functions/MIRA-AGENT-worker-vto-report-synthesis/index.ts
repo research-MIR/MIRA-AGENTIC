@@ -19,11 +19,12 @@ const finalSynthesizerPrompt = `You are a master Editor-in-Chief AI. You will be
 Your task is to synthesize these individual reports into a single, cohesive, and comprehensive final report. You must not lose any detail. Your final output MUST follow the exact structure and format outlined below.
 
 ### Your Process:
-1.  **Aggregate Quantitative Data:** Sum up all the numerical data from each report (Total Jobs, Passed, Failed) to get the grand totals for the entire pack. Recalculate the final pass rates based on these new totals.
-2.  **Calculate Special Metrics:** Calculate the "Outfit Completion Rate": the percentage of *passed* jobs where \`garment_comparison.generated_extra_garments\` was true.
-3.  **Synthesize Qualitative Insights:** Read the "Strategic Recommendations" sections from all reports. Identify the most critical, recurring themes, hard limits, and actionable advice. Combine them into a unified, non-redundant list in the final report.
-4.  **Combine Camera Angle Analysis:** Merge the camera angle data from all reports to present a complete picture for each shot type.
-5.  **Leverage Quantitative Scores:** In your "Hard Limits" and "Actionable Advice" sections, you MUST use the numerical scores from the individual reports to provide data-driven insights. For example: "The average \`pattern_accuracy\` score for complex garments was only 4.5/10, indicating a systemic weakness in this area."
+1.  **Aggregate Quantitative Data:** Sum up all the numerical data from each report (Total Jobs, Passed, Failed, Passed with Notes by category) to get the grand totals for the entire pack. Recalculate the final pass rates based on these new totals.
+2.  **Synthesize Qualitative Insights:** Read the \`notes\` fields from all the individual reports. Identify the most critical, recurring themes, hard limits, and actionable advice.
+3.  **Aggregate Scores:** For each score (e.g., \`fit_and_shape\`), calculate the average across all reports.
+4.  **Analyze by Category:** Group reports by \`garment_analysis.garment_type\` and \`garment_analysis.pattern_type\`. Calculate pass rates and average scores for each group.
+5.  **Analyze by Camera Angle:** Group reports by \`pose_and_body_analysis.original_camera_angle.shot_type\`. Calculate pass rates for each.
+6.  **Create a Data-Driven Narrative:** Use the qualitative insights from the \`notes\` to write the narrative sections of your report. You MUST use the aggregated quantitative data as evidence to support your qualitative observations.
 
 ### OUTPUT FORMAT
 Your entire response MUST be a single, valid JSON object with "thinking" and "report" keys.
@@ -37,36 +38,37 @@ Your entire response MUST be a single, valid JSON object with "thinking" and "re
 # VTO Pack Analysis Report
 
 ## 1. Executive Summary
-A brief, one-paragraph overview of the pack's performance and the most critical findings.
+A brief, one-paragraph overview of the pack's performance, highlighting both key successes and the most critical areas for improvement, supported by top-level stats.
 
 ## 2. Quantitative Analysis
 - **Overall Performance:**
   - Total Jobs: X
-  - Passed: Y
-  - Failed: Z
+  - Passed (Perfect): Y
+  - Passed (with Logo Issues): A
+  - Passed (with Detail Issues): B
+  - Failed (Fitting Issues): C
+  - Failed (Other): D
   - **Overall Pass Rate: XX.X%**
-- **Conditional Hit Rates:**
-  - Anatomy-Adjusted Hit Rate: XX.X%
-  - Garment-Adjusted Hit Rate: XX.X%
-  - Complex Pattern Forgiveness Hit Rate: XX.X%
-  - **Outfit Completion Rate (among passed jobs): XX.X%**
+- **Average Quality Scores (out of 10):**
+  - Fit & Shape: X.X
+  - Logo Fidelity: Y.Y
+  - Detail Accuracy: Z.Z
+  - Pose Preservation: A.A
 
-## 3. Camera Angle Deep Dive
-### Full Shot
-- Pass Rate: XX.X%
-- Key Failure Types: ...
-### Medium Shot
-- Pass Rate: XX.X%
-- Key Failure Types: ...
-*(...and so on for each angle)*
+## 3. Performance by Garment Type
+*(A Markdown table with columns: Garment Type, Total Jobs, Pass Rate %, Avg. Fit Score)*
 
-## 4. Strategic Recommendations
+## 4. Performance by Pattern Type
+*(A Markdown table with columns: Pattern Type, Total Jobs, Pass Rate %, Avg. Pattern Accuracy)*
+
+## 5. Camera Angle Deep Dive
+*(A list or table showing the pass rate for each camera angle, e.g., "Full Shot: 85% Pass Rate")*
+
+## 6. Strategic Recommendations
 ### Hard Limits & Known Issues
-- (Bulleted list of identified limitations, supported by quantitative data where possible)
-### The Safe Zone: Your Most Reliable Inputs
-- (Description of the ideal conditions for success, supported by quantitative data)
+- (Bulleted list of identified limitations, supported by quantitative data. E.g., "The system struggles with complex patterns, achieving only a 4.5/10 average accuracy score.")
 ### Actionable Advice for Future Packs
-- (Bulleted list of concrete recommendations, supported by quantitative data)
+- (Bulleted list of concrete recommendations, supported by both quantitative and qualitative insights from the \`notes\`.)
 `;
 
 const extractJson = (text: string): any => {
