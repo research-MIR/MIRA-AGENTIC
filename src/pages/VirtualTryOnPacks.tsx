@@ -62,8 +62,7 @@ const VirtualTryOnPacks = () => {
       const uploadFile = async (file: File, type: 'person' | 'garment') => {
         if (!session?.user) throw new Error("User session not found.");
         const optimizedFile = await optimizeImage(file);
-        const sanitizedName = sanitizeFilename(optimizedFile.name);
-        const filePath = `${session.user.id}/vto-source/${type}-${Date.now()}-${sanitizedName}`;
+        const filePath = `${session.user.id}/vto-source/${type}-${Date.now()}.png`;
         
         const { error } = await supabase.storage
           .from('mira-agent-user-uploads')

@@ -99,8 +99,7 @@ export const useFileUpload = () => {
         const toastId = showLoading(`Uploading ${file.name}...`);
         try {
           const optimizedFile = await optimizeImage(file);
-          const sanitized = sanitizeFilename(optimizedFile.name);
-          const filePath = `${session?.user.id}/${Date.now()}-${sanitized}`;
+          const filePath = `${session?.user.id}/${Date.now()}.png`;
           const { error } = await supabaseClient.storage.from(bucket).upload(filePath, optimizedFile, {
             contentType: 'image/png',
             upsert: true,

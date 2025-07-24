@@ -184,7 +184,7 @@ export const useGeneratorStore = create<GeneratorState>((set, get) => ({
         const uploadFile = async (file: File | null) => {
           if (!file) return null;
           const optimized = await optimizeImage(file);
-          const filePath = `${userId}/${Date.now()}-${sanitizeFilename(optimized.name)}`;
+          const filePath = `${userId}/${Date.now()}.png`;
           const { error } = await supabase.storage.from('mira-agent-user-uploads').upload(filePath, optimized, {
             contentType: 'image/png',
             upsert: true,

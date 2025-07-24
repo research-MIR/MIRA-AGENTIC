@@ -117,8 +117,7 @@ const EditWithWords = () => {
     try {
         const uploadFile = async (file: File, type: 'source' | 'reference') => {
             const optimizedFile = await optimizeImage(file);
-            const sanitizedName = sanitizeFilename(optimizedFile.name);
-            const filePath = `${session?.user?.id}/edit-${type}/${Date.now()}-${sanitizedName}`;
+            const filePath = `${session?.user?.id}/edit-${type}/${Date.now()}.png`;
             const { data, error } = await supabase.storage
                 .from('mira-agent-user-uploads')
                 .upload(filePath, optimizedFile, {
