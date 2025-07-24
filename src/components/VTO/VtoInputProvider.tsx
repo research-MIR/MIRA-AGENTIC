@@ -217,9 +217,10 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
             .select('id, storage_path, attributes, name')
             .eq('user_id', session!.user.id)
             .eq('image_hash', hash)
-            .single();
+            .limit(1)
+            .maybeSingle();
 
-        if (checkError && checkError.code !== 'PGRST116') {
+        if (checkError) {
             throw checkError;
         }
 
@@ -259,9 +260,10 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
                 .select('id, storage_path, attributes, name')
                 .eq('user_id', session!.user.id)
                 .eq('image_hash', hash)
-                .single();
+                .limit(1)
+                .maybeSingle();
 
-            if (checkError && checkError.code !== 'PGRST116') throw checkError;
+            if (checkError) throw checkError;
 
             if (existingGarment) {
                 showSuccess(`Found matching garment in wardrobe: ${existingGarment.name}`);
@@ -340,12 +342,13 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
             .select('id, storage_path, attributes, name')
             .eq('user_id', session!.user.id)
             .eq('image_hash', hash)
-            .single();
+            .limit(1)
+            .maybeSingle();
         
-        if (checkError && checkError.code !== 'PGRST116') throw checkError;
+        if (checkError) throw checkError;
 
         let finalAnalysis: AnalyzedGarment['analysis'];
-        let finalUrl = URL.createObjectURL(tempPairGarmentFile!);
+        let finalUrl = URL.createObjectURL(tempPairGarmentFile);
         let finalFile: File | undefined = tempPairGarmentFile;
 
         if (existingGarment) {
@@ -354,7 +357,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
             finalUrl = existingGarment.storage_path;
             finalFile = undefined;
         } else {
-            finalAnalysis = await analyzeGarment(tempPairGarmentFile!);
+            finalAnalysis = await analyzeGarment(tempPairGarmentFile);
         }
 
         const newPair: QueueItem = {
@@ -404,7 +407,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
                 .filter(pose => selectedModelUrls.has(pose.final_url))
                 .map(pose => ({
                     person: { url: pose.final_url, model_job_id: model.jobId },
-                    garment: { url: garment.previewUrl, file: garment.file, analysis: garment.analysis || undefined, hash: garment.hash },
+                    garment: { url: garment.previewUrl, file: garment.file, analysis: { ...garment.analysis, hash: garment.hash } },
                     appendix: generalAppendix,
                 }))
         );
@@ -422,7 +425,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
                     const model = maleModels[i % maleModels.length];
                     model.poses.forEach(pose => {
                         if (selectedModelUrls.has(pose.final_url)) {
-                            queue.push({ person: { url: pose.final_url, model_job_id: model.jobId }, garment: { url: garment.previewUrl, file: garment.file, analysis: garment.analysis || undefined, hash: garment.hash }, appendix: generalAppendix });
+                            queue.push({ person: { url: pose.final_url, model_job_id: model.jobId }, garment: { url: garment.previewUrl, file: garment.file, analysis: { ...garment.analysis, hash: garment.hash } }, appendix: generalAppendix });
                         }
                     });
                 }
@@ -432,7 +435,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
                     const model = femaleModels[i % femaleModels.length];
                     model.poses.forEach(pose => {
                         if (selectedModelUrls.has(pose.final_url)) {
-                            queue.push({ person: { url: pose.final_url, model_job_id: model.jobId }, garment: { url: garment.previewUrl, file: garment.file, analysis: garment.analysis || undefined, hash: garment.hash }, appendix: generalAppendix });
+                            queue.push({ person: { url: pose.final_url, model_job_id: model.jobId }, garment: { url: garment.previewUrl, file: garment.file, analysis: { ...garment.analysis, hash: garment.hash } }, appendix: generalAppendix });
                         }
                     });
                 }
@@ -450,7 +453,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
                 const model = maleModels[i];
                 model.poses.forEach(pose => {
                     if (selectedModelUrls.has(pose.final_url)) {
-                        queue.push({ person: { url: pose.final_url, model_job_id: model.jobId }, garment: { url: garment.previewUrl, file: garment.file, analysis: garment.analysis || undefined, hash: garment.hash }, appendix: generalAppendix });
+                        queue.push({ person: { url: pose.final_url, model_job_id: model.jobId }, garment: { url: garment.previewUrl, file: garment.file, analysis: { ...garment.analysis, hash: garment.hash } }, appendix: generalAppendix });
                     }
                 });
             });
@@ -458,7 +461,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
                 const model = femaleModels[i];
                 model.poses.forEach(pose => {
                     if (selectedModelUrls.has(pose.final_url)) {
-                        queue.push({ person: { url: pose.final_url, model_job_id: model.jobId }, garment: { url: garment.previewUrl, file: garment.file, analysis: garment.analysis || undefined, hash: garment.hash }, appendix: generalAppendix });
+                        queue.push({ person: { url: pose.final_url, model_job_id: model.jobId }, garment: { url: garment.previewUrl, file: garment.file, analysis: { ...garment.analysis, hash: garment.hash } }, appendix: generalAppendix });
                     }
                 });
             });
