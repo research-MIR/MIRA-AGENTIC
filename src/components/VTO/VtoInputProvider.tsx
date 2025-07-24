@@ -6,27 +6,36 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { ModelPoseSelector, VtoModel, ModelPack } from './ModelPoseSelector';
 import { SecureImageDisplay } from './SecureImageDisplay';
 import { useLanguage } from "@/context/LanguageContext";
-import { PlusCircle, Shirt, Users, X, Link2, Shuffle, Info, Loader2, Wand2 } from 'lucide-react';
+import { PlusCircle, Shirt, Users, X, Link2, Shuffle, Info, Loader2, Wand2, Library } from 'lucide-react';
 import { cn } from "@/lib/utils";
 import { useDropzone } from "@/hooks/useDropzone";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Label } from '../ui/label';
 import { Textarea } from '../ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSession } from '../Auth/SessionContextProvider';
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { showError } from '@/utils/toast';
+import { optimizeImage, sanitizeFilename } from '@/lib/utils';
+import { Badge } from '../ui/badge';
+import { Skeleton } from '../ui/skeleton';
 
-interface AnalyzedGarment {
-  file: File;
-  previewUrl: string;
-  analysis: {
+interface Garment {
+  id: string;
+  storage_path: string;
+  attributes: {
     intended_gender: 'male' | 'female' | 'unisex';
     type_of_fit: 'upper body' | 'lower body' | 'full body';
     [key: string]: any;
   } | null;
+}
+
+interface AnalyzedGarment {
+  file: File;
+  previewUrl: string;
+  analysis: Garment['attributes'];
   isAnalyzing: boolean;
 }
 
@@ -89,6 +98,7 @@ const MultiImageUploader = ({ onFilesSelect, title, icon, description }: { onFil
 export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProviderProps) => {
   const { supabase, session } = useSession();
   const { t } = useLanguage();
+  const queryClient = useQueryClient();
   const [isModelModalOpen, setIsModelModalOpen] = useState(false);
   
   const [selectedModelUrls, setSelectedModelUrls] = useState<Set<string>>(new Set());
@@ -103,6 +113,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
   const [tempPairAppendix, setTempPairAppendix] = useState("");
 
   const [selectedPackId, setSelectedPackId] = useState<string>('all');
+  const [selectedGarmentIds, setSelectedGarmentIds] = useState<Set<string>>(new Set());
 
   const { data: packs, isLoading: isLoadingPacks } = useQuery<ModelPack[]>({
     queryKey: ['modelPacks', session?.user?.id],
@@ -144,6 +155,17 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
     enabled: !!session?.user,
   });
 
+  const { data: wardrobe, isLoading: isLoadingWardrobe } = useQuery<Garment[]>({
+    queryKey: ['userGarments', session?.user?.id],
+    queryFn: async () => {
+      if (!session?.user) return [];
+      const { data, error } = await supabase.from('mira-agent-garments').select('*').eq('user_id', session.user.id).order('created_at', { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!session?.user,
+  });
+
   const tempPairGarmentUrl = useMemo(() => tempPairGarmentFile ? URL.createObjectURL(tempPairGarmentFile) : null, [tempPairGarmentFile]);
 
   const isAnalyzingGarments = useMemo(() => {
@@ -171,17 +193,43 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
     return true;
   }, [isAnalyzingGarments, mode, selectedModelUrls, analyzedGarment, analyzedRandomGarments, precisePairs]);
 
-  const analyzeGarment = async (file: File): Promise<AnalyzedGarment['analysis']> => {
+  const analyzeAndSaveGarment = async (file: File): Promise<AnalyzedGarment> => {
+    const newGarment: AnalyzedGarment = {
+        file,
+        previewUrl: URL.createObjectURL(file),
+        analysis: null,
+        isAnalyzing: true,
+    };
+
     try {
-        const base64 = await fileToBase64(file);
-        const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-analyze-garment-attributes', {
+        const [base64, optimizedFile] = await Promise.all([
+            fileToBase64(file),
+            optimizeImage(file)
+        ]);
+
+        const { data: analysis, error: analysisError } = await supabase.functions.invoke('MIRA-AGENT-tool-analyze-garment-attributes', {
             body: { image_base64: base64, mime_type: file.type }
         });
-        if (error) throw error;
-        return data;
+        if (analysisError) throw analysisError;
+
+        const sanitizedName = sanitizeFilename(optimizedFile.name);
+        const filePath = `${session?.user.id}/garments/${Date.now()}-${sanitizedName}`;
+        const { error: uploadError } = await supabase.storage.from('mira-agent-user-uploads').upload(filePath, optimizedFile);
+        if (uploadError) throw uploadError;
+
+        const { error: insertError } = await supabase.from('mira-agent-garments').insert({
+            user_id: session?.user.id,
+            name: file.name,
+            storage_path: filePath,
+            attributes: analysis
+        });
+        if (insertError) throw insertError;
+
+        queryClient.invalidateQueries({ queryKey: ['userGarments', session?.user?.id] });
+        return { ...newGarment, analysis, isAnalyzing: false };
     } catch (err) {
-        console.error(`Failed to analyze garment ${file.name}:`, err);
-        return null;
+        console.error(`Failed to process garment ${file.name}:`, err);
+        return { ...newGarment, analysis: null, isAnalyzing: false };
     }
   };
 
@@ -191,16 +239,10 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
         setAnalyzedGarment(null);
         return;
     }
-    const newGarment: AnalyzedGarment = {
-        file,
-        previewUrl: URL.createObjectURL(file),
-        analysis: null,
-        isAnalyzing: true,
-    };
+    const newGarment: AnalyzedGarment = { file, previewUrl: URL.createObjectURL(file), analysis: null, isAnalyzing: true };
     setAnalyzedGarment(newGarment);
-
-    const analysisResult = await analyzeGarment(file);
-    setAnalyzedGarment(g => g ? { ...g, analysis: analysisResult, isAnalyzing: false } : null);
+    const result = await analyzeAndSaveGarment(file);
+    setAnalyzedGarment(result);
   };
 
   const handleRandomGarmentFilesSelect = async (files: File[]) => {
@@ -213,10 +255,8 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
     setAnalyzedRandomGarments(prev => [...prev, ...newGarments]);
 
     newGarments.forEach(async (garment) => {
-        const analysisResult = await analyzeGarment(garment.file);
-        setAnalyzedRandomGarments(prev => prev.map(g => 
-            g.file === garment.file ? { ...g, analysis: analysisResult, isAnalyzing: false } : g
-        ));
+        const result = await analyzeAndSaveGarment(garment.file);
+        setAnalyzedRandomGarments(prev => prev.map(g => g.file === garment.file ? result : g));
     });
   };
 
@@ -505,9 +545,57 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
     <>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2">
-          {mode === 'one-to-many' && renderOneToMany()}
-          {mode === 'random-pairs' && renderRandomPairs()}
-          {mode === 'precise-pairs' && renderPrecisePairs()}
+          <Tabs defaultValue="one-to-many" onValueChange={(v) => setMode(v as VtoMode)}>
+            <TabsList className="grid w-full grid-cols-4">
+              <TabsTrigger value="one-to-many">{t('oneGarment')}</TabsTrigger>
+              <TabsTrigger value="random-pairs">{t('randomPairs')}</TabsTrigger>
+              <TabsTrigger value="precise-pairs">{t('precisePairs')}</TabsTrigger>
+              <TabsTrigger value="wardrobe">{t('armadio')}</TabsTrigger>
+            </TabsList>
+            <TabsContent value="one-to-many" className="pt-6">{renderOneToMany()}</TabsContent>
+            <TabsContent value="random-pairs" className="pt-6">{renderRandomPairs()}</TabsContent>
+            <TabsContent value="precise-pairs" className="pt-6">{renderPrecisePairs()}</TabsContent>
+            <TabsContent value="wardrobe" className="pt-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>{t('myWardrobe')}</CardTitle>
+                  <CardDescription>{t('wardrobeDescription')}</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {isLoadingWardrobe ? <Skeleton className="h-64 w-full" /> : !wardrobe || wardrobe.length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <p>{t('noGarmentsSaved')}</p>
+                      <p className="text-xs">{t('noGarmentsSavedDescription')}</p>
+                    </div>
+                  ) : (
+                    <ScrollArea className="h-96">
+                      <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 pr-4">
+                        {wardrobe.map(garment => {
+                          const isSelected = selectedGarmentIds.has(garment.id);
+                          return (
+                            <div key={garment.id} className="relative group cursor-pointer" onClick={() => setSelectedGarmentIds(prev => {
+                              const newSet = new Set(prev);
+                              if (newSet.has(garment.id)) newSet.delete(garment.id);
+                              else newSet.add(garment.id);
+                              return newSet;
+                            })}>
+                              <SecureImageDisplay imageUrl={garment.storage_path} alt={garment.name || 'garment'} />
+                              {isSelected && <div className="absolute inset-0 bg-primary/70 flex items-center justify-center rounded-md"><CheckCircle className="h-8 w-8 text-primary-foreground" /></div>}
+                              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-1 rounded-b-md">
+                                <Badge variant={garment.attributes?.intended_gender === 'male' ? 'default' : garment.attributes?.intended_gender === 'female' ? 'destructive' : 'secondary'}>
+                                  {garment.attributes?.intended_gender}
+                                </Badge>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </ScrollArea>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+          </Tabs>
         </div>
         <div className="lg:col-span-1 space-y-6">
           <div className="flex flex-col gap-2">
