@@ -146,6 +146,11 @@ Prima di tentare di nuovo, controlla se il tuo lavoro appare nella lista dei "Jo
     skipReframeDescription: "Questo salterà il passaggio di outpainting, risultando in un'immagine quadrata (1:1) più veloce.",
     aspectRatioDisabled: "Le proporzioni vengono ignorate quando il reframe viene saltato.",
     aspectRatioDescription: "Le immagini finali verranno generate con queste proporzioni utilizzando lo strumento Reframe.",
+    selectFromWardrobe: "Seleziona dall'Armadio",
+    uploadNew: "Carica Nuovo",
+    addSelected: "Aggiungi Selezionati",
+    wardrobeIsEmpty: "Il tuo Armadio è vuoto.",
+    wardrobeIsEmptyDesc: "Carica indumenti qui o nella pagina Armadio per usarli nei tuoi pack.",
   },
   en: {
     proMode: "Pro Mode",
@@ -294,5 +299,10 @@ Before trying again, please check if your job shows up in the "Recent Jobs" list
     skipReframeDescription: "This will bypass the outpainting step, resulting in a faster, square (1:1) image.",
     aspectRatioDisabled: "Aspect ratio is ignored when reframe is skipped.",
     aspectRatioDescription: "The final images will be generated with this aspect ratio using the Reframe tool.",
+    selectFromWardrobe: "Select from Wardrobe",
+    uploadNew: "Upload New",
+    addSelected: "Add Selected",
+    wardrobeIsEmpty: "Your wardrobe is empty.",
+    wardrobeIsEmptyDesc: "Upload garments here or in the Wardrobe page to use them in your packs.",
   },
 };
