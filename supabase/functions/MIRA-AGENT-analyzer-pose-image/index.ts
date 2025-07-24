@@ -13,10 +13,10 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const systemPrompt = `You are an expert AI fashion analyst. Your task is to analyze a single image of a model and return a structured JSON object containing two key pieces of information: the "shoot focus" and the "garment" being worn.
+const systemPrompt = `You are a "Quality Assurance AI" for a photorealistic model generation pipeline. You will be given two images: a "BASE MODEL" image (showing the model in neutral underwear) and a "GENERATED POSE" image. Your sole task is to analyze the "GENERATED POSE" and return a structured JSON object.
 
 ### Task 1: Shoot Focus Analysis
-Analyze the framing of the image to determine the shoot focus. You MUST use the following logic:
+Analyze the framing of the "GENERATED POSE" image to determine the shoot focus. You MUST use the following logic:
 1.  Could at least 40% of a typical upper-body garment (like a t-shirt or blazer) be visible in this shot?
 2.  If NO, the shoot focus is **"lower_body"**.
 3.  If YES, then ask: Could at least 40% of a typical lower-body garment (like trousers or a skirt) be visible?
@@ -24,8 +24,11 @@ Analyze the framing of the image to determine the shoot focus. You MUST use the 
 5.  If YES to both questions, the shoot focus is **"full_body"**.
 
 ### Task 2: Garment Analysis
-1.  Identify the primary garment the model is wearing (e.g., "simple grey bra," "grey boxer shorts").
+1.  Identify the primary garment the model is wearing in the "GENERATED POSE" image (e.g., "simple grey bra," "blue denim jacket").
 2.  Classify the body part that this garment covers. The value MUST be one of: **"upper_body"**, **"lower_body"**, or **"full_body"**.
+
+### Task 3: Visual Comparison (CRITICAL)
+You must perform a direct visual comparison. Is the garment worn in the "GENERATED POSE" image the **exact, identical, pixel-for-pixel same garment** as the one worn in the "BASE MODEL" image? Your answer for the \`is_identical_to_base_garment\` field must be a boolean (\`true\` or \`false\`). Be extremely strict. Any change in color, shape, texture, or style means it is not identical.
 
 ### Output Format
 Your entire response MUST be a single, valid JSON object with the following structure. Do not include any other text or explanations.
@@ -34,7 +37,8 @@ Your entire response MUST be a single, valid JSON object with the following stru
   "shoot_focus": "upper_body" | "lower_body" | "full_body",
   "garment": {
     "description": "A concise text description of the garment.",
-    "coverage": "upper_body" | "lower_body" | "full_body"
+    "coverage": "upper_body" | "lower_body" | "full_body",
+    "is_identical_to_base_garment": true | false
   }
 }`;
 
@@ -61,9 +65,9 @@ async function downloadImageAsPart(supabase: SupabaseClient, publicUrl: string):
 serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
 
-  const { job_id, image_url, pose_prompt } = await req.json();
-  if (!job_id || !image_url || !pose_prompt) {
-    throw new Error("job_id, image_url, and pose_prompt are required.");
+  const { job_id, image_url, base_model_image_url, pose_prompt } = await req.json();
+  if (!job_id || !image_url || !base_model_image_url || !pose_prompt) {
+    throw new Error("job_id, image_url, base_model_image_url, and pose_prompt are required.");
   }
 
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
@@ -72,11 +76,22 @@ serve(async (req) => {
 
   try {
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
-    const imageParts = await downloadImageAsPart(supabase, image_url);
+    
+    const [poseImageParts, baseModelImageParts] = await Promise.all([
+        downloadImageAsPart(supabase, image_url),
+        downloadImageAsPart(supabase, base_model_image_url)
+    ]);
+
+    const finalParts: Part[] = [
+        { text: "--- BASE MODEL ---" },
+        ...baseModelImageParts,
+        { text: "--- GENERATED POSE ---" },
+        ...poseImageParts
+    ];
     
     const result = await ai.models.generateContent({
         model: MODEL_NAME,
-        contents: [{ role: 'user', parts: imageParts }],
+        contents: [{ role: 'user', parts: finalParts }],
         generationConfig: { responseMimeType: "application/json" },
         config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
     });

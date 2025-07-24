@@ -328,6 +328,7 @@ async function handlePollingPosesState(supabase: any, job: any) {
                     body: {
                         job_id: job.id,
                         image_url: publicUrl,
+                        base_model_image_url: job.base_model_image_url,
                         pose_prompt: updatedPoseJobs[index].pose_prompt
                     }
                 }).catch(err => {
