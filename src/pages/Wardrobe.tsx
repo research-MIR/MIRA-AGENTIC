@@ -67,8 +67,8 @@ const Wardrobe = () => {
                   <p className="font-semibold truncate">{garment.name}</p>
                   {garment.attributes && (
                     <div className="flex flex-wrap gap-1">
-                      <Badge variant="outline">{garment.attributes.intended_gender}</Badge>
-                      <Badge variant="secondary">{garment.attributes.type_of_fit}</Badge>
+                      <Badge variant="outline" className="capitalize">{garment.attributes.intended_gender}</Badge>
+                      <Badge variant="secondary" className="capitalize">{garment.attributes.type_of_fit}</Badge>
                     </div>
                   )}
                 </div>

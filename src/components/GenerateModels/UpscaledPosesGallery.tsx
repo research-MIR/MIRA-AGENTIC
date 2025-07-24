@@ -9,6 +9,7 @@ interface PoseAnalysis {
   garment: {
     description: string;
     coverage: 'upper_body' | 'lower_body' | 'full_body';
+    is_identical_to_base_garment: boolean;
   };
 }
 

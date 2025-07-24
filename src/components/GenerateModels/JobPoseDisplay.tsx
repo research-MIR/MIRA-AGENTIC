@@ -7,18 +7,22 @@ import { useImagePreview } from "@/context/ImagePreviewContext";
 import { SecureImageDisplay } from "@/components/VTO/SecureImageDisplay";
 import { Badge } from "@/components/ui/badge";
 
+interface PoseAnalysis {
+  shoot_focus: 'upper_body' | 'lower_body' | 'full_body';
+  garment: {
+    description: string;
+    coverage: 'upper_body' | 'lower_body' | 'full_body';
+    is_identical_to_base_garment: boolean;
+  };
+}
+
 interface Pose {
   final_url: string;
   is_upscaled?: boolean;
   status: string;
   pose_prompt: string;
   jobId: string;
-  analysis?: {
-    shoot_focus: string;
-    garment: {
-      coverage: string;
-    }
-  }
+  analysis?: PoseAnalysis;
 }
 
 interface Job {
