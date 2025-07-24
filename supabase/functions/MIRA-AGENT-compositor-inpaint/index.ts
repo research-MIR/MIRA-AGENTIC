@@ -1,10 +1,14 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { createCanvas, loadImage } from "https://deno.land/x/canvas@v1.4.1/mod.ts";
 import { Image } from "https://deno.land/x/imagescript@1.2.15/mod.ts";
+import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type"
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
+
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 const GENERATED_IMAGES_BUCKET = "mira-generations";
@@ -16,7 +20,7 @@ const JPEG_QUALITY = parseFloat(Deno.env.get("JPEG_QUALITY") ?? "0.9"); // 0..1
 // -----------------------------------------------------------------------------
 // Utilities
 // -----------------------------------------------------------------------------
-const clamp = (v, min, max)=>Math.min(Math.max(v, min), max);
+const clamp = (v, min, max) => Math.min(Math.max(v, min), max);
 /** Ensure we have a PNG/alpha-backed Image (JPEGs decode fine but this forces a clean RGBA buffer). */ async function toPNG(img) {
   const buf = await img.encode(0); // PNG, compression 0
   return await Image.decode(buf);
@@ -25,20 +29,20 @@ const clamp = (v, min, max)=>Math.min(Math.max(v, min), max);
   const total = img.width * img.height;
   let sampled = 0, opaque = 0, transparent = 0, soft = 0;
   const data = img.bitmap;
-  for(let i = 0; i < total; i += step){
+  for (let i = 0; i < total; i += step) {
     const a = data[i * 4 + 3];
     sampled++;
     if (a === 0) transparent++;
     else if (a === 255) opaque++;
     else soft++;
   }
-  const pct = (n)=>n / sampled * 100;
+  const pct = (n) => n / sampled * 100;
   return {
     opaquePct: pct(opaque),
     softPct: pct(soft),
     transparentPct: pct(transparent),
     sampled,
-    total
+    total,
   };
 }
 /**
@@ -51,9 +55,9 @@ const clamp = (v, min, max)=>Math.min(Math.max(v, min), max);
   const out = patch.clone();
   const data = out.bitmap;
   let touched = 0;
-  for(let y = 0; y < h; y++){
+  for (let y = 0; y < h; y++) {
     const dy = Math.min(y, h - 1 - y);
-    for(let x = 0; x < w; x++){
+    for (let x = 0; x < w; x++) {
       const dx = Math.min(x, w - 1 - x);
       const dist = Math.min(dx, dy);
       if (dist < r) {
@@ -73,7 +77,7 @@ const clamp = (v, min, max)=>Math.min(Math.max(v, min), max);
   console.log(`${logPrefix} Alpha stats -> opaque=${stats.opaquePct.toFixed(1)}% soft=${stats.softPct.toFixed(1)}% transparent=${stats.transparentPct.toFixed(1)}% (sampled ${stats.sampled}/${stats.total})`);
   return {
     softPatch: out,
-    radius: r
+    radius: r,
   };
 }
 async function downloadFromSupabase(supabase, publicUrl) {
@@ -93,16 +97,31 @@ async function downloadFromSupabase(supabase, publicUrl) {
   if (error) throw new Error(`Failed to download from Supabase storage (${filePath}): ${error.message}`);
   return data;
 }
+
+async function uploadBufferToStorage(supabase: SupabaseClient, buffer: Uint8Array | null, userId: string, filename: string): Promise<string | null> {
+    if (!buffer) return null;
+    const filePath = `${userId}/vto-debug/${Date.now()}-${filename}`;
+    const { error } = await supabase.storage
+      .from(GENERATED_IMAGES_BUCKET)
+      .upload(filePath, buffer, { contentType: 'image/png', upsert: true });
+    if (error) {
+        console.error(`Storage upload failed for ${filename}: ${error.message}`);
+        throw new Error(`Storage upload failed for ${filename}: ${error.message}`);
+    }
+    const { data: { publicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
+    return publicUrl;
+}
+
 // -----------------------------------------------------------------------------
 // Main handler
 // -----------------------------------------------------------------------------
-serve(async (req)=>{
+serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, {
     headers: corsHeaders
   });
   const { job_id, final_image_url, job_type = "bitstudio" } = await req.json();
   if (!job_id || !final_image_url) throw new Error("job_id and final_image_url are required.");
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
   const logPrefix = `[Compositor-Inpaint][${job_id}]`;
   console.log(`${logPrefix} Job started. Type: ${job_type}`);
   const tableName = job_type === "bitstudio" ? "mira-agent-bitstudio-jobs" : "mira-agent-inpainting-jobs";
@@ -132,14 +151,21 @@ serve(async (req)=>{
       fetch(final_image_url)
     ]);
     if (!inpaintedPatchResponse.ok) throw new Error(`Failed to download inpainted patch: ${inpaintedPatchResponse.statusText}`);
+    
+    const inpaintedPatchBlob = await inpaintedPatchResponse.blob();
+    const vtoned_crop_url = await uploadBufferToStorage(supabase, new Uint8Array(await inpaintedPatchBlob.arrayBuffer()), job.user_id, 'vtoned_crop.png');
+
     const [sourceImage, origPatch] = await Promise.all([
       Image.decode(await sourceBlob.arrayBuffer()),
-      Image.decode(await inpaintedPatchResponse.arrayBuffer())
+      Image.decode(await inpaintedPatchBlob.arrayBuffer())
     ]);
     // Guarantee RGBA/alpha-friendly patch
     const inpaintedPatchImg = await toPNG(origPatch);
     console.log(`${logPrefix} Compositing with feathering...`);
     const { softPatch, radius } = featherPatchAlpha(inpaintedPatchImg, FEATHER_RATIO, FEATHER_MIN_PX, FEATHER_MAX_PX, logPrefix);
+    
+    const feathered_patch_url = await uploadBufferToStorage(supabase, await softPatch.encode(0), job.user_id, 'feathered_patch.png');
+
     sourceImage.composite(softPatch, bbox.x, bbox.y);
     console.log(`${logPrefix} Patch composited at (${bbox.x}, ${bbox.y}) with radius=${radius}px.`);
     // Final encode as JPEG
@@ -173,6 +199,18 @@ serve(async (req)=>{
         verificationResult = data;
       }
     }
+
+    const finalMetadata = {
+        ...job.metadata,
+        verification_result: verificationResult,
+        debug_assets: {
+            ...job.metadata.debug_assets,
+            vtoned_crop_url,
+            feathered_patch_url,
+            compositing_bbox: bbox,
+        }
+    };
+
     if (verificationResult && verificationResult.is_match === false) {
       console.log(`${logPrefix} QA failed -> 'awaiting_fix'. Invoking fixer orchestrator.`);
       const qaHistory = job.metadata?.qa_history || [];
@@ -183,13 +221,7 @@ serve(async (req)=>{
       };
       await supabase.from(tableName).update({
         status: "awaiting_fix",
-        metadata: {
-          ...job.metadata,
-          qa_history: [
-            ...qaHistory,
-            newQaReportObject
-          ]
-        }
+        metadata: { ...finalMetadata, qa_history: [...qaHistory, newQaReportObject] }
       }).eq("id", job_id);
       supabase.functions.invoke("MIRA-AGENT-fixer-orchestrator", {
         body: {
@@ -200,11 +232,7 @@ serve(async (req)=>{
       console.log(`${logPrefix} Fixer orchestrator invoked.`);
     } else {
       console.log(`${logPrefix} QA passed/skipped. Finalizing job.`);
-      const finalMetadata = {
-        ...job.metadata,
-        verification_result: verificationResult
-      };
-      const updatePayload = {
+      const updatePayload: any = {
         status: "complete",
         final_image_url: finalPublicUrl,
         metadata: finalMetadata

@@ -9,7 +9,13 @@ export interface BitStudioJob {
   created_at: string;
   batch_pair_job_id?: string;
   metadata?: {
-    debug_assets?: any;
+    debug_assets?: {
+      raw_mask_url?: string;
+      expanded_mask_url?: string;
+      vtoned_crop_url?: string;
+      feathered_patch_url?: string;
+      compositing_bbox?: { x: number; y: number; width: number; height: number; };
+    };
     prompt_used?: string;
     source_image_url?: string;
     reference_image_url?: string;
