@@ -6,7 +6,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { ModelPoseSelector, VtoModel, ModelPack } from './ModelPoseSelector';
 import { SecureImageDisplay } from './SecureImageDisplay';
 import { useLanguage } from "@/context/LanguageContext";
-import { PlusCircle, Shirt, Users, X, Link2, Shuffle, Info, Loader2 } from 'lucide-react';
+import { PlusCircle, Shirt, Users, X, Link2, Shuffle, Info, Loader2, Wand2 } from 'lucide-react';
 import { cn } from "@/lib/utils";
 import { useDropzone } from "@/hooks/useDropzone";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -145,6 +145,16 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
   });
 
   const tempPairGarmentUrl = useMemo(() => tempPairGarmentFile ? URL.createObjectURL(tempPairGarmentFile) : null, [tempPairGarmentFile]);
+
+  const isAnalyzingGarments = useMemo(() => {
+    if (mode === 'one-to-many') {
+      return analyzedGarment?.isAnalyzing ?? false;
+    }
+    if (mode === 'random-pairs') {
+      return analyzedRandomGarments.some(g => g.isAnalyzing);
+    }
+    return false;
+  }, [mode, analyzedGarment, analyzedRandomGarments]);
 
   const analyzeGarment = async (file: File): Promise<AnalyzedGarment['analysis']> => {
     try {
@@ -323,11 +333,11 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
     onQueueReady(queue);
   };
 
-  const isProceedDisabled = mode === 'one-to-many' 
-    ? (selectedModelUrls.size === 0 || !analyzedGarment)
+  const isProceedDisabled = isAnalyzingGarments || (mode === 'one-to-many' 
+    ? (selectedModelUrls.size === 0 || !analyzedGarment || !analyzedGarment.analysis)
     : mode === 'random-pairs'
-    ? (selectedModelUrls.size === 0 || analyzedRandomGarments.length === 0)
-    : precisePairs.length === 0;
+    ? (selectedModelUrls.size === 0 || analyzedRandomGarments.length === 0 || analyzedRandomGarments.some(g => g.isAnalyzing))
+    : precisePairs.length === 0);
 
   const renderOneToMany = () => (
     <Card>
@@ -346,8 +356,13 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
           </div>
           <div className="space-y-2">
             <Label>{t('uploadGarment')}</Label>
-            <div className="aspect-square max-w-xs mx-auto">
+            <div className="aspect-square max-w-xs mx-auto relative">
               <ImageUploader onFileSelect={(files) => handleGarmentFileSelect(files)} title={t('garmentImage')} imageUrl={analyzedGarment?.previewUrl || null} onClear={() => setAnalyzedGarment(null)} />
+              {analyzedGarment?.isAnalyzing && (
+                <div className="absolute inset-0 bg-black/50 flex items-center justify-center rounded-md">
+                  <Loader2 className="h-8 w-8 animate-spin text-white" />
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -480,7 +495,16 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
         </div>
         <div className="lg:col-span-1 space-y-6">
           <div className="flex flex-col gap-2">
-            <Button size="lg" onClick={handleProceed} disabled={isProceedDisabled}>{t('reviewQueue', { count: mode === 'precise-pairs' ? precisePairs.length : selectedModelUrls.size })}</Button>
+            <Button size="lg" onClick={handleProceed} disabled={isProceedDisabled}>
+              {isAnalyzingGarments ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Wand2 className="mr-2 h-4 w-4" />
+              )}
+              {isAnalyzingGarments 
+                ? "Analyzing Garments..." 
+                : t('reviewQueue', { count: mode === 'precise-pairs' ? precisePairs.length : selectedModelUrls.size })}
+            </Button>
             <Button variant="outline" onClick={onGoBack}>{t('goBack')}</Button>
           </div>
         </div>
