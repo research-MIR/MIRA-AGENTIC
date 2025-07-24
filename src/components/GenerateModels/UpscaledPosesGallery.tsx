@@ -2,6 +2,15 @@ import { useLanguage } from "@/context/LanguageContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useImagePreview } from "@/context/ImagePreviewContext";
 import { SecureImageDisplay } from "@/components/VTO/SecureImageDisplay";
+import { Badge } from "@/components/ui/badge";
+
+interface PoseAnalysis {
+  shoot_focus: 'upper_body' | 'lower_body' | 'full_body';
+  garment: {
+    description: string;
+    coverage: 'upper_body' | 'lower_body' | 'full_body';
+  };
+}
 
 interface Pose {
   final_url: string;
@@ -9,6 +18,7 @@ interface Pose {
   status: string;
   pose_prompt: string;
   jobId: string;
+  analysis?: PoseAnalysis;
 }
 
 interface Job {
@@ -47,6 +57,12 @@ export const UpscaledPosesGallery = ({ jobs }: UpscaledPosesGalleryProps) => {
             onClick={() => showImage({ images: upscaledPoses.map(p => ({ url: p.final_url, jobId: p.jobId })), currentIndex: index })}
           >
             <SecureImageDisplay imageUrl={pose.final_url} alt={pose.pose_prompt} />
+            {pose.analysis && (
+              <>
+                <Badge variant="secondary" className="absolute top-1 left-1 z-10 capitalize">{pose.analysis.shoot_focus.replace('_', ' ')}</Badge>
+                <Badge variant="default" className="absolute top-1 right-1 z-10 capitalize">{pose.analysis.garment.coverage.replace('_', ' ')}</Badge>
+              </>
+            )}
           </div>
           <p className="text-xs text-muted-foreground truncate">{pose.pose_prompt}</p>
         </div>

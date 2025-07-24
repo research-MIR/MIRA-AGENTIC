@@ -23,11 +23,20 @@ import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { showError, showSuccess } from "@/utils/toast";
 
+interface PoseAnalysis {
+  shoot_focus: 'upper_body' | 'lower_body' | 'full_body';
+  garment: {
+    description: string;
+    coverage: 'upper_body' | 'lower_body' | 'full_body';
+  };
+}
+
 interface Pose {
   final_url: string;
   is_upscaled?: boolean;
   status: string;
   pose_prompt: string;
+  analysis?: PoseAnalysis;
 }
 
 interface Job {

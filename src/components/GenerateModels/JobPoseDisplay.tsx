@@ -5,6 +5,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { cn } from "@/lib/utils";
 import { useImagePreview } from "@/context/ImagePreviewContext";
 import { SecureImageDisplay } from "@/components/VTO/SecureImageDisplay";
+import { Badge } from "@/components/ui/badge";
 
 interface Pose {
   final_url: string;
@@ -12,6 +13,12 @@ interface Pose {
   status: string;
   pose_prompt: string;
   jobId: string;
+  analysis?: {
+    shoot_focus: string;
+    garment: {
+      coverage: string;
+    }
+  }
 }
 
 interface Job {
@@ -27,21 +34,31 @@ interface JobPoseDisplayProps {
 const PoseStatusIcon = ({ pose }: { pose: Pose }) => {
   let statusIcon = null;
   let tooltipText = '';
+  let color = '';
 
-  if (pose.status === 'complete') {
-    if (pose.is_upscaled) {
-      statusIcon = <CheckCircle className="h-5 w-5 text-white" />;
-      tooltipText = 'Upscaled & Ready';
-    } else {
-      statusIcon = <Wand2 className="h-5 w-5 text-white" />;
-      tooltipText = 'Ready for Upscaling';
-    }
-  } else if (pose.status === 'processing' || pose.status === 'pending') {
-    statusIcon = <Loader2 className="h-5 w-5 text-white animate-spin" />;
-    tooltipText = 'Generating...';
-  } else {
-    statusIcon = <AlertTriangle className="h-5 w-5 text-white" />;
-    tooltipText = 'Failed';
+  switch (pose.status) {
+    case 'complete':
+      if (pose.is_upscaled) {
+        statusIcon = <CheckCircle className="h-5 w-5 text-white" />;
+        tooltipText = 'Upscaled & Ready';
+        color = 'bg-green-600';
+      } else {
+        statusIcon = <Wand2 className="h-5 w-5 text-white" />;
+        tooltipText = 'Ready for Upscaling';
+        color = 'bg-blue-500';
+      }
+      break;
+    case 'analyzing':
+    case 'processing':
+    case 'pending':
+      statusIcon = <Loader2 className="h-5 w-5 text-white animate-spin" />;
+      tooltipText = pose.status === 'analyzing' ? 'Analyzing...' : 'Generating...';
+      color = 'bg-gray-500';
+      break;
+    default: // failed
+      statusIcon = <AlertTriangle className="h-5 w-5 text-white" />;
+      tooltipText = 'Failed';
+      color = 'bg-destructive';
   }
 
   return (
@@ -50,10 +67,7 @@ const PoseStatusIcon = ({ pose }: { pose: Pose }) => {
         <TooltipTrigger asChild>
           <div className={cn(
             "absolute bottom-1 right-1 h-8 w-8 rounded-full flex items-center justify-center border-2 border-background",
-            pose.status === 'complete' && pose.is_upscaled && 'bg-green-600',
-            pose.status === 'complete' && !pose.is_upscaled && 'bg-blue-500',
-            (pose.status === 'processing' || pose.status === 'pending') && 'bg-gray-500',
-            pose.status === 'failed' && 'bg-destructive'
+            color
           )}>
             {statusIcon}
           </div>
@@ -100,6 +114,12 @@ export const JobPoseDisplay = ({ job }: JobPoseDisplayProps) => {
                     onClick={() => showImage({ images: poses.map(p => ({ url: p.final_url, jobId: job.id })), currentIndex: index })}
                 >
                     <SecureImageDisplay imageUrl={pose.final_url} alt={pose.pose_prompt} />
+                    {pose.analysis && (
+                      <>
+                        <Badge variant="secondary" className="absolute top-1 left-1 z-10 capitalize">{pose.analysis.shoot_focus.replace('_', ' ')}</Badge>
+                        <Badge variant="default" className="absolute top-1 right-1 z-10 capitalize">{pose.analysis.garment.coverage.replace('_', ' ')}</Badge>
+                      </>
+                    )}
                     <PoseStatusIcon pose={pose} />
                 </div>
                 <p className="text-xs text-muted-foreground truncate">{pose.pose_prompt}</p>
