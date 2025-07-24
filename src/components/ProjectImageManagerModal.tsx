@@ -72,7 +72,7 @@ export const ProjectImageManagerModal = ({ project, isOpen, onClose }: ProjectIm
         const optimizedFile = await optimizeImage(file);
         const filePath = `${session.user.id}/${Date.now()}-${file.name}`;
         const { error: uploadError } = await supabase.storage.from('mira-generations').upload(filePath, optimizedFile);
-        if (uploadError) throw uploadError;
+        if (uploadError) throw new Error(uploadError.message);
         const { data: { publicUrl } } = supabase.storage.from('mira-generations').getPublicUrl(filePath);
         
         const { error: jobError } = await supabase.from('mira-agent-jobs').insert({
