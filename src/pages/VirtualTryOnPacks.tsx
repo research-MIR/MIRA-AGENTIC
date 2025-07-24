@@ -26,6 +26,7 @@ import { SecureImageDisplay } from "@/components/VTO/SecureImageDisplay";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Badge } from "@/components/ui/badge";
 import { CheckCircle } from "lucide-react";
+import { VtoModeSelector } from "@/components/VTO/VtoModeSelector";
 
 interface Garment {
   id: string;
@@ -88,6 +89,7 @@ const MultiImageUploader = ({ onFilesSelect, title, icon, description }: { onFil
     );
 };
 
+type WizardStep = 'select-mode' | 'provide-inputs' | 'review-queue';
 type VtoMode = 'one-to-many' | 'random-pairs' | 'precise-pairs' | 'wardrobe';
 const aspectRatioOptions = ["1:1", "16:9", "9:16", "4:3", "3:4", "21:9", "3:2", "2:3", "4:5", "5:4"];
 
@@ -96,7 +98,7 @@ const VirtualTryOnPacks = () => {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
 
-  const [showReview, setShowReview] = useState(false);
+  const [step, setStep] = useState<WizardStep>('select-mode');
   const [mode, setMode] = useState<VtoMode>('one-to-many');
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -184,17 +186,43 @@ const VirtualTryOnPacks = () => {
     return true;
   }, [isAnalyzingGarments, mode, selectedModelUrls, analyzedGarment, analyzedRandomGarments, precisePairs, selectedGarmentIds]);
 
-  const analyzeGarment = async (file: File): Promise<AnalyzedGarment['analysis']> => {
+  const analyzeAndSaveGarment = async (file: File): Promise<AnalyzedGarment> => {
+    const newGarment: AnalyzedGarment = {
+        file,
+        previewUrl: URL.createObjectURL(file),
+        analysis: null,
+        isAnalyzing: true,
+    };
+
     try {
-        const base64 = await fileToBase64(file);
-        const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-analyze-garment-attributes', {
+        const [base64, optimizedFile] = await Promise.all([
+            fileToBase64(file),
+            optimizeImage(file)
+        ]);
+
+        const { data: analysis, error: analysisError } = await supabase.functions.invoke('MIRA-AGENT-tool-analyze-garment-attributes', {
             body: { image_base64: base64, mime_type: file.type }
         });
-        if (error) throw error;
-        return data;
+        if (analysisError) throw analysisError;
+
+        const sanitizedName = sanitizeFilename(optimizedFile.name);
+        const filePath = `${session?.user.id}/garments/${Date.now()}-${sanitizedName}`;
+        const { error: uploadError } = await supabase.storage.from('mira-agent-user-uploads').upload(filePath, optimizedFile);
+        if (uploadError) throw uploadError;
+
+        const { error: insertError } = await supabase.from('mira-agent-garments').insert({
+            user_id: session?.user.id,
+            name: file.name,
+            storage_path: filePath,
+            attributes: analysis
+        });
+        if (insertError) throw insertError;
+
+        queryClient.invalidateQueries({ queryKey: ['userGarments', session?.user?.id] });
+        return { ...newGarment, analysis, isAnalyzing: false };
     } catch (err) {
-        console.error(`Failed to analyze garment ${file.name}:`, err);
-        return null;
+        console.error(`Failed to process garment ${file.name}:`, err);
+        return { ...newGarment, analysis: null, isAnalyzing: false };
     }
   };
 
@@ -420,8 +448,187 @@ const VirtualTryOnPacks = () => {
     }
   };
 
+  const handleSelectMode = (selectedMode: VtoMode) => {
+    setMode(selectedMode);
+    setStep('provide-inputs');
+  };
+
+  const handleGoBack = () => {
+    if (step === 'provide-inputs') {
+      setStep('select-mode');
+    } else if (step === 'review-queue') {
+      setStep('provide-inputs');
+    }
+  };
+
+  const queueCount = useMemo(() => {
+    if (mode === 'one-to-many') return selectedModelUrls.size;
+    if (mode === 'random-pairs') return analyzedRandomGarments.length;
+    if (mode === 'precise-pairs') return precisePairs.length;
+    return 0;
+  }, [mode, selectedModelUrls, analyzedRandomGarments, precisePairs]);
+
+  const renderOneToMany = () => (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t('oneToManyInputTitle')}</CardTitle>
+        <CardDescription>{t('oneToManyInputDescription')}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="space-y-2">
+            <Label>{t('selectModels')}</Label>
+            <Button variant="outline" className="w-full" onClick={() => setIsModelModalOpen(true)}>
+              {t('selectModels')} ({selectedModelUrls.size})
+            </Button>
+            <ModelPoseSelector mode="get-all" onUseEntirePack={handleUseEntirePack} models={models || []} isLoading={isLoadingModels} error={modelsError as Error | null} packs={packs} isLoadingPacks={isLoadingPacks} selectedPackId={selectedPackId} setSelectedPackId={setSelectedPackId} />
+          </div>
+          <div className="space-y-2">
+            <Label>{t('uploadGarment')}</Label>
+            <div className="aspect-square max-w-xs mx-auto relative">
+              <ImageUploader onFileSelect={(files) => handleGarmentFileSelect(files)} title={t('garmentImage')} imageUrl={analyzedGarment?.previewUrl || null} onClear={() => setAnalyzedGarment(null)} />
+              {analyzedGarment?.isAnalyzing && (
+                <div className="absolute inset-0 bg-black/50 flex items-center justify-center rounded-md">
+                  <Loader2 className="h-8 w-8 animate-spin text-white" />
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+        <div>
+          <Label htmlFor="general-appendix">{t('promptAppendix')}</Label>
+          <Textarea id="general-appendix" value={generalAppendix} onChange={(e) => setGeneralAppendix(e.target.value)} placeholder={t('promptAppendixPlaceholder')} rows={2} />
+        </div>
+      </CardContent>
+    </Card>
+  );
+
+  const renderRandomPairs = () => (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t('randomPairsInputTitle')}</CardTitle>
+        <CardDescription>{t('randomPairsInputDescription')}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="space-y-2">
+            <Label>{t('selectModels')}</Label>
+            <Button variant="outline" className="w-full" onClick={() => setIsModelModalOpen(true)}>
+              {t('selectModels')} ({selectedModelUrls.size})
+            </Button>
+            <ModelPoseSelector mode="get-all" onUseEntirePack={handleUseEntirePack} models={models || []} isLoading={isLoadingModels} error={modelsError as Error | null} packs={packs} isLoadingPacks={isLoadingPacks} selectedPackId={selectedPackId} setSelectedPackId={setSelectedPackId} />
+          </div>
+          <div className="space-y-2">
+            <Label>{t('uploadGarments')}</Label>
+            <div className="h-32">
+              <MultiImageUploader onFilesSelect={handleRandomGarmentFilesSelect} title={t('uploadGarments')} icon={<Shirt />} description={t('selectMultipleGarmentImages')} />
+            </div>
+            {analyzedRandomGarments.length > 0 && (
+              <ScrollArea className="h-24 mt-2 border rounded-md p-2">
+                <div className="grid grid-cols-5 gap-2">
+                  {analyzedRandomGarments.map((g, i) => <div key={i} className="relative"><img src={g.previewUrl} className="w-full h-full object-cover rounded-md aspect-square" />{g.isAnalyzing && <div className="absolute inset-0 bg-black/50 flex items-center justify-center"><Loader2 className="h-4 w-4 animate-spin text-white"/></div>}</div>)}
+                </div>
+              </ScrollArea>
+            )}
+          </div>
+        </div>
+         <div>
+          <Label htmlFor="general-appendix-random">{t('promptAppendix')}</Label>
+          <Textarea id="general-appendix-random" value={generalAppendix} onChange={(e) => setGeneralAppendix(e.target.value)} placeholder={t('promptAppendixPlaceholder')} rows={2} />
+        </div>
+        <div className="flex items-center justify-between p-2 rounded-md bg-muted/50">
+            <div className="flex items-center gap-2">
+                <Label htmlFor="loop-models-switch" className="text-sm font-medium">
+                    {t('loopModels')}
+                </Label>
+                <TooltipProvider>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Info className="h-4 w-4 text-muted-foreground cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent>
+                            <p className="max-w-xs">{t('loopModelsDescription')}</p>
+                        </TooltipContent>
+                    </Tooltip>
+                </TooltipProvider>
+            </div>
+            <Switch
+                id="loop-models-switch"
+                checked={loopModels}
+                onCheckedChange={setLoopModels}
+            />
+        </div>
+      </CardContent>
+    </Card>
+  );
+
+  const renderPrecisePairs = () => (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+      <Card>
+        <CardHeader>
+            <CardTitle>{t('precisePairsInputTitle')}</CardTitle>
+            <CardDescription>{t('precisePairsInputDescription')}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-2">
+                <Label>{t('person')}</Label>
+                <div className="aspect-square w-full bg-muted rounded-md flex items-center justify-center">
+                    {tempPairPersonUrl ? (
+                        <div className="relative w-full h-full">
+                            <SecureImageDisplay imageUrl={tempPairPersonUrl} alt="Selected Person" />
+                            <Button variant="destructive" size="icon" className="absolute top-2 right-2 h-6 w-6 z-10" onClick={() => setTempPairPersonUrl(null)}><X className="h-4 w-4" /></Button>
+                        </div>
+                    ) : (
+                        <Button variant="outline" onClick={() => setIsModelModalOpen(true)}>Select Model</Button>
+                    )}
+                </div>
+            </div>
+            <ImageUploader onFileSelect={(files) => files && setTempPairGarmentFile(files[0])} title={t('garment')} imageUrl={tempPairGarmentUrl} onClear={() => setTempPairGarmentFile(null)} />
+          </div>
+          <div>
+            <Label htmlFor="pair-appendix">{t('promptAppendixPair')}</Label>
+            <Input id="pair-appendix" value={tempPairAppendix} onChange={(e) => setTempPairAppendix(e.target.value)} placeholder={t('promptAppendixPairPlaceholder')} />
+          </div>
+          <Button className="w-full" onClick={addPrecisePair} disabled={!tempPairPersonUrl || !tempPairGarmentFile}>{t('addPairToQueue')}</Button>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader><CardTitle>{t('batchQueue')}</CardTitle></CardHeader>
+        <CardContent>
+          <ScrollArea className="h-96">
+            <div className="space-y-2 pr-4">
+              {precisePairs.map((pair, i) => (
+                <div key={i} className="flex gap-2 items-center bg-muted p-2 rounded-md">
+                  <div className="w-16 h-16 rounded-md overflow-hidden flex-shrink-0"><SecureImageDisplay imageUrl={pair.person.url} alt="Person" /></div>
+                  <PlusCircle className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+                  <div className="w-16 h-16 rounded-md overflow-hidden flex-shrink-0"><img src={pair.garment.url} alt="Garment" className="w-full h-full object-cover" /></div>
+                  <p className="text-xs text-muted-foreground flex-1 truncate italic">"{pair.appendix}"</p>
+                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setPrecisePairs(p => p.filter((_, idx) => idx !== i))}><X className="h-4 w-4" /></Button>
+                </div>
+              ))}
+            </div>
+          </ScrollArea>
+        </CardContent>
+      </Card>
+    </div>
+  );
+
   const renderCreateStep = () => {
-    if (showReview) {
+    if (step === 'select-mode') {
+      return (
+        <div className="flex flex-col items-center justify-center h-full">
+          <Alert className="max-w-2xl mb-8">
+            <Info className="h-4 w-4" />
+            <AlertTitle>{t('vtoPacksIntroTitle')}</AlertTitle>
+            <AlertDescription>{t('vtoPacksIntroDescription')}</AlertDescription>
+          </Alert>
+          <VtoModeSelector onSelectMode={handleSelectMode} />
+        </div>
+      );
+    }
+
+    if (step === 'review-queue') {
       return (
         <div className="max-w-2xl mx-auto space-y-6">
           <VtoReviewQueue queue={queue} />
@@ -462,7 +669,7 @@ const VirtualTryOnPacks = () => {
             </AlertDescription>
           </Alert>
           <div className="flex justify-between items-center">
-            <Button variant="outline" onClick={() => setShowReview(false)}>{t('goBack')}</Button>
+            <Button variant="outline" onClick={handleGoBack}>{t('goBack')}</Button>
             <Button size="lg" onClick={handleGenerate} disabled={isLoading}>
               {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
               {t('generateNImages', { count: queue.length })}
@@ -537,9 +744,9 @@ const VirtualTryOnPacks = () => {
               )}
               {isAnalyzingGarments 
                 ? "Analyzing Garments..." 
-                : t('reviewQueue', { count: precisePairs.length })}
+                : t('reviewQueue', { count: queueCount })}
             </Button>
-            <Button variant="outline" onClick={onGoBack}>{t('goBack')}</Button>
+            <Button variant="outline" onClick={handleGoBack}>{t('goBack')}</Button>
           </div>
         </div>
       </div>
@@ -552,7 +759,7 @@ const VirtualTryOnPacks = () => {
         <div className="flex justify-between items-center">
             <div>
                 <h1 className="text-3xl font-bold">{t('virtualTryOnPacks')}</h1>
-                <p className="text-muted-foreground">{showReview ? t('step3Title') : t('step2Title')}</p>
+                <p className="text-muted-foreground">{getStepTitle()}</p>
             </div>
         </div>
       </header>
