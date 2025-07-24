@@ -80,31 +80,41 @@ serve(async (req) => {
     console.log(`[VTO-Packs-Orchestrator] Logging unique garments to the Armadio...`);
     const uniqueGarments = new Map<string, any>();
     pairs.forEach((pair: any) => {
-        if (pair.garment_url && !uniqueGarments.has(pair.garment_url)) {
-            uniqueGarments.set(pair.garment_url, {
+        const garmentAnalysis = pair.metadata?.garment_analysis;
+        const uniqueKey = garmentAnalysis?.hash || pair.garment_url;
+        if (pair.garment_url && !uniqueGarments.has(uniqueKey)) {
+            uniqueGarments.set(uniqueKey, {
                 storage_path: pair.garment_url,
-                attributes: pair.metadata?.garment_analysis || null,
-                name: pair.garment_url.split('/').pop()?.split('-').slice(1).join('-') || 'Untitled Garment'
+                attributes: garmentAnalysis || null,
+                name: pair.garment_url.split('/').pop()?.split('-').slice(1).join('-') || 'Untitled Garment',
+                image_hash: garmentAnalysis?.hash || null
             });
         }
     });
 
     if (uniqueGarments.size > 0) {
-        const garmentsToInsert = Array.from(uniqueGarments.values()).map(g => ({
-            user_id: user_id,
-            storage_path: g.storage_path,
-            attributes: g.attributes,
-            name: g.name
-        }));
+        const garmentsToInsert = Array.from(uniqueGarments.values())
+            .filter(g => g.image_hash) // Only insert new garments that have a hash
+            .map(g => ({
+                user_id: user_id,
+                storage_path: g.storage_path,
+                attributes: g.attributes,
+                name: g.name,
+                image_hash: g.image_hash
+            }));
 
-        const { error: garmentInsertError } = await supabase
-            .from('mira-agent-garments')
-            .insert(garmentsToInsert, { onConflict: 'user_id, storage_path' });
+        if (garmentsToInsert.length > 0) {
+            const { error: garmentInsertError } = await supabase
+                .from('mira-agent-garments')
+                .insert(garmentsToInsert, { onConflict: 'user_id, image_hash' });
 
-        if (garmentInsertError) {
-            console.error(`[VTO-Packs-Orchestrator] Non-critical error logging garments to Armadio:`, garmentInsertError.message);
+            if (garmentInsertError) {
+                console.error(`[VTO-Packs-Orchestrator] Non-critical error logging garments to Armadio:`, garmentInsertError.message);
+            } else {
+                console.log(`[VTO-Packs-Orchestrator] Successfully logged ${garmentsToInsert.length} unique garments.`);
+            }
         } else {
-            console.log(`[VTO-Packs-Orchestrator] Successfully logged ${garmentsToInsert.length} unique garments.`);
+            console.log(`[VTO-Packs-Orchestrator] No new garments with hashes to log.`);
         }
     }
     // --- END OF NEW LOGIC ---

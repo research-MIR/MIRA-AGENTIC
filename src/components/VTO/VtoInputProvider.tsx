@@ -17,8 +17,9 @@ import { useQuery } from '@tanstack/react-query';
 import { useSession } from '../Auth/SessionContextProvider';
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { showError } from '@/utils/toast';
+import { showError, showLoading, dismissToast, showSuccess } from '@/utils/toast';
 import { GarmentSelector } from './GarmentSelector';
+import { calculateFileHash } from '@/lib/utils';
 
 interface AnalyzedGarment {
   file: File;
@@ -29,6 +30,7 @@ interface AnalyzedGarment {
     [key: string]: any;
   } | null;
   isAnalyzing: boolean;
+  hash?: string;
 }
 
 export interface QueueItem {
@@ -37,6 +39,7 @@ export interface QueueItem {
     url: string; // This will be previewUrl for new files, storage_path for existing
     file?: File; // Only for new uploads
     analysis?: AnalyzedGarment['analysis']; 
+    hash?: string;
   };
   appendix?: string;
 }
@@ -106,6 +109,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
   const [tempPairPersonUrl, setTempPairPersonUrl] = useState<string | null>(null);
   const [tempPairGarmentFile, setTempPairGarmentFile] = useState<File | null>(null);
   const [tempPairAppendix, setTempPairAppendix] = useState("");
+  const [isAddingPair, setIsAddingPair] = useState(false);
 
   const [selectedPackId, setSelectedPackId] = useState<string>('all');
 
@@ -196,16 +200,46 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
         setAnalyzedGarment(null);
         return;
     }
-    const newGarment: AnalyzedGarment = {
+    
+    const tempGarment: AnalyzedGarment = {
         file,
         previewUrl: URL.createObjectURL(file),
         analysis: null,
         isAnalyzing: true,
     };
-    setAnalyzedGarment(newGarment);
+    setAnalyzedGarment(tempGarment);
 
-    const analysisResult = await analyzeGarment(file);
-    setAnalyzedGarment(g => g ? { ...g, analysis: analysisResult, isAnalyzing: false } : null);
+    try {
+        const hash = await calculateFileHash(file);
+
+        const { data: existingGarment, error: checkError } = await supabase
+            .from('mira-agent-garments')
+            .select('id, storage_path, attributes, name')
+            .eq('user_id', session!.user.id)
+            .eq('image_hash', hash)
+            .single();
+
+        if (checkError && checkError.code !== 'PGRST116') {
+            throw checkError;
+        }
+
+        if (existingGarment) {
+            showSuccess("Found matching garment in your wardrobe.");
+            setAnalyzedGarment({
+                file: new File([], existingGarment.name),
+                previewUrl: existingGarment.storage_path,
+                analysis: existingGarment.attributes,
+                isAnalyzing: false,
+                hash: hash,
+            });
+        } else {
+            const analysisResult = await analyzeGarment(file);
+            setAnalyzedGarment(g => g ? { ...g, analysis: analysisResult, isAnalyzing: false, hash: hash } : null);
+        }
+    } catch (err: any) {
+        showError(`Failed to process garment: ${err.message}`);
+        setAnalyzedGarment(null);
+    }
   };
 
   const handleRandomGarmentFilesSelect = async (files: File[]) => {
@@ -218,19 +252,49 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
     setAnalyzedRandomGarments(prev => [...prev, ...newGarments]);
 
     newGarments.forEach(async (garment) => {
-        const analysisResult = await analyzeGarment(garment.file);
-        setAnalyzedRandomGarments(prev => prev.map(g => 
-            g.file === garment.file ? { ...g, analysis: analysisResult, isAnalyzing: false } : g
-        ));
+        try {
+            const hash = await calculateFileHash(garment.file);
+            const { data: existingGarment, error: checkError } = await supabase
+                .from('mira-agent-garments')
+                .select('id, storage_path, attributes, name')
+                .eq('user_id', session!.user.id)
+                .eq('image_hash', hash)
+                .single();
+
+            if (checkError && checkError.code !== 'PGRST116') throw checkError;
+
+            if (existingGarment) {
+                showSuccess(`Found matching garment in wardrobe: ${existingGarment.name}`);
+                setAnalyzedRandomGarments(prev => prev.map(g => 
+                    g.file === garment.file ? { 
+                        ...g, 
+                        previewUrl: existingGarment.storage_path,
+                        analysis: existingGarment.attributes, 
+                        isAnalyzing: false, 
+                        hash: hash,
+                        file: new File([], existingGarment.name)
+                    } : g
+                ));
+            } else {
+                const analysisResult = await analyzeGarment(garment.file);
+                setAnalyzedRandomGarments(prev => prev.map(g => 
+                    g.file === garment.file ? { ...g, analysis: analysisResult, isAnalyzing: false, hash: hash } : g
+                ));
+            }
+        } catch (err: any) {
+            showError(`Failed to process garment ${garment.file.name}: ${err.message}`);
+            setAnalyzedRandomGarments(prev => prev.filter(g => g.file !== garment.file));
+        }
     });
   };
 
   const handleSelectFromWardrobe = (garments: any[]) => {
     const newAnalyzedGarments = garments.map(g => ({
-      file: new File([], g.name), // Placeholder file
+      file: new File([], g.name),
       previewUrl: g.storage_path,
       analysis: g.attributes,
       isAnalyzing: false,
+      hash: g.image_hash,
     }));
 
     if (mode === 'one-to-many') {
@@ -265,18 +329,55 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
     setSelectedModelUrls(new Set(allUrls));
   };
 
-  const addPrecisePair = () => {
+  const addPrecisePair = async () => {
     if (tempPairPersonUrl && tempPairGarmentFile) {
-      const garmentUrl = URL.createObjectURL(tempPairGarmentFile);
-      const newPair: QueueItem = {
-        person: { url: tempPairPersonUrl },
-        garment: { url: garmentUrl, file: tempPairGarmentFile },
-        appendix: tempPairAppendix
-      };
-      setPrecisePairs(prev => [...prev, newPair]);
-      setTempPairPersonUrl(null);
-      setTempPairGarmentFile(null);
-      setTempPairAppendix("");
+      setIsAddingPair(true);
+      const toastId = showLoading("Analyzing garment...");
+      try {
+        const hash = await calculateFileHash(tempPairGarmentFile);
+        const { data: existingGarment, error: checkError } = await supabase
+            .from('mira-agent-garments')
+            .select('id, storage_path, attributes, name')
+            .eq('user_id', session!.user.id)
+            .eq('image_hash', hash)
+            .single();
+        
+        if (checkError && checkError.code !== 'PGRST116') throw checkError;
+
+        let finalAnalysis: AnalyzedGarment['analysis'];
+        let finalUrl = URL.createObjectURL(tempPairGarmentFile);
+        let finalFile: File | undefined = tempPairGarmentFile;
+
+        if (existingGarment) {
+            showSuccess("Found matching garment in wardrobe.");
+            finalAnalysis = existingGarment.attributes;
+            finalUrl = existingGarment.storage_path;
+            finalFile = undefined;
+        } else {
+            finalAnalysis = await analyzeGarment(tempPairGarmentFile);
+        }
+
+        const newPair: QueueItem = {
+            person: { url: tempPairPersonUrl },
+            garment: { 
+                url: finalUrl, 
+                file: finalFile,
+                analysis: finalAnalysis,
+                hash: hash,
+            },
+            appendix: tempPairAppendix
+        };
+        setPrecisePairs(prev => [...prev, newPair]);
+        setTempPairPersonUrl(null);
+        setTempPairGarmentFile(null);
+        setTempPairAppendix("");
+        dismissToast(toastId);
+      } catch (err: any) {
+          dismissToast(toastId);
+          showError(`Failed to add pair: ${err.message}`);
+      } finally {
+        setIsAddingPair(false);
+      }
     }
   };
 
@@ -303,7 +404,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
                 .filter(pose => selectedModelUrls.has(pose.final_url))
                 .map(pose => ({
                     person: { url: pose.final_url, model_job_id: model.jobId },
-                    garment: { url: garment.previewUrl, file: garment.file, analysis: garment.analysis },
+                    garment: { url: garment.previewUrl, file: garment.file, analysis: { ...garment.analysis, hash: garment.hash } },
                     appendix: generalAppendix,
                 }))
         );
@@ -321,7 +422,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
                     const model = maleModels[i % maleModels.length];
                     model.poses.forEach(pose => {
                         if (selectedModelUrls.has(pose.final_url)) {
-                            queue.push({ person: { url: pose.final_url, model_job_id: model.jobId }, garment: { url: garment.previewUrl, file: garment.file, analysis: garment.analysis }, appendix: generalAppendix });
+                            queue.push({ person: { url: pose.final_url, model_job_id: model.jobId }, garment: { url: garment.previewUrl, file: garment.file, analysis: { ...garment.analysis, hash: garment.hash } }, appendix: generalAppendix });
                         }
                     });
                 }
@@ -331,7 +432,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
                     const model = femaleModels[i % femaleModels.length];
                     model.poses.forEach(pose => {
                         if (selectedModelUrls.has(pose.final_url)) {
-                            queue.push({ person: { url: pose.final_url, model_job_id: model.jobId }, garment: { url: garment.previewUrl, file: garment.file, analysis: garment.analysis }, appendix: generalAppendix });
+                            queue.push({ person: { url: pose.final_url, model_job_id: model.jobId }, garment: { url: garment.previewUrl, file: garment.file, analysis: { ...garment.analysis, hash: garment.hash } }, appendix: generalAppendix });
                         }
                     });
                 }
@@ -349,7 +450,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
                 const model = maleModels[i];
                 model.poses.forEach(pose => {
                     if (selectedModelUrls.has(pose.final_url)) {
-                        queue.push({ person: { url: pose.final_url, model_job_id: model.jobId }, garment: { url: garment.previewUrl, file: garment.file, analysis: garment.analysis }, appendix: generalAppendix });
+                        queue.push({ person: { url: pose.final_url, model_job_id: model.jobId }, garment: { url: garment.previewUrl, file: garment.file, analysis: { ...garment.analysis, hash: garment.hash } }, appendix: generalAppendix });
                     }
                 });
             });
@@ -357,13 +458,22 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
                 const model = femaleModels[i];
                 model.poses.forEach(pose => {
                     if (selectedModelUrls.has(pose.final_url)) {
-                        queue.push({ person: { url: pose.final_url, model_job_id: model.jobId }, garment: { url: garment.previewUrl, file: garment.file, analysis: garment.analysis }, appendix: generalAppendix });
+                        queue.push({ person: { url: pose.final_url, model_job_id: model.jobId }, garment: { url: garment.previewUrl, file: garment.file, analysis: { ...garment.analysis, hash: garment.hash } }, appendix: generalAppendix });
                     }
                 });
             });
         }
     } else if (mode === 'precise-pairs') {
-      queue = precisePairs;
+      queue = precisePairs.map(p => ({
+          ...p,
+          garment: {
+              ...p.garment,
+              analysis: {
+                  ...p.garment.analysis,
+                  hash: p.garment.hash,
+              }
+          }
+      }));
     }
     onQueueReady(queue);
   };
@@ -495,13 +605,16 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
                     )}
                 </div>
             </div>
-            <ImageUploader onFileSelect={(files) => files && setTempPairGarmentFile(files[0])} title={t('garment')} imageUrl={tempPairGarmentUrl} onClear={() => setTempPairGarmentFile(null)} />
+            <ImageUploader onFileSelect={(file) => setTempPairGarmentFile(file)} title={t('garment')} imageUrl={tempPairGarmentUrl} onClear={() => setTempPairGarmentFile(null)} />
           </div>
           <div>
             <Label htmlFor="pair-appendix">{t('promptAppendixPair')}</Label>
             <Input id="pair-appendix" value={tempPairAppendix} onChange={(e) => setTempPairAppendix(e.target.value)} placeholder={t('promptAppendixPairPlaceholder')} />
           </div>
-          <Button className="w-full" onClick={addPrecisePair} disabled={!tempPairPersonUrl || !tempPairGarmentFile}>{t('addPairToQueue')}</Button>
+          <Button className="w-full" onClick={addPrecisePair} disabled={!tempPairPersonUrl || !tempPairGarmentFile || isAddingPair}>
+            {isAddingPair && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {t('addPairToQueue')}
+          </Button>
         </CardContent>
       </Card>
       <Card>
