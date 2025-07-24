@@ -85,7 +85,11 @@ const VirtualTryOnPacks = () => {
         return {
           person_url,
           garment_url,
-          appendix: item.appendix
+          appendix: item.appendix,
+          metadata: {
+            model_generation_job_id: item.person.model_job_id,
+            garment_analysis: item.garment.analysis,
+          }
         };
       }));
 

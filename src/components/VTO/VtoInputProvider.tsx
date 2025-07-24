@@ -6,7 +6,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { ModelPoseSelector, VtoModel, ModelPack } from './ModelPoseSelector';
 import { SecureImageDisplay } from './SecureImageDisplay';
 import { useLanguage } from "@/context/LanguageContext";
-import { PlusCircle, Shirt, Users, X, Link2, Shuffle, Info } from 'lucide-react';
+import { PlusCircle, Shirt, Users, X, Link2, Shuffle, Info, Loader2 } from 'lucide-react';
 import { cn } from "@/lib/utils";
 import { useDropzone } from "@/hooks/useDropzone";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -17,10 +17,22 @@ import { useQuery } from '@tanstack/react-query';
 import { useSession } from '../Auth/SessionContextProvider';
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { showError } from '@/utils/toast';
+
+interface AnalyzedGarment {
+  file: File;
+  previewUrl: string;
+  analysis: {
+    intended_gender: 'male' | 'female' | 'unisex';
+    type_of_fit: 'upper body' | 'lower body' | 'full body';
+    [key: string]: any;
+  } | null;
+  isAnalyzing: boolean;
+}
 
 export interface QueueItem {
-  person: { url: string; file?: File };
-  garment: { url: string; file: File };
+  person: { url: string; file?: File; model_job_id?: string };
+  garment: { url: string; file: File; analysis?: AnalyzedGarment['analysis'] };
   appendix?: string;
 }
 
@@ -29,6 +41,15 @@ interface VtoInputProviderProps {
   onQueueReady: (queue: QueueItem[]) => void;
   onGoBack: () => void;
 }
+
+const fileToBase64 = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve((reader.result as string).split(',')[1]);
+    reader.onerror = (error) => reject(error);
+  });
+};
 
 const ImageUploader = ({ onFileSelect, title, imageUrl, onClear }: { onFileSelect: (file: File) => void, title: string, imageUrl: string | null, onClear: () => void }) => {
     const inputRef = useRef<HTMLInputElement>(null);
@@ -71,9 +92,9 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
   const [isModelModalOpen, setIsModelModalOpen] = useState(false);
   
   const [selectedModelUrls, setSelectedModelUrls] = useState<Set<string>>(new Set());
-  const [garmentFile, setGarmentFile] = useState<File | null>(null);
+  const [analyzedGarment, setAnalyzedGarment] = useState<AnalyzedGarment | null>(null);
   const [generalAppendix, setGeneralAppendix] = useState("");
-  const [randomGarmentFiles, setRandomGarmentFiles] = useState<File[]>([]);
+  const [analyzedRandomGarments, setAnalyzedRandomGarments] = useState<AnalyzedGarment[]>([]);
   const [loopModels, setLoopModels] = useState(true);
 
   const [precisePairs, setPrecisePairs] = useState<QueueItem[]>([]);
@@ -100,7 +121,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
       if (!session?.user) return [];
       let query = supabase
         .from('mira-agent-model-generation-jobs')
-        .select('id, base_model_image_url, final_posed_images')
+        .select('id, base_model_image_url, final_posed_images, gender')
         .eq('user_id', session.user.id)
         .eq('status', 'complete');
       
@@ -115,15 +136,64 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
         .map(job => ({
           jobId: job.id,
           baseModelUrl: job.base_model_image_url,
-          poses: (job.final_posed_images || []).filter((p: any) => p.is_upscaled)
+          poses: (job.final_posed_images || []).filter((p: any) => p.is_upscaled),
+          gender: job.gender,
         }))
         .filter(model => model.poses.length > 0);
     },
     enabled: !!session?.user,
   });
 
-  const garmentFileUrl = useMemo(() => garmentFile ? URL.createObjectURL(garmentFile) : null, [garmentFile]);
   const tempPairGarmentUrl = useMemo(() => tempPairGarmentFile ? URL.createObjectURL(tempPairGarmentFile) : null, [tempPairGarmentFile]);
+
+  const analyzeGarment = async (file: File): Promise<AnalyzedGarment['analysis']> => {
+    try {
+        const base64 = await fileToBase64(file);
+        const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-analyze-garment-attributes', {
+            body: { image_base64: base64, mime_type: file.type }
+        });
+        if (error) throw error;
+        return data;
+    } catch (err) {
+        console.error(`Failed to analyze garment ${file.name}:`, err);
+        return null;
+    }
+  };
+
+  const handleGarmentFileSelect = async (files: FileList) => {
+    const file = files?.[0];
+    if (!file) {
+        setAnalyzedGarment(null);
+        return;
+    }
+    const newGarment: AnalyzedGarment = {
+        file,
+        previewUrl: URL.createObjectURL(file),
+        analysis: null,
+        isAnalyzing: true,
+    };
+    setAnalyzedGarment(newGarment);
+
+    const analysisResult = await analyzeGarment(file);
+    setAnalyzedGarment(g => g ? { ...g, analysis: analysisResult, isAnalyzing: false } : null);
+  };
+
+  const handleRandomGarmentFilesSelect = async (files: File[]) => {
+    const newGarments: AnalyzedGarment[] = files.map(file => ({
+        file,
+        previewUrl: URL.createObjectURL(file),
+        analysis: null,
+        isAnalyzing: true,
+    }));
+    setAnalyzedRandomGarments(prev => [...prev, ...newGarments]);
+
+    newGarments.forEach(async (garment) => {
+        const analysisResult = await analyzeGarment(garment.file);
+        setAnalyzedRandomGarments(prev => prev.map(g => 
+            g.file === garment.file ? { ...g, analysis: analysisResult, isAnalyzing: false } : g
+        ));
+    });
+  };
 
   const handleMultiModelSelect = (poseUrls: string[]) => {
     setSelectedModelUrls(prev => {
@@ -167,54 +237,86 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
 
   const handleProceed = () => {
     let queue: QueueItem[] = [];
-    if (mode === 'one-to-many' && garmentFile) {
-      queue = Array.from(selectedModelUrls).map(personUrl => ({
-        person: { url: personUrl },
-        garment: { url: URL.createObjectURL(garmentFile), file: garmentFile },
-        appendix: generalAppendix,
-      }));
-    } else if (mode === 'random-pairs') {
-      if (models && selectedModelUrls.size > 0 && randomGarmentFiles.length > 0) {
-        const selectedModels = models.filter(model => 
-            model.poses.some(pose => selectedModelUrls.has(pose.final_url))
+    const allSelectedModels = models?.filter(model => 
+        model.poses.some(pose => selectedModelUrls.has(pose.final_url))
+    ) || [];
+
+    const maleModels = allSelectedModels.filter(m => m.gender === 'male');
+    const femaleModels = allSelectedModels.filter(m => m.gender === 'female');
+
+    if (mode === 'one-to-many' && analyzedGarment?.analysis) {
+        const garment = analyzedGarment;
+        const garmentGender = garment.analysis.intended_gender;
+        
+        let targetModels: VtoModel[] = [];
+        if (garmentGender === 'male') targetModels = maleModels;
+        else if (garmentGender === 'female') targetModels = femaleModels;
+        else if (garmentGender === 'unisex') targetModels = [...maleModels, ...femaleModels];
+
+        queue = targetModels.flatMap(model => 
+            model.poses
+                .filter(pose => selectedModelUrls.has(pose.final_url))
+                .map(pose => ({
+                    person: { url: pose.final_url, model_job_id: model.jobId },
+                    garment: { url: garment.previewUrl, file: garment.file, analysis: garment.analysis },
+                    appendix: generalAppendix,
+                }))
         );
-        const garments = randomGarmentFiles.map(f => ({ file: f, url: URL.createObjectURL(f) }));
+    } else if (mode === 'random-pairs') {
+        const maleGarments = analyzedRandomGarments.filter(g => g.analysis?.intended_gender === 'male');
+        const femaleGarments = analyzedRandomGarments.filter(g => g.analysis?.intended_gender === 'female');
+        const unisexGarments = analyzedRandomGarments.filter(g => g.analysis?.intended_gender === 'unisex');
 
-        const shuffledModels = [...selectedModels].sort(() => 0.5 - Math.random());
-        const shuffledGarments = [...garments].sort(() => 0.5 - Math.random());
+        const maleGarmentTasks = [...maleGarments, ...unisexGarments];
+        const femaleGarmentTasks = [...femaleGarments, ...unisexGarments];
 
-        if (loopModels && shuffledModels.length > 0) {
-            const numGarments = shuffledGarments.length;
-            const numModels = shuffledModels.length;
-            
-            for (let i = 0; i < numGarments; i++) {
-                const model = shuffledModels[i % numModels]; // Loop through models
-                const garment = shuffledGarments[i];
-                
-                for (const pose of model.poses) {
-                    queue.push({
-                        person: { url: pose.final_url },
-                        garment: { url: garment.url, file: garment.file },
-                        appendix: generalAppendix,
+        if (loopModels) {
+            maleGarmentTasks.forEach((garment, i) => {
+                if (maleModels.length > 0) {
+                    const model = maleModels[i % maleModels.length];
+                    model.poses.forEach(pose => {
+                        if (selectedModelUrls.has(pose.final_url)) {
+                            queue.push({ person: { url: pose.final_url, model_job_id: model.jobId }, garment: { url: garment.previewUrl, file: garment.file, analysis: garment.analysis }, appendix: generalAppendix });
+                        }
                     });
                 }
-            }
+            });
+            femaleGarmentTasks.forEach((garment, i) => {
+                if (femaleModels.length > 0) {
+                    const model = femaleModels[i % femaleModels.length];
+                    model.poses.forEach(pose => {
+                        if (selectedModelUrls.has(pose.final_url)) {
+                            queue.push({ person: { url: pose.final_url, model_job_id: model.jobId }, garment: { url: garment.previewUrl, file: garment.file, analysis: garment.analysis }, appendix: generalAppendix });
+                        }
+                    });
+                }
+            });
         } else {
-            const numPairs = Math.min(shuffledModels.length, shuffledGarments.length);
-            for (let i = 0; i < numPairs; i++) {
-                const model = shuffledModels[i];
-                const garment = shuffledGarments[i];
-
-                for (const pose of model.poses) {
-                    queue.push({
-                        person: { url: pose.final_url },
-                        garment: { url: garment.url, file: garment.file },
-                        appendix: generalAppendix,
-                    });
-                }
+            if (maleGarmentTasks.length > maleModels.length) {
+                showError(`Cannot pair ${maleGarmentTasks.length} male/unisex garments with only ${maleModels.length} male models in strict mode.`);
+                return;
             }
+            if (femaleGarmentTasks.length > femaleModels.length) {
+                showError(`Cannot pair ${femaleGarmentTasks.length} female/unisex garments with only ${femaleModels.length} female models in strict mode.`);
+                return;
+            }
+            maleGarmentTasks.forEach((garment, i) => {
+                const model = maleModels[i];
+                model.poses.forEach(pose => {
+                    if (selectedModelUrls.has(pose.final_url)) {
+                        queue.push({ person: { url: pose.final_url, model_job_id: model.jobId }, garment: { url: garment.previewUrl, file: garment.file, analysis: garment.analysis }, appendix: generalAppendix });
+                    }
+                });
+            });
+            femaleGarmentTasks.forEach((garment, i) => {
+                const model = femaleModels[i];
+                model.poses.forEach(pose => {
+                    if (selectedModelUrls.has(pose.final_url)) {
+                        queue.push({ person: { url: pose.final_url, model_job_id: model.jobId }, garment: { url: garment.previewUrl, file: garment.file, analysis: garment.analysis }, appendix: generalAppendix });
+                    }
+                });
+            });
         }
-      }
     } else if (mode === 'precise-pairs') {
       queue = precisePairs;
     }
@@ -222,9 +324,9 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
   };
 
   const isProceedDisabled = mode === 'one-to-many' 
-    ? (selectedModelUrls.size === 0 || !garmentFile)
+    ? (selectedModelUrls.size === 0 || !analyzedGarment)
     : mode === 'random-pairs'
-    ? (selectedModelUrls.size === 0 || randomGarmentFiles.length === 0)
+    ? (selectedModelUrls.size === 0 || analyzedRandomGarments.length === 0)
     : precisePairs.length === 0;
 
   const renderOneToMany = () => (
@@ -245,7 +347,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
           <div className="space-y-2">
             <Label>{t('uploadGarment')}</Label>
             <div className="aspect-square max-w-xs mx-auto">
-              <ImageUploader onFileSelect={(files) => files && setGarmentFile(files[0])} title={t('garmentImage')} imageUrl={garmentFileUrl} onClear={() => setGarmentFile(null)} />
+              <ImageUploader onFileSelect={(files) => handleGarmentFileSelect(files)} title={t('garmentImage')} imageUrl={analyzedGarment?.previewUrl || null} onClear={() => setAnalyzedGarment(null)} />
             </div>
           </div>
         </div>
@@ -275,12 +377,12 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
           <div className="space-y-2">
             <Label>{t('uploadGarments')}</Label>
             <div className="h-32">
-              <MultiImageUploader onFilesSelect={setRandomGarmentFiles} title={t('uploadGarments')} icon={<Shirt />} description={t('selectMultipleGarmentImages')} />
+              <MultiImageUploader onFilesSelect={handleRandomGarmentFilesSelect} title={t('uploadGarments')} icon={<Shirt />} description={t('selectMultipleGarmentImages')} />
             </div>
-            {randomGarmentFiles.length > 0 && (
+            {analyzedRandomGarments.length > 0 && (
               <ScrollArea className="h-24 mt-2 border rounded-md p-2">
                 <div className="grid grid-cols-5 gap-2">
-                  {randomGarmentFiles.map((file, i) => <img key={i} src={URL.createObjectURL(file)} className="w-full h-full object-cover rounded-md aspect-square" />)}
+                  {analyzedRandomGarments.map((g, i) => <div key={i} className="relative"><img src={g.previewUrl} className="w-full h-full object-cover rounded-md aspect-square" />{g.isAnalyzing && <div className="absolute inset-0 bg-black/50 flex items-center justify-center"><Loader2 className="h-4 w-4 animate-spin text-white"/></div>}</div>)}
                 </div>
               </ScrollArea>
             )}

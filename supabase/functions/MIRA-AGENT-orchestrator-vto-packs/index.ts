@@ -47,6 +47,7 @@ serve(async (req) => {
             prompt_appendix: pair.appendix,
             final_aspect_ratio: aspect_ratio,
             skip_reframe: skip_reframe,
+            ...pair.metadata // Pass through any extra metadata from the frontend
         }
     }));
 

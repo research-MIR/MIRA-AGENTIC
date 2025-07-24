@@ -17,6 +17,7 @@ export interface VtoModel {
   jobId: string;
   baseModelUrl: string | null;
   poses: Pose[];
+  gender: 'male' | 'female' | null;
 }
 
 export interface ModelPack {
