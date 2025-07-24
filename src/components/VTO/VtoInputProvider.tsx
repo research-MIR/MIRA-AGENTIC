@@ -20,18 +20,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { showError, showLoading, dismissToast, showSuccess } from '@/utils/toast';
 import { GarmentSelector } from './GarmentSelector';
 import { calculateFileHash } from '@/lib/utils';
-
-interface AnalyzedGarment {
-  file?: File;
-  previewUrl: string;
-  analysis: {
-    intended_gender: 'male' | 'female' | 'unisex';
-    type_of_fit: 'upper body' | 'lower body' | 'full body';
-    [key: string]: any;
-  } | null;
-  isAnalyzing: boolean;
-  hash?: string;
-}
+import { AnalyzedGarment } from '@/types/vto';
+import { isPoseCompatible } from '@/lib/vto-utils';
 
 export interface QueueItem {
   person: { url: string; model_job_id?: string };
@@ -385,15 +375,19 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
   };
 
   const handleProceed = () => {
-    let queue: QueueItem[] = [];
+    console.log(`[VTO Packs] handleProceed triggered for mode: ${mode}`);
+    let finalQueue: QueueItem[] = [];
     const allSelectedModels = models?.filter(model => 
         model.poses.some(pose => selectedModelUrls.has(pose.final_url))
     ) || [];
+
+    console.log(`[VTO Packs] Found ${allSelectedModels.length} models with at least one selected pose.`);
 
     const maleModels = allSelectedModels.filter(m => m.gender === 'male');
     const femaleModels = allSelectedModels.filter(m => m.gender === 'female');
 
     if (mode === 'one-to-many' && analyzedGarment?.analysis) {
+        console.log(`[VTO Packs] Mode: one-to-many. Analyzing garment:`, analyzedGarment);
         const garment = analyzedGarment;
         const garmentGender = garment.analysis.intended_gender;
         
@@ -401,17 +395,26 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
         if (garmentGender === 'male') targetModels = maleModels;
         else if (garmentGender === 'female') targetModels = femaleModels;
         else if (garmentGender === 'unisex') targetModels = [...maleModels, ...femaleModels];
+        console.log(`[VTO Packs] Garment gender is ${garmentGender}. Targetting ${targetModels.length} models.`);
 
-        queue = targetModels.flatMap(model => 
+        targetModels.forEach(model => {
             model.poses
                 .filter(pose => selectedModelUrls.has(pose.final_url))
-                .map(pose => ({
-                    person: { url: pose.final_url, model_job_id: model.jobId },
-                    garment: { url: garment.previewUrl, file: garment.file, analysis: { ...garment.analysis, hash: garment.hash } },
-                    appendix: generalAppendix,
-                }))
-        );
+                .forEach(pose => {
+                    const compatibility = isPoseCompatible(garment, pose);
+                    if (compatibility.compatible) {
+                        finalQueue.push({
+                            person: { url: pose.final_url, model_job_id: model.jobId },
+                            garment: { url: garment.previewUrl, file: garment.file, analysis: garment.analysis, hash: garment.hash },
+                            appendix: generalAppendix,
+                        });
+                    } else {
+                        console.log(`[VTO Packs] SKIPPED PAIR (one-to-many): Model ${model.jobId} / Pose ${pose.final_url} is not compatible with garment. Reason: ${compatibility.reason}`);
+                    }
+                });
+        });
     } else if (mode === 'random-pairs') {
+        console.log(`[VTO Packs] Mode: random-pairs. Analyzing ${analyzedRandomGarments.length} garments.`);
         const maleGarments = analyzedRandomGarments.filter(g => g.analysis?.intended_gender === 'male');
         const femaleGarments = analyzedRandomGarments.filter(g => g.analysis?.intended_gender === 'female');
         const unisexGarments = analyzedRandomGarments.filter(g => g.analysis?.intended_gender === 'unisex');
@@ -419,66 +422,63 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
         const maleGarmentTasks = [...maleGarments, ...unisexGarments];
         const femaleGarmentTasks = [...femaleGarments, ...unisexGarments];
 
-        if (loopModels) {
-            maleGarmentTasks.forEach((garment, i) => {
-                if (maleModels.length > 0) {
-                    const model = maleModels[i % maleModels.length];
-                    model.poses.forEach(pose => {
-                        if (selectedModelUrls.has(pose.final_url)) {
-                            queue.push({ person: { url: pose.final_url, model_job_id: model.jobId }, garment: { url: garment.previewUrl, file: garment.file, analysis: { ...garment.analysis, hash: garment.hash } }, appendix: generalAppendix });
-                        }
-                    });
-                }
-            });
-            femaleGarmentTasks.forEach((garment, i) => {
-                if (femaleModels.length > 0) {
-                    const model = femaleModels[i % femaleModels.length];
-                    model.poses.forEach(pose => {
-                        if (selectedModelUrls.has(pose.final_url)) {
-                            queue.push({ person: { url: pose.final_url, model_job_id: model.jobId }, garment: { url: garment.previewUrl, file: garment.file, analysis: { ...garment.analysis, hash: garment.hash } }, appendix: generalAppendix });
-                        }
-                    });
-                }
-            });
-        } else {
-            if (maleGarmentTasks.length > maleModels.length) {
-                showError(`Cannot pair ${maleGarmentTasks.length} male/unisex garments with only ${maleModels.length} male models in strict mode.`);
+        const createPairs = (garments: AnalyzedGarment[], models: VtoModel[]) => {
+            const numPairs = loopModels ? garments.length : Math.min(garments.length, models.length);
+            if (!loopModels && garments.length > models.length) {
+                showError(`Cannot pair ${garments.length} garments with only ${models.length} models in strict mode.`);
                 return;
             }
-            if (femaleGarmentTasks.length > femaleModels.length) {
-                showError(`Cannot pair ${femaleGarmentTasks.length} female/unisex garments with only ${femaleModels.length} female models in strict mode.`);
-                return;
+
+            for (let i = 0; i < numPairs; i++) {
+                const garment = garments[i];
+                const model = models[i % models.length];
+                model.poses.forEach(pose => {
+                    if (selectedModelUrls.has(pose.final_url)) {
+                        const compatibility = isPoseCompatible(garment, pose);
+                        if (compatibility.compatible) {
+                            finalQueue.push({ person: { url: pose.final_url, model_job_id: model.jobId }, garment: { url: garment.previewUrl, file: garment.file, analysis: garment.analysis, hash: garment.hash }, appendix: generalAppendix });
+                        } else {
+                            console.log(`[VTO Packs] SKIPPED PAIR (random): Model ${model.jobId} / Pose ${pose.final_url} is not compatible with garment. Reason: ${compatibility.reason}`);
+                        }
+                    }
+                });
             }
-            maleGarmentTasks.forEach((garment, i) => {
-                const model = maleModels[i];
-                model.poses.forEach(pose => {
-                    if (selectedModelUrls.has(pose.final_url)) {
-                        queue.push({ person: { url: pose.final_url, model_job_id: model.jobId }, garment: { url: garment.previewUrl, file: garment.file, analysis: { ...garment.analysis, hash: garment.hash } }, appendix: generalAppendix });
-                    }
-                });
-            });
-            femaleGarmentTasks.forEach((garment, i) => {
-                const model = femaleModels[i];
-                model.poses.forEach(pose => {
-                    if (selectedModelUrls.has(pose.final_url)) {
-                        queue.push({ person: { url: pose.final_url, model_job_id: model.jobId }, garment: { url: garment.previewUrl, file: garment.file, analysis: { ...garment.analysis, hash: garment.hash } }, appendix: generalAppendix });
-                    }
-                });
-            });
-        }
+        };
+
+        createPairs(maleGarmentTasks, maleModels);
+        createPairs(femaleGarmentTasks, femaleModels);
+
     } else if (mode === 'precise-pairs') {
-      queue = precisePairs.map(p => ({
-          ...p,
-          garment: {
-              ...p.garment,
-              analysis: {
-                  ...p.garment.analysis,
-                  hash: p.garment.hash,
-              }
-          }
-      }));
+        console.log(`[VTO Packs] Mode: precise-pairs. Analyzing ${precisePairs.length} pairs.`);
+        precisePairs.forEach(pair => {
+            const modelForPair = models?.find(m => m.poses.some(p => p.final_url === pair.person.url));
+            if (modelForPair) {
+                modelForPair.poses.forEach(pose => {
+                    const compatibility = isPoseCompatible(pair.garment as any, pose);
+                    if (compatibility.compatible) {
+                        finalQueue.push({
+                            person: { url: pose.final_url, model_job_id: modelForPair.jobId },
+                            garment: { ...pair.garment },
+                            appendix: pair.appendix
+                        });
+                    } else {
+                        console.log(`[VTO Packs] SKIPPED POSE (precise): Model ${modelForPair.jobId} / Pose ${pose.final_url} is not compatible with garment. Reason: ${compatibility.reason}`);
+                    }
+                });
+            } else {
+                console.warn(`[VTO Packs] Could not find model for precise pair with person URL: ${pair.person.url}`);
+            }
+        });
     }
-    onQueueReady(queue);
+
+    console.log(`[VTO Packs] Final queue generated with ${finalQueue.length} compatible pairs.`);
+
+    if (finalQueue.length === 0) {
+        showError("No compatible model poses were found for the selected garments. Please try a different combination or check the compatibility guide.");
+        return;
+    }
+
+    onQueueReady(finalQueue);
   };
 
   const queueCount = useMemo(() => {

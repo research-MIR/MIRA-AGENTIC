@@ -9,13 +9,7 @@ export interface BitStudioJob {
   created_at: string;
   batch_pair_job_id?: string;
   metadata?: {
-    debug_assets?: {
-      raw_mask_url?: string;
-      expanded_mask_url?: string;
-      vtoned_crop_url?: string;
-      feathered_patch_url?: string;
-      compositing_bbox?: { x: number; y: number; width: number; height: number; };
-    };
+    debug_assets?: any;
     prompt_used?: string;
     source_image_url?: string;
     reference_image_url?: string;
@@ -30,4 +24,33 @@ export interface BitStudioJob {
       error?: string;
     }
   };
+}
+
+export interface PoseAnalysis {
+  shoot_focus: 'upper_body' | 'lower_body' | 'full_body';
+  garment: {
+    description: string;
+    coverage: 'upper_body' | 'lower_body' | 'full_body';
+    is_identical_to_base_garment: boolean;
+  };
+}
+
+export interface Pose {
+  final_url: string;
+  is_upscaled?: boolean;
+  status: string;
+  pose_prompt: string;
+  analysis?: PoseAnalysis;
+}
+
+export interface AnalyzedGarment {
+  file?: File;
+  previewUrl: string;
+  analysis: {
+    intended_gender: 'male' | 'female' | 'unisex';
+    type_of_fit: 'upper body' | 'lower body' | 'full body';
+    [key: string]: any;
+  } | null;
+  isAnalyzing: boolean;
+  hash?: string;
 }
