@@ -10,6 +10,7 @@ interface Job {
   base_model_image_url?: string | null;
   final_posed_images?: { status: string; is_upscaled?: boolean }[];
   pose_prompts?: any[];
+  gender?: 'male' | 'female' | null;
 }
 
 interface Props {
@@ -86,6 +87,11 @@ export const RecentJobThumbnail = ({ job, onClick, isSelected }: Props) => {
         </div>
       ) : (
         <img src={displayUrl} alt="Job source" className="w-full h-full object-cover rounded-md" />
+      )}
+      {job.gender && (
+        <div className="absolute top-1 left-1 h-6 w-6 rounded-full bg-black/60 flex items-center justify-center text-white text-xs font-bold border-2 border-background/50 backdrop-blur-sm">
+          {job.gender.charAt(0).toUpperCase()}
+        </div>
       )}
       {renderStatusIcon()}
     </button>
