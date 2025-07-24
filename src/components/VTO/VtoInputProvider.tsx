@@ -18,6 +18,7 @@ import { useSession } from '../Auth/SessionContextProvider';
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { showError } from '@/utils/toast';
+import { GarmentSelector } from './GarmentSelector';
 
 interface AnalyzedGarment {
   file: File;
@@ -31,8 +32,12 @@ interface AnalyzedGarment {
 }
 
 export interface QueueItem {
-  person: { url: string; file?: File; model_job_id?: string };
-  garment: { url: string; file: File; analysis?: AnalyzedGarment['analysis'] };
+  person: { url: string; model_job_id?: string };
+  garment: { 
+    url: string; // This will be previewUrl for new files, storage_path for existing
+    file?: File; // Only for new uploads
+    analysis?: AnalyzedGarment['analysis']; 
+  };
   appendix?: string;
 }
 
@@ -220,6 +225,21 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
     });
   };
 
+  const handleSelectFromWardrobe = (garments: any[]) => {
+    const newAnalyzedGarments = garments.map(g => ({
+      file: new File([], g.name), // Placeholder file
+      previewUrl: g.storage_path,
+      analysis: g.attributes,
+      isAnalyzing: false,
+    }));
+
+    if (mode === 'one-to-many') {
+      setAnalyzedGarment(newAnalyzedGarments[0]);
+    } else {
+      setAnalyzedRandomGarments(prev => [...prev, ...newAnalyzedGarments]);
+    }
+  };
+
   const handleMultiModelSelect = (poseUrls: string[]) => {
     setSelectedModelUrls(prev => {
       const newSet = new Set(prev);
@@ -372,14 +392,16 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
           </div>
           <div className="space-y-2">
             <Label>{t('uploadGarment')}</Label>
-            <div className="aspect-square max-w-xs mx-auto relative">
-              <ImageUploader onFileSelect={(files) => handleGarmentFileSelect(files)} title={t('garmentImage')} imageUrl={analyzedGarment?.previewUrl || null} onClear={() => setAnalyzedGarment(null)} />
-              {analyzedGarment?.isAnalyzing && (
-                <div className="absolute inset-0 bg-black/50 flex items-center justify-center rounded-md">
-                  <Loader2 className="h-8 w-8 animate-spin text-white" />
-                </div>
-              )}
-            </div>
+            <GarmentSelector onSelect={(garments) => handleSelectFromWardrobe(garments)} multiSelect={false}>
+              <div className="aspect-square max-w-xs mx-auto relative">
+                <ImageUploader onFileSelect={(files) => handleGarmentFileSelect(files)} title={t('garmentImage')} imageUrl={analyzedGarment?.previewUrl || null} onClear={() => setAnalyzedGarment(null)} />
+                {analyzedGarment?.isAnalyzing && (
+                  <div className="absolute inset-0 bg-black/50 flex items-center justify-center rounded-md">
+                    <Loader2 className="h-8 w-8 animate-spin text-white" />
+                  </div>
+                )}
+              </div>
+            </GarmentSelector>
           </div>
         </div>
         <div>
@@ -407,9 +429,11 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
           </div>
           <div className="space-y-2">
             <Label>{t('uploadGarments')}</Label>
-            <div className="h-32">
-              <MultiImageUploader onFilesSelect={handleRandomGarmentFilesSelect} title={t('uploadGarments')} icon={<Shirt />} description={t('selectMultipleGarmentImages')} />
-            </div>
+            <GarmentSelector onSelect={handleSelectFromWardrobe} multiSelect={true}>
+              <div className="h-32">
+                <MultiImageUploader onFilesSelect={handleRandomGarmentFilesSelect} title={t('uploadGarments')} icon={<Shirt />} description={t('selectMultipleGarmentImages')} />
+              </div>
+            </GarmentSelector>
             {analyzedRandomGarments.length > 0 && (
               <ScrollArea className="h-24 mt-2 border rounded-md p-2">
                 <div className="grid grid-cols-5 gap-2">

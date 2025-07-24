@@ -79,8 +79,13 @@ const VirtualTryOnPacks = () => {
       };
 
       const pairsForBackend = await Promise.all(queue.map(async (item) => {
-        const person_url = item.person.file ? await uploadFile(item.person.file, 'person') : item.person.url;
-        const garment_url = await uploadFile(item.garment.file, 'garment');
+        // A person URL is always pre-existing from the model generation step
+        const person_url = item.person.url;
+        
+        // A garment URL is either from an existing Armadio item (storage_path) or needs to be created by uploading a new file
+        const garment_url = item.garment.file 
+            ? await uploadFile(item.garment.file, 'garment') 
+            : item.garment.url;
         
         return {
           person_url,
