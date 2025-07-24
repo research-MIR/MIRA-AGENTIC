@@ -1,5 +1,5 @@
 import { useLanguage } from "@/context/LanguageContext";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { AlertTriangle, CheckCircle, Loader2, Wand2 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -17,6 +17,7 @@ interface Pose {
 interface Job {
     id: string;
     final_posed_images?: Pose[];
+    model_description?: string;
 }
 
 interface JobPoseDisplayProps {
@@ -84,6 +85,11 @@ export const JobPoseDisplay = ({ job }: JobPoseDisplayProps) => {
     <Card>
         <CardHeader>
             <CardTitle>Generated Poses for Job</CardTitle>
+            {job.model_description && (
+                <CardDescription>
+                    <strong>Prompt Used:</strong> {job.model_description}
+                </CardDescription>
+            )}
         </CardHeader>
         <CardContent>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">

@@ -38,6 +38,8 @@ interface Job {
   pose_prompts?: any[];
   base_generation_results?: any[];
   auto_approve: boolean;
+  model_description?: string;
+  gender?: 'male' | 'female' | null;
 }
 
 const ModelPackDetail = () => {
