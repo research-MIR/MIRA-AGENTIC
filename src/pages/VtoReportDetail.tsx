@@ -196,7 +196,10 @@ const VtoReportDetail = () => {
       const { data, error } = await supabase.rpc('get_vto_report_details_for_pack', {
         p_pack_id: packId
       });
-      if (error) throw error;
+      if (error) {
+        console.error('[VtoReportDetail] RPC Error:', JSON.stringify(error, null, 2));
+        throw error;
+      }
       return data;
     },
     enabled: !!packId,
