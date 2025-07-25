@@ -3,12 +3,12 @@ import { useLanguage } from "@/context/LanguageContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, AlertTriangle, Loader2, BrainCircuit, BarChart2, CheckCircle, XCircle, ImageIcon, Share2 } from "lucide-react";
+import { ArrowLeft, AlertTriangle, Loader2, BrainCircuit, BarChart2, CheckCircle, XCircle, ImageIcon } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { useSecureImage } from "@/hooks/useSecureImage";
+import { SecureImageDisplay } from "@/components/VTO/SecureImageDisplay";
 import { useEffect, useState } from "react";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
@@ -19,8 +19,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Progress } from "@/components/ui/progress";
-import { ShareVtoReportModal } from "@/components/ShareVtoReportModal";
-import { SecureImageDisplay } from "@/components/VTO/SecureImageDisplay";
+import { useSecureImage } from "@/hooks/useSecureImage";
 
 interface ReportDetail {
   report_id: string;
@@ -44,11 +43,8 @@ interface ReportDetail {
   final_image_url: string;
 }
 
-interface PackDetails {
-  pack_id: string;
-  created_at: string;
-  sharing_mode: 'private' | 'public_link';
-  is_owner: boolean;
+interface PackData {
+  id: string;
   synthesis_report: string | null;
   synthesis_thinking: string | null;
 }
@@ -73,10 +69,10 @@ const BooleanIndicator = ({ value, label }: { value: boolean, label: string }) =
 const ImageCard = ({ title, url }: { title: string, url?: string }) => {
   const { displayUrl, isLoading, error } = useSecureImage(url);
   return (
-    <div className="space-y-2">
+    <div className="space-y-1">
       <h3 className="text-sm font-semibold text-center text-muted-foreground">{title}</h3>
       <div className="aspect-square bg-muted rounded-md flex items-center justify-center overflow-hidden">
-        {!url ? <div className="text-xs text-muted-foreground">Not available</div> :
+        {!url ? <p className="text-xs text-muted-foreground">Not available</p> :
          isLoading ? <Loader2 className="h-8 w-8 animate-spin" /> :
          error ? <AlertTriangle className="h-8 w-8 text-destructive" /> :
          displayUrl ? <img src={displayUrl} alt={title} className="max-w-full max-h-full object-contain" /> : null
@@ -114,9 +110,9 @@ const ReportDetailModal = ({ report, isOpen, onClose }: { report: ReportDetail |
                     <CardHeader><CardTitle className="text-base">Overall Assessment</CardTitle></CardHeader>
                     <CardContent className="space-y-2 text-sm">
                       <BooleanIndicator value={reportData.overall_pass} label="Overall Pass" />
-                      {reportData.pass_with_notes && <div className="text-sm"><strong>Note:</strong> <Badge variant="secondary">{reportData.pass_notes_category?.replace(/_/g, ' ')}</Badge></div>}
-                      <div><strong>Confidence:</strong> {(normalizedConfidence * 100).toFixed(0)}%</div>
-                      {reportData.failure_category && <div className="text-sm"><strong>Failure Category:</strong> <Badge variant="destructive">{reportData.failure_category.replace(/_/g, ' ')}</Badge></div>}
+                      {reportData.pass_with_notes && <p><strong>Note:</strong> <Badge variant="secondary">{reportData.pass_notes_category?.replace(/_/g, ' ')}</Badge></p>}
+                      <p><strong>Confidence:</strong> {(normalizedConfidence * 100).toFixed(0)}%</p>
+                      {reportData.failure_category && <p><strong>Failure Category:</strong> <Badge variant="destructive">{reportData.failure_category.replace(/_/g, ' ')}</Badge></p>}
                     </CardContent>
                   </Card>
                   <Accordion type="multiple" defaultValue={['garment', 'pose', 'quality']}>
@@ -131,7 +127,7 @@ const ReportDetailModal = ({ report, isOpen, onClose }: { report: ReportDetail |
                           <ScoreIndicator score={reportData.garment_comparison?.scores?.logo_fidelity} label="Logo Fidelity" />
                           <ScoreIndicator score={reportData.garment_comparison?.scores?.detail_accuracy} label="Detail Accuracy" />
                         </div>
-                        <div className="text-xs italic text-muted-foreground pt-2 border-t border-border/50"><strong>Inspector Notes:</strong> {reportData.garment_comparison?.notes}</div>
+                        <p className="text-xs italic text-muted-foreground pt-2 border-t border-border/50"><strong>Inspector Notes:</strong> {reportData.garment_comparison?.notes}</p>
                       </AccordionContent>
                     </AccordionItem>
                     <AccordionItem value="pose">
@@ -142,7 +138,7 @@ const ReportDetailModal = ({ report, isOpen, onClose }: { report: ReportDetail |
                           <ScoreIndicator score={reportData.pose_and_body_analysis?.scores?.anatomical_correctness} label="Anatomical Correctness" />
                         </div>
                         <BooleanIndicator value={!reportData.pose_and_body_analysis?.pose_changed} label="Pose Maintained" />
-                        <div className="text-xs italic text-muted-foreground"><strong>Inspector Notes:</strong> {reportData.pose_and_body_analysis?.notes}</div>
+                        <p className="text-xs italic text-muted-foreground"><strong>Inspector Notes:</strong> {reportData.pose_and_body_analysis?.notes}</p>
                       </AccordionContent>
                     </AccordionItem>
                   </Accordion>
@@ -175,14 +171,12 @@ const VtoReportDetail = () => {
   const queryClient = useQueryClient();
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [selectedReport, setSelectedReport] = useState<ReportDetail | null>(null);
-  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
 
-  const { data: packDetails, isLoading: isLoadingPack } = useQuery<PackDetails | null>({
-    queryKey: ['vtoPackDetails', packId],
+  const { data: packData, isLoading: isLoadingPack } = useQuery<PackData | null>({
+    queryKey: ['vtoPackData', packId],
     queryFn: async () => {
       if (!packId) return null;
-      const { data, error } = await supabase.rpc('get_vto_pack_details', { p_pack_id: packId }).single();
-      if (error && error.code === 'PGRST116') return null; // Not found or no access
+      const { data, error } = await supabase.from('mira-agent-vto-packs-jobs').select('id, synthesis_report, synthesis_thinking').eq('id', packId).single();
       if (error) throw error;
       return data;
     },
@@ -192,41 +186,19 @@ const VtoReportDetail = () => {
   const { data: reportDetails, isLoading: isLoadingReports, error } = useQuery<ReportDetail[]>({
     queryKey: ['vtoReportDetail', packId],
     queryFn: async () => {
-      if (!packId) return [];
+      if (!packId || !session?.user) return [];
       const { data, error } = await supabase.rpc('get_vto_report_details_for_pack', {
-        p_pack_id: packId
+        p_pack_id: packId,
+        p_user_id: session.user.id
       });
-      if (error) {
-        console.error('[VtoReportDetail] RPC Error:', JSON.stringify(error, null, 2));
-        throw error;
-      }
+      if (error) throw error;
       return data;
     },
-    enabled: !!packId,
+    enabled: !!packId && !!session?.user,
   });
 
   useEffect(() => {
-    if (packDetails) {
-      console.log('[VtoReportDetail] Pack Details Loaded:', JSON.stringify(packDetails, null, 2));
-    }
-  }, [packDetails]);
-
-  useEffect(() => {
-    if (reportDetails && reportDetails.length > 0) {
-      console.log(`[VtoReportDetail] Report Details Loaded (${reportDetails.length} reports).`);
-      console.log('[VtoReportDetail] Details for first report:', JSON.stringify(reportDetails[0], null, 2));
-      console.log(`[VtoReportDetail] First report image URLs:`, {
-        person: reportDetails[0].source_person_image_url,
-        garment: reportDetails[0].source_garment_image_url,
-        final: reportDetails[0].final_image_url,
-      });
-    } else if (reportDetails) {
-        console.log('[VtoReportDetail] Report Details query returned 0 reports.');
-    }
-  }, [reportDetails]);
-
-  useEffect(() => {
-    if (!packId) return;
+    if (!packId || !session?.user?.id) return;
     const channel: RealtimeChannel = supabase
       .channel(`vto-report-detail-tracker-${packId}`)
       .on(
@@ -240,12 +212,12 @@ const VtoReportDetail = () => {
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'mira-agent-vto-packs-jobs', filter: `id=eq.${packId}` },
         (payload) => {
-          queryClient.setQueryData(['vtoPackDetails', packId], payload.new);
+          queryClient.setQueryData(['vtoPackData', packId], payload.new);
         }
       )
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [packId, supabase, queryClient]);
+  }, [packId, session?.user?.id, supabase, queryClient]);
 
   const handleGenerateAnalysis = async () => {
     if (!packId || !session?.user) return;
@@ -287,7 +259,7 @@ const VtoReportDetail = () => {
   );
 
   const isLoading = isLoadingPack || isLoadingReports;
-  const analysisInProgress = packDetails?.synthesis_report === 'Analysis in progress...';
+  const analysisInProgress = packData?.synthesis_report === 'Analysis in progress...';
 
   if (isLoading) {
     return <div className="p-8"><Skeleton className="h-12 w-1/3" /><div className="grid grid-cols-6 gap-4 mt-8">{[...Array(12)].map((_, i) => <Skeleton key={i} className="h-40 w-full" />)}</div></div>;
@@ -295,10 +267,6 @@ const VtoReportDetail = () => {
 
   if (error) {
     return <div className="p-8"><Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Error</AlertTitle><AlertDescription>{error.message}</AlertDescription></Alert></div>;
-  }
-
-  if (!packDetails) {
-    return <div className="p-8"><Alert><AlertTitle>Not Found</AlertTitle><AlertDescription>This report could not be found or you do not have access.</AlertDescription></Alert></div>;
   }
 
   return (
@@ -312,33 +280,25 @@ const VtoReportDetail = () => {
           <div className="flex justify-between items-center">
             <div>
               <h1 className="text-3xl font-bold">{t('vtoReportDetailTitle')}</h1>
-              <div className="text-muted-foreground">Pack from {new Date(packDetails.created_at).toLocaleString()}</div>
+              <p className="text-muted-foreground">Pack ID: {packId}</p>
             </div>
-            <div className="flex items-center gap-2">
-              {packDetails.is_owner && (
-                <Button variant="outline" onClick={() => setIsShareModalOpen(true)}>
-                  <Share2 className="mr-2 h-4 w-4" />
-                  Share
-                </Button>
-              )}
-              <Button onClick={handleGenerateAnalysis} disabled={isAnalyzing || analysisInProgress}>
-                {(isAnalyzing || analysisInProgress) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <BarChart2 className="mr-2 h-4 w-4" />}
-                {analysisInProgress ? "Analyzing..." : packDetails.synthesis_report ? "Re-generate Analysis" : "Generate Strategic Analysis"}
-              </Button>
-            </div>
+            <Button onClick={handleGenerateAnalysis} disabled={isAnalyzing || analysisInProgress}>
+              {(isAnalyzing || analysisInProgress) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <BarChart2 className="mr-2 h-4 w-4" />}
+              {analysisInProgress ? "Analyzing..." : packData?.synthesis_report ? "Re-generate Analysis" : "Generate Strategic Analysis"}
+            </Button>
           </div>
         </header>
 
         <div className="flex-1 overflow-y-auto">
           {(isAnalyzing || analysisInProgress) && <div className="flex justify-center p-8"><Loader2 className="h-8 w-8 animate-spin" /></div>}
           
-          {packDetails.synthesis_report && !analysisInProgress && (
+          {packData?.synthesis_report && !analysisInProgress && (
             <Card className="mb-8">
               <CardContent className="p-6">
                 <div className="markdown-content">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{packDetails.synthesis_report}</ReactMarkdown>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{packData.synthesis_report}</ReactMarkdown>
                 </div>
-                {packDetails.synthesis_thinking && (
+                {packData.synthesis_thinking && (
                   <Accordion type="single" collapsible className="w-full mt-4">
                     <AccordionItem value="item-1">
                       <AccordionTrigger>
@@ -349,7 +309,7 @@ const VtoReportDetail = () => {
                       </AccordionTrigger>
                       <AccordionContent>
                         <div className="markdown-content p-4 bg-muted rounded-md mt-2 text-sm">
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{packDetails.synthesis_thinking}</ReactMarkdown>
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{packData.synthesis_thinking}</ReactMarkdown>
                         </div>
                       </AccordionContent>
                     </AccordionItem>
@@ -378,11 +338,6 @@ const VtoReportDetail = () => {
         </div>
       </div>
       <ReportDetailModal isOpen={!!selectedReport} onClose={() => setSelectedReport(null)} report={selectedReport} />
-      <ShareVtoReportModal
-        isOpen={isShareModalOpen}
-        onClose={() => setIsShareModalOpen(false)}
-        pack={packDetails ? { pack_id: packDetails.pack_id, sharing_mode: packDetails.sharing_mode } : null}
-      />
     </>
   );
 };
