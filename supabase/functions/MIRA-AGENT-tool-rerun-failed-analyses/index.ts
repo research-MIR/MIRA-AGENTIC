@@ -24,27 +24,14 @@ serve(async (req) => {
     const logPrefix = `[RerunFailedAnalyses][${pack_id}]`;
     console.log(`${logPrefix} Function invoked by user ${user_id}.`);
 
-    // Security Check: Verify user owns the pack
-    const { data: packOwner, error: ownerError } = await supabase
-      .from('mira-agent-vto-packs-jobs')
-      .select('user_id')
-      .eq('id', pack_id)
-      .single();
+    // Call the new, robust database function
+    const { data: failedReports, error: rpcError } = await supabase
+      .rpc('get_rerunnable_qa_reports_for_pack', {
+        p_pack_id: pack_id,
+        p_user_id: user_id
+      });
 
-    if (ownerError) throw new Error(`Could not verify pack ownership: ${ownerError.message}`);
-    if (packOwner.user_id !== user_id) {
-      throw new Error("Permission denied: You do not own this pack.");
-    }
-
-    // CORRECTED QUERY SYNTAX: Use and() with a nested or() to correctly group the conditions.
-    console.log(`${logPrefix} Searching for reports where overall_pass is false AND (failure_category is NULL OR 'Unknown').`);
-    const { data: failedReports, error: fetchError } = await supabase
-      .from('mira-agent-vto-qa-reports')
-      .select('id')
-      .eq('vto_pack_job_id', pack_id)
-      .and(`comparative_report->>overall_pass.eq.false,or(comparative_report->>failure_category.is.null,comparative_report->>failure_category.eq.Unknown)`);
-
-    if (fetchError) throw new Error(`Failed to fetch failed reports: ${fetchError.message}`);
+    if (rpcError) throw new Error(`Failed to fetch failed reports via RPC: ${rpcError.message}`);
 
     if (!failedReports || failedReports.length === 0) {
       console.log(`${logPrefix} No 'Unknown' failed analyses found to rerun.`);
@@ -54,7 +41,7 @@ serve(async (req) => {
       });
     }
 
-    const reportIdsToRerun = failedReports.map(r => r.id);
+    const reportIdsToRerun = failedReports.map(r => r.report_id);
     console.log(`${logPrefix} Found ${reportIdsToRerun.length} reports to rerun with IDs:`, reportIdsToRerun);
 
     // Reset the status of these reports
@@ -73,7 +60,6 @@ serve(async (req) => {
       })
     );
 
-    // We don't await these, just log if any invocation fails
     Promise.allSettled(workerPromises).then(results => {
         const failedInvocations = results.filter(r => r.status === 'rejected');
         if (failedInvocations.length > 0) {
