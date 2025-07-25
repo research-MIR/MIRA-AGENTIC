@@ -13,24 +13,23 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const finalSynthesizerPrompt = `You are a master Editor-in-Chief AI. You will be given an array of pre-written, detailed analysis reports, where each report covers a small batch of data from a larger dataset.
+const finalSynthesizerPrompt = `You are a master Editor-in-Chief AI. You will be given an array of pre-analyzed, structured JSON summaries from your team of "Junior Analysts". Each summary object represents a chunk of data from a larger dataset.
 
 ### Your Mission:
-Your task is to synthesize these individual reports into a single, cohesive, and comprehensive final report. You must not lose any detail. Your final output MUST follow the exact structure and format outlined below.
+Your task is to synthesize these individual structured summaries into a single, cohesive, and comprehensive final report. You must not lose any detail. Your final output MUST follow the exact structure and format outlined below.
 
 ### Your Process:
-1.  **Aggregate Quantitative Data:** Sum up all the numerical data from each report (Total Jobs, Passed, Failed, Passed with Notes by category, Shape Mismatches, Unsolicited Garments) to get the grand totals for the entire pack. Recalculate the final pass rates based on these new totals.
-2.  **Synthesize Qualitative Insights:** Read the \`notes\` fields from all the individual reports. Identify the most critical, recurring themes, hard limits, and actionable advice.
-3.  **Aggregate Scores:** For each score (e.g., \`fit_and_shape\`, \`body_type_preservation\`), calculate the average across all reports.
-4.  **Analyze by Category:** Group reports by \`garment_analysis.garment_type\`, \`garment_analysis.pattern_type\`, and \`pose_and_body_analysis.body_type\`. Calculate pass rates and average scores for each group.
-5.  **Analyze by Camera Angle:** Group reports by \`pose_and_body_analysis.original_camera_angle.shot_type\`. Calculate pass rates for each.
-6.  **Create a Data-Driven Narrative:** Use the qualitative insights from the \`notes\` to write the narrative sections of your report. You MUST use the aggregated quantitative data as evidence to support your qualitative observations.
+1.  **Aggregate Quantitative Data:** Iterate through the \`quantitative_summary\` object of each chunk. Sum up all the numerical data (Total Jobs, Passed, Failed, all score sums, etc.) to get the grand totals for the entire pack.
+2.  **Aggregate Categorical Data:** Iterate through the \`categorical_breakdowns\` object of each chunk. For each category (e.g., \`garment_type\`, \`body_type\`), merge the data. For example, if chunk 1 has \`"jacket": {"count": 10, "passed": 4}\` and chunk 2 has \`"jacket": {"count": 8, "passed": 6}\`, your final aggregate for jackets will be \`{"count": 18, "passed": 10}\`.
+3.  **Calculate Final Metrics:** Using the aggregated totals, calculate the final metrics for the report, such as Overall Pass Rate, average scores (by dividing sum by count), and pass rates for each category.
+4.  **Synthesize Qualitative Insights:** Read the \`qualitative_insights\` object from all the individual reports. Identify the most critical, recurring themes, hard limits, and actionable advice. Use the \`representative_failure_note\` and \`critical_outlier_note\` fields to find powerful, specific examples to include in your narrative.
+5.  **Create a Data-Driven Narrative:** Use the qualitative insights to write the narrative sections of your report (Executive Summary, Recommendations). You MUST use the aggregated quantitative data you calculated as hard evidence to support your qualitative observations.
 
 ### OUTPUT FORMAT
 Your entire response MUST be a single, valid JSON object with "thinking" and "report" keys.
 
 **1. The "thinking" Field:**
-- This is your scratchpad. Write down your aggregation calculations and synthesis notes here.
+- This is your scratchpad. Write down your aggregation calculations and synthesis notes here. Show your work.
 
 **2. The "report" Field:**
 - This field must contain the final, user-facing report as a single Markdown string, following this exact structure:

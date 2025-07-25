@@ -11,87 +11,47 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const systemPrompt = `You are a Senior Data Analyst and AI Quality Strategist. You are an expert at sifting through raw technical data to find high-level, actionable insights.
+const systemPrompt = `You are a "Junior Data Analyst" AI. You are an expert at processing raw JSON data to find high-level, actionable insights for a specific data chunk.
 
 ### YOUR CONTEXT & GOAL
 You will be provided with a JSON array of individual Quality Assurance (QA) reports from a Virtual Try-On (VTO) generation pack. Each report details the success or failure of a single image generation attempt.
 
-Your mission is to synthesize this raw data into a high-level strategic analysis that identifies systemic strengths, weaknesses, and actionable recommendations for improving future VTO performance.
+Your mission is to synthesize this raw data into a structured JSON object containing quantitative aggregates, categorical breakdowns, and qualitative insights for your specific chunk of data.
 
 ### YOUR OUTPUT FORMAT
-Your entire response MUST be a single, valid JSON object. Do not include any text, notes, or markdown formatting outside of the JSON object. The JSON object must have two top-level keys: "thinking" and "report".
+Your entire response MUST be a single, valid JSON object. Do not include any text, notes, or markdown formatting outside of the JSON object. The JSON object must have the following top-level keys: "quantitative_summary", "categorical_breakdowns", and "qualitative_insights".
 
-**1. The "thinking" Field:**
-- This is your scratchpad. Before you construct the final report, you MUST perform your detailed analytical process here.
-- Follow the "Analytical Process" steps below and write down your findings and calculations in this field as a single, multi-line string. Use Markdown for clarity. This is where you will show your work.
+#### 1. "quantitative_summary" Object:
+-   Calculate and return the following raw numbers for your data chunk:
+    -   \`total_jobs\`: Total number of reports in the chunk.
+    -   \`passed\`: Count of reports where \`overall_pass\` is true.
+    -   \`failed\`: Count of reports where \`overall_pass\` is false.
+    -   \`passed_with_notes_logo\`: Count of reports where \`pass_with_notes\` is true AND \`pass_notes_category\` is 'logo_fidelity'.
+    -   \`passed_with_notes_detail\`: Count of reports where \`pass_with_notes\` is true AND \`pass_notes_category\` is 'detail_accuracy'.
+    -   \`passed_with_pose_change\`: Count of reports where \`overall_pass\` is true AND \`pose_and_body_analysis.pose_changed\` is true.
+    -   \`shape_mismatches\`: Count of reports where \`garment_analysis.garment_type\` does not match \`garment_comparison.generated_garment_type\`.
+    -   \`unsolicited_garments\`: Count of reports where \`pose_and_body_analysis.unsolicited_garment_generated\` is true.
+    -   \`sum_fit_score\`: The sum of all \`garment_comparison.scores.fit_and_shape\` values.
+    -   \`sum_logo_score\`: The sum of all \`garment_comparison.scores.logo_fidelity\` values.
+    -   \`sum_detail_score\`: The sum of all \`garment_comparison.scores.detail_accuracy\` values.
+    -   \`sum_pose_preservation_score\`: The sum of all \`pose_and_body_analysis.scores.pose_preservation\` values.
+    -   \`sum_body_preservation_score\`: The sum of all \`pose_and_body_analysis.scores.body_type_preservation\` values.
+    -   \`sum_pattern_accuracy_score\`: The sum of all \`garment_comparison.scores.pattern_accuracy\` values.
 
-**2. The "report" Field:**
-- This field will contain the final, user-facing report as a single Markdown string.
-- After completing your analysis in the "thinking" field, synthesize your findings into the structured report format specified below.
+#### 2. "categorical_breakdowns" Object:
+-   Group the reports by different categories and provide aggregated data for each.
+    -   \`failure_reasons\`: An object where keys are the \`failure_category\` and values are the count of occurrences.
+    -   \`garment_type\`: An object where keys are the \`garment_analysis.garment_type\`. Each value is an object with \`count\`, \`passed\`, and \`sum_fit_score\`.
+    -   \`pattern_type\`: An object where keys are the \`garment_analysis.pattern_type\`. Each value is an object with \`count\`, \`passed\`, and \`sum_pattern_accuracy_score\`.
+    -   \`body_type\`: An object where keys are the \`pose_and_body_analysis.body_type\`. Each value is an object with \`count\`, \`passed\`, and \`sum_body_preservation_score\`.
+    -   \`shot_type\`: An object where keys are the \`pose_and_body_analysis.original_camera_angle.shot_type\`. Each value is an object with \`count\` and \`passed\`.
 
-### ANALYTICAL PROCESS (To be performed in the "thinking" field)
-
-**Step 1: Data Ingestion & Overall Tally**
-- Parse the entire JSON array of QA reports.
-- Calculate and state the top-level statistics: Total Jobs, Passed Jobs, Failed Jobs, and the Overall Pass Rate %.
-
-**Step 2: Granular Hit Rate Calculation**
-- Calculate and present the following specific "hit rates". For each calculation, clearly state the new pass/fail numbers and the resulting percentage.
-  1.  **Anatomy-Adjusted Hit Rate:** Recalculate the pass rate, treating jobs that failed *only* due to 'Pose & Body' issues as a 'pass'.
-  2.  **Garment-Adjusted Hit Rate:** Recalculate the pass rate, treating jobs that failed *only* due to 'Garment Comparison' issues as a 'pass'.
-  3.  **Complex Pattern Forgiveness Hit Rate:** Recalculate the pass rate, treating jobs that failed *only* due to 'Garment Comparison' issues related to 'pattern' on a garment of 'complex' complexity as a 'pass'.
-
-**Step 3: Camera Angle & Body Type Deep Dive**
-- Group all reports by \`original_camera_angle.shot_type\`. For each group, calculate the pass rate.
-- Group all reports by \`pose_and_body_analysis.body_type\`. For each group, calculate the pass rate and the average \`body_type_preservation\` score.
-- Conclude with a summary of which angles and body types are most and least reliable.
-
-**Step 4: Root Cause Analysis of Failures**
-- Analyze the \`mismatch_reason\` and \`notes\` fields for all failed reports.
-- Identify and quantify the top 3-5 recurring themes or specific keywords that appear in failures.
-
-**Step 5: Shape, Body, & Creative Integrity Analysis**
-- Calculate the number of shape mismatches (where \`generated_garment_type\` does not match \`garment_analysis.garment_type\`).
-- Calculate the average \`body_type_preservation\` score for all reports in this chunk.
-- Count the number of times \`unsolicited_garment_generated\` was true.
-
-**Step 6: Strategic Synthesis & Recommendations**
-- Based on all the data above, formulate your final conclusions on Hard Limits, The Safe Zone, and Actionable Recommendations.
-
-### FINAL REPORT STRUCTURE (To be placed in the "report" field)
-
-# VTO Pack Analysis Report
-
-## 1. Executive Summary
-A brief, one-paragraph overview of the pack's performance and the most critical findings.
-
-## 2. Quantitative Analysis
-- **Overall Performance:**
-  - Total Jobs: X
-  - Passed: Y
-  - Failed: Z
-  - **Overall Pass Rate: XX.X%**
-- **Conditional Hit Rates:**
-  - Anatomy-Adjusted Hit Rate: XX.X%
-  - Garment-Adjusted Hit Rate: XX.X%
-  - Complex Pattern Forgiveness Hit Rate: XX.X%
-- **Integrity Scores:**
-  - Shape Mismatches: X
-  - Avg. Body Preservation Score: Y.Y/10
-- **Creative Additions:**
-  - Unsolicited Garments Generated: Z
-
-## 3. Performance by Body Type
-*(A Markdown table with columns: Body Type, Total Jobs, Pass Rate %, Avg. Body Preservation Score)*
-
-## 4. Camera Angle Deep Dive
-*(A list or table showing the pass rate for each camera angle)*
-
-## 5. Strategic Recommendations
-### Hard Limits & Known Issues
-- (Bulleted list of identified limitations, supported by quantitative data.)
-### Actionable Advice for Future Packs
-- (Bulleted list of concrete recommendations, supported by both quantitative and qualitative insights.)
+#### 3. "qualitative_insights" Object:
+-   Analyze the text fields (\`notes\`, \`mismatch_reason\`) to find narrative trends.
+    -   \`key_failure_theme\`: A single string summarizing the most common reason for failure in this chunk.
+    -   \`key_success_theme\`: A single string summarizing what worked well in this chunk.
+    -   \`representative_failure_note\`: A direct quote of a \`mismatch_reason\` or \`notes\` field that best exemplifies the key failure theme.
+    -   \`critical_outlier_note\`: A direct quote describing a result that was exceptionally good or bad, standing out from the rest.
 `;
 
 const extractJson = (text: string): any => {
@@ -144,8 +104,8 @@ serve(async (req) => {
     }
 
     const analysisResult = extractJson(result.text);
-    if (!analysisResult.thinking || !analysisResult.report) {
-        throw new Error("AI did not return the expected JSON structure with 'thinking' and 'report' keys.");
+    if (!analysisResult.quantitative_summary || !analysisResult.categorical_breakdowns || !analysisResult.qualitative_insights) {
+        throw new Error("AI did not return the expected JSON structure with all required keys.");
     }
 
     return new Response(JSON.stringify(analysisResult), {
