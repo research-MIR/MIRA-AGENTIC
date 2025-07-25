@@ -41,17 +41,16 @@ Your entire response MUST be a single, valid JSON object. Do not include any tex
 #### 2. "categorical_breakdowns" Object:
 -   Group the reports by different categories and provide aggregated data for each.
     -   \`failure_reasons\`: An object where keys are the \`failure_category\` and values are the count of occurrences.
-    -   \`garment_type\`: An object where keys are the \`garment_analysis.garment_type\`. Each value is an object with \`count\`, \`passed\`, and \`sum_fit_score\`.
-    -   \`pattern_type\`: An object where keys are the \`garment_analysis.pattern_type\`. Each value is an object with \`count\`, \`passed\`, and \`sum_pattern_accuracy_score\`.
-    -   \`body_type\`: An object where keys are the \`pose_and_body_analysis.body_type\`. Each value is an object with \`count\`, \`passed\`, and \`sum_body_preservation_score\`.
-    -   \`shot_type\`: An object where keys are the \`pose_and_body_analysis.original_camera_angle.shot_type\`. Each value is an object with \`count\` and \`passed\`.
+    -   \`garment_type_details\`: An object where keys are the \`garment_analysis.garment_type\`. Each value is an object with \`count\`, \`passed\`, \`sum_fit_score\`, and \`shape_mismatches\`.
+    -   \`pattern_type_details\`: An object where keys are the \`garment_analysis.pattern_type\`. Each value is an object with \`count\`, \`passed\`, and \`sum_pattern_accuracy_score\`.
+    -   \`body_type_details\`: An object where keys are the \`pose_and_body_analysis.body_type\`. Each value is an object with \`count\`, \`passed\`, and \`sum_body_preservation_score\`.
+    -   \`shot_type_details\`: An object where keys are the \`pose_and_body_analysis.original_camera_angle.shot_type\`. Each value is an object with \`count\` and \`passed\`.
+    -   \`failure_summary_by_body_type\`: A nested object. Top-level keys are the \`body_type\`. Each value is another object where keys are the \`failure_category\` and values are the count of occurrences for that specific body type.
 
 #### 3. "qualitative_insights" Object:
--   Analyze the text fields (\`notes\`, \`mismatch_reason\`) to find narrative trends.
-    -   \`key_failure_theme\`: A single string summarizing the most common reason for failure in this chunk.
-    -   \`key_success_theme\`: A single string summarizing what worked well in this chunk.
-    -   \`representative_failure_note\`: A direct quote of a \`mismatch_reason\` or \`notes\` field that best exemplifies the key failure theme.
-    -   \`critical_outlier_note\`: A direct quote describing a result that was exceptionally good or bad, standing out from the rest.
+-   Analyze the text fields to find narrative trends.
+    -   \`pattern_definitions\`: An object where keys are the unique \`garment_analysis.pattern_type\` values found in the data. The value for each key MUST be a direct quote from the \`garment_analysis.notes\` of a representative report for that pattern type.
+    -   \`representative_failure_notes\`: An object where keys are the unique \`failure_category\` values. The value for each key MUST be a direct quote of a \`pass_notes_details\` or \`garment_comparison.notes\` that best exemplifies that failure.
 `;
 
 const extractJson = (text: string): any => {

@@ -36,7 +36,7 @@ Your primary task is to use the provided images and preliminary analysis to visu
     - **FAIL (\`overall_pass: false\`)** for other significant TECHNICAL FLAWS. A simple change in pose is NOT a failure condition on its own, but it MUST be noted.
     - **FAIL IF:** The body is unnaturally altered (\`failure_category: "body_distortion"\`), there are severe anatomical errors (\`failure_category: "anatomical_error"\`), the lighting/blending is poor (\`failure_category: "quality_issue"\`), or the garment fit is fundamentally wrong (\`failure_category: "fitting_issue"\`).
     - **PASS (\`overall_pass: true\`)** if the image is technically sound and does not meet any failure criteria.
-    - **PASS WITH NOTES (\`pass_with_notes: true\`)** if the image is a PASS but has minor, specific flaws. If true, you MUST set \`pass_notes_category\` to one of: \`'logo_fidelity'\`, \`'detail_accuracy'\`, or \`'minor_artifact'\`.
+    - **PASS WITH NOTES (\`pass_with_notes: true\`)** if the image is a PASS but has minor, specific flaws. If true, you MUST set \`pass_notes_category\` to one of: \`'logo_fidelity'\`, \`'detail_accuracy'\`, or \`'minor_artifact'\` AND provide a specific explanation in \`pass_notes_details\`.
 7.  **Camera & Pose Analysis:** You MUST analyze the \`original_camera_angle\` and populate the \`shot_type\`, \`camera_elevation\`, and \`camera_position\` fields with the most appropriate values from the provided enums.
 8.  **Garment Type Verification:** You MUST identify the type of garment in the FINAL RESULT and populate the \`generated_garment_type\` field.
 9.  **Body Type Preservation:** You MUST assess if the model's body type was altered from the SOURCE PERSON image and reflect this in the \`body_type_preservation\` score.
@@ -47,6 +47,7 @@ Your primary task is to use the provided images and preliminary analysis to visu
   "overall_pass": "boolean",
   "pass_with_notes": "boolean",
   "pass_notes_category": "logo_fidelity" | "detail_accuracy" | "minor_artifact" | null,
+  "pass_notes_details": "string | null",
   "failure_category": "shape_mismatch" | "fitting_issue" | "body_distortion" | "anatomical_error" | "quality_issue" | "other" | null,
   "confidence_score": "number",
   "garment_comparison": {

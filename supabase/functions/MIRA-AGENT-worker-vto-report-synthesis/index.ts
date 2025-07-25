@@ -20,9 +20,9 @@ Your task is to synthesize these individual structured summaries into a single, 
 
 ### Your Process:
 1.  **Aggregate Quantitative Data:** Iterate through the \`quantitative_summary\` object of each chunk. Sum up all the numerical data (Total Jobs, Passed, Failed, all score sums, etc.) to get the grand totals for the entire pack.
-2.  **Aggregate Categorical Data:** Iterate through the \`categorical_breakdowns\` object of each chunk. For each category (e.g., \`garment_type\`, \`body_type\`), merge the data. For example, if chunk 1 has \`"jacket": {"count": 10, "passed": 4}\` and chunk 2 has \`"jacket": {"count": 8, "passed": 6}\`, your final aggregate for jackets will be \`{"count": 18, "passed": 10}\`.
+2.  **Aggregate Categorical Data:** Iterate through the \`categorical_breakdowns\` object of each chunk. For each category (e.g., \`garment_type_details\`, \`body_type_details\`), merge the data. For example, if chunk 1 has \`"jacket": {"count": 10, "passed": 4, "shape_mismatches": 1}\` and chunk 2 has \`"jacket": {"count": 8, "passed": 6, "shape_mismatches": 3}\`, your final aggregate for jackets will be \`{"count": 18, "passed": 10, "shape_mismatches": 4}\`. Do the same for the nested \`failure_summary_by_body_type\` object.
 3.  **Calculate Final Metrics:** Using the aggregated totals, calculate the final metrics for the report, such as Overall Pass Rate, average scores (by dividing sum by count), and pass rates for each category.
-4.  **Synthesize Qualitative Insights:** Read the \`qualitative_insights\` object from all the individual reports. Identify the most critical, recurring themes, hard limits, and actionable advice. Use the \`representative_failure_note\` and \`critical_outlier_note\` fields to find powerful, specific examples to include in your narrative.
+4.  **Synthesize Qualitative Insights:** Read the \`qualitative_insights\` object from all the individual reports. Merge the \`pattern_definitions\` and \`representative_failure_notes\` into single, comprehensive objects.
 5.  **Create a Data-Driven Narrative:** Use the qualitative insights to write the narrative sections of your report (Executive Summary, Recommendations). You MUST use the aggregated quantitative data you calculated as hard evidence to support your qualitative observations.
 
 ### OUTPUT FORMAT
@@ -43,10 +43,10 @@ A brief, one-paragraph overview of the pack's performance, highlighting both key
 - **Overall Performance:**
   - Total Jobs: X
   - Passed (Perfect): Y
-  - Passed (with Logo Issues): A
-  - Passed (with Detail Issues): B
-  - Failed (Fitting Issues): C
-  - Failed (Other): D
+  - Passed (with Pose Change): A
+  - Passed (with Logo Issues): B
+  - Passed (with Detail Issues): C
+  - Failed: D
   - **Overall Pass Rate: XX.X%**
 - **Average Quality Scores (out of 10):**
   - Fit & Shape: X.X
@@ -58,26 +58,28 @@ A brief, one-paragraph overview of the pack's performance, highlighting both key
   - Garment Shape Mismatches: X
   - Unsolicited Garments Generated (Creative Additions): Y
 
-## 3. Garment Shape Integrity
-*(A Markdown table with columns: Garment Type, Total Jobs, Shape Mismatch %)*
+## 3. Garment Shape & Fit Integrity
+This analysis pinpoints failures where the generated garment was a fundamentally different shape or length from the reference.
+*(A Markdown table with columns: Garment Type, Total Jobs, Shape Mismatches, Pass Rate %, Avg. Fit Score)*
 
-## 4. Performance by Garment Type
-*(A Markdown table with columns: Garment Type, Total Jobs, Pass Rate %, Avg. Fit Score)*
+## 4. Failure Analysis by Body Type
+This table cross-references failure categories with the model's body type, revealing specific weaknesses.
+*(A Markdown table with columns: Body Type, Failure Category, Failure Count, Representative Example)*
 
 ## 5. Performance by Pattern Type
+### Category Definitions
+*(A Markdown list defining each pattern type, using the data from the \`pattern_definitions\` object.)*
+### Performance Table
 *(A Markdown table with columns: Pattern Type, Total Jobs, Pass Rate %, Avg. Pattern Accuracy)*
 
-## 6. Performance by Body Type
-*(A Markdown table with columns: Body Type, Total Jobs, Pass Rate %, Avg. Body Preservation Score)*
+## 6. Deep Dive: "Passed with Issues"
+*(A section with two sub-headings: "Passed (with Logo Issues)" and "Passed (with Detail Issues)". Each sub-heading should contain a summary of the common problem and a representative example note.)*
 
-## 7. Camera Angle Deep Dive
-*(A list or table showing the pass rate for each camera angle, e.g., "Full Shot: 85% Pass Rate")*
-
-## 8. Strategic Recommendations
+## 7. Strategic Recommendations
 ### Hard Limits & Known Issues
-- (Bulleted list of identified limitations, supported by quantitative data. E.g., "The system struggles with complex patterns, achieving only a 4.5/10 average accuracy score.")
+- (Bulleted list of identified limitations, supported by quantitative data from your aggregated tables.)
 ### Actionable Advice for Future Packs
-- (Bulleted list of concrete recommendations, supported by both quantitative and qualitative insights from the \`notes\`.)
+- (Bulleted list of concrete recommendations, supported by both quantitative and qualitative insights.)
 `;
 
 const extractJson = (text: string): any => {
