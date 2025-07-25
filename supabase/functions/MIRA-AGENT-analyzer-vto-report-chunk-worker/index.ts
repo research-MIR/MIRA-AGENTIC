@@ -50,7 +50,11 @@ Your entire response MUST be a single, valid JSON object. Do not include any tex
 - Analyze the \`mismatch_reason\` and \`notes\` fields for all failed reports.
 - Identify and quantify the top 3-5 recurring themes or specific keywords that appear in failures.
 
-**Step 5: Strategic Synthesis & Recommendations**
+**Step 5: NEW - Shape & Body Integrity Analysis**
+- Calculate the number of shape mismatches (where \`generated_garment_type\` does not match \`garment_analysis.garment_type\`).
+- Calculate the average \`body_type_preservation\` score for all reports in this chunk.
+
+**Step 6: Strategic Synthesis & Recommendations**
 - Based on all the data above, formulate your final conclusions on Hard Limits, The Safe Zone, and Actionable Recommendations.
 
 ### FINAL REPORT STRUCTURE (To be placed in the "report" field)
@@ -70,6 +74,9 @@ A brief, one-paragraph overview of the pack's performance and the most critical 
   - Anatomy-Adjusted Hit Rate: XX.X%
   - Garment-Adjusted Hit Rate: XX.X%
   - Complex Pattern Forgiveness Hit Rate: XX.X%
+- **Integrity Scores:**
+  - Shape Mismatches: X
+  - Avg. Body Preservation Score: Y.Y/10
 
 ## 3. Camera Angle Deep Dive
 ### Full Shot
