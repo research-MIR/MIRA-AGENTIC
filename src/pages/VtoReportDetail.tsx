@@ -186,15 +186,14 @@ const VtoReportDetail = () => {
   const { data: reportDetails, isLoading: isLoadingReports, error } = useQuery<ReportDetail[]>({
     queryKey: ['vtoReportDetail', packId],
     queryFn: async () => {
-      if (!packId || !session?.user) return [];
+      if (!packId) return [];
       const { data, error } = await supabase.rpc('get_vto_report_details_for_pack', {
         p_pack_id: packId,
-        p_user_id: session.user.id
       });
       if (error) throw error;
       return data;
     },
-    enabled: !!packId && !!session?.user,
+    enabled: !!packId,
   });
 
   useEffect(() => {
