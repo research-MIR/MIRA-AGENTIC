@@ -36,14 +36,13 @@ serve(async (req) => {
       throw new Error("Permission denied: You do not own this pack.");
     }
 
-    // CORRECTED LOGIC: Find reports where the analysis failed, not the job status.
-    console.log(`${logPrefix} Searching for reports where overall_pass is false and failure_category is NULL or 'Unknown'.`);
+    // CORRECTED LOGIC: Use and() with a nested or() to correctly group the conditions.
+    console.log(`${logPrefix} Searching for reports where overall_pass is false AND (failure_category is NULL OR 'Unknown').`);
     const { data: failedReports, error: fetchError } = await supabase
       .from('mira-agent-vto-qa-reports')
       .select('id')
       .eq('vto_pack_job_id', pack_id)
-      .eq('comparative_report->>overall_pass', 'false') // Check the JSONB content
-      .or('comparative_report->>failure_category.is.null,comparative_report->>failure_category.eq.Unknown');
+      .and(`comparative_report->>overall_pass.eq.false,or(comparative_report->>failure_category.is.null,comparative_report->>failure_category.eq.Unknown)`);
 
     if (fetchError) throw new Error(`Failed to fetch failed reports: ${fetchError.message}`);
 
