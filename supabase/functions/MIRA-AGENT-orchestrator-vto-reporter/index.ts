@@ -3,7 +3,6 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-const BATCH_SIZE = 50; // Process up to 50 reports at a time
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -58,12 +57,10 @@ serve(async (req) => {
       return new Response(JSON.stringify({ success: true, message: "Analysis is already up-to-date for this pack." }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
     
-    // 4. Take only the next batch of jobs to queue
-    const jobsToQueue = jobsToAnalyze.slice(0, BATCH_SIZE);
-    console.log(`${logPrefix} Found ${jobsToAnalyze.length} total jobs needing analysis. Queuing the next batch of ${jobsToQueue.length}.`);
+    console.log(`${logPrefix} Found ${jobsToAnalyze.length} total jobs needing analysis. Queuing all of them.`);
 
-    // 5. Create new QA job entries for the batch
-    const newQaJobs = jobsToQueue.map(job => ({
+    // 4. Create new QA job entries for all remaining jobs
+    const newQaJobs = jobsToAnalyze.map(job => ({
       user_id,
       vto_pack_job_id: pack_id,
       source_vto_job_id: job.id,
@@ -76,10 +73,10 @@ serve(async (req) => {
 
     if (insertError) throw new Error(`Failed to create QA jobs: ${insertError.message}`);
 
-    // 6. Asynchronously invoke the watchdog to start processing immediately
+    // 5. Asynchronously invoke the watchdog to start processing immediately
     supabase.functions.invoke('MIRA-AGENT-watchdog-background-jobs').catch(console.error);
 
-    const message = `Successfully queued the next ${jobsToQueue.length} jobs for analysis.`;
+    const message = `Successfully queued all ${jobsToAnalyze.length} remaining jobs for analysis.`;
     console.log(`${logPrefix} ${message}`);
     return new Response(JSON.stringify({ success: true, message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
