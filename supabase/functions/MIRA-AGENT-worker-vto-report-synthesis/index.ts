@@ -6,6 +6,7 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const MODEL_NAME = "gemini-2.5-pro-preview-06-05";
+const CHUNK_SIZE = 40;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -92,29 +93,70 @@ const extractJson = (text: string): any => {
 serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
   
-  const { pack_id } = await req.json();
+  const { pack_id, user_id } = await req.json();
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-  const logPrefix = `[VTO-Report-Synthesizer][${pack_id}]`;
+  const logPrefix = `[VTO-Report-Worker][${pack_id}]`;
 
   try {
-    if (!pack_id) {
-      throw new Error("pack_id is required.");
+    if (!pack_id || !user_id) {
+      throw new Error("pack_id and user_id are required.");
     }
-    console.log(`${logPrefix} Synthesizer started.`);
+    console.log(`${logPrefix} Worker started.`);
 
-    const { data: chunkResults, error: fetchError } = await supabase
-      .from('mira-agent-vto-report-chunks')
-      .select('result_data')
-      .eq('pack_id', pack_id)
-      .eq('status', 'complete');
+    const { data: reports, error: rpcError } = await supabase.rpc('get_vto_report_details_for_pack', {
+      p_pack_id: pack_id,
+      p_user_id_override: user_id
+    });
 
-    if (fetchError) throw fetchError;
-    if (!chunkResults || chunkResults.length === 0) {
-      throw new Error("No completed chunk results found to synthesize.");
+    if (rpcError) throw new Error(`Failed to fetch report details: ${rpcError.message}`);
+    if (!reports || reports.length === 0) {
+      throw new Error("No analysis reports found for this pack to synthesize.");
     }
 
-    const chunkReports = chunkResults.map(r => r.result_data).filter(Boolean);
-    console.log(`${logPrefix} Found ${chunkReports.length} completed chunk reports. Starting final synthesis.`);
+    const comparativeReports = reports.map((r: any) => r.comparative_report).filter(Boolean);
+    if (comparativeReports.length === 0) {
+        throw new Error("No valid comparative reports found in the fetched data.");
+    }
+
+    console.log(`${logPrefix} Found ${comparativeReports.length} reports. Chunking and dispatching to sub-workers...`);
+
+    const chunks = [];
+    for (let i = 0; i < comparativeReports.length; i += CHUNK_SIZE) {
+        chunks.push(comparativeReports.slice(i, i + CHUNK_SIZE));
+    }
+
+    const chunkPromises = chunks.map((chunk, index) => {
+        console.log(`${logPrefix} Invoking chunk worker ${index + 1}/${chunks.length}...`);
+        return supabase.functions.invoke('MIRA-AGENT-analyzer-vto-report-chunk-worker', {
+            body: { reports_chunk: chunk }
+        });
+    });
+
+    const chunkResults = await Promise.allSettled(chunkPromises);
+    
+    const successfulResults = chunkResults
+        .filter(result => result.status === 'fulfilled' && !result.value.error)
+        .map((result: any) => result.value.data);
+
+    const failedResults = chunkResults.filter(result => result.status === 'rejected' || (result.status === 'fulfilled' && result.value.error));
+    
+    if (failedResults.length > 0) {
+        console.warn(`[VTO-Report-Worker][${pack_id}] ${failedResults.length}/${chunks.length} chunk workers failed. Proceeding with partial data.`);
+        failedResults.forEach((result: any) => {
+            if (result.status === 'rejected') {
+                console.error(` - Worker rejected with reason:`, result.reason);
+            } else {
+                console.error(` - Worker fulfilled but returned an error:`, result.value.error);
+            }
+        });
+    }
+
+    if (successfulResults.length === 0) {
+        throw new Error("All chunk analysis workers failed. Cannot synthesize report.");
+    }
+
+    const chunkReports = successfulResults;
+    console.log(`${logPrefix} ${chunkReports.length} chunk workers completed successfully. Starting final synthesis.`);
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
     const result = await ai.models.generateContent({
@@ -142,23 +184,13 @@ serve(async (req) => {
       console.error(`${logPrefix} Failed to save final analysis to DB:`, updateError);
     }
 
-    // Clean up the chunk jobs
-    const { error: deleteError } = await supabase
-      .from('mira-agent-vto-report-chunks')
-      .delete()
-      .eq('pack_id', pack_id);
-    
-    if (deleteError) {
-        console.error(`${logPrefix} Failed to clean up chunk jobs:`, deleteError);
-    }
-
     return new Response(JSON.stringify({ success: true }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });
 
   } catch (error) {
-    console.error(`${logPrefix} Error:`, error);
+    console.error(`[VTO-Report-Worker][${pack_id}] Error:`, error);
     await supabase.from('mira-agent-vto-packs-jobs').update({
         synthesis_report: `# Analysis Failed\n\nAn error occurred during the report synthesis: ${error.message}`
     }).eq('id', pack_id);

@@ -1,13 +1,10 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { GoogleGenAI, GenerationResult } from 'https://esm.sh/@google/genai@0.15.0';
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const MODEL_NAME = "gemini-2.5-pro-preview-06-05";
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1500;
-const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -67,28 +64,10 @@ const extractJson = (text: string): any => {
 serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
 
-  const { chunk_job_id } = await req.json();
-  if (!chunk_job_id) {
-    return new Response(JSON.stringify({ error: "chunk_job_id is required." }), { status: 400, headers: corsHeaders });
-  }
-
-  const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-  const logPrefix = `[VTO-Report-Chunk-Worker][${chunk_job_id}]`;
-
   try {
-    await supabase.from('mira-agent-vto-report-chunks').update({ status: 'processing' }).eq('id', chunk_job_id);
-
-    const { data: chunkJob, error: fetchError } = await supabase
-      .from('mira-agent-vto-report-chunks')
-      .select('chunk_data')
-      .eq('id', chunk_job_id)
-      .single();
-    
-    if (fetchError) throw fetchError;
-    const reports_chunk = chunkJob.chunk_data;
-
+    const { reports_chunk } = await req.json();
     if (!reports_chunk || !Array.isArray(reports_chunk)) {
-      throw new Error("chunk_data is missing or not an array.");
+      throw new Error("reports_chunk (as an array) is required.");
     }
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
@@ -97,50 +76,44 @@ serve(async (req) => {
 
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
-            console.log(`${logPrefix} Calling Gemini API, attempt ${attempt}/${MAX_RETRIES}...`);
+            console.log(`[VTO-Report-Chunk-Worker] Calling Gemini API, attempt ${attempt}/${MAX_RETRIES}...`);
             result = await ai.models.generateContent({
                 model: MODEL_NAME,
                 contents: [{ role: 'user', parts: [{ text: `Here is the JSON data for the QA reports: ${JSON.stringify(reports_chunk)}` }] }],
                 generationConfig: { responseMimeType: "application/json" },
                 config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
             });
-            lastError = null;
-            break;
+            lastError = null; // Clear error on success
+            break; // Exit loop on success
         } catch (error) {
             lastError = error;
-            console.warn(`${logPrefix} Attempt ${attempt} failed:`, error.message);
+            console.warn(`[VTO-Report-Chunk-Worker] Attempt ${attempt} failed:`, error.message);
             if (attempt < MAX_RETRIES) {
-                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS * attempt));
+                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS * attempt)); // Exponential backoff
             }
         }
     }
 
-    if (lastError) throw lastError;
-    if (!result) throw new Error("AI model failed to respond after all retries.");
+    if (lastError) {
+        throw lastError; // Rethrow the last error if all retries fail
+    }
+
+    if (!result) {
+        throw new Error("AI model failed to respond after all retries.");
+    }
 
     const analysisResult = extractJson(result.text);
     if (!analysisResult.quantitative_summary || !analysisResult.categorical_breakdowns || !analysisResult.qualitative_insights) {
         throw new Error("AI did not return the expected JSON structure with all required keys.");
     }
 
-    await supabase.from('mira-agent-vto-report-chunks').update({
-        status: 'complete',
-        result_data: analysisResult,
-        error_message: null
-    }).eq('id', chunk_job_id);
-
-    console.log(`${logPrefix} Successfully completed and saved analysis.`);
-    return new Response(JSON.stringify({ success: true }), {
+    return new Response(JSON.stringify(analysisResult), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });
 
   } catch (error) {
-    console.error(`${logPrefix} Error:`, error);
-    await supabase.from('mira-agent-vto-report-chunks').update({
-        status: 'failed',
-        error_message: error.message
-    }).eq('id', chunk_job_id);
+    console.error("[VTO-Report-Chunk-Worker] Error:", error);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,
