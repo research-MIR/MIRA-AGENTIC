@@ -330,7 +330,7 @@ serve(async (req) => {
     }
     console.log(`[Watchdog-BG][${requestId}] === Task 11: Finished ===`);
 
-    // --- NEW Task 12: Handle jobs with expanded masks, ready for step 2 ---
+    // --- Task 12: Handle jobs with expanded masks, ready for step 2 ---
     const { data: readyForStep2Jobs, error: step2Error } = await supabase
       .from('mira-agent-batch-inpaint-pair-jobs')
       .select('id, metadata')
@@ -357,6 +357,46 @@ serve(async (req) => {
       actionsTaken.push(`Triggered Step 2 worker for ${readyForStep2Jobs.length} jobs.`);
     } else {
       console.log(`[Watchdog-BG][${requestId}] No jobs ready for step 2 found.`);
+    }
+
+    // --- NEW Task 13: Handle Pending VTO Report Chunks ---
+    const { data: pendingChunks, error: chunkError } = await supabase
+      .from('mira-agent-vto-report-chunks')
+      .select('id')
+      .eq('status', 'pending')
+      .limit(10); // Process up to 10 chunks per watchdog run
+
+    if (chunkError) {
+      console.error(`[Watchdog-BG][${requestId}] Error querying for pending report chunks:`, chunkError.message);
+    } else if (pendingChunks && pendingChunks.length > 0) {
+      console.log(`[Watchdog-BG][${requestId}] Found ${pendingChunks.length} pending report chunks. Invoking workers...`);
+      const chunkPromises = pendingChunks.map(chunk => 
+        supabase.functions.invoke('MIRA-AGENT-analyzer-vto-report-chunk-worker', {
+          body: { chunk_id: chunk.id }
+        })
+      );
+      await Promise.allSettled(chunkPromises);
+      actionsTaken.push(`Triggered ${pendingChunks.length} VTO report chunk workers.`);
+    } else {
+      console.log(`[Watchdog-BG][${requestId}] No pending VTO report chunks found.`);
+    }
+
+    // --- NEW Task 14: Handle Packs Ready for Synthesis ---
+    const { data: readyPacks, error: readyPacksError } = await supabase.rpc('find_packs_ready_for_synthesis');
+
+    if (readyPacksError) {
+      console.error(`[Watchdog-BG][${requestId}] Error checking for packs ready for synthesis:`, readyPacksError.message);
+    } else if (readyPacks && readyPacks.length > 0) {
+      console.log(`[Watchdog-BG][${requestId}] Found ${readyPacks.length} pack(s) ready for final synthesis. Invoking synthesizers...`);
+      const synthesizerPromises = readyPacks.map(pack => 
+        supabase.functions.invoke('MIRA-AGENT-final-synthesizer-vto-report', {
+          body: { pack_id: pack.pack_id }
+        })
+      );
+      await Promise.allSettled(synthesizerPromises);
+      actionsTaken.push(`Triggered final synthesis for ${readyPacks.length} VTO report packs.`);
+    } else {
+      console.log(`[Watchdog-BG][${requestId}] No VTO report packs are ready for final synthesis.`);
     }
 
     const finalMessage = actionsTaken.length > 0 ? actionsTaken.join(' ') : "No actions required. All jobs are running normally.";

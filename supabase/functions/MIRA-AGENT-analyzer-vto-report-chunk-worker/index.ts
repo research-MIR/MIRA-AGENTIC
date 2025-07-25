@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { GoogleGenAI, GenerationResult } from 'https://esm.sh/@google/genai@0.15.0';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const MODEL_NAME = "gemini-2.5-pro-preview-06-05";
@@ -53,6 +54,9 @@ Your entire response MUST be a single, valid JSON object. Do not include any tex
     -   \`representative_failure_notes\`: An object where keys are the unique \`failure_category\` values. The value for each key MUST be a direct quote of a \`pass_notes_details\` or \`garment_comparison.notes\` that best exemplifies that failure.
 `;
 
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+
 const extractJson = (text: string): any => {
     const match = text.match(/```json\s*([\s\S]*?)\s*```/);
     if (match && match[1]) return JSON.parse(match[1]);
@@ -64,11 +68,25 @@ const extractJson = (text: string): any => {
 serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
 
+  const { chunk_id } = await req.json();
+  if (!chunk_id) {
+    return new Response(JSON.stringify({ error: "chunk_id is required." }), { status: 400, headers: corsHeaders });
+  }
+  
+  const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
+  const logPrefix = `[VTO-Report-Chunk-Worker][${chunk_id}]`;
+
   try {
-    const { reports_chunk } = await req.json();
-    if (!reports_chunk || !Array.isArray(reports_chunk)) {
-      throw new Error("reports_chunk (as an array) is required.");
-    }
+    const { data: chunkJob, error: fetchError } = await supabase
+      .from('mira-agent-vto-report-chunks')
+      .select('chunk_data')
+      .eq('id', chunk_id)
+      .single();
+    
+    if (fetchError) throw fetchError;
+    if (!chunkJob || !chunkJob.chunk_data) throw new Error("Chunk job not found or is missing data.");
+
+    const reports_chunk = chunkJob.chunk_data;
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
     let result: GenerationResult | null = null;
@@ -107,13 +125,24 @@ serve(async (req) => {
         throw new Error("AI did not return the expected JSON structure with all required keys.");
     }
 
-    return new Response(JSON.stringify(analysisResult), {
+    await supabase
+      .from('mira-agent-vto-report-chunks')
+      .update({ result_data: analysisResult, status: 'complete' })
+      .eq('id', chunk_id);
+
+    console.log(`${logPrefix} Analysis complete and saved to database.`);
+
+    return new Response(JSON.stringify({ success: true }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });
 
   } catch (error) {
-    console.error("[VTO-Report-Chunk-Worker] Error:", error);
+    console.error(`${logPrefix} Error:`, error);
+    await supabase
+      .from('mira-agent-vto-report-chunks')
+      .update({ status: 'failed', error_message: error.message })
+      .eq('id', chunk_id);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,
