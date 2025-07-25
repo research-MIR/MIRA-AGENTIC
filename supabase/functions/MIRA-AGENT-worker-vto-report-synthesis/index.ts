@@ -24,7 +24,8 @@ Your task is to synthesize these individual reports into a single, cohesive, and
 3.  **Aggregate Scores:** For each score (e.g., \`fit_and_shape\`), calculate the average across all reports.
 4.  **Analyze by Category:** Group reports by \`garment_analysis.garment_type\` and \`garment_analysis.pattern_type\`. Calculate pass rates and average scores for each group.
 5.  **Analyze by Camera Angle:** Group reports by \`pose_and_body_analysis.original_camera_angle.shot_type\`. Calculate pass rates for each.
-6.  **Create a Data-Driven Narrative:** Use the qualitative insights from the \`notes\` to write the narrative sections of your report. You MUST use the aggregated quantitative data as evidence to support your qualitative observations.
+6.  **NEW - Analyze Shape Integrity:** For each garment type, calculate the percentage of times the \`generated_garment_type\` did NOT match the original \`garment_analysis.garment_type\`.
+7.  **Create a Data-Driven Narrative:** Use the qualitative insights from the \`notes\` to write the narrative sections of your report. You MUST use the aggregated quantitative data as evidence to support your qualitative observations.
 
 ### OUTPUT FORMAT
 Your entire response MUST be a single, valid JSON object with "thinking" and "report" keys.
@@ -54,17 +55,21 @@ A brief, one-paragraph overview of the pack's performance, highlighting both key
   - Logo Fidelity: Y.Y
   - Detail Accuracy: Z.Z
   - Pose Preservation: A.A
+  - Body Type Preservation: B.B
 
-## 3. Performance by Garment Type
+## 3. Garment Shape Integrity
+*(A Markdown table with columns: Garment Type, Total Jobs, Shape Mismatch %)*
+
+## 4. Performance by Garment Type
 *(A Markdown table with columns: Garment Type, Total Jobs, Pass Rate %, Avg. Fit Score)*
 
-## 4. Performance by Pattern Type
+## 5. Performance by Pattern Type
 *(A Markdown table with columns: Pattern Type, Total Jobs, Pass Rate %, Avg. Pattern Accuracy)*
 
-## 5. Camera Angle Deep Dive
+## 6. Camera Angle Deep Dive
 *(A list or table showing the pass rate for each camera angle, e.g., "Full Shot: 85% Pass Rate")*
 
-## 6. Strategic Recommendations
+## 7. Strategic Recommendations
 ### Hard Limits & Known Issues
 - (Bulleted list of identified limitations, supported by quantitative data. E.g., "The system struggles with complex patterns, achieving only a 4.5/10 average accuracy score.")
 ### Actionable Advice for Future Packs

@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
 import { useLanguage } from "@/context/LanguageContext";
-import { BarChart2, CheckCircle, XCircle, Loader2, AlertTriangle, UserCheck2, BadgeAlert, FileText, RefreshCw } from "lucide-react";
+import { BarChart2, CheckCircle, XCircle, Loader2, AlertTriangle, UserCheck2, BadgeAlert, FileText, RefreshCw, Shirt, User } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -23,6 +23,15 @@ interface QaReport {
     failure_category: string | null;
     pose_and_body_analysis?: {
         pose_changed: boolean;
+        scores: {
+            body_type_preservation?: number;
+        }
+    },
+    garment_comparison?: {
+        generated_garment_type?: string;
+    },
+    garment_analysis?: {
+        garment_type?: string;
     }
   } | null;
 }
@@ -37,6 +46,8 @@ interface PackSummary {
   passed_detail_issue: number;
   failed_jobs: number;
   failure_summary: Record<string, number>;
+  shape_mismatches: number;
+  avg_body_preservation_score: number | null;
 }
 
 const VtoReports = () => {
@@ -87,6 +98,8 @@ const VtoReports = () => {
           passed_detail_issue: 0,
           failed_jobs: 0,
           failure_summary: {},
+          shape_mismatches: 0,
+          avg_body_preservation_score: null,
         });
       }
       const summary = packs.get(report.vto_pack_job_id)!;
@@ -94,19 +107,31 @@ const VtoReports = () => {
       
       const reportData = report.comparative_report;
 
-      if (reportData?.overall_pass) {
-        if (reportData.pass_with_notes) {
-            if (reportData.pass_notes_category === 'logo_fidelity') summary.passed_logo_issue++;
-            else if (reportData.pass_notes_category === 'detail_accuracy') summary.passed_detail_issue++;
-        } else if (reportData.pose_and_body_analysis?.pose_changed) {
-            summary.passed_pose_change++;
+      if (reportData) {
+        if (reportData.overall_pass) {
+          if (reportData.pass_with_notes) {
+              if (reportData.pass_notes_category === 'logo_fidelity') summary.passed_logo_issue++;
+              else if (reportData.pass_notes_category === 'detail_accuracy') summary.passed_detail_issue++;
+          } else if (reportData.pose_and_body_analysis?.pose_changed) {
+              summary.passed_pose_change++;
+          } else {
+              summary.passed_perfect++;
+          }
         } else {
-            summary.passed_perfect++;
+          summary.failed_jobs++;
+          const reason = reportData.failure_category || "Unknown";
+          summary.failure_summary[reason] = (summary.failure_summary[reason] || 0) + 1;
         }
-      } else {
-        summary.failed_jobs++;
-        const reason = reportData?.failure_category || "Unknown";
-        summary.failure_summary[reason] = (summary.failure_summary[reason] || 0) + 1;
+
+        if (reportData.garment_analysis?.garment_type && reportData.garment_comparison?.generated_garment_type && reportData.garment_analysis.garment_type !== reportData.garment_comparison.generated_garment_type) {
+            summary.shape_mismatches++;
+        }
+
+        const bodyScore = reportData.pose_and_body_analysis?.scores?.body_type_preservation;
+        if (typeof bodyScore === 'number') {
+            const currentTotal = (summary.avg_body_preservation_score || 0) * (summary.total_jobs - 1);
+            summary.avg_body_preservation_score = (currentTotal + bodyScore) / summary.total_jobs;
+        }
       }
     }
     return Array.from(packs.values()).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
@@ -235,34 +260,29 @@ const VtoReports = () => {
                   </div>
                 </CardTitle>
               </CardHeader>
-              <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="space-y-2">
                   <h3 className="font-semibold text-sm">{t('overallPassRate')}</h3>
                   <div className="flex items-center gap-4 flex-wrap">
-                    <div className="flex items-center gap-2 text-green-600">
-                      <CheckCircle className="h-5 w-5" />
-                      <span className="text-2xl font-bold">{report.passed_perfect}</span>
-                      <span>Passed</span>
+                    <div className="flex items-center gap-2 text-green-600"><CheckCircle className="h-5 w-5" /><span className="text-2xl font-bold">{report.passed_perfect}</span><span>Passed</span></div>
+                    <div className="flex items-center gap-2 text-yellow-600"><UserCheck2 className="h-5 w-5" /><span className="text-2xl font-bold">{report.passed_pose_change}</span><span>Passed (Pose Change)</span></div>
+                    <div className="flex items-center gap-2 text-orange-500"><BadgeAlert className="h-5 w-5" /><span className="text-2xl font-bold">{report.passed_logo_issue}</span><span>Passed (Logo Issue)</span></div>
+                    <div className="flex items-center gap-2 text-orange-500"><FileText className="h-5 w-5" /><span className="text-2xl font-bold">{report.passed_detail_issue}</span><span>Passed (Detail Issue)</span></div>
+                    <div className="flex items-center gap-2 text-destructive"><XCircle className="h-5 w-5" /><span className="text-2xl font-bold">{report.failed_jobs}</span><span>Failed</span></div>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <h3 className="font-semibold text-sm">Integrity Scores</h3>
+                  <div className="flex items-center gap-4 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <Shirt className="h-5 w-5" />
+                      <span className="text-2xl font-bold">{report.shape_mismatches}</span>
+                      <span>Shape Mismatches</span>
                     </div>
-                    <div className="flex items-center gap-2 text-yellow-600">
-                      <UserCheck2 className="h-5 w-5" />
-                      <span className="text-2xl font-bold">{report.passed_pose_change}</span>
-                      <span>Passed (Pose Change)</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-orange-500">
-                      <BadgeAlert className="h-5 w-5" />
-                      <span className="text-2xl font-bold">{report.passed_logo_issue}</span>
-                      <span>Passed (Logo Issue)</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-orange-500">
-                      <FileText className="h-5 w-5" />
-                      <span className="text-2xl font-bold">{report.passed_detail_issue}</span>
-                      <span>Passed (Detail Issue)</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-destructive">
-                      <XCircle className="h-5 w-5" />
-                      <span className="text-2xl font-bold">{report.failed_jobs}</span>
-                      <span>Failed</span>
+                    <div className="flex items-center gap-2">
+                      <User className="h-5 w-5" />
+                      <span className="text-2xl font-bold">{report.avg_body_preservation_score?.toFixed(1) || 'N/A'}</span>
+                      <span>Avg. Body Preservation</span>
                     </div>
                   </div>
                 </div>
@@ -278,7 +298,7 @@ const VtoReports = () => {
                       ))}
                     </div>
                   ) : (
-                    <div className="h-24 bg-muted rounded-md flex items-center justify-center text-muted-foreground">
+                    <div className="h-full bg-muted rounded-md flex items-center justify-center text-muted-foreground">
                       <p>No failures recorded.</p>
                     </div>
                   )}

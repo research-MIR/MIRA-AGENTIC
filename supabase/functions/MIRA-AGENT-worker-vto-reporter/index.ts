@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { GoogleGenAI, Content, Part } from 'https://esm.sh/@google/genai@0.15.0';
+import { GoogleGenAI, Content, Part, HarmCategory, HarmBlockThreshold } from 'https://esm.sh/@google/genai@0.15.0';
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 
@@ -36,6 +36,8 @@ Your primary task is to use the provided images and preliminary analysis to visu
     - **PASS (\`overall_pass: true\`)** if the image is technically sound.
     - **PASS WITH NOTES (\`pass_with_notes: true\`)** if the image is a PASS but has minor, specific flaws. If true, you MUST set \`pass_notes_category\` to one of: \`'logo_fidelity'\`, \`'detail_accuracy'\`, or \`'minor_artifact'\`.
 6.  **Camera & Pose Analysis:** You MUST analyze the \`original_camera_angle\` and populate the \`shot_type\`, \`camera_elevation\`, and \`camera_position\` fields with the most appropriate values from the provided enums.
+7.  **NEW - Garment Type Verification:** You MUST identify the type of garment in the FINAL RESULT and populate the \`generated_garment_type\` field.
+8.  **NEW - Body Type Preservation:** You MUST assess if the model's body type (e.g., physique, build, muscularity) was altered from the SOURCE PERSON image and reflect this in the \`body_type_preservation\` score.
 
 ### JSON Schema (Your Output):
 {
@@ -45,13 +47,14 @@ Your primary task is to use the provided images and preliminary analysis to visu
   "failure_category": "fitting_issue" | "body_distortion" | "anatomical_error" | "quality_issue" | "other" | null,
   "confidence_score": "number",
   "garment_comparison": {
+    "generated_garment_type": "t-shirt" | "jacket" | "dress" | "pants" | "skirt" | "shoes" | "accessory" | "other" | null,
     "scores": { "color_fidelity": "number", "texture_realism": "number", "pattern_accuracy": "number", "fit_and_shape": "number", "logo_fidelity": "number", "detail_accuracy": "number" },
     "notes": "string"
   },
   "pose_and_body_analysis": {
     "original_camera_angle": { "shot_type": "full_shot" | "medium_shot" | "close_up" | "other", "camera_elevation": "eye_level" | "high_angle" | "low_angle", "camera_position": "frontal" | "three_quarter" | "profile" },
     "pose_changed": "boolean",
-    "scores": { "pose_preservation": "number", "anatomical_correctness": "number" },
+    "scores": { "pose_preservation": "number", "anatomical_correctness": "number", "body_type_preservation": "number" },
     "notes": "string"
   }
 }`;
