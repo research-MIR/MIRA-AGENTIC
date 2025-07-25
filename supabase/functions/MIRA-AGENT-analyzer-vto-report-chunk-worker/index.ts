@@ -77,6 +77,12 @@ serve(async (req) => {
   const logPrefix = `[VTO-Report-Chunk-Worker][${chunk_id}]`;
 
   try {
+    // Immediately set status to processing to prevent watchdog re-triggering
+    await supabase
+      .from('mira-agent-vto-report-chunks')
+      .update({ status: 'processing' })
+      .eq('id', chunk_id);
+
     const { data: chunkJob, error: fetchError } = await supabase
       .from('mira-agent-vto-report-chunks')
       .select('chunk_data')

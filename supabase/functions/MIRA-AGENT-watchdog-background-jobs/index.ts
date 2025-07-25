@@ -359,29 +359,37 @@ serve(async (req) => {
       console.log(`[Watchdog-BG][${requestId}] No jobs ready for step 2 found.`);
     }
 
-    // --- NEW Task 13: Handle Pending VTO Report Chunks ---
-    const { data: pendingChunks, error: chunkError } = await supabase
+    // --- Task 13: Handle Pending VTO Report Chunks ---
+    const { data: pendingChunk, error: chunkError } = await supabase
       .from('mira-agent-vto-report-chunks')
       .select('id')
       .eq('status', 'pending')
-      .limit(10); // Process up to 10 chunks per watchdog run
+      .limit(1)
+      .maybeSingle();
 
     if (chunkError) {
       console.error(`[Watchdog-BG][${requestId}] Error querying for pending report chunks:`, chunkError.message);
-    } else if (pendingChunks && pendingChunks.length > 0) {
-      console.log(`[Watchdog-BG][${requestId}] Found ${pendingChunks.length} pending report chunks. Invoking workers...`);
-      const chunkPromises = pendingChunks.map(chunk => 
+    } else if (pendingChunk) {
+      console.log(`[Watchdog-BG][${requestId}] Found pending report chunk ${pendingChunk.id}. Claiming and invoking worker...`);
+      
+      const { error: updateError } = await supabase
+        .from('mira-agent-vto-report-chunks')
+        .update({ status: 'processing' })
+        .eq('id', pendingChunk.id);
+
+      if (updateError) {
+        console.error(`[Watchdog-BG][${requestId}] Failed to claim chunk ${pendingChunk.id}:`, updateError.message);
+      } else {
         supabase.functions.invoke('MIRA-AGENT-analyzer-vto-report-chunk-worker', {
-          body: { chunk_id: chunk.id }
-        })
-      );
-      await Promise.allSettled(chunkPromises);
-      actionsTaken.push(`Triggered ${pendingChunks.length} VTO report chunk workers.`);
+          body: { chunk_id: pendingChunk.id }
+        }).catch(console.error);
+        actionsTaken.push(`Triggered VTO report chunk worker for ${pendingChunk.id}.`);
+      }
     } else {
       console.log(`[Watchdog-BG][${requestId}] No pending VTO report chunks found.`);
     }
 
-    // --- NEW Task 14: Handle Packs Ready for Synthesis ---
+    // --- Task 14: Handle Packs Ready for Synthesis ---
     const { data: readyPacks, error: readyPacksError } = await supabase.rpc('find_packs_ready_for_synthesis');
 
     if (readyPacksError) {
