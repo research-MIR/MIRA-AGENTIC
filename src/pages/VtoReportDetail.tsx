@@ -3,12 +3,12 @@ import { useLanguage } from "@/context/LanguageContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, AlertTriangle, Loader2, BrainCircuit, BarChart2, CheckCircle, XCircle, ImageIcon } from "lucide-react";
+import { ArrowLeft, AlertTriangle, Loader2, BrainCircuit, BarChart2, CheckCircle, XCircle, ImageIcon, Share2 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { SecureImageDisplay } from "@/components/VTO/SecureImageDisplay";
+import { useSecureImage } from "@/hooks/useSecureImage";
 import { useEffect, useState } from "react";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
@@ -19,7 +19,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Progress } from "@/components/ui/progress";
-import { useSecureImage } from "@/hooks/useSecureImage";
+import { ShareVtoReportModal } from "@/components/ShareVtoReportModal";
 
 interface ReportDetail {
   report_id: string;
@@ -43,8 +43,11 @@ interface ReportDetail {
   final_image_url: string;
 }
 
-interface PackData {
-  id: string;
+interface PackDetails {
+  pack_id: string;
+  created_at: string;
+  sharing_mode: 'private' | 'public_link';
+  is_owner: boolean;
   synthesis_report: string | null;
   synthesis_thinking: string | null;
 }
@@ -171,12 +174,14 @@ const VtoReportDetail = () => {
   const queryClient = useQueryClient();
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [selectedReport, setSelectedReport] = useState<ReportDetail | null>(null);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
 
-  const { data: packData, isLoading: isLoadingPack } = useQuery<PackData | null>({
-    queryKey: ['vtoPackData', packId],
+  const { data: packDetails, isLoading: isLoadingPack } = useQuery<PackDetails | null>({
+    queryKey: ['vtoPackDetails', packId],
     queryFn: async () => {
       if (!packId) return null;
-      const { data, error } = await supabase.from('mira-agent-vto-packs-jobs').select('id, synthesis_report, synthesis_thinking').eq('id', packId).single();
+      const { data, error } = await supabase.rpc('get_vto_pack_details', { p_pack_id: packId }).single();
+      if (error && error.code === 'PGRST116') return null;
       if (error) throw error;
       return data;
     },
@@ -186,19 +191,18 @@ const VtoReportDetail = () => {
   const { data: reportDetails, isLoading: isLoadingReports, error } = useQuery<ReportDetail[]>({
     queryKey: ['vtoReportDetail', packId],
     queryFn: async () => {
-      if (!packId || !session?.user) return [];
+      if (!packId) return [];
       const { data, error } = await supabase.rpc('get_vto_report_details_for_pack', {
-        p_pack_id: packId,
-        p_user_id: session.user.id
+        p_pack_id: packId
       });
       if (error) throw error;
       return data;
     },
-    enabled: !!packId && !!session?.user,
+    enabled: !!packId,
   });
 
   useEffect(() => {
-    if (!packId || !session?.user?.id) return;
+    if (!packId) return;
     const channel: RealtimeChannel = supabase
       .channel(`vto-report-detail-tracker-${packId}`)
       .on(
@@ -212,12 +216,12 @@ const VtoReportDetail = () => {
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'mira-agent-vto-packs-jobs', filter: `id=eq.${packId}` },
         (payload) => {
-          queryClient.setQueryData(['vtoPackData', packId], payload.new);
+          queryClient.setQueryData(['vtoPackDetails', packId], payload.new);
         }
       )
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [packId, session?.user?.id, supabase, queryClient]);
+  }, [packId, supabase, queryClient]);
 
   const handleGenerateAnalysis = async () => {
     if (!packId || !session?.user) return;
@@ -259,7 +263,7 @@ const VtoReportDetail = () => {
   );
 
   const isLoading = isLoadingPack || isLoadingReports;
-  const analysisInProgress = packData?.synthesis_report === 'Analysis in progress...';
+  const analysisInProgress = packDetails?.synthesis_report === 'Analysis in progress...';
 
   if (isLoading) {
     return <div className="p-8"><Skeleton className="h-12 w-1/3" /><div className="grid grid-cols-6 gap-4 mt-8">{[...Array(12)].map((_, i) => <Skeleton key={i} className="h-40 w-full" />)}</div></div>;
@@ -267,6 +271,10 @@ const VtoReportDetail = () => {
 
   if (error) {
     return <div className="p-8"><Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Error</AlertTitle><AlertDescription>{error.message}</AlertDescription></Alert></div>;
+  }
+
+  if (!packDetails) {
+    return <div className="p-8"><Alert><AlertTitle>Not Found</AlertTitle><AlertDescription>This report could not be found or you do not have access.</AlertDescription></Alert></div>;
   }
 
   return (
@@ -280,25 +288,33 @@ const VtoReportDetail = () => {
           <div className="flex justify-between items-center">
             <div>
               <h1 className="text-3xl font-bold">{t('vtoReportDetailTitle')}</h1>
-              <p className="text-muted-foreground">Pack ID: {packId}</p>
+              <p className="text-muted-foreground">Pack from {new Date(packDetails.created_at).toLocaleString()}</p>
             </div>
-            <Button onClick={handleGenerateAnalysis} disabled={isAnalyzing || analysisInProgress}>
-              {(isAnalyzing || analysisInProgress) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <BarChart2 className="mr-2 h-4 w-4" />}
-              {analysisInProgress ? "Analyzing..." : packData?.synthesis_report ? "Re-generate Analysis" : "Generate Strategic Analysis"}
-            </Button>
+            <div className="flex items-center gap-2">
+              {packDetails.is_owner && (
+                <Button variant="outline" onClick={() => setIsShareModalOpen(true)}>
+                  <Share2 className="mr-2 h-4 w-4" />
+                  Share
+                </Button>
+              )}
+              <Button onClick={handleGenerateAnalysis} disabled={isAnalyzing || analysisInProgress}>
+                {(isAnalyzing || analysisInProgress) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <BarChart2 className="mr-2 h-4 w-4" />}
+                {analysisInProgress ? "Analyzing..." : packDetails.synthesis_report ? "Re-generate Analysis" : "Generate Strategic Analysis"}
+              </Button>
+            </div>
           </div>
         </header>
 
         <div className="flex-1 overflow-y-auto">
           {(isAnalyzing || analysisInProgress) && <div className="flex justify-center p-8"><Loader2 className="h-8 w-8 animate-spin" /></div>}
           
-          {packData?.synthesis_report && !analysisInProgress && (
+          {packDetails.synthesis_report && !analysisInProgress && (
             <Card className="mb-8">
               <CardContent className="p-6">
                 <div className="markdown-content">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{packData.synthesis_report}</ReactMarkdown>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{packDetails.synthesis_report}</ReactMarkdown>
                 </div>
-                {packData.synthesis_thinking && (
+                {packDetails.synthesis_thinking && (
                   <Accordion type="single" collapsible className="w-full mt-4">
                     <AccordionItem value="item-1">
                       <AccordionTrigger>
@@ -309,7 +325,7 @@ const VtoReportDetail = () => {
                       </AccordionTrigger>
                       <AccordionContent>
                         <div className="markdown-content p-4 bg-muted rounded-md mt-2 text-sm">
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{packData.synthesis_thinking}</ReactMarkdown>
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{packDetails.synthesis_thinking}</ReactMarkdown>
                         </div>
                       </AccordionContent>
                     </AccordionItem>
@@ -338,6 +354,11 @@ const VtoReportDetail = () => {
         </div>
       </div>
       <ReportDetailModal isOpen={!!selectedReport} onClose={() => setSelectedReport(null)} report={selectedReport} />
+      <ShareVtoReportModal
+        isOpen={isShareModalOpen}
+        onClose={() => setIsShareModalOpen(false)}
+        pack={packDetails ? { pack_id: packDetails.pack_id, sharing_mode: packDetails.sharing_mode } : null}
+      />
     </>
   );
 };
