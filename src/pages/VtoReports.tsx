@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
 import { useLanguage } from "@/context/LanguageContext";
-import { BarChart2, CheckCircle, XCircle, Loader2, AlertTriangle, UserCheck2, BadgeAlert, FileText } from "lucide-react";
+import { BarChart2, CheckCircle, XCircle, Loader2, AlertTriangle, UserCheck2, BadgeAlert, FileText, RefreshCw } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -44,6 +44,7 @@ const VtoReports = () => {
   const { supabase, session } = useSession();
   const queryClient = useQueryClient();
   const [isAnalyzing, setIsAnalyzing] = useState<string | null>(null);
+  const [isRerunning, setIsRerunning] = useState<string | null>(null);
 
   const { data: reports, isLoading, error } = useQuery<QaReport[]>({
     queryKey: ['vtoQaReports', session?.user?.id],
@@ -141,6 +142,26 @@ const VtoReports = () => {
     }
   };
 
+  const handleRerunFailed = async (packId: string) => {
+    if (!session?.user) return;
+    setIsRerunning(packId);
+    const toastId = showLoading("Re-queuing failed analysis jobs...");
+    try {
+        const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-rerun-failed-analyses', {
+            body: { pack_id: packId, user_id: session.user.id }
+        });
+        if (error) throw error;
+        dismissToast(toastId);
+        showSuccess(data.message);
+        queryClient.invalidateQueries({ queryKey: ['vtoQaReports', session.user.id] });
+    } catch (err: any) {
+        dismissToast(toastId);
+        showError(`Operation failed: ${err.message}`);
+    } finally {
+        setIsRerunning(null);
+    }
+  };
+
   if (isLoading) {
     return <div className="p-8 space-y-4"><Skeleton className="h-32 w-full" /><Skeleton className="h-32 w-full" /></div>;
   }
@@ -157,12 +178,35 @@ const VtoReports = () => {
       </header>
       <div className="space-y-4">
         {packSummaries.map(report => {
+          const unknownFailures = report.failure_summary['Unknown'] || 0;
           return (
             <Card key={report.pack_id}>
               <CardHeader>
                 <CardTitle className="flex justify-between items-center">
                   <span>Pack from {new Date(report.created_at).toLocaleString()}</span>
                   <div className="flex items-center gap-2">
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button variant="secondary" size="sm" disabled={unknownFailures === 0 || isRerunning === report.pack_id}>
+                          {isRerunning === report.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+                          {t('rerunUnknownFailures', { count: unknownFailures })}
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>{t('rerunFailedAnalysesTitle')}</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            {t('rerunFailedAnalysesDescription', { count: unknownFailures })}
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>{t('cancel')}</AlertDialogCancel>
+                          <AlertDialogAction onClick={() => handleRerunFailed(report.pack_id)}>
+                            {t('rerunFailedAnalysesAction')}
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
                         <Button variant="outline" size="sm" disabled={isAnalyzing === report.pack_id}>

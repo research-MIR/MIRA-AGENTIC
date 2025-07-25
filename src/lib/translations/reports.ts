@@ -13,6 +13,10 @@ export const reportsTranslations = {
     allJobs: "Tutti i Job",
     passedJobs: "Job Approvati",
     failedJobs: "Job Falliti",
+    rerunUnknownFailures: "Riesegui Sconosciuti ({count})",
+    rerunFailedAnalysesTitle: "Rieseguire le Analisi Fallite?",
+    rerunFailedAnalysesDescription: "Questo rimetterà in coda i {count} job che sono falliti con un errore 'Sconosciuto'. Questo non influenzerà i job falliti per altri motivi. Continuare?",
+    rerunFailedAnalysesAction: "Sì, Riesegui Analisi",
   },
   en: {
     vtoAnalysisReports: "VTO Analysis Reports",
@@ -28,5 +32,9 @@ export const reportsTranslations = {
     allJobs: "All Jobs",
     passedJobs: "Passed Jobs",
     failedJobs: "Failed Jobs",
+    rerunUnknownFailures: "Rerun Unknown ({count})",
+    rerunFailedAnalysesTitle: "Rerun Failed Analyses?",
+    rerunFailedAnalysesDescription: "This will re-queue the {count} jobs that failed with an 'Unknown' error. This will not affect jobs that failed for other reasons. Continue?",
+    rerunFailedAnalysesAction: "Yes, Rerun Analyses",
   },
 };
