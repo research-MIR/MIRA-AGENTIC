@@ -20,6 +20,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Progress } from "@/components/ui/progress";
 import { ShareVtoReportModal } from "@/components/ShareVtoReportModal";
+import { SecureImageDisplay } from "@/components/VTO/SecureImageDisplay";
 
 interface ReportDetail {
   report_id: string;
@@ -113,9 +114,9 @@ const ReportDetailModal = ({ report, isOpen, onClose }: { report: ReportDetail |
                     <CardHeader><CardTitle className="text-base">Overall Assessment</CardTitle></CardHeader>
                     <CardContent className="space-y-2 text-sm">
                       <BooleanIndicator value={reportData.overall_pass} label="Overall Pass" />
-                      {reportData.pass_with_notes && <p><strong>Note:</strong> <Badge variant="secondary">{reportData.pass_notes_category?.replace(/_/g, ' ')}</Badge></p>}
+                      {reportData.pass_with_notes && <div className="text-sm"><strong>Note:</strong> <Badge variant="secondary">{reportData.pass_notes_category?.replace(/_/g, ' ')}</Badge></div>}
                       <p><strong>Confidence:</strong> {(normalizedConfidence * 100).toFixed(0)}%</p>
-                      {reportData.failure_category && <p><strong>Failure Category:</strong> <Badge variant="destructive">{reportData.failure_category.replace(/_/g, ' ')}</Badge></p>}
+                      {reportData.failure_category && <div className="text-sm"><strong>Failure Category:</strong> <Badge variant="destructive">{reportData.failure_category.replace(/_/g, ' ')}</Badge></div>}
                     </CardContent>
                   </Card>
                   <Accordion type="multiple" defaultValue={['garment', 'pose', 'quality']}>
@@ -181,7 +182,7 @@ const VtoReportDetail = () => {
     queryFn: async () => {
       if (!packId) return null;
       const { data, error } = await supabase.rpc('get_vto_pack_details', { p_pack_id: packId }).single();
-      if (error && error.code === 'PGRST116') return null;
+      if (error && error.code === 'PGRST116') return null; // Not found or no access
       if (error) throw error;
       return data;
     },
