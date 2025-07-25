@@ -1,6 +1,7 @@
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { useLanguage } from "@/context/LanguageContext";
+import PasswordForm from "@/components/Settings/PasswordForm";
 
 const Settings = () => {
   const { session } = useSession();
@@ -12,7 +13,7 @@ const Settings = () => {
         <h1 className="text-3xl font-bold">{t('settings')}</h1>
         <p className="text-muted-foreground">{t('manageYourAccount')}</p>
       </header>
-      <div className="max-w-2xl">
+      <div className="max-w-2xl space-y-8">
         <Card>
           <CardHeader>
             <CardTitle>{t('accountInformation')}</CardTitle>
@@ -25,6 +26,8 @@ const Settings = () => {
             </div>
           </CardContent>
         </Card>
+
+        <PasswordForm />
       </div>
     </div>
   );
