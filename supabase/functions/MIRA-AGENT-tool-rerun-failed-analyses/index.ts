@@ -37,6 +37,7 @@ serve(async (req) => {
     }
 
     // Find failed reports with 'Unknown' or NULL failure category
+    console.log(`${logPrefix} Searching for failed reports where failure_category is NULL or 'Unknown'.`);
     const { data: failedReports, error: fetchError } = await supabase
       .from('mira-agent-vto-qa-reports')
       .select('id')
@@ -47,6 +48,7 @@ serve(async (req) => {
     if (fetchError) throw new Error(`Failed to fetch failed reports: ${fetchError.message}`);
 
     if (!failedReports || failedReports.length === 0) {
+      console.log(`${logPrefix} No 'Unknown' failed analyses found to rerun.`);
       return new Response(JSON.stringify({ success: true, message: "No 'Unknown' failed analyses found to rerun." }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 200,
@@ -54,7 +56,7 @@ serve(async (req) => {
     }
 
     const reportIdsToRerun = failedReports.map(r => r.id);
-    console.log(`${logPrefix} Found ${reportIdsToRerun.length} reports to rerun.`);
+    console.log(`${logPrefix} Found ${reportIdsToRerun.length} reports to rerun with IDs:`, reportIdsToRerun);
 
     // Reset the status of these reports
     const { error: updateError } = await supabase
