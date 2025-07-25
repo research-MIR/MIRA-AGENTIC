@@ -289,7 +289,7 @@ const VtoReportDetail = () => {
           <div className="flex justify-between items-center">
             <div>
               <h1 className="text-3xl font-bold">{t('vtoReportDetailTitle')}</h1>
-              <p className="text-muted-foreground">Pack from {new Date(packDetails.created_at).toLocaleString()}</p>
+              <div className="text-muted-foreground">Pack from {new Date(packDetails.created_at).toLocaleString()}</div>
             </div>
             <div className="flex items-center gap-2">
               {packDetails.is_owner && (
