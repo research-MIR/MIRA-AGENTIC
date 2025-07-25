@@ -73,7 +73,7 @@ const BooleanIndicator = ({ value, label }: { value: boolean, label: string }) =
 const ImageCard = ({ title, url }: { title: string, url?: string }) => {
   const { displayUrl, isLoading, error } = useSecureImage(url);
   return (
-    <div className="space-y-1">
+    <div className="space-y-2">
       <h3 className="text-sm font-semibold text-center text-muted-foreground">{title}</h3>
       <div className="aspect-square bg-muted rounded-md flex items-center justify-center overflow-hidden">
         {!url ? <div className="text-xs text-muted-foreground">Not available</div> :
@@ -201,6 +201,26 @@ const VtoReportDetail = () => {
     },
     enabled: !!packId,
   });
+
+  useEffect(() => {
+    if (packDetails) {
+      console.log('[VtoReportDetail] Pack Details Loaded:', JSON.stringify(packDetails, null, 2));
+    }
+  }, [packDetails]);
+
+  useEffect(() => {
+    if (reportDetails && reportDetails.length > 0) {
+      console.log(`[VtoReportDetail] Report Details Loaded (${reportDetails.length} reports).`);
+      console.log('[VtoReportDetail] Details for first report:', JSON.stringify(reportDetails[0], null, 2));
+      console.log(`[VtoReportDetail] First report image URLs:`, {
+        person: reportDetails[0].source_person_image_url,
+        garment: reportDetails[0].source_garment_image_url,
+        final: reportDetails[0].final_image_url,
+      });
+    } else if (reportDetails) {
+        console.log('[VtoReportDetail] Report Details query returned 0 reports.');
+    }
+  }, [reportDetails]);
 
   useEffect(() => {
     if (!packId) return;
