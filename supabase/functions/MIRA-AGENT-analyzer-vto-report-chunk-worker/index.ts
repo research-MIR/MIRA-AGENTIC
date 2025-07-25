@@ -41,10 +41,10 @@ Your entire response MUST be a single, valid JSON object. Do not include any tex
   2.  **Garment-Adjusted Hit Rate:** Recalculate the pass rate, treating jobs that failed *only* due to 'Garment Comparison' issues as a 'pass'.
   3.  **Complex Pattern Forgiveness Hit Rate:** Recalculate the pass rate, treating jobs that failed *only* due to 'Garment Comparison' issues related to 'pattern' on a garment of 'complex' complexity as a 'pass'.
 
-**Step 3: Camera Angle Deep Dive**
-- Group all reports by \`original_camera_angle.shot_type\`.
-- For each camera angle group, perform a full analysis: Total Jobs, Overall Pass Rate %, and a breakdown of failure categories.
-- Conclude with a summary of which angles are most and least reliable.
+**Step 3: Camera Angle & Body Type Deep Dive**
+- Group all reports by \`original_camera_angle.shot_type\`. For each group, calculate the pass rate.
+- Group all reports by \`pose_and_body_analysis.body_type\`. For each group, calculate the pass rate and the average \`body_type_preservation\` score.
+- Conclude with a summary of which angles and body types are most and least reliable.
 
 **Step 4: Root Cause Analysis of Failures**
 - Analyze the \`mismatch_reason\` and \`notes\` fields for all failed reports.
@@ -81,16 +81,13 @@ A brief, one-paragraph overview of the pack's performance and the most critical 
 - **Creative Additions:**
   - Unsolicited Garments Generated: Z
 
-## 3. Camera Angle Deep Dive
-### Full Shot
-- Pass Rate: XX.X%
-- Key Failure Types: ...
-### Medium Shot
-- Pass Rate: XX.X%
-- Key Failure Types: ...
-*(...and so on for each angle)*
+## 3. Performance by Body Type
+*(A Markdown table with columns: Body Type, Total Jobs, Pass Rate %, Avg. Body Preservation Score)*
 
-## 4. Strategic Recommendations
+## 4. Camera Angle Deep Dive
+*(A list or table showing the pass rate for each camera angle)*
+
+## 5. Strategic Recommendations
 ### Hard Limits & Known Issues
 - (Bulleted list of identified limitations, supported by quantitative data.)
 ### Actionable Advice for Future Packs

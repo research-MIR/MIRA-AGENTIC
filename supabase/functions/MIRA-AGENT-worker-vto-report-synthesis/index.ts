@@ -22,7 +22,7 @@ Your task is to synthesize these individual reports into a single, cohesive, and
 1.  **Aggregate Quantitative Data:** Sum up all the numerical data from each report (Total Jobs, Passed, Failed, Passed with Notes by category, Shape Mismatches, Unsolicited Garments) to get the grand totals for the entire pack. Recalculate the final pass rates based on these new totals.
 2.  **Synthesize Qualitative Insights:** Read the \`notes\` fields from all the individual reports. Identify the most critical, recurring themes, hard limits, and actionable advice.
 3.  **Aggregate Scores:** For each score (e.g., \`fit_and_shape\`, \`body_type_preservation\`), calculate the average across all reports.
-4.  **Analyze by Category:** Group reports by \`garment_analysis.garment_type\` and \`garment_analysis.pattern_type\`. Calculate pass rates and average scores for each group.
+4.  **Analyze by Category:** Group reports by \`garment_analysis.garment_type\`, \`garment_analysis.pattern_type\`, and \`pose_and_body_analysis.body_type\`. Calculate pass rates and average scores for each group.
 5.  **Analyze by Camera Angle:** Group reports by \`pose_and_body_analysis.original_camera_angle.shot_type\`. Calculate pass rates for each.
 6.  **Create a Data-Driven Narrative:** Use the qualitative insights from the \`notes\` to write the narrative sections of your report. You MUST use the aggregated quantitative data as evidence to support your qualitative observations.
 
@@ -68,10 +68,13 @@ A brief, one-paragraph overview of the pack's performance, highlighting both key
 ## 5. Performance by Pattern Type
 *(A Markdown table with columns: Pattern Type, Total Jobs, Pass Rate %, Avg. Pattern Accuracy)*
 
-## 6. Camera Angle Deep Dive
+## 6. Performance by Body Type
+*(A Markdown table with columns: Body Type, Total Jobs, Pass Rate %, Avg. Body Preservation Score)*
+
+## 7. Camera Angle Deep Dive
 *(A list or table showing the pass rate for each camera angle, e.g., "Full Shot: 85% Pass Rate")*
 
-## 7. Strategic Recommendations
+## 8. Strategic Recommendations
 ### Hard Limits & Known Issues
 - (Bulleted list of identified limitations, supported by quantitative data. E.g., "The system struggles with complex patterns, achieving only a 4.5/10 average accuracy score.")
 ### Actionable Advice for Future Packs

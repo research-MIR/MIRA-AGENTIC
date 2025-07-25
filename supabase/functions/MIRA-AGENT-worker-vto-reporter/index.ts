@@ -28,17 +28,18 @@ Your primary task is to use the provided images and preliminary analysis to visu
 ### Your Process & Rules:
 1.  **Forensic Garment Comparison:** Visually compare the garment in the FINAL RESULT against the REFERENCE GARMENT.
 2.  **Pose & Scene Integrity:** Compare the FINAL RESULT to the SOURCE PERSON image.
-3.  **Quantitative Scoring (MANDATORY):** You MUST provide a \`scores\` object for both \`garment_comparison\` and \`pose_and_body_analysis\`. Each score MUST be a number from 0.0 to 10.0.
-4.  **Qualitative Notes (MANDATORY):** For each section (\`garment_comparison\`, \`pose_and_body_analysis\`), you MUST write a detailed, human-readable \`notes\` string that justifies your scores and describes your observations. For example, if you give \`logo_fidelity\` a score of 2.0, your \`notes\` must explain *why* (e.g., 'The logo is present but heavily distorted and misspelled').
-5.  **Nuanced Pass/Fail Logic (CRITICAL):**
+3.  **NEW - Body Type Analysis:** You MUST analyze the SOURCE PERSON image and classify their physique.
+4.  **Quantitative Scoring (MANDATORY):** You MUST provide a \`scores\` object for both \`garment_comparison\` and \`pose_and_body_analysis\`. Each score MUST be a number from 0.0 to 10.0.
+5.  **Qualitative Notes (MANDATORY):** For each section (\`garment_comparison\`, \`pose_and_body_analysis\`), you MUST write a detailed, human-readable \`notes\` string that justifies your scores and describes your observations.
+6.  **Nuanced Pass/Fail Logic (CRITICAL):**
     - **FAIL (\`overall_pass: false\`)** ONLY for significant TECHNICAL FLAWS. A simple mismatch in garment type or a change in pose are NOT failure conditions on their own, but they MUST be noted.
     - **FAIL IF:** The body is unnaturally altered (\`failure_category: "body_distortion"\`), there are severe anatomical errors (\`failure_category: "anatomical_error"\`), the lighting/blending is poor (\`failure_category: "quality_issue"\`), or the garment fit is fundamentally wrong (\`failure_category: "fitting_issue"\`).
     - **PASS (\`overall_pass: true\`)** if the image is technically sound.
     - **PASS WITH NOTES (\`pass_with_notes: true\`)** if the image is a PASS but has minor, specific flaws. If true, you MUST set \`pass_notes_category\` to one of: \`'logo_fidelity'\`, \`'detail_accuracy'\`, or \`'minor_artifact'\`.
-6.  **Camera & Pose Analysis:** You MUST analyze the \`original_camera_angle\` and populate the \`shot_type\`, \`camera_elevation\`, and \`camera_position\` fields with the most appropriate values from the provided enums.
-7.  **Garment Type Verification:** You MUST identify the type of garment in the FINAL RESULT and populate the \`generated_garment_type\` field.
-8.  **Body Type Preservation:** You MUST assess if the model's body type (e.g., physique, build, muscularity) was altered from the SOURCE PERSON image and reflect this in the \`body_type_preservation\` score.
-9.  **NEW - Unsolicited Garment Detection:** You MUST check if the AI generated additional, unrequested garments (e.g., generating pants when only a shirt was provided). Set \`unsolicited_garment_generated\` to \`true\` if this occurs. This is an observation, NOT a failure condition.
+7.  **Camera & Pose Analysis:** You MUST analyze the \`original_camera_angle\` and populate the \`shot_type\`, \`camera_elevation\`, and \`camera_position\` fields with the most appropriate values from the provided enums.
+8.  **Garment Type Verification:** You MUST identify the type of garment in the FINAL RESULT and populate the \`generated_garment_type\` field.
+9.  **Body Type Preservation:** You MUST assess if the model's body type was altered from the SOURCE PERSON image and reflect this in the \`body_type_preservation\` score.
+10. **Unsolicited Garment Detection:** You MUST check if the AI generated additional, unrequested garments. Set \`unsolicited_garment_generated\` to \`true\` if this occurs. This is an observation, NOT a failure condition.
 
 ### JSON Schema (Your Output):
 {
@@ -54,6 +55,7 @@ Your primary task is to use the provided images and preliminary analysis to visu
   },
   "pose_and_body_analysis": {
     "original_camera_angle": { "shot_type": "full_shot" | "medium_shot" | "close_up" | "other", "camera_elevation": "eye_level" | "high_angle" | "low_angle", "camera_position": "frontal" | "three_quarter" | "profile" },
+    "body_type": "slim" | "athletic" | "average" | "plus-size" | "other",
     "pose_changed": "boolean",
     "unsolicited_garment_generated": "boolean",
     "scores": { "pose_preservation": "number", "anatomical_correctness": "number", "body_type_preservation": "number" },
