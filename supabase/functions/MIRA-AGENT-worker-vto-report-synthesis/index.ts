@@ -103,7 +103,7 @@ serve(async (req) => {
 
     const { data: reports, error: rpcError } = await supabase.rpc('get_vto_report_details_for_pack', {
       p_pack_id: pack_id,
-      p_user_id: user_id
+      p_user_id_override: user_id
     });
 
     if (rpcError) throw new Error(`Failed to fetch report details: ${rpcError.message}`);
