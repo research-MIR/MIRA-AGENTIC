@@ -50,9 +50,10 @@ Your entire response MUST be a single, valid JSON object. Do not include any tex
 - Analyze the \`mismatch_reason\` and \`notes\` fields for all failed reports.
 - Identify and quantify the top 3-5 recurring themes or specific keywords that appear in failures.
 
-**Step 5: NEW - Shape & Body Integrity Analysis**
+**Step 5: Shape, Body, & Creative Integrity Analysis**
 - Calculate the number of shape mismatches (where \`generated_garment_type\` does not match \`garment_analysis.garment_type\`).
 - Calculate the average \`body_type_preservation\` score for all reports in this chunk.
+- Count the number of times \`unsolicited_garment_generated\` was true.
 
 **Step 6: Strategic Synthesis & Recommendations**
 - Based on all the data above, formulate your final conclusions on Hard Limits, The Safe Zone, and Actionable Recommendations.
@@ -77,6 +78,8 @@ A brief, one-paragraph overview of the pack's performance and the most critical 
 - **Integrity Scores:**
   - Shape Mismatches: X
   - Avg. Body Preservation Score: Y.Y/10
+- **Creative Additions:**
+  - Unsolicited Garments Generated: Z
 
 ## 3. Camera Angle Deep Dive
 ### Full Shot
@@ -89,9 +92,9 @@ A brief, one-paragraph overview of the pack's performance and the most critical 
 
 ## 4. Strategic Recommendations
 ### Hard Limits & Known Issues
-- (Bulleted list of identified limitations, supported by quantitative data. E.g., "The system struggles with complex patterns, achieving only a 4.5/10 average accuracy score.")
+- (Bulleted list of identified limitations, supported by quantitative data.)
 ### Actionable Advice for Future Packs
-- (Bulleted list of concrete recommendations, supported by both quantitative and qualitative insights from the \`notes\`.)
+- (Bulleted list of concrete recommendations, supported by both quantitative and qualitative insights.)
 `;
 
 const extractJson = (text: string): any => {

@@ -6,7 +6,7 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const MODEL_NAME = "gemini-2.5-pro-preview-06-05";
-const CHUNK_SIZE = 20;
+const CHUNK_SIZE = 250;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -19,13 +19,12 @@ const finalSynthesizerPrompt = `You are a master Editor-in-Chief AI. You will be
 Your task is to synthesize these individual reports into a single, cohesive, and comprehensive final report. You must not lose any detail. Your final output MUST follow the exact structure and format outlined below.
 
 ### Your Process:
-1.  **Aggregate Quantitative Data:** Sum up all the numerical data from each report (Total Jobs, Passed, Failed, Passed with Notes by category) to get the grand totals for the entire pack. Recalculate the final pass rates based on these new totals.
+1.  **Aggregate Quantitative Data:** Sum up all the numerical data from each report (Total Jobs, Passed, Failed, Passed with Notes by category, Shape Mismatches, Unsolicited Garments) to get the grand totals for the entire pack. Recalculate the final pass rates based on these new totals.
 2.  **Synthesize Qualitative Insights:** Read the \`notes\` fields from all the individual reports. Identify the most critical, recurring themes, hard limits, and actionable advice.
-3.  **Aggregate Scores:** For each score (e.g., \`fit_and_shape\`), calculate the average across all reports.
+3.  **Aggregate Scores:** For each score (e.g., \`fit_and_shape\`, \`body_type_preservation\`), calculate the average across all reports.
 4.  **Analyze by Category:** Group reports by \`garment_analysis.garment_type\` and \`garment_analysis.pattern_type\`. Calculate pass rates and average scores for each group.
 5.  **Analyze by Camera Angle:** Group reports by \`pose_and_body_analysis.original_camera_angle.shot_type\`. Calculate pass rates for each.
-6.  **NEW - Analyze Shape Integrity:** For each garment type, calculate the percentage of times the \`generated_garment_type\` did NOT match the original \`garment_analysis.garment_type\`.
-7.  **Create a Data-Driven Narrative:** Use the qualitative insights from the \`notes\` to write the narrative sections of your report. You MUST use the aggregated quantitative data as evidence to support your qualitative observations.
+6.  **Create a Data-Driven Narrative:** Use the qualitative insights from the \`notes\` to write the narrative sections of your report. You MUST use the aggregated quantitative data as evidence to support your qualitative observations.
 
 ### OUTPUT FORMAT
 Your entire response MUST be a single, valid JSON object with "thinking" and "report" keys.
@@ -56,6 +55,9 @@ A brief, one-paragraph overview of the pack's performance, highlighting both key
   - Detail Accuracy: Z.Z
   - Pose Preservation: A.A
   - Body Type Preservation: B.B
+- **Integrity & Creative Metrics:**
+  - Garment Shape Mismatches: X
+  - Unsolicited Garments Generated (Creative Additions): Y
 
 ## 3. Garment Shape Integrity
 *(A Markdown table with columns: Garment Type, Total Jobs, Shape Mismatch %)*

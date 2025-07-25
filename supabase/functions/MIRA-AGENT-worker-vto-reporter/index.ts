@@ -36,8 +36,9 @@ Your primary task is to use the provided images and preliminary analysis to visu
     - **PASS (\`overall_pass: true\`)** if the image is technically sound.
     - **PASS WITH NOTES (\`pass_with_notes: true\`)** if the image is a PASS but has minor, specific flaws. If true, you MUST set \`pass_notes_category\` to one of: \`'logo_fidelity'\`, \`'detail_accuracy'\`, or \`'minor_artifact'\`.
 6.  **Camera & Pose Analysis:** You MUST analyze the \`original_camera_angle\` and populate the \`shot_type\`, \`camera_elevation\`, and \`camera_position\` fields with the most appropriate values from the provided enums.
-7.  **NEW - Garment Type Verification:** You MUST identify the type of garment in the FINAL RESULT and populate the \`generated_garment_type\` field.
-8.  **NEW - Body Type Preservation:** You MUST assess if the model's body type (e.g., physique, build, muscularity) was altered from the SOURCE PERSON image and reflect this in the \`body_type_preservation\` score.
+7.  **Garment Type Verification:** You MUST identify the type of garment in the FINAL RESULT and populate the \`generated_garment_type\` field.
+8.  **Body Type Preservation:** You MUST assess if the model's body type (e.g., physique, build, muscularity) was altered from the SOURCE PERSON image and reflect this in the \`body_type_preservation\` score.
+9.  **NEW - Unsolicited Garment Detection:** You MUST check if the AI generated additional, unrequested garments (e.g., generating pants when only a shirt was provided). Set \`unsolicited_garment_generated\` to \`true\` if this occurs. This is an observation, NOT a failure condition.
 
 ### JSON Schema (Your Output):
 {
@@ -54,6 +55,7 @@ Your primary task is to use the provided images and preliminary analysis to visu
   "pose_and_body_analysis": {
     "original_camera_angle": { "shot_type": "full_shot" | "medium_shot" | "close_up" | "other", "camera_elevation": "eye_level" | "high_angle" | "low_angle", "camera_position": "frontal" | "three_quarter" | "profile" },
     "pose_changed": "boolean",
+    "unsolicited_garment_generated": "boolean",
     "scores": { "pose_preservation": "number", "anatomical_correctness": "number", "body_type_preservation": "number" },
     "notes": "string"
   }
