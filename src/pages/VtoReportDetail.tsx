@@ -76,7 +76,7 @@ const ImageCard = ({ title, url }: { title: string, url?: string }) => {
     <div className="space-y-1">
       <h3 className="text-sm font-semibold text-center text-muted-foreground">{title}</h3>
       <div className="aspect-square bg-muted rounded-md flex items-center justify-center overflow-hidden">
-        {!url ? <p className="text-xs text-muted-foreground">Not available</p> :
+        {!url ? <div className="text-xs text-muted-foreground">Not available</div> :
          isLoading ? <Loader2 className="h-8 w-8 animate-spin" /> :
          error ? <AlertTriangle className="h-8 w-8 text-destructive" /> :
          displayUrl ? <img src={displayUrl} alt={title} className="max-w-full max-h-full object-contain" /> : null
@@ -115,7 +115,7 @@ const ReportDetailModal = ({ report, isOpen, onClose }: { report: ReportDetail |
                     <CardContent className="space-y-2 text-sm">
                       <BooleanIndicator value={reportData.overall_pass} label="Overall Pass" />
                       {reportData.pass_with_notes && <div className="text-sm"><strong>Note:</strong> <Badge variant="secondary">{reportData.pass_notes_category?.replace(/_/g, ' ')}</Badge></div>}
-                      <p><strong>Confidence:</strong> {(normalizedConfidence * 100).toFixed(0)}%</p>
+                      <div><strong>Confidence:</strong> {(normalizedConfidence * 100).toFixed(0)}%</div>
                       {reportData.failure_category && <div className="text-sm"><strong>Failure Category:</strong> <Badge variant="destructive">{reportData.failure_category.replace(/_/g, ' ')}</Badge></div>}
                     </CardContent>
                   </Card>
