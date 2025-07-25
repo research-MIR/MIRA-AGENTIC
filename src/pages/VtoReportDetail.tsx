@@ -131,7 +131,7 @@ const ReportDetailModal = ({ report, isOpen, onClose }: { report: ReportDetail |
                           <ScoreIndicator score={reportData.garment_comparison?.scores?.logo_fidelity} label="Logo Fidelity" />
                           <ScoreIndicator score={reportData.garment_comparison?.scores?.detail_accuracy} label="Detail Accuracy" />
                         </div>
-                        <p className="text-xs italic text-muted-foreground pt-2 border-t border-border/50"><strong>Inspector Notes:</strong> {reportData.garment_comparison?.notes}</p>
+                        <div className="text-xs italic text-muted-foreground pt-2 border-t border-border/50"><strong>Inspector Notes:</strong> {reportData.garment_comparison?.notes}</div>
                       </AccordionContent>
                     </AccordionItem>
                     <AccordionItem value="pose">
@@ -142,7 +142,7 @@ const ReportDetailModal = ({ report, isOpen, onClose }: { report: ReportDetail |
                           <ScoreIndicator score={reportData.pose_and_body_analysis?.scores?.anatomical_correctness} label="Anatomical Correctness" />
                         </div>
                         <BooleanIndicator value={!reportData.pose_and_body_analysis?.pose_changed} label="Pose Maintained" />
-                        <p className="text-xs italic text-muted-foreground"><strong>Inspector Notes:</strong> {reportData.pose_and_body_analysis?.notes}</p>
+                        <div className="text-xs italic text-muted-foreground"><strong>Inspector Notes:</strong> {reportData.pose_and_body_analysis?.notes}</div>
                       </AccordionContent>
                     </AccordionItem>
                   </Accordion>
