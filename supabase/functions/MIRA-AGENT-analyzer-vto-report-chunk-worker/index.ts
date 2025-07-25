@@ -1,8 +1,10 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { GoogleGenAI } from 'https://esm.sh/@google/genai@0.15.0';
+import { GoogleGenAI, GenerationResult } from 'https://esm.sh/@google/genai@0.15.0';
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const MODEL_NAME = "gemini-2.5-pro-preview-06-05";
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 1500;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -80,11 +82,9 @@ A brief, one-paragraph overview of the pack's performance and the most critical 
 
 ## 4. Strategic Recommendations
 ### Hard Limits & Known Issues
-- (Bulleted list of identified limitations)
-### The Safe Zone: Your Most Reliable Inputs
-- (Description of the ideal conditions for success)
+- (Bulleted list of identified limitations, supported by quantitative data. E.g., "The system struggles with complex patterns, achieving only a 4.5/10 average accuracy score.")
 ### Actionable Advice for Future Packs
-- (Bulleted list of concrete recommendations)
+- (Bulleted list of concrete recommendations, supported by both quantitative and qualitative insights from the \`notes\`.)
 `;
 
 const extractJson = (text: string): any => {
@@ -105,12 +105,36 @@ serve(async (req) => {
     }
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
-    const result = await ai.models.generateContent({
-        model: MODEL_NAME,
-        contents: [{ role: 'user', parts: [{ text: `Here is the JSON data for the QA reports: ${JSON.stringify(reports_chunk)}` }] }],
-        generationConfig: { responseMimeType: "application/json" },
-        config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
-    });
+    let result: GenerationResult | null = null;
+    let lastError: Error | null = null;
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+            console.log(`[VTO-Report-Chunk-Worker] Calling Gemini API, attempt ${attempt}/${MAX_RETRIES}...`);
+            result = await ai.models.generateContent({
+                model: MODEL_NAME,
+                contents: [{ role: 'user', parts: [{ text: `Here is the JSON data for the QA reports: ${JSON.stringify(reports_chunk)}` }] }],
+                generationConfig: { responseMimeType: "application/json" },
+                config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
+            });
+            lastError = null; // Clear error on success
+            break; // Exit loop on success
+        } catch (error) {
+            lastError = error;
+            console.warn(`[VTO-Report-Chunk-Worker] Attempt ${attempt} failed:`, error.message);
+            if (attempt < MAX_RETRIES) {
+                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS * attempt)); // Exponential backoff
+            }
+        }
+    }
+
+    if (lastError) {
+        throw lastError; // Rethrow the last error if all retries fail
+    }
+
+    if (!result) {
+        throw new Error("AI model failed to respond after all retries.");
+    }
 
     const analysisResult = extractJson(result.text);
     if (!analysisResult.thinking || !analysisResult.report) {

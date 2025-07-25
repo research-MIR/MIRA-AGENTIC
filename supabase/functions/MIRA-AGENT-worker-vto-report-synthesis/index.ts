@@ -121,13 +121,31 @@ serve(async (req) => {
         });
     });
 
-    const chunkResults = await Promise.all(chunkPromises);
-    const chunkReports = chunkResults.map(result => {
-        if (result.error) throw new Error(`A chunk worker failed: ${result.error.message}`);
-        return result.data;
-    });
+    const chunkResults = await Promise.allSettled(chunkPromises);
+    
+    const successfulResults = chunkResults
+        .filter(result => result.status === 'fulfilled' && !result.value.error)
+        .map((result: any) => result.value.data);
 
-    console.log(`${logPrefix} All ${chunkReports.length} chunk workers completed. Starting final synthesis.`);
+    const failedResults = chunkResults.filter(result => result.status === 'rejected' || (result.status === 'fulfilled' && result.value.error));
+    
+    if (failedResults.length > 0) {
+        console.warn(`[VTO-Report-Worker][${pack_id}] ${failedResults.length}/${chunks.length} chunk workers failed. Proceeding with partial data.`);
+        failedResults.forEach((result: any) => {
+            if (result.status === 'rejected') {
+                console.error(` - Worker rejected with reason:`, result.reason);
+            } else {
+                console.error(` - Worker fulfilled but returned an error:`, result.value.error);
+            }
+        });
+    }
+
+    if (successfulResults.length === 0) {
+        throw new Error("All chunk analysis workers failed. Cannot synthesize report.");
+    }
+
+    const chunkReports = successfulResults;
+    console.log(`${logPrefix} ${chunkReports.length} chunk workers completed successfully. Starting final synthesis.`);
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
     const result = await ai.models.generateContent({
