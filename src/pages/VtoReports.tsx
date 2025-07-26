@@ -39,6 +39,12 @@ interface QaReport {
 interface PackSummary {
   pack_id: string;
   created_at: string;
+  metadata: {
+    name?: string;
+    refinement_of_pack_id?: string;
+    total_pairs: number;
+    engine?: 'google' | 'bitstudio';
+  };
   total_jobs: number;
   passed_perfect: number;
   passed_pose_change: number;
@@ -59,13 +65,17 @@ const VtoReports = () => {
   const [isRerunning, setIsRerunning] = useState<string | null>(null);
   const [isStartingRefinement, setIsStartingRefinement] = useState<string | null>(null);
 
-  const { data: reports, isLoading, error } = useQuery<QaReport[]>({
-    queryKey: ['vtoQaReports', session?.user?.id],
+  const { data: reports, isLoading, error } = useQuery<any[]>({ // Using any for now to accommodate packs table
+    queryKey: ['vtoQaReportsAndPacks', session?.user?.id],
     queryFn: async () => {
       if (!session?.user) return [];
-      const { data, error } = await supabase.rpc('get_vto_qa_reports_for_user', { p_user_id: session.user.id });
-      if (error) throw error;
-      return data;
+      const { data: reports, error: reportsError } = await supabase.rpc('get_vto_qa_reports_for_user', { p_user_id: session.user.id });
+      if (reportsError) throw reportsError;
+
+      const { data: packs, error: packsError } = await supabase.from('mira-agent-vto-packs-jobs').select('id, created_at, metadata').eq('user_id', session.user.id);
+      if (packsError) throw packsError;
+
+      return { reports, packs };
     },
     enabled: !!session?.user,
   });
@@ -78,7 +88,14 @@ const VtoReports = () => {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'mira-agent-vto-qa-reports', filter: `user_id=eq.${session.user.id}` },
         () => {
-          queryClient.invalidateQueries({ queryKey: ['vtoQaReports', session.user.id] });
+          queryClient.invalidateQueries({ queryKey: ['vtoQaReportsAndPacks', session.user.id] });
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'mira-agent-vto-packs-jobs', filter: `user_id=eq.${session.user.id}` },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ['vtoQaReportsAndPacks', session.user.id] });
         }
       )
       .subscribe();
@@ -86,30 +103,28 @@ const VtoReports = () => {
   }, [session?.user?.id, supabase, queryClient]);
 
   const packSummaries = useMemo((): PackSummary[] => {
-    if (!reports) return [];
-    const packs = new Map<string, PackSummary>();
-    for (const report of reports) {
-      if (!packs.has(report.vto_pack_job_id)) {
-        packs.set(report.vto_pack_job_id, {
-          pack_id: report.vto_pack_job_id,
-          created_at: report.created_at,
-          total_jobs: 0,
-          passed_perfect: 0,
-          passed_pose_change: 0,
-          passed_logo_issue: 0,
-          passed_detail_issue: 0,
-          failed_jobs: 0,
-          failure_summary: {},
-          shape_mismatches: 0,
-          avg_body_preservation_score: null,
-          has_refinement_pass: false, // Will be updated later
+    if (!reports?.packs) return [];
+    const packsMap = new Map<string, PackSummary>();
+
+    // Initialize all packs from the packs table
+    for (const pack of reports.packs) {
+        packsMap.set(pack.id, {
+            pack_id: pack.id,
+            created_at: pack.created_at,
+            metadata: pack.metadata || {},
+            total_jobs: 0, passed_perfect: 0, passed_pose_change: 0, passed_logo_issue: 0, passed_detail_issue: 0,
+            failed_jobs: 0, failure_summary: {}, shape_mismatches: 0, avg_body_preservation_score: null, has_refinement_pass: false,
         });
-      }
-      const summary = packs.get(report.vto_pack_job_id)!;
+    }
+
+    // Populate with report data
+    for (const report of reports.reports) {
+      if (!packsMap.has(report.vto_pack_job_id)) continue;
+      
+      const summary = packsMap.get(report.vto_pack_job_id)!;
       summary.total_jobs++;
       
       const reportData = report.comparative_report;
-
       if (reportData) {
         if (reportData.overall_pass) {
           if (reportData.pass_with_notes) {
@@ -125,11 +140,9 @@ const VtoReports = () => {
           const reason = reportData.failure_category || "Unknown";
           summary.failure_summary[reason] = (summary.failure_summary[reason] || 0) + 1;
         }
-
         if (reportData.garment_analysis?.garment_type && reportData.garment_comparison?.generated_garment_type && reportData.garment_analysis.garment_type !== reportData.garment_comparison.generated_garment_type) {
             summary.shape_mismatches++;
         }
-
         const bodyScore = reportData.pose_and_body_analysis?.scores?.body_type_preservation;
         if (typeof bodyScore === 'number') {
             const currentTotal = (summary.avg_body_preservation_score || 0) * (summary.total_jobs - 1);
@@ -137,7 +150,14 @@ const VtoReports = () => {
         }
       }
     }
-    return Array.from(packs.values()).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+    const allPacks = Array.from(packsMap.values());
+    // Second pass to determine if a refinement pass exists for each pack
+    allPacks.forEach(pack => {
+        pack.has_refinement_pass = allPacks.some(p => p.metadata?.refinement_of_pack_id === pack.pack_id);
+    });
+
+    return allPacks.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   }, [reports]);
 
   const handleResetAndAnalyze = async (packId: string) => {
@@ -160,7 +180,7 @@ const VtoReports = () => {
       if (orchestratorError) throw orchestratorError;
 
       showSuccess(orchestratorData.message);
-      queryClient.invalidateQueries({ queryKey: ['vtoQaReports', session.user.id] });
+      queryClient.invalidateQueries({ queryKey: ['vtoQaReportsAndPacks', session.user.id] });
 
     } catch (err: any) {
       dismissToast(toastId);
@@ -181,7 +201,7 @@ const VtoReports = () => {
         if (error) throw error;
         dismissToast(toastId);
         showSuccess(data.message);
-        queryClient.invalidateQueries({ queryKey: ['vtoQaReports', session.user.id] });
+        queryClient.invalidateQueries({ queryKey: ['vtoQaReportsAndPacks', session.user.id] });
     } catch (err: any) {
         dismissToast(toastId);
         showError(`Operation failed: ${err.message}`);
@@ -201,7 +221,7 @@ const VtoReports = () => {
       if (error) throw error;
       dismissToast(toastId);
       showSuccess(data.message);
-      queryClient.invalidateQueries({ queryKey: ['vtoQaReports', session.user.id] });
+      queryClient.invalidateQueries({ queryKey: ['vtoQaReportsAndPacks', session.user.id] });
     } catch (err: any) {
       dismissToast(toastId);
       showError(`Failed to start refinement pass: ${err.message}`);
@@ -227,16 +247,22 @@ const VtoReports = () => {
       <div className="space-y-4">
         {packSummaries.map(report => {
           const unknownFailures = report.failure_summary['Unknown'] || 0;
+          const isRefinementPack = !!report.metadata?.refinement_of_pack_id;
           return (
             <Card key={report.pack_id}>
               <CardHeader>
                 <CardTitle className="flex justify-between items-center">
-                  <span>Pack from {new Date(report.created_at).toLocaleString()}</span>
                   <div className="flex items-center gap-2">
-                    <Button variant="secondary" size="sm" onClick={() => handleStartRefinementPass(report.pack_id)} disabled={isStartingRefinement === report.pack_id}>
-                      {isStartingRefinement === report.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Wand2 className="h-4 w-4 mr-2" />}
-                      Start Refinement Pass
-                    </Button>
+                    {isRefinementPack && <Wand2 className="h-5 w-5 text-purple-500" />}
+                    <span>{report.metadata?.name || `Pack from ${new Date(report.created_at).toLocaleString()}`}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {!isRefinementPack && (
+                      <Button variant="secondary" size="sm" onClick={() => handleStartRefinementPass(report.pack_id)} disabled={isStartingRefinement === report.pack_id || report.has_refinement_pass}>
+                        {isStartingRefinement === report.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Wand2 className="h-4 w-4 mr-2" />}
+                        Start Refinement Pass
+                      </Button>
+                    )}
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
                         <Button variant="secondary" size="sm" disabled={unknownFailures === 0 || isRerunning === report.pack_id}>

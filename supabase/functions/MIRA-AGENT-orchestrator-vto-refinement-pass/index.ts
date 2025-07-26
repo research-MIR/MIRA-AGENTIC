@@ -24,7 +24,16 @@ serve(async (req) => {
     const logPrefix = `[VTO-Refinement-Orchestrator][${pack_id}]`;
     console.log(`${logPrefix} Starting refinement pass for user ${user_id}.`);
 
-    // 1. Fetch all completed, first-pass jobs for the pack
+    // 1. Fetch the original pack to get its name
+    const { data: sourcePack, error: sourcePackError } = await supabase
+      .from('mira-agent-vto-packs-jobs')
+      .select('metadata')
+      .eq('id', pack_id)
+      .single();
+    if (sourcePackError) throw new Error(`Failed to fetch source pack details: ${sourcePackError.message}`);
+    const sourcePackName = sourcePack.metadata?.name || `Pack ${pack_id.substring(0, 8)}`;
+
+    // 2. Fetch all completed, first-pass jobs for the pack
     const { data: firstPassJobs, error: fetchError } = await supabase
       .from('mira-agent-bitstudio-jobs')
       .select('id, source_person_image_url, source_garment_image_url, final_image_url, metadata')
@@ -39,10 +48,28 @@ serve(async (req) => {
     }
     console.log(`${logPrefix} Found ${firstPassJobs.length} jobs to refine.`);
 
-    // 2. Create a new parent batch job to group this refinement pass
+    // 3. Create a NEW VTO pack for the refinement pass
+    const { data: newPack, error: newPackError } = await supabase
+      .from('mira-agent-vto-packs-jobs')
+      .insert({
+        user_id,
+        metadata: {
+          name: `[Refined] ${sourcePackName}`,
+          total_pairs: firstPassJobs.length,
+          engine: 'bitstudio_inpaint',
+          refinement_of_pack_id: pack_id
+        }
+      })
+      .select('id')
+      .single();
+    if (newPackError) throw newPackError;
+    const newVtoPackJobId = newPack.id;
+    console.log(`${logPrefix} Created new refinement pack with ID: ${newVtoPackJobId}`);
+
+    // 4. Create a new parent batch job to group this refinement pass
     const { data: batchJob, error: batchError } = await supabase
       .from('mira-agent-batch-inpaint-jobs')
-      .insert({ user_id, status: 'processing', metadata: { total_pairs: firstPassJobs.length, source_vto_pack_id: pack_id } })
+      .insert({ user_id, status: 'processing', metadata: { total_pairs: firstPassJobs.length, source_vto_pack_id: pack_id, refinement_vto_pack_id: newVtoPackJobId } })
       .select('id')
       .single();
     
@@ -50,7 +77,7 @@ serve(async (req) => {
     const batchJobId = batchJob.id;
     console.log(`${logPrefix} Main refinement batch job ${batchJobId} created.`);
 
-    // 3. Create the individual pair jobs for the inpainting pipeline
+    // 5. Create the individual pair jobs for the inpainting pipeline, linked to the NEW pack
     const pairJobsToInsert = firstPassJobs.map(job => ({
       batch_job_id: batchJobId,
       user_id: user_id,
@@ -63,7 +90,7 @@ serve(async (req) => {
         pass_number: 2,
         original_person_image_url_for_analysis: job.source_person_image_url,
         original_vto_job_id: job.id,
-        vto_pack_job_id: pack_id, // Critical for linking back
+        vto_pack_job_id: newVtoPackJobId, // Link to the new pack
       }
     }));
 
@@ -74,10 +101,10 @@ serve(async (req) => {
     if (pairsError) throw pairsError;
     console.log(`${logPrefix} ${pairJobsToInsert.length} refinement pair jobs created and set to 'pending'.`);
 
-    // 4. Asynchronously invoke the watchdog to start processing immediately
+    // 6. Asynchronously invoke the watchdog to start processing immediately
     supabase.functions.invoke('MIRA-AGENT-watchdog-background-jobs').catch(console.error);
 
-    return new Response(JSON.stringify({ success: true, message: `${pairJobsToInsert.length} refinement jobs have been queued.` }), {
+    return new Response(JSON.stringify({ success: true, message: `${pairJobsToInsert.length} refinement jobs have been queued into a new pack.` }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });
