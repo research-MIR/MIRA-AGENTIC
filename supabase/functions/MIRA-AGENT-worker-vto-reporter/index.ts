@@ -110,9 +110,29 @@ serve(async (req) => {
     const { data: qaJob, error: qaFetchError } = await supabase.from('mira-agent-vto-qa-reports').select('source_vto_job_id').eq('id', qa_job_id).single();
     if (qaFetchError) throw qaFetchError;
 
-    const { data: vtoJob, error: vtoFetchError } = await supabase.from('mira-agent-bitstudio-jobs').select('source_person_image_url, source_garment_image_url, final_image_url').eq('id', qaJob.source_vto_job_id).single();
+    const { data: vtoJob, error: vtoFetchError } = await supabase.from('mira-agent-bitstudio-jobs').select('source_person_image_url, source_garment_image_url, final_image_url, batch_pair_job_id').eq('id', qaJob.source_vto_job_id).single();
     if (vtoFetchError) throw vtoFetchError;
     if (!vtoJob.final_image_url) throw new Error("VTO job is missing a final_image_url.");
+
+    let sourcePersonImageUrl = vtoJob.source_person_image_url;
+
+    // --- NEW LOGIC: Check for refinement pass lineage ---
+    if (vtoJob.batch_pair_job_id) {
+        console.log(`${logPrefix} Job is linked to a batch pair job. Checking for refinement pass metadata...`);
+        const { data: pairJob, error: pairFetchError } = await supabase
+            .from('mira-agent-batch-inpaint-pair-jobs')
+            .select('metadata')
+            .eq('id', vtoJob.batch_pair_job_id)
+            .single();
+        
+        if (pairFetchError) {
+            console.warn(`${logPrefix} Could not fetch parent pair job, proceeding with default source image. Error: ${pairFetchError.message}`);
+        } else if (pairJob?.metadata?.original_person_image_url_for_analysis) {
+            sourcePersonImageUrl = pairJob.metadata.original_person_image_url_for_analysis;
+            console.log(`${logPrefix} Refinement pass detected. Using original person image for analysis: ${sourcePersonImageUrl}`);
+        }
+    }
+    // --- END OF NEW LOGIC ---
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
 
@@ -123,7 +143,7 @@ serve(async (req) => {
 
     console.log(`${logPrefix} Stage 2: Performing comparative analysis with all visual evidence...`);
     const [personImageParts, referenceGarmentParts, finalResultParts] = await Promise.all([
-        downloadImageAsPart(supabase, vtoJob.source_person_image_url, "SOURCE PERSON"),
+        downloadImageAsPart(supabase, sourcePersonImageUrl, "SOURCE PERSON"),
         downloadImageAsPart(supabase, vtoJob.source_garment_image_url, "REFERENCE GARMENT"),
         downloadImageAsPart(supabase, vtoJob.final_image_url, "FINAL RESULT")
     ]);

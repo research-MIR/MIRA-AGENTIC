@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
 import { useLanguage } from "@/context/LanguageContext";
-import { BarChart2, CheckCircle, XCircle, Loader2, AlertTriangle, UserCheck2, BadgeAlert, FileText, RefreshCw, Shirt, User } from "lucide-react";
+import { BarChart2, CheckCircle, XCircle, Loader2, AlertTriangle, UserCheck2, BadgeAlert, FileText, RefreshCw, Shirt, User, Wand2 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -48,6 +48,7 @@ interface PackSummary {
   failure_summary: Record<string, number>;
   shape_mismatches: number;
   avg_body_preservation_score: number | null;
+  has_refinement_pass: boolean;
 }
 
 const VtoReports = () => {
@@ -56,6 +57,7 @@ const VtoReports = () => {
   const queryClient = useQueryClient();
   const [isAnalyzing, setIsAnalyzing] = useState<string | null>(null);
   const [isRerunning, setIsRerunning] = useState<string | null>(null);
+  const [isStartingRefinement, setIsStartingRefinement] = useState<string | null>(null);
 
   const { data: reports, isLoading, error } = useQuery<QaReport[]>({
     queryKey: ['vtoQaReports', session?.user?.id],
@@ -100,6 +102,7 @@ const VtoReports = () => {
           failure_summary: {},
           shape_mismatches: 0,
           avg_body_preservation_score: null,
+          has_refinement_pass: false, // Will be updated later
         });
       }
       const summary = packs.get(report.vto_pack_job_id)!;
@@ -187,6 +190,26 @@ const VtoReports = () => {
     }
   };
 
+  const handleStartRefinementPass = async (packId: string) => {
+    if (!session?.user) return;
+    setIsStartingRefinement(packId);
+    const toastId = showLoading("Starting refinement pass...");
+    try {
+      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-vto-refinement-pass', {
+        body: { pack_id: packId, user_id: session.user.id }
+      });
+      if (error) throw error;
+      dismissToast(toastId);
+      showSuccess(data.message);
+      queryClient.invalidateQueries({ queryKey: ['vtoQaReports', session.user.id] });
+    } catch (err: any) {
+      dismissToast(toastId);
+      showError(`Failed to start refinement pass: ${err.message}`);
+    } finally {
+      setIsStartingRefinement(null);
+    }
+  };
+
   if (isLoading) {
     return <div className="p-8 space-y-4"><Skeleton className="h-32 w-full" /><Skeleton className="h-32 w-full" /></div>;
   }
@@ -210,6 +233,10 @@ const VtoReports = () => {
                 <CardTitle className="flex justify-between items-center">
                   <span>Pack from {new Date(report.created_at).toLocaleString()}</span>
                   <div className="flex items-center gap-2">
+                    <Button variant="secondary" size="sm" onClick={() => handleStartRefinementPass(report.pack_id)} disabled={isStartingRefinement === report.pack_id}>
+                      {isStartingRefinement === report.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Wand2 className="h-4 w-4 mr-2" />}
+                      Start Refinement Pass
+                    </Button>
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
                         <Button variant="secondary" size="sm" disabled={unknownFailures === 0 || isRerunning === report.pack_id}>
