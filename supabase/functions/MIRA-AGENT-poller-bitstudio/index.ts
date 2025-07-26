@@ -121,7 +121,7 @@ serve(async (req) => {
     return new Response(JSON.stringify({ success: true, status: jobStatus }), { headers: corsHeaders });
 
   } catch (error) {
-    console.error(`[BitStudioPoller][${job.id}] Error:`, error);
+    console.error(`[BitStudioPoller][${job_id}] Error:`, error);
     await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'failed', error_message: error.message }).eq('id', job_id);
     if (job_id) {
         const { data: job } = await supabase.from('mira-agent-bitstudio-jobs').select('batch_pair_job_id').eq('id', job_id).single();
