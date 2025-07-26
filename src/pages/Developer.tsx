@@ -103,6 +103,7 @@ const Developer = () => {
   const [isShuttingDown, setIsShuttingDown] = useState(false);
   const [isResettingVtoPacks, setIsResettingVtoPacks] = useState(false);
   const [isClearingFailedJobs, setIsClearingFailedJobs] = useState(false);
+  const [isRecompositing, setIsRecompositing] = useState(false);
 
   const handleCancelAllSegmentationJobs = async () => {
     setIsCancelling(true);
@@ -184,6 +185,22 @@ const Developer = () => {
     }
   };
 
+  const handleRecompositeAll = async () => {
+    setIsRecompositing(true);
+    const toastId = showLoading("Finding and re-queuing failed compositing jobs...");
+    try {
+        const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-admin-recomposite-all-failed');
+        if (error) throw error;
+        dismissToast(toastId);
+        showSuccess(data.message);
+    } catch (err: any) {
+        dismissToast(toastId);
+        showError(`Operation failed: ${err.message}`);
+    } finally {
+        setIsRecompositing(false);
+    }
+  };
+
   return (
     <div className="p-4 md:p-8 h-screen overflow-y-auto">
       <header className="pb-4 mb-8 border-b">
@@ -199,6 +216,26 @@ const Developer = () => {
               <CardDescription>These actions affect all users and jobs on the platform. Use with extreme caution.</CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="destructive">Re-run Failed Compositors</Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This will find all failed VTO Pro jobs that have a generated patch and re-run the final compositing step. This is useful for fixing jobs that failed due to a compositing error.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={handleRecompositeAll} disabled={isRecompositing}>
+                      {isRecompositing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      Yes, re-run compositors
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
               <AlertDialog>
                 <AlertDialogTrigger asChild>
                   <Button variant="destructive">Cancel All Segmentation Jobs</Button>
