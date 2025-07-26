@@ -248,6 +248,8 @@ const VtoReports = () => {
         {packSummaries.map(report => {
           const unknownFailures = report.failure_summary['Unknown'] || 0;
           const isRefinementPack = !!report.metadata?.refinement_of_pack_id;
+          const hasRefinementPass = report.has_refinement_pass;
+
           return (
             <Card key={report.pack_id}>
               <CardHeader>
@@ -258,10 +260,35 @@ const VtoReports = () => {
                   </div>
                   <div className="flex items-center gap-2">
                     {!isRefinementPack && (
-                      <Button variant="secondary" size="sm" onClick={() => handleStartRefinementPass(report.pack_id)} disabled={isStartingRefinement === report.pack_id || report.has_refinement_pass}>
-                        {isStartingRefinement === report.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Wand2 className="h-4 w-4 mr-2" />}
-                        Start Refinement Pass
-                      </Button>
+                      hasRefinementPass ? (
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button variant="secondary" size="sm" disabled={isStartingRefinement === report.pack_id}>
+                              {isStartingRefinement === report.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+                              Re-run Refinement Pass
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                This will permanently delete the existing refinement pass and all its associated images and jobs. A new refinement pass will then be created. This action cannot be undone.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogAction onClick={() => handleStartRefinementPass(report.pack_id)}>
+                                Yes, Reset and Re-run
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      ) : (
+                        <Button variant="secondary" size="sm" onClick={() => handleStartRefinementPass(report.pack_id)} disabled={isStartingRefinement === report.pack_id}>
+                          {isStartingRefinement === report.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Wand2 className="h-4 w-4 mr-2" />}
+                          Start Refinement Pass
+                        </Button>
+                      )
                     )}
                     <AlertDialog>
                       <AlertDialogTrigger asChild>

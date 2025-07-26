@@ -24,6 +24,19 @@ serve(async (req) => {
     const logPrefix = `[VTO-Refinement-Orchestrator][${pack_id}]`;
     console.log(`${logPrefix} Starting refinement pass for user ${user_id}.`);
 
+    // --- RESET LOGIC ---
+    console.log(`${logPrefix} Calling RPC to reset any existing refinement pass...`);
+    const { error: resetError } = await supabase.rpc('MIRA-AGENT-admin-reset-vto-refinement-pass', {
+        p_source_pack_id: pack_id,
+        p_user_id: user_id
+    });
+    if (resetError) {
+        console.error(`${logPrefix} Failed to reset existing refinement pass:`, resetError);
+        throw new Error(`Failed to reset existing refinement pass: ${resetError.message}`);
+    }
+    console.log(`${logPrefix} Reset complete. Proceeding to create new pass.`);
+    // --- END OF RESET LOGIC ---
+
     // 1. Fetch the original pack to get its name
     const { data: sourcePack, error: sourcePackError } = await supabase
       .from('mira-agent-vto-packs-jobs')
