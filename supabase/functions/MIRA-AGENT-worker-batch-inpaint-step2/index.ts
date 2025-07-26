@@ -182,6 +182,7 @@ serve(async (req) => {
             resolution: 'standard',
             num_images: 1,
             batch_pair_job_id: pair_job_id,
+            vto_pack_job_id: metadata?.vto_pack_job_id, // <-- THE FIX IS HERE
             metadata: {
                 ...metadata,
                 bbox: bbox,
