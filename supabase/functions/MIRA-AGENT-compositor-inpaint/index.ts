@@ -217,10 +217,11 @@ serve(async (req) => {
       const newQaReportObject = {
         timestamp: new Date().toISOString(),
         report: verificationResult,
-        failed_image_url: finalPublicUrl
+        failed_image_url: finalPublicUrl // This is the composited URL
       };
       await supabase.from(tableName).update({
         status: "awaiting_fix",
+        final_image_url: finalPublicUrl, // <-- THE FIX IS HERE
         metadata: { ...finalMetadata, qa_history: [...qaHistory, newQaReportObject] }
       }).eq("id", job_id);
       supabase.functions.invoke("MIRA-AGENT-fixer-orchestrator", {
