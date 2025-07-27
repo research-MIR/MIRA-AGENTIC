@@ -1,21 +1,20 @@
-import React from 'react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import { Loader2 } from 'lucide-react';
+import React, { useRef } from 'react';
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { ModelPoseSelector, VtoModel, ModelPack } from '../ModelPoseSelector';
 import { GarmentSelector } from '../GarmentSelector';
 import { useLanguage } from "@/context/LanguageContext";
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Loader2, Shirt, Users, UploadCloud, X } from 'lucide-react';
+import { useDropzone } from '@/hooks/useDropzone';
+import { cn } from '@/lib/utils';
+import { Input } from '@/components/ui/input';
 
 const ImageUploader = ({ onFileSelect, title, imageUrl, onClear }: { onFileSelect: (files: FileList) => void, title: string, imageUrl: string | null, onClear: () => void }) => {
-    const inputRef = React.useRef<HTMLInputElement>(null);
-    const { useDropzone } = require('@/hooks/useDropzone');
+    const inputRef = useRef<HTMLInputElement>(null);
     const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: (e: React.DragEvent<HTMLElement>) => e.dataTransfer.files && onFileSelect(e.dataTransfer.files) });
-    const { cn } = require('@/lib/utils');
-    const { PlusCircle } = require('lucide-react');
-    const { Input } = require('@/components/ui/input');
-
+  
     if (imageUrl) {
       return (
         <div className="relative aspect-square">
@@ -27,14 +26,13 @@ const ImageUploader = ({ onFileSelect, title, imageUrl, onClear }: { onFileSelec
   
     return (
       <div {...dropzoneProps} className={cn("flex aspect-square justify-center items-center rounded-lg border border-dashed p-4 text-center transition-colors cursor-pointer", isDraggingOver && "border-primary bg-primary/10")} onClick={() => inputRef.current?.click()}>
-        <div className="text-center pointer-events-none"><PlusCircle className="mx-auto h-8 w-8 text-muted-foreground" /><p className="mt-2 text-sm font-semibold">{title}</p></div>
+        <div className="text-center pointer-events-none"><UploadCloud className="mx-auto h-8 w-8 text-muted-foreground" /><p className="mt-2 text-sm font-semibold">{title}</p></div>
         <Input ref={inputRef} type="file" className="hidden" accept="image/*" onChange={(e: React.ChangeEvent<HTMLInputElement>) => e.target.files && onFileSelect(e.target.files)} />
       </div>
     );
 };
 
 interface OneToManyInputsProps {
-  onQueueReady: (queue: any[]) => void;
   models: VtoModel[];
   packs: ModelPack[] | undefined;
   isLoadingModels: boolean;
@@ -42,7 +40,6 @@ interface OneToManyInputsProps {
   selectedPackId: string;
   setSelectedPackId: (id: string) => void;
   selectedModelUrls: Set<string>;
-  handleMultiModelSelect: (urls: string[]) => void;
   handleUseEntirePack: (models: VtoModel[]) => void;
   analyzedGarment: any;
   handleGarmentFileSelect: (files: FileList) => void;
