@@ -47,6 +47,7 @@ const VtoPackDetailView = ({ packId, isOpen }: { packId: string, isOpen: boolean
           const isFailed = job.status === 'failed' || job.status === 'permanently_failed';
           const inProgressStatuses = ['processing', 'queued', 'segmenting', 'delegated', 'compositing', 'awaiting_fix', 'fixing', 'pending'];
           const isInProgress = inProgressStatuses.includes(job.status);
+          const isComplete = job.status === 'complete' || job.status === 'done';
 
           return (
             <div 
@@ -59,7 +60,7 @@ const VtoPackDetailView = ({ packId, isOpen }: { packId: string, isOpen: boolean
                 alt="Job result" 
                 className="w-full h-full object-cover rounded-md"
               />
-              {job.status === 'complete' && <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity" />}
+              {isComplete && <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity" />}
               {isFailed && (
                 job.final_image_url ? (
                   <TooltipProvider>
@@ -196,7 +197,7 @@ export const RecentVtoPacks = () => {
         .from('mira-agent-bitstudio-jobs')
         .select('id, final_image_url')
         .eq('vto_pack_job_id', packId)
-        .eq('status', 'complete')
+        .in('status', ['complete', 'done'])
         .not('final_image_url', 'is', null);
       if (error) throw error;
 
