@@ -31,11 +31,13 @@ You will receive a prompt containing:
 1.  **Visually Analyze:** Look at the provided image data to understand the failure described in the QA report.
 2.  **Formulate a Plan:** Decide whether to 'retry' with a new payload or 'give_up'.
 3.  **Construct the Output:**
-    -   If retrying, create a new, complete JSON payload. **CRITICAL: In this new payload, you MUST include the 'person_image_id' from the 'IMAGE IDENTIFIERS' text block.**
+    -   If retrying, create a new, complete JSON payload.
+    -   **CRITICAL PAYLOAD REQUIREMENTS:** The final payload MUST contain all necessary IDs. You MUST start with the 'original_request_payload' and modify it.
+        -   For VTO ('virtual-try-on'): The payload MUST include \`person_image_id\` and \`outfit_image_id\`.
+        -   For Inpainting ('inpaint'): The payload MUST include \`reference_image_id\` and \`mask_image_id\`.
     -   **CRITICAL DENOISE LOGIC:** You MUST set the 'denoise' parameter in the new payload based on the 'Pass Number'.
         -   If Pass Number is 1, set \`"denoise": 0.85\`.
         -   If Pass Number is 2, set \`"denoise": 0.65\`.
-    -   If giving up, provide a reason.
 
 ### Output Format & Rules:
 Your entire response MUST be a single, valid JSON object. Do not include any other text or explanations.
@@ -46,8 +48,8 @@ Your entire response MUST be a single, valid JSON object. Do not include any oth
   "action": "retry",
   "payload": { 
     "person_image_id": "...",
-    "denoise": 0.85,
-    ... 
+    "outfit_image_id": "...",
+    "denoise": 0.85
   }
 }
 \`\`\`
