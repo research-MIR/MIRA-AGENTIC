@@ -111,14 +111,18 @@ serve(async (req) => {
   console.log(`${logPrefix} Invoked.`);
 
   try {
-    const { data: job, error: fetchError } = await supabase.from('mira-agent-bitstudio-jobs').select('metadata').eq('id', job_id).single();
+    const { data: job, error: fetchError } = await supabase.from('mira-agent-bitstudio-jobs').select('*').eq('id', job_id).single();
     if (fetchError) throw fetchError;
 
-    const { retry_count = 0, fix_history = [], original_request_payload, reference_image_url, bitstudio_mask_image_id, bitstudio_garment_image_id, bitstudio_person_image_id } = job.metadata || {};
+    const { metadata, source_garment_image_url, bitstudio_mask_image_id, bitstudio_garment_image_id, bitstudio_person_image_id } = job;
+    const { retry_count = 0, fix_history = [], original_request_payload } = metadata || {};
     const { report: lastReport, failed_image_url } = qa_report_object;
 
-    if (!lastReport || !original_request_payload || !reference_image_url || !failed_image_url || !bitstudio_person_image_id || !bitstudio_mask_image_id || !bitstudio_garment_image_id) {
-      throw new Error("Job is missing critical metadata for a fix attempt (e.g., original image IDs, payload, or report).");
+    if (!lastReport || !original_request_payload || !source_garment_image_url || !failed_image_url || !bitstudio_person_image_id || !bitstudio_mask_image_id || !bitstudio_garment_image_id) {
+      const errorMessage = "Job is missing critical metadata for a fix attempt (e.g., original image IDs, payload, or report). This may be an older job that cannot be automatically fixed.";
+      console.error(`${logPrefix} Prerequisite check failed: ${errorMessage}`);
+      await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'permanently_failed', error_message: errorMessage }).eq('id', job_id);
+      return new Response(JSON.stringify({ success: true, message: "Job marked as permanently failed due to missing metadata." }), { headers: corsHeaders });
     }
 
     if (retry_count >= MAX_RETRIES) {
@@ -131,7 +135,7 @@ serve(async (req) => {
 
     console.log(`${logPrefix} Downloading images for multimodal context...`);
     const [referenceData, failedData] = await Promise.all([
-        downloadAndEncodeImage(supabase, reference_image_url),
+        downloadAndEncodeImage(supabase, source_garment_image_url),
         downloadAndEncodeImage(supabase, failed_image_url)
     ]);
     

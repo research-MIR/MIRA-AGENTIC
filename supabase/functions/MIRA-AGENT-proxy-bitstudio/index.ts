@@ -250,7 +250,12 @@ serve(async (req) => {
 
         const { data: newJob, error: insertError } = await supabase.from('mira-agent-bitstudio-jobs').insert({
           user_id, mode, status: 'queued', source_garment_image_url: reference_image_url,
-          bitstudio_person_image_id: sourceImageId, bitstudio_garment_image_id: referenceImageId, bitstudio_task_id: taskId, batch_pair_job_id: batch_pair_job_id, vto_pack_job_id: vto_pack_job_id,
+          bitstudio_person_image_id: sourceImageId, 
+          bitstudio_garment_image_id: referenceImageId, 
+          bitstudio_mask_image_id: maskImageId, // <-- THE FIX IS HERE
+          bitstudio_task_id: taskId, 
+          batch_pair_job_id: batch_pair_job_id, 
+          vto_pack_job_id: vto_pack_job_id,
           metadata: { 
             ...metadata,
             engine: 'bitstudio',
