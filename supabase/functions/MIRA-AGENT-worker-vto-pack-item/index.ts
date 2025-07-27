@@ -338,7 +338,7 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
     throw new Error("Quality checker returned invalid data");
   }
 
-  console.log(`[VTO_QA_DECISION][${pair_job_id}] Full AI Response:`, JSON.stringify(qaData, null, 2));
+  console.warn(`[VTO_QA_DECISION][${pair_job_id}] Full AI Response: ${JSON.stringify(qaData)}`);
 
   const qa_history = metadata.qa_history || [];
   const newHistoryEntry = {
