@@ -305,7 +305,7 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
   let is_final_attempt = qa_retry_count >= 2;
 
   if (bitstudio_result_url) {
-      console.log(`${logPrefix} BitStudio fallback result provided. This is the final attempt.`);
+      console.log(`${logPrefix} BitStudio fallback result provided. This is the absolute final attempt.`);
       is_final_attempt = true;
       const bitstudioBlob = await safeDownload(supabase, bitstudio_result_url);
       variations.push({ base64Image: await blobToBase64(bitstudioBlob) });
@@ -349,7 +349,7 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
 
   if (qaData.action === 'retry') {
     if (is_final_attempt) {
-        console.log(`${logPrefix} Final Google VTO attempt failed. Falling back to BitStudio engine.`);
+        console.warn(`[BITSTUDIO_FALLBACK][${pair_job_id}] QA failed on final Google attempt. Escalating to BitStudio. Using cropped person URL: ${job.metadata.cropped_person_url}`);
         await supabase.from('mira-agent-bitstudio-jobs').update({
             metadata: { ...metadata, qa_history: qa_history, google_vto_step: 'fallback_to_bitstudio' }
         }).eq('id', pair_job_id);
@@ -359,7 +359,7 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
                 existing_job_id: pair_job_id,
                 mode: 'base',
                 user_id: job.user_id,
-                person_image_url: job.source_person_image_url,
+                person_image_url: job.metadata.cropped_person_url,
                 garment_image_url: job.source_garment_image_url,
                 prompt: metadata.prompt_appendix,
                 num_images: 1,
