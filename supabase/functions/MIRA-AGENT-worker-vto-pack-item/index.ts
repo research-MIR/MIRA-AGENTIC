@@ -156,6 +156,10 @@ serve(async (req)=>{
         case 'reframe':
           await handleReframe(supabase, job, logPrefix);
           break;
+        case 'done':
+        case 'fallback_to_bitstudio':
+          console.log(`${logPrefix} Job is already in a terminal state ('${step}'). Exiting gracefully.`);
+          break;
         default:
           throw new Error(`Unknown step: ${step}`);
       }
