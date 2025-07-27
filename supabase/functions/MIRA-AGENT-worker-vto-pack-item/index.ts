@@ -289,7 +289,6 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
         if (is_escalation_check) {
             console.warn(`[BITSTUDIO_FALLBACK][${pair_job_id}] QA failed on final Google attempt. Escalating to BitStudio.`);
             
-            // --- SAFETY CHECK ---
             if (typeof qaData.best_image_index !== 'number' || qaData.best_image_index < 0 || qaData.best_image_index >= variations.length) {
                 console.error(`${logPrefix} QA tool returned 'retry' but provided an invalid best_image_index (${qaData.best_image_index}). Cannot escalate. Marking as permanently failed.`);
                 await supabase.from('mira-agent-bitstudio-jobs').update({
@@ -299,33 +298,39 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
                 await triggerWatchdog(supabase, logPrefix);
                 return;
             }
-            // --- END SAFETY CHECK ---
 
             const bestImageBase64 = variations[qaData.best_image_index].base64Image;
             const fallbackSourceUrl = await uploadBase64ToStorage(supabase, bestImageBase64, job.user_id, 'fallback_source.png');
             
-            await supabase.from('mira-agent-bitstudio-jobs').update({
-                metadata: { ...metadata, qa_history: qa_history, google_vto_step: 'fallback_to_bitstudio', engine: 'bitstudio_fallback', fallback_source_image_url: fallbackSourceUrl.publicUrl }
-            }).eq('id', pair_job_id);
-            
+            const newMetadataForFallback = { 
+                ...metadata, 
+                qa_history: qa_history, 
+                google_vto_step: 'fallback_to_bitstudio', 
+                engine: 'bitstudio_fallback', 
+                fallback_source_image_url: fallbackSourceUrl.publicUrl 
+            };
+
             const { data: proxyData, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
                 body: {
                     existing_job_id: pair_job_id,
                     mode: 'base',
                     user_id: job.user_id,
-                    person_image_url: fallbackSourceUrl.publicUrl, // Use the best failed image as the new source
+                    person_image_url: fallbackSourceUrl.publicUrl,
                     garment_image_url: job.source_garment_image_url,
                     prompt: metadata.prompt_appendix,
                     num_images: 1,
-                    resolution: 'high'
+                    resolution: 'high',
+                    metadata: newMetadataForFallback
                 }
             });
             if (proxyError) throw proxyError;
             console.log(`${logPrefix} BitStudio fallback job created with ID ${proxyData.jobIds[0]}. The BitStudio poller will now take over.`);
+            
             await supabase.from('mira-agent-bitstudio-jobs').update({
                 status: 'awaiting_bitstudio_fallback',
-                metadata: { ...metadata, delegated_bitstudio_job_id: proxyData.jobIds[0] }
+                metadata: { ...newMetadataForFallback, delegated_bitstudio_job_id: proxyData.jobIds[0] }
             }).eq('id', pair_job_id);
+            
             await triggerWatchdog(supabase, logPrefix);
         } else {
             console.log(`${logPrefix} QA requested a retry. Incrementing retry count and starting next generation pass.`);
