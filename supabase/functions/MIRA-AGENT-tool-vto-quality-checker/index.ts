@@ -1,8 +1,14 @@
-import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
+import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { GoogleGenAI, Content, Part, HarmCategory, HarmBlockThreshold, GenerationResult } from 'https://esm.sh/@google/genai@0.15.0';
+import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const MODEL_NAME = "gemini-1.5-flash-latest";
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 1000;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -108,13 +114,51 @@ serve(async (req) => {
         parts.push({ inlineData: { mimeType: 'image/png', data: base64 } });
     });
 
-    const result = await ai.models.generateContent({
-        model: MODEL_NAME,
-        contents: [{ role: 'user', parts }],
-        generationConfig: { responseMimeType: "application/json" },
-        safetySettings,
-        config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
-    });
+    let result: GenerationResult | null = null;
+    let lastError: Error | null = null;
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+            console.log(`[VTO-QualityChecker] Calling Gemini API, attempt ${attempt}...`);
+            result = await ai.models.generateContent({
+                model: MODEL_NAME,
+                contents: [{ role: 'user', parts }],
+                generationConfig: { responseMimeType: "application/json" },
+                safetySettings,
+                config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
+            });
+            lastError = null; // Clear error on success
+            break; // Exit loop on success
+        } catch (error) {
+            lastError = error;
+            console.warn(`[VTO-QualityChecker] Attempt ${attempt} failed:`, error.message);
+            if (attempt < MAX_RETRIES) {
+                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS * attempt));
+            }
+        }
+    }
+
+    if (lastError) {
+        console.error(`[VTO-QualityChecker] All retries failed. Last error:`, lastError.message);
+        // Create a fallback error report
+        const errorReport = {
+            is_match: false,
+            confidence_score: 0.0,
+            logo_present: false,
+            logo_correct: null,
+            mismatch_reason: "The AI quality check failed to produce a valid analysis after multiple retries.",
+            fix_suggestion: "This may be a temporary issue. You can try re-running the analysis manually from the report page.",
+            error: `Analysis failed: ${lastError.message}`
+        };
+        return new Response(JSON.stringify(errorReport), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            status: 200, // Return 200 so the calling function can process the failure report
+        });
+    }
+
+    if (!result) {
+        throw new Error("AI model failed to respond after all retries.");
+    }
 
     const responseJson = extractJson(result.text);
     const { action, best_image_index, reasoning } = responseJson;
@@ -123,7 +167,7 @@ serve(async (req) => {
         throw new Error("AI did not return a valid response with action, best_image_index (if applicable), and reasoning.");
     }
 
-    console.log("[VTO-QualityChecker] Full AI Response:", JSON.stringify(responseJson, null, 2));
+    console.warn(`[VTO_QA_DECISION] Full AI Response: ${JSON.stringify(responseJson)}`);
 
     return new Response(JSON.stringify(responseJson), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
