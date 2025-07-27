@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { GoogleGenAI, Content, Part, HarmCategory, HarmBlockThreshold, GenerationResult } from 'https://esm.sh/@google/genai@0.15.0';
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-const MODEL_NAME = "gemini-2.5-flash";
+const MODEL_NAME = "gemini-1.5-flash-latest";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -20,14 +20,14 @@ const systemPrompt = `You are a "VTO Quality Assurance AI". You will be given a 
 
 ### Your Inputs:
 - **is_final_attempt (boolean):** A flag indicating if this is the last chance to select an image.
-- A series of images: REFERENCE GARMENT, ORIGINAL PERSON, and one or more GENERATED IMAGES.
+- A series of images: REFERENCE GARMENT, ORIGINAL PERSON, and one or more GENERATED IMAGES. The generated images may come from different AI models or generation attempts.
 
 ### Your Internal Thought Process (Chain-of-Thought)
 1.  **Analyze REFERENCE Garment:** Briefly describe its key features.
-2.  **Analyze Each Generated Image:** Evaluate each image based on the core criteria.
+2.  **Analyze Each Generated Image:** Evaluate each image based on the core criteria. Note which images are superior, especially if they come from different generation attempts (e.g., a final, higher-quality attempt).
 3.  **Make a Decision based on 'is_final_attempt':**
     -   **If 'is_final_attempt' is FALSE:** Be highly critical. If you find a high-quality image that meets all criteria, your action is 'select'. If ALL images have significant flaws (distorted anatomy, incorrect garment shape, severe artifacts), your action MUST be 'retry'.
-    -   **If 'is_final_attempt' is TRUE:** You MUST select the single best option available, even if it has minor flaws. Your action MUST be 'select'. Your reasoning should still explain why you chose it and what its flaws are, but you are not allowed to request another retry.
+    -   **If 'is_final_attempt' is TRUE:** You MUST select the single best option available from the entire set, even if it has minor flaws. Your action MUST be 'select'. Your reasoning should still explain why you chose it and what its flaws are, but you are not allowed to request another retry.
 4.  **State Your Final Choice & Justification:** Clearly state your decision and why it is the best choice based on the evaluation criteria.
 
 ### Evaluation Criteria (in order of importance):
