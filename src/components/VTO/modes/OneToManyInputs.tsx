@@ -1,19 +1,20 @@
-import React, { useRef } from 'react';
+import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Loader2, Shirt, Users, X, PlusCircle } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { ModelPoseSelector, VtoModel, ModelPack } from '../ModelPoseSelector';
 import { GarmentSelector } from '../GarmentSelector';
 import { useLanguage } from "@/context/LanguageContext";
-import { useDropzone } from '@/hooks/useDropzone';
-import { cn } from '@/lib/utils';
-import { Input } from '@/components/ui/input';
 
 const ImageUploader = ({ onFileSelect, title, imageUrl, onClear }: { onFileSelect: (files: FileList) => void, title: string, imageUrl: string | null, onClear: () => void }) => {
     const inputRef = React.useRef<HTMLInputElement>(null);
+    const { useDropzone } = require('@/hooks/useDropzone');
     const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: (e: React.DragEvent<HTMLElement>) => e.dataTransfer.files && onFileSelect(e.dataTransfer.files) });
+    const { cn } = require('@/lib/utils');
+    const { PlusCircle } = require('lucide-react');
+    const { Input } = require('@/components/ui/input');
 
     if (imageUrl) {
       return (

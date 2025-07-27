@@ -11,12 +11,12 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Info, Loader2, Wand2 } from 'lucide-react';
-import { useLanguage } from "@/context/LanguageContext";
+import { useLanguage } from '@/context/LanguageContext';
 import { showError, showSuccess } from '@/utils/toast';
 import { calculateFileHash } from '@/lib/utils';
 import { AnalyzedGarment } from '@/types/vto';
 import { isPoseCompatible } from '@/lib/vto-utils';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ModelPoseSelector } from './ModelPoseSelector';
 
 export interface QueueItem {

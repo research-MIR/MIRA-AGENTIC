@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from '@/components/ui/label';
@@ -10,14 +10,14 @@ import { ModelPoseSelector, VtoModel, ModelPack } from '../ModelPoseSelector';
 import { GarmentSelector } from '../GarmentSelector';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useLanguage } from "@/context/LanguageContext";
-import { useDropzone } from '@/hooks/useDropzone';
-import { cn } from '@/lib/utils';
-import { Input } from '@/components/ui/input';
 
 const MultiImageUploader = ({ onFilesSelect, title, icon, description }: { onFilesSelect: (files: File[]) => void, title: string, icon: React.ReactNode, description: string }) => {
     const inputRef = React.useRef<HTMLInputElement>(null);
+    const { useDropzone } = require('@/hooks/useDropzone');
     const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: (e: React.DragEvent<HTMLElement>) => e.dataTransfer.files && onFilesSelect(Array.from(e.dataTransfer.files)) });
-  
+    const { cn } = require('@/lib/utils');
+    const { Input } = require('@/components/ui/input');
+
     return (
       <div {...dropzoneProps} className={cn("flex flex-col h-full justify-center items-center rounded-lg border border-dashed p-2 text-center transition-colors cursor-pointer", isDraggingOver && "border-primary bg-primary/10")} onClick={() => inputRef.current?.click()}>
         {React.cloneElement(icon as React.ReactElement, { className: "h-6 w-6 text-muted-foreground" })}
