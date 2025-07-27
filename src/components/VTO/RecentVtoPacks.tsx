@@ -17,6 +17,17 @@ import { VtoJobDetailModal } from './VtoJobDetailModal';
 import { AnalyzePackModal, AnalysisScope } from './AnalyzePackModal';
 import { Link } from 'react-router-dom';
 import { useLanguage } from '@/context/LanguageContext';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 interface QaReport {
   id: string;
