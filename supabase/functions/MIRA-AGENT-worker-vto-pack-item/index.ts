@@ -307,14 +307,7 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
                 qa_history: qa_history, 
                 google_vto_step: 'fallback_to_bitstudio', 
                 engine: 'bitstudio_fallback', 
-                fallback_source_image_url: fallbackSourceUrl.publicUrl,
-                original_request_payload: { // Construct the payload for the fixer
-                    person_image_id: job.bitstudio_person_image_id,
-                    outfit_image_id: job.bitstudio_garment_image_id,
-                    resolution: 'high',
-                    num_images: 1,
-                    prompt: metadata.prompt_appendix
-                }
+                fallback_source_image_url: fallbackSourceUrl.publicUrl 
             };
 
             const { data: proxyData, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
