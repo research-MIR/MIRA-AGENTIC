@@ -4,9 +4,14 @@ import { AnalyzedGarment, Pose } from '@/types/vto';
  * Determines if a given garment is compatible with a given model pose.
  * @param garment The analyzed garment object.
  * @param pose The pose object with its analysis data.
+ * @param isStrict A boolean to enable or disable strict filtering rules.
  * @returns An object with a 'compatible' boolean and a 'reason' string for logging.
  */
-export const isPoseCompatible = (garment: AnalyzedGarment, pose: Pose): { compatible: boolean; reason: string } => {
+export const isPoseCompatible = (garment: AnalyzedGarment, pose: Pose, isStrict: boolean): { compatible: boolean; reason: string } => {
+  if (!isStrict) {
+    return { compatible: true, reason: "Strict filtering disabled by user." };
+  }
+
   const logPrefix = `[isPoseCompatible] Garment fit: ${garment.analysis?.type_of_fit} | Pose focus: ${pose.analysis?.shoot_focus} | Pose garment coverage: ${pose.analysis?.garment.coverage} | Pose is base: ${pose.analysis?.garment.is_identical_to_base_garment} ->`;
 
   if (!garment.analysis || !pose.analysis) {

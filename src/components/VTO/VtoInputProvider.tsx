@@ -1,33 +1,29 @@
-import React, { useState, useMemo, useRef } from 'react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { ModelPoseSelector, VtoModel, ModelPack } from './ModelPoseSelector';
-import { SecureImageDisplay } from './SecureImageDisplay';
-import { useLanguage } from "@/context/LanguageContext";
-import { PlusCircle, Shirt, Users, X, Link2, Shuffle, Info, Loader2, Wand2 } from 'lucide-react';
-import { cn } from "@/lib/utils";
-import { useDropzone } from "@/hooks/useDropzone";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Label } from '../ui/label';
-import { Textarea } from '../ui/textarea';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import React, { useState, useMemo } from 'react';
+import { useSession } from '@/components/Auth/SessionContextProvider';
 import { useQuery } from '@tanstack/react-query';
-import { useSession } from '../Auth/SessionContextProvider';
-import { Switch } from "@/components/ui/switch";
+import { VtoModel, ModelPack } from './ModelPoseSelector';
+import { OneToManyInputs } from './modes/OneToManyInputs';
+import { RandomPairsInputs } from './modes/RandomPairsInputs';
+import { PrecisePairsInputs } from './modes/PrecisePairsInputs';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { showError, showLoading, dismissToast, showSuccess } from '@/utils/toast';
-import { GarmentSelector } from './GarmentSelector';
+import { Info, Loader2, Wand2 } from 'lucide-react';
+import { useLanguage } from '@/context/LanguageContext';
+import { showError, showSuccess } from '@/utils/toast';
 import { calculateFileHash } from '@/lib/utils';
 import { AnalyzedGarment } from '@/types/vto';
 import { isPoseCompatible } from '@/lib/vto-utils';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ModelPoseSelector } from './ModelPoseSelector';
 
 export interface QueueItem {
   person: { url: string; model_job_id?: string };
   garment: { 
-    url: string; // This will be previewUrl for new files, storage_path for existing
-    file?: File; // Only for new uploads
+    url: string;
+    file?: File;
     analysis?: AnalyzedGarment['analysis']; 
     hash?: string;
   };
@@ -49,41 +45,6 @@ const fileToBase64 = (file: File): Promise<string> => {
   });
 };
 
-const ImageUploader = ({ onFileSelect, title, imageUrl, onClear }: { onFileSelect: (file: File) => void, title: string, imageUrl: string | null, onClear: () => void }) => {
-    const inputRef = useRef<HTMLInputElement>(null);
-    const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: (e) => e.dataTransfer.files && onFileSelect(e.dataTransfer.files[0]) });
-  
-    if (imageUrl) {
-      return (
-        <div className="relative aspect-square">
-          <img src={imageUrl} alt={title} className="w-full h-full object-cover rounded-md" />
-          <Button variant="destructive" size="icon" className="absolute top-2 right-2 h-6 w-6 z-10" onClick={onClear}><X className="h-4 w-4" /></Button>
-        </div>
-      );
-    }
-  
-    return (
-      <div {...dropzoneProps} className={cn("flex aspect-square justify-center items-center rounded-lg border border-dashed p-4 text-center transition-colors cursor-pointer", isDraggingOver && "border-primary bg-primary/10")} onClick={() => inputRef.current?.click()}>
-        <div className="text-center pointer-events-none"><PlusCircle className="mx-auto h-8 w-8 text-muted-foreground" /><p className="mt-2 text-sm font-semibold">{title}</p></div>
-        <Input ref={inputRef} type="file" className="hidden" accept="image/*" onChange={(e) => e.target.files && onFileSelect(e.target.files[0])} />
-      </div>
-    );
-};
-
-const MultiImageUploader = ({ onFilesSelect, title, icon, description }: { onFilesSelect: (files: File[]) => void, title: string, icon: React.ReactNode, description: string }) => {
-    const inputRef = useRef<HTMLInputElement>(null);
-    const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: (e) => e.dataTransfer.files && onFilesSelect(Array.from(e.dataTransfer.files)) });
-  
-    return (
-      <div {...dropzoneProps} className={cn("flex flex-col h-full justify-center items-center rounded-lg border border-dashed p-2 text-center transition-colors cursor-pointer", isDraggingOver && "border-primary bg-primary/10")} onClick={() => inputRef.current?.click()}>
-        {React.cloneElement(icon as React.ReactElement, { className: "h-6 w-6 text-muted-foreground" })}
-        <p className="mt-1 text-xs font-semibold">{title}</p>
-        <p className="text-xs text-muted-foreground">{description}</p>
-        <Input ref={inputRef} type="file" multiple className="hidden" accept="image/*" onChange={(e) => e.target.files && onFilesSelect(Array.from(e.target.files))} />
-      </div>
-    );
-};
-
 export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProviderProps) => {
   const { supabase, session } = useSession();
   const { t } = useLanguage();
@@ -102,6 +63,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
   const [isAddingPair, setIsAddingPair] = useState(false);
 
   const [selectedPackId, setSelectedPackId] = useState<string>('all');
+  const [isStrictFiltering, setIsStrictFiltering] = useState(true);
 
   const { data: packs, isLoading: isLoadingPacks } = useQuery<ModelPack[]>({
     queryKey: ['modelPacks', session?.user?.id],
@@ -146,27 +108,16 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
   const tempPairGarmentUrl = useMemo(() => tempPairGarmentFile ? URL.createObjectURL(tempPairGarmentFile) : null, [tempPairGarmentFile]);
 
   const isAnalyzingGarments = useMemo(() => {
-    if (mode === 'one-to-many') {
-      return analyzedGarment?.isAnalyzing ?? false;
-    }
-    if (mode === 'random-pairs') {
-      return analyzedRandomGarments.some(g => g.isAnalyzing);
-    }
+    if (mode === 'one-to-many') return analyzedGarment?.isAnalyzing ?? false;
+    if (mode === 'random-pairs') return analyzedRandomGarments.some(g => g.isAnalyzing);
     return false;
   }, [mode, analyzedGarment, analyzedRandomGarments]);
 
   const isProceedDisabled = useMemo(() => {
     if (isAnalyzingGarments) return true;
-
-    if (mode === 'one-to-many') {
-        return selectedModelUrls.size === 0 || !analyzedGarment || !analyzedGarment.analysis;
-    }
-    if (mode === 'random-pairs') {
-        return selectedModelUrls.size === 0 || analyzedRandomGarments.length === 0 || analyzedRandomGarments.some(g => !g.analysis);
-    }
-    if (mode === 'precise-pairs') {
-        return precisePairs.length === 0;
-    }
+    if (mode === 'one-to-many') return selectedModelUrls.size === 0 || !analyzedGarment || !analyzedGarment.analysis;
+    if (mode === 'random-pairs') return selectedModelUrls.size === 0 || analyzedRandomGarments.length === 0 || analyzedRandomGarments.some(g => !g.analysis);
+    if (mode === 'precise-pairs') return precisePairs.length === 0;
     return true;
   }, [isAnalyzingGarments, mode, selectedModelUrls, analyzedGarment, analyzedRandomGarments, precisePairs]);
 
@@ -186,43 +137,17 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
 
   const handleGarmentFileSelect = async (files: FileList) => {
     const file = files?.[0];
-    if (!file) {
-        setAnalyzedGarment(null);
-        return;
-    }
+    if (!file) { setAnalyzedGarment(null); return; }
     
-    const tempGarment: AnalyzedGarment = {
-        file,
-        previewUrl: URL.createObjectURL(file),
-        analysis: null,
-        isAnalyzing: true,
-    };
+    const tempGarment: AnalyzedGarment = { file, previewUrl: URL.createObjectURL(file), analysis: null, isAnalyzing: true };
     setAnalyzedGarment(tempGarment);
 
     try {
         const hash = await calculateFileHash(file);
-
-        const { data: existingGarment, error: checkError } = await supabase
-            .from('mira-agent-garments')
-            .select('id, storage_path, attributes, name')
-            .eq('user_id', session!.user.id)
-            .eq('image_hash', hash)
-            .limit(1)
-            .maybeSingle();
-
-        if (checkError) {
-            throw checkError;
-        }
-
+        const { data: existingGarment } = await supabase.from('mira-agent-garments').select('storage_path, attributes, name').eq('user_id', session!.user.id).eq('image_hash', hash).limit(1).maybeSingle();
         if (existingGarment) {
             showSuccess("Found matching garment in your wardrobe.");
-            setAnalyzedGarment({
-                file: undefined,
-                previewUrl: existingGarment.storage_path,
-                analysis: existingGarment.attributes,
-                isAnalyzing: false,
-                hash: hash,
-            });
+            setAnalyzedGarment({ file: undefined, previewUrl: existingGarment.storage_path, analysis: existingGarment.attributes, isAnalyzing: false, hash: hash });
         } else {
             const analysisResult = await analyzeGarment(file);
             setAnalyzedGarment(g => g ? { ...g, analysis: analysisResult, isAnalyzing: false, hash: hash } : null);
@@ -234,44 +159,19 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
   };
 
   const handleRandomGarmentFilesSelect = async (files: File[]) => {
-    const newGarments: AnalyzedGarment[] = files.map(file => ({
-        file,
-        previewUrl: URL.createObjectURL(file),
-        analysis: null,
-        isAnalyzing: true,
-    }));
+    const newGarments: AnalyzedGarment[] = files.map(file => ({ file, previewUrl: URL.createObjectURL(file), analysis: null, isAnalyzing: true }));
     setAnalyzedRandomGarments(prev => [...prev, ...newGarments]);
 
     newGarments.forEach(async (garment) => {
         try {
             const hash = await calculateFileHash(garment.file!);
-            const { data: existingGarment, error: checkError } = await supabase
-                .from('mira-agent-garments')
-                .select('id, storage_path, attributes, name')
-                .eq('user_id', session!.user.id)
-                .eq('image_hash', hash)
-                .limit(1)
-                .maybeSingle();
-
-            if (checkError) throw checkError;
-
+            const { data: existingGarment } = await supabase.from('mira-agent-garments').select('storage_path, attributes, name').eq('user_id', session!.user.id).eq('image_hash', hash).limit(1).maybeSingle();
             if (existingGarment) {
                 showSuccess(`Found matching garment in wardrobe: ${existingGarment.name}`);
-                setAnalyzedRandomGarments(prev => prev.map(g => 
-                    g.file === garment.file ? { 
-                        ...g, 
-                        previewUrl: existingGarment.storage_path,
-                        analysis: existingGarment.attributes, 
-                        isAnalyzing: false, 
-                        hash: hash,
-                        file: undefined
-                    } : g
-                ));
+                setAnalyzedRandomGarments(prev => prev.map(g => g.file === garment.file ? { ...g, previewUrl: existingGarment.storage_path, analysis: existingGarment.attributes, isAnalyzing: false, hash: hash, file: undefined } : g));
             } else {
                 const analysisResult = await analyzeGarment(garment.file!);
-                setAnalyzedRandomGarments(prev => prev.map(g => 
-                    g.file === garment.file ? { ...g, analysis: analysisResult, isAnalyzing: false, hash: hash } : g
-                ));
+                setAnalyzedRandomGarments(prev => prev.map(g => g.file === garment.file ? { ...g, analysis: analysisResult, isAnalyzing: false, hash: hash } : g));
             }
         } catch (err: any) {
             showError(`Failed to process garment ${garment.file!.name}: ${err.message}`);
@@ -281,38 +181,23 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
   };
 
   const handleSelectFromWardrobe = (garments: any[]) => {
-    const newAnalyzedGarments = garments.map(g => ({
-      file: undefined,
-      previewUrl: g.storage_path,
-      analysis: g.attributes,
-      isAnalyzing: false,
-      hash: g.image_hash,
-    }));
-
-    if (mode === 'one-to-many') {
-      setAnalyzedGarment(newAnalyzedGarments[0]);
-    } else {
-      setAnalyzedRandomGarments(prev => [...prev, ...newAnalyzedGarments]);
-    }
+    const newAnalyzedGarments = garments.map(g => ({ file: undefined, previewUrl: g.storage_path, analysis: g.attributes, isAnalyzing: false, hash: g.image_hash }));
+    if (mode === 'one-to-many') setAnalyzedGarment(newAnalyzedGarments[0]);
+    else setAnalyzedRandomGarments(prev => [...prev, ...newAnalyzedGarments]);
   };
 
   const handleMultiModelSelect = (poseUrls: string[]) => {
     setSelectedModelUrls(prev => {
       const newSet = new Set(prev);
       const isSelected = poseUrls.length > 0 && newSet.has(poseUrls[0]);
-      if (isSelected) {
-        poseUrls.forEach(url => newSet.delete(url));
-      } else {
-        poseUrls.forEach(url => newSet.add(url));
-      }
+      if (isSelected) poseUrls.forEach(url => newSet.delete(url));
+      else poseUrls.forEach(url => newSet.add(url));
       return newSet;
     });
   };
 
   const handleSingleModelSelect = (poseUrls: string[]) => {
-    if (poseUrls.length > 0) {
-      setTempPairPersonUrl(poseUrls[0]);
-    }
+    if (poseUrls.length > 0) setTempPairPersonUrl(poseUrls[0]);
     setIsModelModalOpen(false);
   };
 
@@ -327,20 +212,9 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
       const toastId = showLoading("Analyzing garment...");
       try {
         const hash = await calculateFileHash(tempPairGarmentFile);
-        const { data: existingGarment, error: checkError } = await supabase
-            .from('mira-agent-garments')
-            .select('id, storage_path, attributes, name')
-            .eq('user_id', session!.user.id)
-            .eq('image_hash', hash)
-            .limit(1)
-            .maybeSingle();
+        const { data: existingGarment } = await supabase.from('mira-agent-garments').select('storage_path, attributes, name').eq('user_id', session!.user.id).eq('image_hash', hash).limit(1).maybeSingle();
         
-        if (checkError) throw checkError;
-
-        let finalAnalysis: AnalyzedGarment['analysis'];
-        let finalUrl = URL.createObjectURL(tempPairGarmentFile);
-        let finalFile: File | undefined = tempPairGarmentFile;
-
+        let finalAnalysis: AnalyzedGarment['analysis'], finalUrl = URL.createObjectURL(tempPairGarmentFile), finalFile: File | undefined = tempPairGarmentFile;
         if (existingGarment) {
             showSuccess("Found matching garment in wardrobe.");
             finalAnalysis = existingGarment.attributes;
@@ -352,12 +226,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
 
         const newPair: QueueItem = {
             person: { url: tempPairPersonUrl },
-            garment: { 
-                url: finalUrl, 
-                file: finalFile,
-                analysis: finalAnalysis,
-                hash: hash,
-            },
+            garment: { url: finalUrl, file: finalFile, analysis: finalAnalysis, hash: hash },
             appendix: tempPairAppendix
         };
         setPrecisePairs(prev => [...prev, newPair]);
@@ -366,8 +235,8 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
         setTempPairAppendix("");
         dismissToast(toastId);
       } catch (err: any) {
-          dismissToast(toastId);
-          showError(`Failed to add pair: ${err.message}`);
+        dismissToast(toastId);
+        showError(`Failed to add pair: ${err.message}`);
       } finally {
         setIsAddingPair(false);
       }
@@ -375,291 +244,105 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
   };
 
   const handleProceed = () => {
-    console.log(`[VTO Packs] handleProceed triggered for mode: ${mode}`);
     let finalQueue: QueueItem[] = [];
-    const allSelectedModels = models?.filter(model => 
-        model.poses.some(pose => selectedModelUrls.has(pose.final_url))
-    ) || [];
-
-    console.log(`[VTO Packs] Found ${allSelectedModels.length} models with at least one selected pose.`);
-
+    const allSelectedModels = models?.filter(model => model.poses.some(pose => selectedModelUrls.has(pose.final_url))) || [];
     const maleModels = allSelectedModels.filter(m => m.gender === 'male');
     const femaleModels = allSelectedModels.filter(m => m.gender === 'female');
 
     if (mode === 'one-to-many' && analyzedGarment?.analysis) {
-        console.log(`[VTO Packs] Mode: one-to-many. Analyzing garment:`, analyzedGarment);
         const garment = analyzedGarment;
         const garmentGender = garment.analysis.intended_gender;
-        
         let targetModels: VtoModel[] = [];
         if (garmentGender === 'male') targetModels = maleModels;
         else if (garmentGender === 'female') targetModels = femaleModels;
         else if (garmentGender === 'unisex') targetModels = [...maleModels, ...femaleModels];
-        console.log(`[VTO Packs] Garment gender is ${garmentGender}. Targetting ${targetModels.length} models.`);
 
         targetModels.forEach(model => {
-            model.poses
-                .filter(pose => selectedModelUrls.has(pose.final_url))
-                .forEach(pose => {
-                    const compatibility = isPoseCompatible(garment, pose);
-                    if (compatibility.compatible) {
-                        finalQueue.push({
-                            person: { url: pose.final_url, model_job_id: model.jobId },
-                            garment: { url: garment.previewUrl, file: garment.file, analysis: garment.analysis, hash: garment.hash },
-                            appendix: generalAppendix,
-                        });
-                    } else {
-                        console.log(`[VTO Packs] SKIPPED PAIR (one-to-many): Model ${model.jobId} / Pose ${pose.final_url} is not compatible with garment. Reason: ${compatibility.reason}`);
-                    }
-                });
+            model.poses.filter(pose => selectedModelUrls.has(pose.final_url)).forEach(pose => {
+                const compatibility = isPoseCompatible(garment, pose, isStrictFiltering);
+                if (compatibility.compatible) {
+                    finalQueue.push({ person: { url: pose.final_url, model_job_id: model.jobId }, garment: { url: garment.previewUrl, file: garment.file, analysis: garment.analysis, hash: garment.hash }, appendix: generalAppendix });
+                }
+            });
         });
     } else if (mode === 'random-pairs') {
-        console.log(`[VTO Packs] Mode: random-pairs. Analyzing ${analyzedRandomGarments.length} garments.`);
         const maleGarments = analyzedRandomGarments.filter(g => g.analysis?.intended_gender === 'male');
         const femaleGarments = analyzedRandomGarments.filter(g => g.analysis?.intended_gender === 'female');
         const unisexGarments = analyzedRandomGarments.filter(g => g.analysis?.intended_gender === 'unisex');
 
-        const maleGarmentTasks = [...maleGarments, ...unisexGarments];
-        const femaleGarmentTasks = [...femaleGarments, ...unisexGarments];
-
         const createPairs = (garments: AnalyzedGarment[], models: VtoModel[]) => {
             const numPairs = loopModels ? garments.length : Math.min(garments.length, models.length);
-            if (!loopModels && garments.length > models.length) {
-                showError(`Cannot pair ${garments.length} garments with only ${models.length} models in strict mode.`);
-                return;
-            }
-
+            if (!loopModels && garments.length > models.length) showError(`Cannot pair ${garments.length} garments with only ${models.length} models in strict mode.`);
             for (let i = 0; i < numPairs; i++) {
                 const garment = garments[i];
                 const model = models[i % models.length];
-                model.poses.forEach(pose => {
-                    if (selectedModelUrls.has(pose.final_url)) {
-                        const compatibility = isPoseCompatible(garment, pose);
-                        if (compatibility.compatible) {
-                            finalQueue.push({ person: { url: pose.final_url, model_job_id: model.jobId }, garment: { url: garment.previewUrl, file: garment.file, analysis: garment.analysis, hash: garment.hash }, appendix: generalAppendix });
-                        } else {
-                            console.log(`[VTO Packs] SKIPPED PAIR (random): Model ${model.jobId} / Pose ${pose.final_url} is not compatible with garment. Reason: ${compatibility.reason}`);
-                        }
+                model.poses.filter(pose => selectedModelUrls.has(pose.final_url)).forEach(pose => {
+                    const compatibility = isPoseCompatible(garment, pose, isStrictFiltering);
+                    if (compatibility.compatible) {
+                        finalQueue.push({ person: { url: pose.final_url, model_job_id: model.jobId }, garment: { url: garment.previewUrl, file: garment.file, analysis: garment.analysis, hash: garment.hash }, appendix: generalAppendix });
                     }
                 });
             }
         };
-
-        createPairs(maleGarmentTasks, maleModels);
-        createPairs(femaleGarmentTasks, femaleModels);
-
+        createPairs([...maleGarments, ...unisexGarments], maleModels);
+        createPairs([...femaleGarments, ...unisexGarments], femaleModels);
     } else if (mode === 'precise-pairs') {
-        console.log(`[VTO Packs] Mode: precise-pairs. Analyzing ${precisePairs.length} pairs.`);
         precisePairs.forEach(pair => {
             const modelForPair = models?.find(m => m.poses.some(p => p.final_url === pair.person.url));
             if (modelForPair) {
-                modelForPair.poses.forEach(pose => {
-                    const compatibility = isPoseCompatible(pair.garment as any, pose);
+                const pose = modelForPair.poses.find(p => p.final_url === pair.person.url);
+                if (pose) {
+                    const compatibility = isPoseCompatible(pair.garment as any, pose, isStrictFiltering);
                     if (compatibility.compatible) {
-                        finalQueue.push({
-                            person: { url: pose.final_url, model_job_id: modelForPair.jobId },
-                            garment: { ...pair.garment },
-                            appendix: pair.appendix
-                        });
-                    } else {
-                        console.log(`[VTO Packs] SKIPPED POSE (precise): Model ${modelForPair.jobId} / Pose ${pose.final_url} is not compatible with garment. Reason: ${compatibility.reason}`);
+                        finalQueue.push({ ...pair, person: { ...pair.person, model_job_id: modelForPair.jobId } });
                     }
-                });
-            } else {
-                console.warn(`[VTO Packs] Could not find model for precise pair with person URL: ${pair.person.url}`);
+                }
             }
         });
     }
 
-    console.log(`[VTO Packs] Final queue generated with ${finalQueue.length} compatible pairs.`);
-
     if (finalQueue.length === 0) {
-        showError("No compatible model poses were found for the selected garments. Please try a different combination or check the compatibility guide.");
+        showError("No compatible model poses were found for the selected garments. Try disabling 'Strict Pairing' or changing your selection.");
         return;
     }
-
     onQueueReady(finalQueue);
   };
 
   const queueCount = useMemo(() => {
     if (mode === 'one-to-many') return selectedModelUrls.size;
-    if (mode === 'random-pairs') return analyzedRandomGarments.length;
+    if (mode === 'random-pairs') return analyzedRandomGarments.length * selectedModelUrls.size;
     if (mode === 'precise-pairs') return precisePairs.length;
     return 0;
   }, [mode, selectedModelUrls, analyzedRandomGarments, precisePairs]);
-
-  const renderOneToMany = () => (
-    <Card>
-      <CardHeader>
-        <CardTitle>{t('oneToManyInputTitle')}</CardTitle>
-        <CardDescription>{t('oneToManyInputDescription')}</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="space-y-2">
-            <Label>{t('selectModels')}</Label>
-            <Button variant="outline" className="w-full" onClick={() => setIsModelModalOpen(true)}>
-              {t('selectModels')} ({selectedModelUrls.size})
-            </Button>
-            <ModelPoseSelector mode="get-all" onUseEntirePack={handleUseEntirePack} models={models || []} isLoading={isLoadingModels} error={modelsError as Error | null} packs={packs} isLoadingPacks={isLoadingPacks} selectedPackId={selectedPackId} setSelectedPackId={setSelectedPackId} />
-          </div>
-          <div className="space-y-2">
-            <Label>{t('uploadGarment')}</Label>
-            <GarmentSelector onSelect={(garments) => handleSelectFromWardrobe(garments)} multiSelect={false}>
-              <div className="aspect-square max-w-xs mx-auto relative">
-                <ImageUploader onFileSelect={(files) => handleGarmentFileSelect(files)} title={t('garmentImage')} imageUrl={analyzedGarment?.previewUrl || null} onClear={() => setAnalyzedGarment(null)} />
-                {analyzedGarment?.isAnalyzing && (
-                  <div className="absolute inset-0 bg-black/50 flex items-center justify-center rounded-md">
-                    <Loader2 className="h-8 w-8 animate-spin text-white" />
-                  </div>
-                )}
-              </div>
-            </GarmentSelector>
-          </div>
-        </div>
-        <div>
-          <Label htmlFor="general-appendix">{t('promptAppendix')}</Label>
-          <Textarea id="general-appendix" value={generalAppendix} onChange={(e) => setGeneralAppendix(e.target.value)} placeholder={t('promptAppendixPlaceholder')} rows={2} />
-        </div>
-      </CardContent>
-    </Card>
-  );
-
-  const renderRandomPairs = () => (
-    <Card>
-      <CardHeader>
-        <CardTitle>{t('randomPairsInputTitle')}</CardTitle>
-        <CardDescription>{t('randomPairsInputDescription')}</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="space-y-2">
-            <Label>{t('selectModels')}</Label>
-            <Button variant="outline" className="w-full" onClick={() => setIsModelModalOpen(true)}>
-              {t('selectModels')} ({selectedModelUrls.size})
-            </Button>
-            <ModelPoseSelector mode="get-all" onUseEntirePack={handleUseEntirePack} models={models || []} isLoading={isLoadingModels} error={modelsError as Error | null} packs={packs} isLoadingPacks={isLoadingPacks} selectedPackId={selectedPackId} setSelectedPackId={setSelectedPackId} />
-          </div>
-          <div className="space-y-2">
-            <Label>{t('uploadGarments')}</Label>
-            <GarmentSelector onSelect={handleSelectFromWardrobe} multiSelect={true}>
-              <div className="h-32">
-                <MultiImageUploader onFilesSelect={handleRandomGarmentFilesSelect} title={t('uploadGarments')} icon={<Shirt />} description={t('selectMultipleGarmentImages')} />
-              </div>
-            </GarmentSelector>
-            {analyzedRandomGarments.length > 0 && (
-              <ScrollArea className="h-24 mt-2 border rounded-md p-2">
-                <div className="grid grid-cols-5 gap-2">
-                  {analyzedRandomGarments.map((g, i) => <div key={i} className="relative"><img src={g.previewUrl} className="w-full h-full object-cover rounded-md aspect-square" />{g.isAnalyzing && <div className="absolute inset-0 bg-black/50 flex items-center justify-center"><Loader2 className="h-4 w-4 animate-spin text-white"/></div>}</div>)}
-                </div>
-              </ScrollArea>
-            )}
-          </div>
-        </div>
-         <div>
-          <Label htmlFor="general-appendix-random">{t('promptAppendix')}</Label>
-          <Textarea id="general-appendix-random" value={generalAppendix} onChange={(e) => setGeneralAppendix(e.target.value)} placeholder={t('promptAppendixPlaceholder')} rows={2} />
-        </div>
-        <div className="flex items-center justify-between p-2 rounded-md bg-muted/50">
-            <div className="flex items-center gap-2">
-                <Label htmlFor="loop-models-switch" className="text-sm font-medium">
-                    {t('loopModels')}
-                </Label>
-                <TooltipProvider>
-                    <Tooltip>
-                        <TooltipTrigger asChild>
-                            <Info className="h-4 w-4 text-muted-foreground cursor-help" />
-                        </TooltipTrigger>
-                        <TooltipContent>
-                            <p className="max-w-xs">{t('loopModelsDescription')}</p>
-                        </TooltipContent>
-                    </Tooltip>
-                </TooltipProvider>
-            </div>
-            <Switch
-                id="loop-models-switch"
-                checked={loopModels}
-                onCheckedChange={setLoopModels}
-            />
-        </div>
-      </CardContent>
-    </Card>
-  );
-
-  const renderPrecisePairs = () => (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-      <Card>
-        <CardHeader>
-            <CardTitle>{t('precisePairsInputTitle')}</CardTitle>
-            <CardDescription>{t('precisePairsInputDescription')}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-2">
-                <Label>{t('person')}</Label>
-                <div className="aspect-square w-full bg-muted rounded-md flex items-center justify-center">
-                    {tempPairPersonUrl ? (
-                        <div className="relative w-full h-full">
-                            <SecureImageDisplay imageUrl={tempPairPersonUrl} alt="Selected Person" />
-                            <Button variant="destructive" size="icon" className="absolute top-2 right-2 h-6 w-6 z-10" onClick={() => setTempPairPersonUrl(null)}><X className="h-4 w-4" /></Button>
-                        </div>
-                    ) : (
-                        <Button variant="outline" onClick={() => setIsModelModalOpen(true)}>Select Model</Button>
-                    )}
-                </div>
-            </div>
-            <ImageUploader onFileSelect={(file) => setTempPairGarmentFile(file)} title={t('garment')} imageUrl={tempPairGarmentUrl} onClear={() => setTempPairGarmentFile(null)} />
-          </div>
-          <div>
-            <Label htmlFor="pair-appendix">{t('promptAppendixPair')}</Label>
-            <Input id="pair-appendix" value={tempPairAppendix} onChange={(e) => setTempPairAppendix(e.target.value)} placeholder={t('promptAppendixPairPlaceholder')} />
-          </div>
-          <Button className="w-full" onClick={addPrecisePair} disabled={!tempPairPersonUrl || !tempPairGarmentFile || isAddingPair}>
-            {isAddingPair && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {t('addPairToQueue')}
-          </Button>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader><CardTitle>{t('batchQueue')}</CardTitle></CardHeader>
-        <CardContent>
-          <ScrollArea className="h-96">
-            <div className="space-y-2 pr-4">
-              {precisePairs.map((pair, i) => (
-                <div key={i} className="flex gap-2 items-center bg-muted p-2 rounded-md">
-                  <div className="w-16 h-16 rounded-md overflow-hidden flex-shrink-0"><SecureImageDisplay imageUrl={pair.person.url} alt="Person" /></div>
-                  <PlusCircle className="h-5 w-5 text-muted-foreground flex-shrink-0" />
-                  <div className="w-16 h-16 rounded-md overflow-hidden flex-shrink-0"><img src={pair.garment.url} alt="Garment" className="w-full h-full object-cover" /></div>
-                  <p className="text-xs text-muted-foreground flex-1 truncate italic">"{pair.appendix}"</p>
-                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setPrecisePairs(p => p.filter((_, idx) => idx !== i))}><X className="h-4 w-4" /></Button>
-                </div>
-              ))}
-            </div>
-          </ScrollArea>
-        </CardContent>
-      </Card>
-    </div>
-  );
 
   return (
     <>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2">
-          {mode === 'one-to-many' && renderOneToMany()}
-          {mode === 'random-pairs' && renderRandomPairs()}
-          {mode === 'precise-pairs' && renderPrecisePairs()}
+          {mode === 'one-to-many' && <OneToManyInputs {...{ models, packs, isLoadingModels, isLoadingPacks, selectedPackId, setSelectedPackId, selectedModelUrls, handleUseEntirePack, analyzedGarment, handleGarmentFileSelect, handleSelectFromWardrobe, setAnalyzedGarment, generalAppendix, setGeneralAppendix, setIsModelModalOpen }} />}
+          {mode === 'random-pairs' && <RandomPairsInputs {...{ models, packs, isLoadingModels, isLoadingPacks, selectedPackId, setSelectedPackId, selectedModelUrls, handleUseEntirePack, setIsModelModalOpen, analyzedRandomGarments, handleRandomGarmentFilesSelect, handleSelectFromWardrobe, generalAppendix, setGeneralAppendix, loopModels, setLoopModels }} />}
+          {mode === 'precise-pairs' && <PrecisePairsInputs {...{ precisePairs, setPrecisePairs, tempPairPersonUrl, setTempPairPersonUrl, tempPairGarmentFile, setTempPairGarmentFile, tempPairGarmentUrl, tempPairAppendix, setTempPairAppendix, addPrecisePair, setIsModelModalOpen }} />}
         </div>
         <div className="lg:col-span-1 space-y-6">
+          <Card>
+            <CardHeader><CardTitle>Advanced Settings</CardTitle></CardHeader>
+            <CardContent>
+              <div className="flex items-center justify-between p-2 rounded-md">
+                <Label htmlFor="strict-pairing-switch" className="flex items-center gap-2">Strict Pairing</Label>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild><Info className="h-4 w-4 text-muted-foreground cursor-help" /></TooltipTrigger>
+                    <TooltipContent><p className="max-w-xs">When enabled, the system prevents incompatible pairings (e.g., putting a t-shirt on a close-up of shoes). Disable for more creative freedom.</p></TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+                <Switch id="strict-pairing-switch" checked={isStrictFiltering} onCheckedChange={setIsStrictFiltering} />
+              </div>
+            </CardContent>
+          </Card>
           <div className="flex flex-col gap-2">
             <Button size="lg" onClick={handleProceed} disabled={isProceedDisabled}>
-              {isAnalyzingGarments ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Wand2 className="mr-2 h-4 w-4" />
-              )}
-              {isAnalyzingGarments 
-                ? "Analyzing Garments..." 
-                : t('reviewQueue', { count: queueCount })}
+              {isAnalyzingGarments ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+              {isAnalyzingGarments ? "Analyzing Garments..." : t('reviewQueue', { count: queueCount })}
             </Button>
             <Button variant="outline" onClick={onGoBack}>{t('goBack')}</Button>
           </div>
@@ -681,9 +364,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
             selectedPackId={selectedPackId}
             setSelectedPackId={setSelectedPackId}
           />
-          <DialogFooter>
-            <Button onClick={() => setIsModelModalOpen(false)}>Done</Button>
-          </DialogFooter>
+          <DialogFooter><Button onClick={() => setIsModelModalOpen(false)}>Done</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </>
