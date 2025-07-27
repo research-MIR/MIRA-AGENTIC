@@ -34,7 +34,7 @@ You will receive a prompt containing:
     -   If giving up, provide a reason.
 
 ### Output Format & Rules:
-Your entire output MUST be a single, valid JSON object. Do not include any other text or explanations.
+Your entire response MUST be a single, valid JSON object. Do not include any other text or explanations.
 
 **If you decide to retry:**
 \`\`\`json
@@ -78,7 +78,7 @@ async function downloadAndEncodeImage(supabase: SupabaseClient, url: string): Pr
         }
         
         const bucketName = pathSegments[publicSegmentIndex + 1];
-        const filePath = pathSegments.slice(publicSegmentIndex + 2).join('/');
+        const filePath = decodeURIComponent(pathSegments.slice(publicSegmentIndex + 2).join('/'));
 
         if (!bucketName || !filePath) {
             throw new Error(`Could not parse bucket or path from Supabase URL: ${url}`);
@@ -90,7 +90,6 @@ async function downloadAndEncodeImage(supabase: SupabaseClient, url: string): Pr
         }
         blob = data;
     } else {
-        // Handle external URLs (like BitStudio)
         const response = await fetch(url);
         if (!response.ok) {
             throw new Error(`Failed to download image from external URL ${url}. Status: ${response.statusText}`);
@@ -209,12 +208,14 @@ serve(async (req) => {
         retry_number: retry_count + 1,
         qa_report_used: {
             report: lastReport,
-            failed_image_url: failed_image_url // Log the URL of the image that was actually fixed in this step
+            failed_image_url: failed_image_url
         },
         gemini_input_prompt: "Multimodal prompt sent (see logs for details)",
         gemini_raw_output: result.text,
         parsed_plan: plan,
     };
+
+    const newFixHistory = [...fix_history, currentFixAttemptLog];
 
     switch (plan.action) {
       case 'retry': {
@@ -222,7 +223,7 @@ serve(async (req) => {
         if (!payload) throw new Error("Plan action 'retry' is missing the 'payload' parameter.");
         
         await supabase.from('mira-agent-bitstudio-jobs').update({ 
-            metadata: { ...job.metadata, fix_history: [...fix_history, currentFixAttemptLog] }
+            metadata: { ...job.metadata, fix_history: newFixHistory }
         }).eq('id', job_id);
 
         const { error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
@@ -241,7 +242,7 @@ serve(async (req) => {
         await supabase.from('mira-agent-bitstudio-jobs').update({ 
             status: 'permanently_failed', 
             error_message: reason,
-            metadata: { ...job.metadata, fix_history: [...fix_history, currentFixAttemptLog] }
+            metadata: { ...job.metadata, fix_history: newFixHistory }
         }).eq('id', job_id);
         if (job.metadata?.batch_pair_job_id) {
             await supabase.from('mira-agent-batch-inpaint-pair-jobs')

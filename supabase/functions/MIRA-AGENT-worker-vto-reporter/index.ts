@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { GoogleGenAI, Content, Part, HarmCategory, HarmBlockThreshold } from 'https://esm.sh/@google/genai@0.15.0';
+import { GoogleGenAI, Content, Part, HarmCategory, HarmBlockThreshold, GenerationResult } from 'https://esm.sh/@google/genai@0.15.0';
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 
@@ -7,11 +7,20 @@ const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const MODEL_NAME = "gemini-2.5-pro-preview-06-05";
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 1500;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
+
+const safetySettings = [
+    { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+    { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+    { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+    { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+];
 
 const garmentAnalysisPrompt = `You are a fashion cataloger. Analyze the provided garment image and return a JSON object with the keys \`garment_type\`, \`pattern_type\`, \`has_logo\`, and \`notes\`.
 - \`garment_type\` must be one of: 't-shirt', 'jacket', 'dress', 'pants', 'skirt', 'shoes', 'accessory', 'other'.
@@ -115,63 +124,93 @@ serve(async (req) => {
     if (!vtoJob.final_image_url) throw new Error("VTO job is missing a final_image_url.");
 
     let sourcePersonImageUrl = vtoJob.source_person_image_url;
-
-    // --- NEW LOGIC: Check for refinement pass lineage ---
     if (vtoJob.batch_pair_job_id) {
-        console.log(`${logPrefix} Job is linked to a batch pair job. Checking for refinement pass metadata...`);
-        const { data: pairJob, error: pairFetchError } = await supabase
-            .from('mira-agent-batch-inpaint-pair-jobs')
-            .select('metadata')
-            .eq('id', vtoJob.batch_pair_job_id)
-            .single();
-        
-        if (pairFetchError) {
-            console.warn(`${logPrefix} Could not fetch parent pair job, proceeding with default source image. Error: ${pairFetchError.message}`);
-        } else if (pairJob?.metadata?.original_person_image_url_for_analysis) {
+        const { data: pairJob } = await supabase.from('mira-agent-batch-inpaint-pair-jobs').select('metadata').eq('id', vtoJob.batch_pair_job_id).single();
+        if (pairJob?.metadata?.original_person_image_url_for_analysis) {
             sourcePersonImageUrl = pairJob.metadata.original_person_image_url_for_analysis;
-            console.log(`${logPrefix} Refinement pass detected. Using original person image for analysis: ${sourcePersonImageUrl}`);
         }
     }
-    // --- END OF NEW LOGIC ---
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
 
-    console.log(`${logPrefix} Stage 1: Analyzing reference garment...`);
-    const garment_analysis = await analyzeGarment(ai, supabase, vtoJob.source_garment_image_url, "REFERENCE GARMENT");
+    // --- STAGE 1: Garment Analysis (with retry) ---
+    let garment_analysis: any = null;
+    let lastGarmentError: Error | null = null;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+            console.log(`${logPrefix} Stage 1: Analyzing reference garment, attempt ${attempt}/${MAX_RETRIES}...`);
+            garment_analysis = await analyzeGarment(ai, supabase, vtoJob.source_garment_image_url, "REFERENCE GARMENT");
+            lastGarmentError = null;
+            break;
+        } catch (error) {
+            lastGarmentError = error;
+            console.warn(`${logPrefix} Garment analysis attempt ${attempt} failed:`, error.message);
+            if (attempt < MAX_RETRIES) {
+                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS * attempt));
+            }
+        }
+    }
+    if (lastGarmentError) throw lastGarmentError;
+    if (!garment_analysis) throw new Error("Garment analysis failed to produce a result after all retries.");
+    
     await supabase.from('mira-agent-vto-qa-reports').update({ reference_garment_analysis: garment_analysis }).eq('id', qa_job_id);
     console.log(`${logPrefix} Stage 1 complete.`);
 
-    console.log(`${logPrefix} Stage 2: Performing comparative analysis with all visual evidence...`);
-    const [personImageParts, referenceGarmentParts, finalResultParts] = await Promise.all([
-        downloadImageAsPart(supabase, sourcePersonImageUrl, "SOURCE PERSON"),
-        downloadImageAsPart(supabase, vtoJob.source_garment_image_url, "REFERENCE GARMENT"),
-        downloadImageAsPart(supabase, vtoJob.final_image_url, "FINAL RESULT")
-    ]);
+    // --- STAGE 2: Comparative Analysis (with retry and fallback) ---
+    let comparative_report: any = null;
+    let lastComparisonError: Error | null = null;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+            console.log(`${logPrefix} Stage 2: Performing comparative analysis, attempt ${attempt}/${MAX_RETRIES}...`);
+            const [personImageParts, referenceGarmentParts, finalResultParts] = await Promise.all([
+                downloadImageAsPart(supabase, sourcePersonImageUrl, "SOURCE PERSON"),
+                downloadImageAsPart(supabase, vtoJob.source_garment_image_url, "REFERENCE GARMENT"),
+                downloadImageAsPart(supabase, vtoJob.final_image_url, "FINAL RESULT")
+            ]);
+            const comparisonParts: Part[] = [
+                { text: "--- PRELIMINARY REFERENCE GARMENT ANALYSIS (JSON) ---" },
+                { text: JSON.stringify(garment_analysis) },
+                { text: "--- SOURCE PERSON IMAGE ---" }, ...personImageParts,
+                { text: "--- REFERENCE GARMENT IMAGE ---" }, ...referenceGarmentParts,
+                { text: "--- FINAL RESULT IMAGE ---" }, ...finalResultParts
+            ];
+            const comparisonResult = await ai.models.generateContent({
+                model: MODEL_NAME,
+                contents: [{ role: 'user', parts: comparisonParts }],
+                generationConfig: { responseMimeType: "application/json" },
+                config: { systemInstruction: { role: "system", parts: [{ text: comparativeAnalysisPrompt }] } }
+            });
+            comparative_report = { ...extractJson(comparisonResult.text), garment_analysis: garment_analysis };
+            lastComparisonError = null;
+            break;
+        } catch (error) {
+            lastComparisonError = error;
+            console.warn(`${logPrefix} Comparative analysis attempt ${attempt} failed:`, error.message);
+            if (attempt < MAX_RETRIES) {
+                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS * attempt));
+            }
+        }
+    }
 
-    const comparisonParts: Part[] = [
-        { text: "--- PRELIMINARY REFERENCE GARMENT ANALYSIS (JSON) ---" },
-        { text: JSON.stringify(garment_analysis) },
-        { text: "--- SOURCE PERSON IMAGE ---" },
-        ...personImageParts,
-        { text: "--- REFERENCE GARMENT IMAGE ---" },
-        ...referenceGarmentParts,
-        { text: "--- FINAL RESULT IMAGE ---" },
-        ...finalResultParts
-    ];
-    const comparisonResult = await ai.models.generateContent({
-        model: MODEL_NAME,
-        contents: [{ role: 'user', parts: comparisonParts }],
-        generationConfig: { responseMimeType: "application/json" },
-        config: { systemInstruction: { role: "system", parts: [{ text: comparativeAnalysisPrompt }] } }
-    });
-    const comparative_report = {
-        ...extractJson(comparisonResult.text),
-        garment_analysis: garment_analysis // Inject the preliminary analysis into the final report
-    };
+    if (lastComparisonError) {
+        console.error(`${logPrefix} Comparative analysis failed after all retries. Creating fallback report.`);
+        comparative_report = {
+            overall_pass: false,
+            pass_with_notes: false,
+            failure_category: "analysis_failed",
+            mismatch_reason: "The AI quality check failed to produce a valid analysis after multiple retries.",
+            fix_suggestion: "This may be a temporary issue. You can try re-running the analysis manually from the report page.",
+            confidence_score: 0.0,
+            garment_analysis: garment_analysis,
+            garment_comparison: { scores: {} },
+            pose_and_body_analysis: { scores: {} }
+        };
+    }
+    if (!comparative_report) throw new Error("Comparative analysis failed to produce a result after all retries.");
+
     console.log(`${logPrefix} Stage 2 complete.`);
-
     await supabase.from('mira-agent-vto-qa-reports').update({ comparative_report, status: 'complete' }).eq('id', qa_job_id);
-    await supabase.from('mira-agent-bitstudio-jobs').update({ metadata: { verification_result: comparative_report } }).eq('id', qaJob.source_vto_job_id);
+    await supabase.from('mira-agent-bitstudio-jobs').update({ metadata: { ...vtoJob.metadata, verification_result: comparative_report } }).eq('id', qaJob.source_vto_job_id);
     console.log(`${logPrefix} Job finished successfully.`);
 
     return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });

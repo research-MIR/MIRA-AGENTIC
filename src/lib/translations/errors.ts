@@ -12,6 +12,7 @@ export const errorTranslations = {
     ERROR_NO_IMAGE_TO_REFINE: "Mi dispiace, non ho trovato un'immagine nella nostra conversazione da rifinire. Per favore, caricane una o generane una prima.",
     errorMaxContext: "Questa conversazione ha raggiunto la sua memoria massima. Per continuare, per favore inizia una nuova chat.",
     errorIncompleteOutput: "Il job di affinamento non è riuscito a produrre un risultato valido. Questo può accadere a causa di un problema temporaneo. Riprovare di solito risolve il problema.",
+    errorAnalysisFailed: "Il controllo di qualità automatico non è riuscito a produrre un'analisi valida dopo diversi tentativi. Questo potrebbe essere un problema temporaneo. Puoi provare a rieseguire l'analisi manualmente dalla pagina dei report.",
   },
   en: {
     errorQuotaExceeded: "You have reached your image generation limit for this period. Please check your plan details.",
@@ -26,5 +27,6 @@ export const errorTranslations = {
     ERROR_NO_IMAGE_TO_REFINE: "I'm sorry, I couldn't find an image in our current conversation to refine. Please upload or generate one first.",
     errorMaxContext: "This conversation has reached its maximum context memory. To continue, please start a new chat.",
     errorIncompleteOutput: "The refinement job failed to produce a valid output. This can happen due to a temporary issue. Retrying usually solves the problem.",
+    errorAnalysisFailed: "The automated quality check failed to produce a valid analysis after multiple retries. This may be a temporary issue. You can try re-running the analysis manually from the report page.",
   },
 };

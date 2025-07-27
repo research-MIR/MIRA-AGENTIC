@@ -10,6 +10,7 @@ const errorKeywordMap: Record<string, string> = {
     "maximum context memory": "errorMaxContext",
     "history is too long": "errorMaxContext",
     "incomplete or invalid output": "errorIncompleteOutput",
+    "analysis_failed": "errorAnalysisFailed",
 };
 
 /**
