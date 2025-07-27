@@ -7,13 +7,6 @@ import { AnalyzedGarment, Pose } from '@/types/vto';
  * @returns An object with a 'compatible' boolean and a 'reason' string for logging.
  */
 export const isPoseCompatible = (garment: AnalyzedGarment, pose: Pose): { compatible: boolean; reason: string } => {
-  // User requested to relax the compatibility checks to only filter by gender.
-  // The gender check is handled in the VtoInputProvider, so this function will now always return true.
-  // The old logic is commented out below for reference.
-
-  return { compatible: true, reason: "Compatibility checks relaxed to only filter by gender." };
-
-  /*
   const logPrefix = `[isPoseCompatible] Garment fit: ${garment.analysis?.type_of_fit} | Pose focus: ${pose.analysis?.shoot_focus} | Pose garment coverage: ${pose.analysis?.garment.coverage} | Pose is base: ${pose.analysis?.garment.is_identical_to_base_garment} ->`;
 
   if (!garment.analysis || !pose.analysis) {
@@ -69,5 +62,4 @@ export const isPoseCompatible = (garment: AnalyzedGarment, pose: Pose): { compat
 
   console.log(`${logPrefix} COMPATIBLE.`);
   return { compatible: true, reason: "Compatible" };
-  */
 };
