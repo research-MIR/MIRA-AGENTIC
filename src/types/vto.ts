@@ -1,6 +1,6 @@
 export interface BitStudioJob {
   id: string;
-  status: 'queued' | 'processing' | 'complete' | 'failed' | 'compositing' | 'delegated' | 'pending' | 'segmenting' | 'permanently_failed' | 'awaiting_fix' | 'fixing';
+  status: 'queued' | 'processing' | 'complete' | 'done' | 'failed' | 'compositing' | 'delegated' | 'pending' | 'segmenting' | 'permanently_failed' | 'awaiting_fix' | 'fixing';
   source_person_image_url?: string;
   source_garment_image_url?: string;
   final_image_url?: string;

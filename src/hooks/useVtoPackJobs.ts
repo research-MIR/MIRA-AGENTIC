@@ -14,7 +14,10 @@ export const useVtoPackJobs = (packId: string | null, enabled: boolean = true) =
       const { data: bitstudioJobs, error: bitstudioError } = await supabase
           .from('mira-agent-bitstudio-jobs')
           .select('*')
-          .eq('vto_pack_job_id', packId);
+          .eq('vto_pack_job_id', packId)
+          .in('status', ['complete', 'done'])
+          .not('final_image_url', 'is', null)
+          .or('metadata->>pass_number.is.null, metadata->>pass_number.neq.2');
       if (bitstudioError) throw bitstudioError;
 
       // Check if it's a refinement pack

@@ -38,7 +38,7 @@ export const RecentJobsList = ({ jobs, isLoading, selectedJobId, onSelectJob, mo
 
     const handleThumbnailClick = (job: BitStudioJob) => {
         onSelectJob(job);
-        if (job.status === 'complete' && job.final_image_url) {
+        if ((job.status === 'complete' || job.status === 'done') && job.final_image_url) {
             showImage({
                 images: [{ url: job.final_image_url, jobId: job.id }],
                 currentIndex: 0
@@ -57,14 +57,28 @@ export const RecentJobsList = ({ jobs, isLoading, selectedJobId, onSelectJob, mo
                                 const urlToPreview = job.final_image_url || job.metadata?.source_image_url || job.source_person_image_url;
                                 const verification = job.metadata?.verification_result;
                                 const isFailed = job.status === 'failed' || job.status === 'permanently_failed';
+                                const isComplete = job.status === 'complete' || job.status === 'done';
+                                const inProgressStatuses = ['processing', 'queued', 'segmenting', 'delegated', 'compositing', 'awaiting_fix', 'fixing', 'pending'];
+                                const isInProgress = inProgressStatuses.includes(job.status);
+
                                 return (
                                     <button key={job.id} onClick={() => handleThumbnailClick(job)} className={cn("border-2 rounded-lg p-0.5 flex-shrink-0 w-24 h-24 relative", selectedJobId === job.id ? "border-primary" : "border-transparent")}>
                                         <SecureImageDisplay imageUrl={urlToPreview || null} alt="Recent job" className="w-full h-full object-cover" />
-                                        {isFailed && (
-                                            <div className="absolute inset-0 bg-destructive/70 flex items-center justify-center rounded-md">
-                                                <XCircle className="h-8 w-8 text-destructive-foreground" />
-                                            </div>
+                                        {isComplete && (
+                                            <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity" />
                                         )}
+                                        {isFailed && (
+                                            job.final_image_url ? (
+                                                <div className="absolute inset-0 bg-yellow-500/70 flex items-center justify-center rounded-md">
+                                                    <AlertTriangle className="h-8 w-8 text-white" />
+                                                </div>
+                                            ) : (
+                                                <div className="absolute inset-0 bg-destructive/70 flex items-center justify-center rounded-md">
+                                                    <XCircle className="h-8 w-8 text-destructive-foreground" />
+                                                </div>
+                                            )
+                                        )}
+                                        {isInProgress && <div className="absolute inset-0 bg-black/70 flex items-center justify-center rounded-md"><Loader2 className="h-8 w-8 animate-spin text-white" /></div>}
                                         {verification && !isFailed && (
                                             <div className="absolute bottom-1 right-1">
                                                 {verification.is_match ? (

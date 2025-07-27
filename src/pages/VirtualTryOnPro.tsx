@@ -71,7 +71,7 @@ const VirtualTryOnPro = ({
       );
     }
 
-    if (job.status === 'complete' && job.final_image_url) {
+    if ((job.status === 'complete' || job.status === 'done') && job.final_image_url) {
       const verification = job.metadata?.verification_result;
       return (
         <div className="space-y-4">
