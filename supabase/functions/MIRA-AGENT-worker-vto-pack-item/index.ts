@@ -1,4 +1,4 @@
-import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
+import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { Image as ISImage } from "https://deno.land/x/imagescript@1.2.15/mod.ts";
 import { decodeBase64, encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
@@ -139,10 +139,10 @@ serve(async (req)=>{
           await handleStart(supabase, job, logPrefix);
           break;
         case 'generate_step_1':
-          await handleGenerateStep(supabase, job, 15, 'generate_step_2', logPrefix);
+          await handleGenerateStep(supabase, job, 15, 'quality_check', logPrefix);
           break;
         case 'generate_step_2':
-          await handleGenerateStep(supabase, job, 30, 'generate_step_3', logPrefix);
+          await handleGenerateStep(supabase, job, 30, 'quality_check', logPrefix);
           break;
         case 'generate_step_3':
           await handleGenerateStep(supabase, job, 55, 'quality_check', logPrefix);
@@ -265,7 +265,7 @@ async function handleGenerateStep(supabase: SupabaseClient, job: any, sampleStep
     body: {
       person_image_url: job.metadata.cropped_person_url,
       garment_image_url: job.metadata.optimized_garment_url,
-      sample_count: 1,
+      sample_count: 3, // Always generate 3 images per pass
       sample_step: sampleStep
     }
   });
@@ -274,14 +274,13 @@ async function handleGenerateStep(supabase: SupabaseClient, job: any, sampleStep
   if (!generatedImages || !Array.isArray(generatedImages) || generatedImages.length === 0 || !generatedImages[0]?.base64Image) {
     throw new Error(`VTO tool did not return a valid image for step ${sampleStep}`);
   }
-  const newVariation = generatedImages[0];
   const currentVariations = job.metadata.generated_variations || [];
   await supabase.from('mira-agent-bitstudio-jobs').update({
     metadata: {
       ...job.metadata,
       generated_variations: [
         ...currentVariations,
-        newVariation
+        ...generatedImages // Add all new images
       ],
       google_vto_step: nextStep
     }
@@ -292,58 +291,90 @@ async function handleGenerateStep(supabase: SupabaseClient, job: any, sampleStep
   });
 }
 async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix: string) {
-  console.log(`${logPrefix} Performing quality check on 3 variations.`);
-  const variations = job.metadata.generated_variations;
-  if (!variations || !Array.isArray(variations) || variations.length < 3) {
-    throw new Error("Not enough variations generated for quality check.");
+  console.log(`${logPrefix} Performing quality check.`);
+  const { metadata, id: pair_job_id } = job;
+  const variations = metadata.generated_variations;
+  const qa_retry_count = metadata.qa_retry_count || 0;
+  const is_final_attempt = qa_retry_count >= 2;
+
+  if (!variations || !Array.isArray(variations) || variations.length === 0) {
+    throw new Error("No variations generated for quality check.");
   }
+
   let [personBlob, garmentBlob] = await Promise.all([
     safeDownload(supabase, job.source_person_image_url),
     safeDownload(supabase, job.source_garment_image_url)
   ]);
+
   const { data: qaData, error } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-quality-checker', {
     body: {
       original_person_image_base64: await blobToBase64(personBlob),
       reference_garment_image_base64: await blobToBase64(garmentBlob),
-      generated_images_base64: variations.map((img: any)=>img.base64Image)
+      generated_images_base64: variations.map((img: any) => img.base64Image),
+      is_final_attempt: is_final_attempt
     }
   });
-  if (error) throw error;
-  personBlob = null;
+
+  personBlob = null; // GC
   garmentBlob = null; // GC
-  if (!qaData || typeof qaData.best_image_index !== 'number') {
+
+  if (error) throw error;
+  if (!qaData || !qaData.action) {
     throw new Error("Quality checker returned invalid data");
   }
-  console.log(`${logPrefix} QA complete. Best image index: ${qaData.best_image_index}.`);
-  const bestImageBase64 = variations[qaData.best_image_index].base64Image;
-  const shouldSkipReframe = job.metadata.skip_reframe === true || job.metadata.final_aspect_ratio === '1:1';
-  if (shouldSkipReframe) {
-    console.log(`${logPrefix} QA passed and reframe is skipped. Finalizing job.`);
-    const finalImage = await uploadBase64ToStorage(supabase, bestImageBase64, job.user_id, 'final_vto_pack.png');
-    await supabase.from('mira-agent-bitstudio-jobs').update({
-      status: 'complete',
-      final_image_url: finalImage.publicUrl,
-      metadata: {
-        ...job.metadata,
-        qa_best_image_base64: null,
-        qa_reasoning: qaData.reasoning,
-        google_vto_step: 'done'
-      }
-    }).eq('id', job.id);
-    console.log(`${logPrefix} Job finalized with 1:1 image.`);
-    await triggerWatchdog(supabase, logPrefix);
-  } else {
+
+  console.log(`${logPrefix} QA complete. Action: ${qaData.action}. Reasoning: ${qaData.reasoning}`);
+
+  const qa_history = metadata.qa_history || [];
+  const newHistoryEntry = {
+    pass_number: qa_retry_count + 1,
+    ...qaData
+  };
+  qa_history.push(newHistoryEntry);
+
+  if (qaData.action === 'retry') {
+    console.log(`${logPrefix} QA requested a retry. Incrementing retry count and starting next generation pass.`);
+    const nextStep = `generate_step_${qa_retry_count + 2}`;
     await supabase.from('mira-agent-bitstudio-jobs').update({
       metadata: {
-        ...job.metadata,
-        qa_best_image_base64: bestImageBase64,
-        qa_reasoning: qaData.reasoning,
-        google_vto_step: 'reframe'
+        ...metadata,
+        qa_history: qa_history,
+        qa_retry_count: qa_retry_count + 1,
+        google_vto_step: nextStep
       }
-    }).eq('id', job.id);
-    invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', {
-      pair_job_id: job.id
-    });
+    }).eq('id', pair_job_id);
+    invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id });
+  } else { // action === 'select'
+    console.log(`${logPrefix} QA selected an image. Proceeding to finalize.`);
+    const bestImageBase64 = variations[qaData.best_image_index].base64Image;
+    const shouldSkipReframe = metadata.skip_reframe === true || metadata.final_aspect_ratio === '1:1';
+
+    if (shouldSkipReframe) {
+      console.log(`${logPrefix} Reframe is skipped. Finalizing job.`);
+      const finalImage = await uploadBase64ToStorage(supabase, bestImageBase64, job.user_id, 'final_vto_pack.png');
+      await supabase.from('mira-agent-bitstudio-jobs').update({
+        status: 'complete',
+        final_image_url: finalImage.publicUrl,
+        metadata: {
+          ...metadata,
+          qa_history: qa_history,
+          qa_best_image_base64: null, // Clear large data
+          google_vto_step: 'done'
+        }
+      }).eq('id', pair_job_id);
+      console.log(`${logPrefix} Job finalized with 1:1 image.`);
+      await triggerWatchdog(supabase, logPrefix);
+    } else {
+      await supabase.from('mira-agent-bitstudio-jobs').update({
+        metadata: {
+          ...metadata,
+          qa_history: qa_history,
+          qa_best_image_base64: bestImageBase64,
+          google_vto_step: 'reframe'
+        }
+      }).eq('id', pair_job_id);
+      invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id });
+    }
   }
 }
 async function handleReframe(supabase: SupabaseClient, job: any, logPrefix: string) {

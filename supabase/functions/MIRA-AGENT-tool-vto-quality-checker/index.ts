@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { GoogleGenAI, Content, Part, HarmCategory, HarmBlockThreshold } from 'https://esm.sh/@google/genai@0.15.0';
+import { GoogleGenAI, Content, Part, HarmCategory, HarmBlockThreshold, GenerationResult } from 'https://esm.sh/@google/genai@0.15.0';
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const MODEL_NAME = "gemini-2.5-flash";
@@ -16,33 +16,46 @@ const safetySettings = [
     { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
 ];
 
-const systemPrompt = `You are a "VTO Quality Assurance AI". You will be given a reference garment image, an original person image, and three generated "try-on" images labeled "Image 0", "Image 1", and "Image 2". Your sole task is to evaluate the three generated images and choose the single best one.
+const systemPrompt = `You are a "VTO Quality Assurance AI". You will be given a reference garment image, an original person image, and a set of generated "try-on" images. Your sole task is to evaluate the generated images and decide on an action: 'select' the best one, or 'retry' if none are acceptable.
+
+### Your Inputs:
+- **is_final_attempt (boolean):** A flag indicating if this is the last chance to select an image.
+- A series of images: REFERENCE GARMENT, ORIGINAL PERSON, and one or more GENERATED IMAGES.
 
 ### Your Internal Thought Process (Chain-of-Thought)
-Before providing your final JSON output, you MUST follow these steps internally to construct your 'reasoning' string:
-1.  **Analyze REFERENCE Garment:** Briefly describe the key features of the reference garment (e.g., "a blue denim jacket with silver buttons").
-2.  **Analyze Each Generated Image:** For each of the three generated images, perform a quick evaluation based on the core criteria.
-    -   **Image 0:** How well does the garment match? How well is the pose preserved? Are there any major artifacts?
-    -   **Image 1:** How well does the garment match? How well is the pose preserved? Are there any major artifacts?
-    -   **Image 2:** How well does the garment match? How well is the pose preserved? Are there any major artifacts?
-3.  **Make a Decision:** Compare your notes for the three images.
-4.  **State Your Final Choice & Justification:** Clearly state which image you chose and why it is superior to the others based on the evaluation criteria. For example: "I chose Image 1 because the denim texture is the most realistic and the model's original pose is perfectly preserved, unlike Image 2 where the arm is distorted."
+1.  **Analyze REFERENCE Garment:** Briefly describe its key features.
+2.  **Analyze Each Generated Image:** Evaluate each image based on the core criteria.
+3.  **Make a Decision based on 'is_final_attempt':**
+    -   **If 'is_final_attempt' is FALSE:** Be highly critical. If you find a high-quality image that meets all criteria, your action is 'select'. If ALL images have significant flaws (distorted anatomy, incorrect garment shape, severe artifacts), your action MUST be 'retry'.
+    -   **If 'is_final_attempt' is TRUE:** You MUST select the single best option available, even if it has minor flaws. Your action MUST be 'select'. Your reasoning should still explain why you chose it and what its flaws are, but you are not allowed to request another retry.
+4.  **State Your Final Choice & Justification:** Clearly state your decision and why it is the best choice based on the evaluation criteria.
 
 ### Evaluation Criteria (in order of importance):
-1.  **Garment Similarity (Highest Priority):** The garment on the model must be the most accurate reproduction of the reference garment. Check for color, texture, pattern, and details like logos or buttons.
-2.  **Pose Preservation (Secondary Priority):** The model's pose in the generated image should be as close as possible to their pose in the original person image. The garment should look natural on the existing pose.
-3.  **Image Quality & Artifacts (Tertiary Priority):** The image should be free of obvious AI artifacts, distortions, or unnatural blending.
+1.  **Garment Similarity (Highest Priority):** The garment on the model must be the most accurate reproduction of the reference garment.
+2.  **Pose Preservation (Secondary Priority):** The model's pose should be as close as possible to their original pose.
+3.  **Image Quality & Artifacts (Tertiary Priority):** The image should be free of obvious AI artifacts or distortions.
 
 ### Your Output:
-Your entire response MUST be a single, valid JSON object with TWO keys: "best_image_index" and "reasoning".
+Your entire response MUST be a single, valid JSON object with the following structure.
 
-**Example Output:**
+**If action is 'select':**
 \`\`\`json
 {
-  "best_image_index": 1,
-  "reasoning": "The reference is a blue denim jacket. Image 0 had an incorrect, darker color. Image 2 had a distorted left arm. Image 1 is the best choice because it accurately reproduces the color and texture of the denim jacket while perfectly preserving the model's original pose."
+  "action": "select",
+  "best_image_index": <number>,
+  "reasoning": "A detailed explanation of why this image was chosen over the others."
 }
-\`\`\``;
+\`\`\`
+
+**If action is 'retry':**
+\`\`\`json
+{
+  "action": "retry",
+  "best_image_index": null,
+  "reasoning": "A detailed explanation of why all images were rejected and a new attempt is needed."
+}
+\`\`\`
+`;
 
 function extractJson(text: string): any {
     const match = text.match(/```json\s*([\s\S]*?)\s*```/);
@@ -59,7 +72,8 @@ serve(async (req) => {
     const { 
         original_person_image_base64, 
         reference_garment_image_base64, 
-        generated_images_base64 
+        generated_images_base64,
+        is_final_attempt
     } = await req.json();
 
     if (!original_person_image_base64 || !reference_garment_image_base64 || !generated_images_base64 || !Array.isArray(generated_images_base64) || generated_images_base64.length === 0) {
@@ -68,7 +82,9 @@ serve(async (req) => {
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
     
+    const userPromptText = `This is the evaluation. is_final_attempt is ${is_final_attempt}. Please analyze the following images and provide your decision.`;
     const parts: Part[] = [
+        { text: userPromptText },
         { text: "--- ORIGINAL PERSON IMAGE ---" },
         { inlineData: { mimeType: 'image/png', data: original_person_image_base64 } },
         { text: "--- REFERENCE GARMENT IMAGE ---" },
@@ -89,10 +105,10 @@ serve(async (req) => {
     });
 
     const responseJson = extractJson(result.text);
-    const bestIndex = responseJson.best_image_index;
+    const { action, best_image_index, reasoning } = responseJson;
 
-    if (typeof bestIndex !== 'number' || bestIndex < 0 || bestIndex >= generated_images_base64.length) {
-        throw new Error("AI did not return a valid index for the best image.");
+    if (!action || (action === 'select' && typeof best_image_index !== 'number') || !reasoning) {
+        throw new Error("AI did not return a valid response with action, best_image_index (if applicable), and reasoning.");
     }
 
     console.log("[VTO-QualityChecker] Full AI Response:", JSON.stringify(responseJson, null, 2));
