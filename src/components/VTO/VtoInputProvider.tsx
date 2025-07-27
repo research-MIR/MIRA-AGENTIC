@@ -16,7 +16,7 @@ import { showError, showSuccess } from '@/utils/toast';
 import { calculateFileHash } from '@/lib/utils';
 import { AnalyzedGarment } from '@/types/vto';
 import { isPoseCompatible } from '@/lib/vto-utils';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { ModelPoseSelector } from './ModelPoseSelector';
 
 export interface QueueItem {
