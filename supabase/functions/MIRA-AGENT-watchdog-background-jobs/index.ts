@@ -424,7 +424,7 @@ serve(async (req) => {
       console.log(`[Watchdog-BG][${requestId}] No VTO report packs are ready for final synthesis.`);
     }
 
-    // --- NEW Task 15: Handle Stalled Fixer Jobs ---
+    // --- Task 15: Handle Stalled Fixer Jobs ---
     const fixerThreshold = new Date(Date.now() - STALLED_FIXER_THRESHOLD_SECONDS * 1000).toISOString();
     const { data: stalledFixerJobs, error: fixerError } = await supabase
       .from('mira-agent-bitstudio-jobs')
@@ -454,7 +454,7 @@ serve(async (req) => {
       console.log(`[Watchdog-BG][${requestId}] No stalled fixer jobs found.`);
     }
 
-    // --- NEW Task 16: Handle Stalled QA Report Jobs ---
+    // --- Task 16: Handle Stalled QA Report Jobs ---
     const qaReportThreshold = new Date(Date.now() - STALLED_QA_REPORT_THRESHOLD_SECONDS * 1000).toISOString();
     const { data: stalledQaJobs, error: qaError } = await supabase
       .from('mira-agent-vto-qa-reports')
@@ -473,7 +473,7 @@ serve(async (req) => {
       console.log(`[Watchdog-BG][${requestId}] No stalled QA jobs found.`);
     }
 
-    // --- NEW Task 17: Handle Stalled Report Chunk Jobs ---
+    // --- Task 17: Handle Stalled Report Chunk Jobs ---
     const chunkWorkerThreshold = new Date(Date.now() - STALLED_CHUNK_WORKER_THRESHOLD_SECONDS * 1000).toISOString();
     const { data: stalledChunkJobs, error: stalledChunkError } = await supabase
       .from('mira-agent-vto-report-chunks')
@@ -490,6 +490,53 @@ serve(async (req) => {
       actionsTaken.push(`Reset ${stalledChunkJobs.length} stalled chunk jobs.`);
     } else {
       console.log(`[Watchdog-BG][${requestId}] No stalled chunk jobs found.`);
+    }
+
+    // --- NEW Task 18: Handle VTO Jobs Awaiting BitStudio Fallback ---
+    const { data: awaitingFallbackJobs, error: fallbackError } = await supabase
+      .from('mira-agent-bitstudio-jobs')
+      .select('id, metadata')
+      .eq('status', 'awaiting_bitstudio_fallback');
+
+    if (fallbackError) {
+      console.error(`[Watchdog-BG][${requestId}] Error querying for jobs awaiting fallback:`, fallbackError.message);
+    } else if (awaitingFallbackJobs && awaitingFallbackJobs.length > 0) {
+      console.log(`[Watchdog-BG][${requestId}] Found ${awaitingFallbackJobs.length} job(s) awaiting BitStudio fallback. Checking status...`);
+      const fallbackCheckPromises = awaitingFallbackJobs.map(async (vtoJob) => {
+        const bitstudioJobId = vtoJob.metadata?.delegated_bitstudio_job_id;
+        if (!bitstudioJobId) return;
+
+        const { data: bitstudioJob, error: bitstudioFetchError } = await supabase
+          .from('mira-agent-bitstudio-jobs')
+          .select('status, final_image_url, error_message')
+          .eq('id', bitstudioJobId)
+          .single();
+
+        if (bitstudioFetchError) {
+          console.error(`[Watchdog-BG][${requestId}] Could not fetch delegated BitStudio job ${bitstudioJobId}:`, bitstudioFetchError.message);
+          return;
+        }
+
+        if (bitstudioJob.status === 'complete') {
+          console.log(`[Watchdog-BG][${requestId}] BitStudio fallback job ${bitstudioJobId} is complete. Calling back VTO worker for job ${vtoJob.id}.`);
+          await supabase.functions.invoke('MIRA-AGENT-worker-vto-pack-item', {
+            body: {
+              pair_job_id: vtoJob.id,
+              bitstudio_result_url: bitstudioJob.final_image_url
+            }
+          });
+        } else if (bitstudioJob.status === 'failed' || bitstudioJob.status === 'permanently_failed') {
+          console.error(`[Watchdog-BG][${requestId}] BitStudio fallback job ${bitstudioJobId} failed. Propagating failure to VTO job ${vtoJob.id}.`);
+          await supabase.from('mira-agent-bitstudio-jobs').update({
+            status: 'failed',
+            error_message: `Delegated BitStudio fallback job failed: ${bitstudioJob.error_message}`
+          }).eq('id', vtoJob.id);
+        }
+      });
+      await Promise.allSettled(fallbackCheckPromises);
+      actionsTaken.push(`Checked status for ${awaitingFallbackJobs.length} jobs awaiting BitStudio fallback.`);
+    } else {
+      console.log(`[Watchdog-BG][${requestId}] No jobs awaiting BitStudio fallback found.`);
     }
 
     const finalMessage = actionsTaken.length > 0 ? actionsTaken.join(' ') : "No actions required. All jobs are running normally.";

@@ -106,7 +106,7 @@ serve(async (req)=>{
       headers: corsHeaders
     });
   }
-  const { pair_job_id, reframe_result_url } = await req.json();
+  const { pair_job_id, reframe_result_url, bitstudio_result_url } = await req.json();
   if (!pair_job_id) {
     return new Response(JSON.stringify({
       error: "pair_job_id is required."
@@ -130,6 +130,9 @@ serve(async (req)=>{
       }).eq('id', pair_job_id);
       console.log(`${logPrefix} Job successfully finalized.`);
       await triggerWatchdog(supabase, logPrefix);
+    } else if (bitstudio_result_url) {
+        console.log(`${logPrefix} Received BitStudio fallback result. Running final quality check.`);
+        await handleQualityCheck(supabase, job, logPrefix, bitstudio_result_url);
     } else {
       console.log(`${logPrefix} Starting job.`);
       const step = job.metadata?.google_vto_step || 'start';
@@ -290,12 +293,19 @@ async function handleGenerateStep(supabase: SupabaseClient, job: any, sampleStep
     pair_job_id: job.id
   });
 }
-async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix: string) {
+async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix: string, bitstudio_result_url?: string) {
   console.log(`${logPrefix} Performing quality check.`);
   const { metadata, id: pair_job_id } = job;
-  const variations = metadata.generated_variations;
+  const variations = metadata.generated_variations || [];
   const qa_retry_count = metadata.qa_retry_count || 0;
-  const is_final_attempt = qa_retry_count >= 2;
+  let is_final_attempt = qa_retry_count >= 2;
+
+  if (bitstudio_result_url) {
+      console.log(`${logPrefix} BitStudio fallback result provided. This is the final attempt.`);
+      is_final_attempt = true;
+      const bitstudioBlob = await safeDownload(supabase, bitstudio_result_url);
+      variations.push({ base64Image: await blobToBase64(bitstudioBlob) });
+  }
 
   if (!variations || !Array.isArray(variations) || variations.length === 0) {
     throw new Error("No variations generated for quality check.");
@@ -339,7 +349,7 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
             metadata: { ...metadata, qa_history: qa_history, google_vto_step: 'fallback_to_bitstudio' }
         }).eq('id', pair_job_id);
         
-        const { error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
+        const { data: proxyData, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
             body: {
                 existing_job_id: pair_job_id,
                 mode: 'base',
@@ -352,8 +362,11 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
             }
         });
         if (proxyError) throw proxyError;
-        console.log(`${logPrefix} BitStudio fallback job created. The BitStudio poller will now take over.`);
-        // The job will now be handled by the BitStudio poller, so this worker's job is done.
+        console.log(`${logPrefix} BitStudio fallback job created with ID ${proxyData.jobIds[0]}. The BitStudio poller will now take over.`);
+        await supabase.from('mira-agent-bitstudio-jobs').update({
+            status: 'awaiting_bitstudio_fallback',
+            metadata: { ...metadata, delegated_bitstudio_job_id: proxyData.jobIds[0] }
+        }).eq('id', pair_job_id);
         await triggerWatchdog(supabase, logPrefix);
     } else {
         console.log(`${logPrefix} QA requested a retry. Incrementing retry count and starting next generation pass.`);
