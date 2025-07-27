@@ -16,6 +16,7 @@ import { useVtoPackJobs } from '@/hooks/useVtoPackJobs';
 import { VtoJobDetailModal } from './VtoJobDetailModal';
 import { AnalyzePackModal, AnalysisScope } from './AnalyzePackModal';
 import { Link } from 'react-router-dom';
+import { useLanguage } from '@/context/LanguageContext';
 
 interface QaReport {
   id: string;
@@ -133,7 +134,7 @@ export const RecentVtoPacks = () => {
   const [isDownloadingResults, setIsDownloadingResults] = useState<string | null>(null);
   const [isDownloadingDebug, setIsDownloadingDebug] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState<string | null>(null);
-  const [packToAnalyze, setPackToAnalyze] = useState<VtoPackSummary | null>(null);
+  const [packToAnalyze, setPackToAnalyze] = useState<PackSummary | null>(null);
   const [isRerunning, setIsRerunning] = useState<string | null>(null);
   const [isStartingRefinement, setIsStartingRefinement] = useState<string | null>(null);
 
