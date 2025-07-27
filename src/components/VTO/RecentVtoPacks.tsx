@@ -5,7 +5,6 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { AlertTriangle, CheckCircle, Loader2, XCircle, Download, HardDriveDownload, BarChart2 } from 'lucide-react';
-import { useImagePreview } from '@/context/ImagePreviewContext';
 import { SecureImageDisplay } from './SecureImageDisplay';
 import { BitStudioJob } from '@/types/vto';
 import { RealtimeChannel } from '@supabase/supabase-js';
@@ -13,6 +12,8 @@ import { Button } from '../ui/button';
 import { showError, showLoading, dismissToast, showSuccess } from '@/utils/toast';
 import JSZip from 'jszip';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useVtoPackJobs } from '@/hooks/useVtoPackJobs';
+import { VtoJobDetailModal } from './VtoJobDetailModal';
 
 interface VtoPackSummary {
   pack_id: string;
@@ -28,71 +29,64 @@ interface VtoPackSummary {
 }
 
 const VtoPackDetailView = ({ packId, isOpen }: { packId: string, isOpen: boolean }) => {
-  const { supabase, session } = useSession();
-  const { showImage } = useImagePreview();
-
-  const { data: childJobs, isLoading } = useQuery<BitStudioJob[]>({
-    queryKey: ['vtoPackChildJobs', packId],
-    queryFn: async () => {
-      if (!session?.user) return [];
-      const { data, error } = await supabase
-        .from('mira-agent-bitstudio-jobs')
-        .select('*')
-        .eq('vto_pack_job_id', packId);
-      if (error) throw error;
-      return data as BitStudioJob[];
-    },
-    enabled: isOpen, // Lazy-load trigger
-  });
+  const { data: childJobs, isLoading } = useVtoPackJobs(packId, isOpen);
+  const [selectedJob, setSelectedJob] = useState<BitStudioJob | null>(null);
 
   if (isLoading) {
     return <div className="flex justify-center p-4"><Loader2 className="h-6 w-6 animate-spin" /></div>;
   }
 
   return (
-    <div className="flex flex-wrap gap-2">
-      {childJobs?.map(job => {
-        const isFailed = job.status === 'failed' || job.status === 'permanently_failed';
-        const inProgressStatuses = ['processing', 'queued', 'segmenting', 'delegated', 'compositing', 'awaiting_fix', 'fixing', 'pending'];
-        const isInProgress = inProgressStatuses.includes(job.status);
+    <>
+      <div className="flex flex-wrap gap-2">
+        {childJobs?.map(job => {
+          const isFailed = job.status === 'failed' || job.status === 'permanently_failed';
+          const inProgressStatuses = ['processing', 'queued', 'segmenting', 'delegated', 'compositing', 'awaiting_fix', 'fixing', 'pending'];
+          const isInProgress = inProgressStatuses.includes(job.status);
 
-        return (
-          <div 
-            key={job.id} 
-            className="w-32 h-32 relative group cursor-pointer"
-            onClick={() => job.final_image_url && showImage({ images: [{ url: job.final_image_url }], currentIndex: 0 })}
-          >
-            <SecureImageDisplay 
-              imageUrl={job.final_image_url || job.source_person_image_url || null} 
-              alt="Job result" 
-              className="w-full h-full object-cover rounded-md"
-            />
-            {job.status === 'complete' && <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity" />}
-            {isFailed && (
-              job.final_image_url ? (
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <div className="absolute inset-0 bg-yellow-500/70 flex items-center justify-center rounded-md">
-                        <AlertTriangle className="h-8 w-8 text-white" />
-                      </div>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>Job failed quality checks but produced an image.</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              ) : (
-                <div className="absolute inset-0 bg-destructive/70 flex items-center justify-center rounded-md">
-                  <XCircle className="h-8 w-8 text-destructive-foreground" />
-                </div>
-              )
-            )}
-            {isInProgress && <div className="absolute inset-0 bg-black/70 flex items-center justify-center rounded-md"><Loader2 className="h-8 w-8 animate-spin text-white" /></div>}
-          </div>
-        )
-      })}
-    </div>
+          return (
+            <div 
+              key={job.id} 
+              className="w-32 h-32 relative group cursor-pointer"
+              onClick={() => setSelectedJob(job)}
+            >
+              <SecureImageDisplay 
+                imageUrl={job.final_image_url || job.source_person_image_url || null} 
+                alt="Job result" 
+                className="w-full h-full object-cover rounded-md"
+              />
+              {job.status === 'complete' && <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity" />}
+              {isFailed && (
+                job.final_image_url ? (
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div className="absolute inset-0 bg-yellow-500/70 flex items-center justify-center rounded-md">
+                          <AlertTriangle className="h-8 w-8 text-white" />
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>Job failed quality checks but produced an image.</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                ) : (
+                  <div className="absolute inset-0 bg-destructive/70 flex items-center justify-center rounded-md">
+                    <XCircle className="h-8 w-8 text-destructive-foreground" />
+                  </div>
+                )
+              )}
+              {isInProgress && <div className="absolute inset-0 bg-black/70 flex items-center justify-center rounded-md"><Loader2 className="h-8 w-8 animate-spin text-white" /></div>}
+            </div>
+          )
+        })}
+      </div>
+      <VtoJobDetailModal 
+        isOpen={!!selectedJob}
+        onClose={() => setSelectedJob(null)}
+        job={selectedJob}
+      />
+    </>
   );
 };
 
@@ -127,7 +121,7 @@ export const RecentVtoPacks = () => {
           if (payload.new.vto_pack_job_id) {
             console.log('[RecentVtoPacks] Realtime update received, invalidating summaries.');
             queryClient.invalidateQueries({ queryKey: ['recentVtoPackSummaries', session.user.id] });
-            queryClient.invalidateQueries({ queryKey: ['vtoPackChildJobs', payload.new.vto_pack_job_id] });
+            queryClient.invalidateQueries({ queryKey: ['vtoPackJobs', payload.new.vto_pack_job_id] });
           }
         }
       )
