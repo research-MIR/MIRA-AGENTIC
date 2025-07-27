@@ -40,7 +40,8 @@ An image is considered fundamentally flawed and MUST be rejected if it meets any
 
 ### Evaluation Criteria (in order of importance):
 1.  **Garment Similarity (Highest Priority):** The garment on the model must be the most accurate reproduction of the reference garment. This is the most important factor.
-2.  **Outfit Coherence (Secondary Priority / Tie-Breaker):** After confirming garment similarity, evaluate the rest of the outfit. An image that shows a complete, plausible outfit (e.g., the AI adds matching pants to a hoodie) is **STRONGLY PREFERRED** over an image that shows the correct garment but leaves the model in their base underwear. This is a preference, not a reason for failure on its own.
+2.  **Outfit Coherence (Secondary Priority / Tie-Breaker):** After confirming garment similarity, evaluate the rest of the outfit. An image that shows a complete, plausible outfit (e.g., the AI adds matching pants to a hoodie) is **STRONGLY PREFERRED** over an image that shows the correct garment but leaves the model in their base underwear.
+    - **Special Rule for Upper Body Garments:** When the reference is an upper-body item (e.g., a shirt, jacket), and \`is_final_attempt\` is FALSE, you are encouraged to be stricter. If the generated image shows the correct top but leaves the model in their base underwear, this should be considered a significant flaw and a strong reason to choose the 'retry' action to seek a more complete outfit.
     - **Special Rule for Lower Body Garments:** Be more forgiving when the reference is a lower-body item (e.g., pants, skirt). In these cases, it is acceptable for the model to be wearing their base underwear on top. Do not heavily penalize this.
 3.  **Pose Preservation (Tertiary Priority):** The model's pose should be as close as possible to their original pose.
 4.  **Image Quality & Artifacts:** The image should be free of obvious AI artifacts or distortions.
