@@ -104,6 +104,7 @@ const Developer = () => {
   const [isResettingVtoPacks, setIsResettingVtoPacks] = useState(false);
   const [isClearingFailedJobs, setIsClearingFailedJobs] = useState(false);
   const [isRecompositing, setIsRecompositing] = useState(false);
+  const [isCancellingVtoPacks, setIsCancellingVtoPacks] = useState(false);
 
   const handleCancelAllSegmentationJobs = async () => {
     setIsCancelling(true);
@@ -201,6 +202,22 @@ const Developer = () => {
     }
   };
 
+  const handleCancelAllVtoPackJobs = async () => {
+    setIsCancellingVtoPacks(true);
+    const toastId = showLoading("Cancelling all active VTO pack jobs...");
+    try {
+        const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-admin-cancel-all-vto-pack-jobs');
+        if (error) throw error;
+        dismissToast(toastId);
+        showSuccess(data.message);
+    } catch (err: any) {
+        dismissToast(toastId);
+        showError(`Failed to cancel jobs: ${err.message}`);
+    } finally {
+        setIsCancellingVtoPacks(false);
+    }
+  };
+
   return (
     <div className="p-4 md:p-8 h-screen overflow-y-auto">
       <header className="pb-4 mb-8 border-b">
@@ -272,6 +289,26 @@ const Developer = () => {
                     <AlertDialogAction onClick={handleCancelAllVTOJobs} disabled={isCancellingVTO}>
                       {isCancellingVTO && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                       Yes, cancel all VTO Pro jobs
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="destructive">Cancel All VTO Pack Jobs</Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This will cancel ALL active jobs related to VTO packs, including generation, QA, and refinement passes for ALL users. This action cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={handleCancelAllVtoPackJobs} disabled={isCancellingVtoPacks}>
+                      {isCancellingVtoPacks && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      Yes, cancel all VTO pack jobs
                     </AlertDialogAction>
                   </AlertDialogFooter>
                 </AlertDialogContent>
