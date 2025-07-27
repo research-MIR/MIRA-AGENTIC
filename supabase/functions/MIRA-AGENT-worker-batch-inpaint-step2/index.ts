@@ -178,7 +178,7 @@ serve(async (req) => {
             mask_url: final_mask_url,
             prompt: finalPrompt,
             reference_image_url: source_garment_image_url,
-            denoise: metadata?.denoise || 0.95, // Use metadata denoise if available, otherwise default to 0.95
+            denoise: metadata?.denoise || 0.95,
             resolution: 'standard',
             num_images: 1,
             batch_pair_job_id: pair_job_id,

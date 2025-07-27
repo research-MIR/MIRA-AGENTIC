@@ -249,10 +249,12 @@ serve(async (req) => {
         if (!taskId) throw new Error("BitStudio did not return a task ID for the inpaint job.");
 
         const { data: newJob, error: insertError } = await supabase.from('mira-agent-bitstudio-jobs').insert({
-          user_id, mode, status: 'queued', source_garment_image_url: reference_image_url,
+          user_id, mode, status: 'queued', 
+          source_person_image_url: metadata?.full_source_image_url,
+          source_garment_image_url: reference_image_url,
           bitstudio_person_image_id: sourceImageId, 
           bitstudio_garment_image_id: referenceImageId, 
-          bitstudio_mask_image_id: maskImageId, // <-- THE FIX IS HERE
+          bitstudio_mask_image_id: maskImageId,
           bitstudio_task_id: taskId, 
           batch_pair_job_id: batch_pair_job_id, 
           vto_pack_job_id: vto_pack_job_id,

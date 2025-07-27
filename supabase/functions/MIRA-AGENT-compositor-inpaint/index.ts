@@ -126,7 +126,7 @@ serve(async (req) => {
   console.log(`${logPrefix} Job started. Type: ${job_type}`);
   const tableName = job_type === "bitstudio" ? "mira-agent-bitstudio-jobs" : "mira-agent-inpainting-jobs";
   try {
-    const { data: job, error: fetchError } = await supabase.from(tableName).select("metadata, user_id").eq("id", job_id).single();
+    const { data: job, error: fetchError } = await supabase.from(tableName).select("metadata, user_id, source_garment_image_url").eq("id", job_id).single();
     if (fetchError) throw fetchError;
     const metadata = job.metadata || {};
     const { full_source_image_url, bbox } = metadata;
@@ -181,11 +181,11 @@ serve(async (req) => {
     console.log(`${logPrefix} Composition complete. Final URL: ${finalPublicUrl}`);
     // ---- Optional verification step -----------------------------------------
     let verificationResult = null;
-    if (job.metadata?.reference_image_url) {
+    if (job.source_garment_image_url) {
       console.log(`${logPrefix} Triggering verification tool...`);
       const { data, error } = await supabase.functions.invoke("MIRA-AGENT-tool-verify-garment-match", {
         body: {
-          original_garment_url: job.metadata.reference_image_url,
+          original_garment_url: job.source_garment_image_url,
           final_generated_url: finalPublicUrl
         }
       });
@@ -221,7 +221,7 @@ serve(async (req) => {
       };
       await supabase.from(tableName).update({
         status: "awaiting_fix",
-        final_image_url: finalPublicUrl, // <-- THE FIX IS HERE
+        final_image_url: finalPublicUrl,
         metadata: { ...finalMetadata, qa_history: [...qaHistory, newQaReportObject] }
       }).eq("id", job_id);
       supabase.functions.invoke("MIRA-AGENT-fixer-orchestrator", {
