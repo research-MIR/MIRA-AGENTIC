@@ -289,6 +289,18 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
         if (is_escalation_check) {
             console.warn(`[BITSTUDIO_FALLBACK][${pair_job_id}] QA failed on final Google attempt. Escalating to BitStudio.`);
             
+            // --- SAFETY CHECK ---
+            if (typeof qaData.best_image_index !== 'number' || qaData.best_image_index < 0 || qaData.best_image_index >= variations.length) {
+                console.error(`${logPrefix} QA tool returned 'retry' but provided an invalid best_image_index (${qaData.best_image_index}). Cannot escalate. Marking as permanently failed.`);
+                await supabase.from('mira-agent-bitstudio-jobs').update({
+                    status: 'permanently_failed',
+                    error_message: `QA tool returned an invalid index (${qaData.best_image_index}) during escalation, preventing a fallback attempt.`
+                }).eq('id', pair_job_id);
+                await triggerWatchdog(supabase, logPrefix);
+                return;
+            }
+            // --- END SAFETY CHECK ---
+
             const bestImageBase64 = variations[qaData.best_image_index].base64Image;
             const fallbackSourceUrl = await uploadBase64ToStorage(supabase, bestImageBase64, job.user_id, 'fallback_source.png');
             

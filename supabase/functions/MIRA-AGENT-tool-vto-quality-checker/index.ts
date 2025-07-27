@@ -1,5 +1,7 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { GoogleGenAI, Content, Part, HarmCategory, HarmBlockThreshold, GenerationResult } from 'https://esm.sh/@google/genai@0.15.0';
+import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const MODEL_NAME = "gemini-1.5-flash-latest";
@@ -65,6 +67,8 @@ An image is considered fundamentally flawed and MUST be rejected if it meets any
 ### Your Output:
 Your entire response MUST be a single, valid JSON object with the following structure.
 
+**CRITICAL OUTPUT RULE:** You MUST ALWAYS return a \`best_image_index\`, even if your action is 'retry'. In a 'retry' scenario, this index should point to the image that is the *best candidate for a fix* or has the fewest flaws, even if it is ultimately unacceptable. The \`best_image_index\` can NEVER be \`null\`.
+
 **If action is 'select':**
 \`\`\`json
 {
@@ -78,8 +82,8 @@ Your entire response MUST be a single, valid JSON object with the following stru
 \`\`\`json
 {
   "action": "retry",
-  "best_image_index": null,
-  "reasoning": "A detailed explanation of why all images were rejected and a new attempt is needed."
+  "best_image_index": 1,
+  "reasoning": "A detailed explanation of why all images were rejected. Image 1 was the closest but still had [specific flaw], so a retry is necessary."
 }
 \`\`\`
 `;
@@ -206,8 +210,8 @@ serve(async (req) => {
     }
     const responseJson = extractJson(result.text);
     const { action, best_image_index, reasoning } = responseJson;
-    if (!action || action === 'select' && typeof best_image_index !== 'number' || !reasoning) {
-      throw new Error("AI did not return a valid response with action, best_image_index (if applicable), and reasoning.");
+    if (!action || typeof best_image_index !== 'number' || !reasoning) {
+      throw new Error("AI did not return a valid response with action, best_image_index, and reasoning.");
     }
     console.warn(`[VTO_QA_DECISION] Full AI Response: ${JSON.stringify(responseJson)}`);
     return new Response(JSON.stringify(responseJson), {
