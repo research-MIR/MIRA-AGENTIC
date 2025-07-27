@@ -11,7 +11,6 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
-import { AnalyzePackModal, AnalysisScope } from "@/components/VTO/AnalyzePackModal";
 
 interface QaReport {
   id: string;
@@ -62,10 +61,8 @@ const VtoReports = () => {
   const { t } = useLanguage();
   const { supabase, session } = useSession();
   const queryClient = useQueryClient();
-  const [isAnalyzing, setIsAnalyzing] = useState<string | null>(null);
   const [isRerunning, setIsRerunning] = useState<string | null>(null);
   const [isStartingRefinement, setIsStartingRefinement] = useState<string | null>(null);
-  const [packToAnalyze, setPackToAnalyze] = useState<PackSummary | null>(null);
 
   const { data: reports, isLoading, error } = useQuery<any>({ // Using any for now to accommodate packs table
     queryKey: ['vtoQaReportsAndPacks', session?.user?.id],
@@ -161,31 +158,6 @@ const VtoReports = () => {
 
     return allPacks.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   }, [reports]);
-
-  const handleAnalyzePack = async (scope: AnalysisScope) => {
-    if (!packToAnalyze || !session?.user) return;
-    setIsAnalyzing(packToAnalyze.pack_id);
-    const toastId = showLoading("Starting analysis...");
-    try {
-      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-vto-reporter', {
-        body: { 
-          pack_id: packToAnalyze.pack_id, 
-          user_id: session.user.id,
-          analysis_scope: scope
-        }
-      });
-      if (error) throw error;
-      dismissToast(toastId);
-      showSuccess(data.message);
-      queryClient.invalidateQueries({ queryKey: ['vtoQaReportsAndPacks', session.user.id] });
-    } catch (err: any) {
-      dismissToast(toastId);
-      showError(`Analysis failed: ${err.message}`);
-    } finally {
-      setIsAnalyzing(null);
-      setPackToAnalyze(null);
-    }
-  };
 
   const handleRerunFailed = async (packId: string) => {
     if (!session?.user) return;
@@ -310,10 +282,6 @@ const VtoReports = () => {
                           </AlertDialogFooter>
                         </AlertDialogContent>
                       </AlertDialog>
-                      <Button variant="outline" size="sm" onClick={() => setPackToAnalyze(report)} disabled={isAnalyzing === report.pack_id}>
-                        {isAnalyzing === report.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <BarChart2 className="h-4 w-4 mr-2" />}
-                        {t('analyzePack')}
-                      </Button>
                       <Link to={`/vto-reports/${report.pack_id}`}>
                         <Button>{t('viewReport')}</Button>
                       </Link>
@@ -375,13 +343,6 @@ const VtoReports = () => {
           )}
         </div>
       </div>
-      <AnalyzePackModal
-        isOpen={!!packToAnalyze}
-        onClose={() => setPackToAnalyze(null)}
-        onAnalyze={handleAnalyzePack}
-        isLoading={isAnalyzing === packToAnalyze?.pack_id}
-        packName={packToAnalyze?.metadata?.name || `Pack from ${new Date(packToAnalyze?.created_at || '').toLocaleString()}`}
-      />
     </>
   );
 };

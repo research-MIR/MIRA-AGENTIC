@@ -14,6 +14,8 @@ import JSZip from 'jszip';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useVtoPackJobs } from '@/hooks/useVtoPackJobs';
 import { VtoJobDetailModal } from './VtoJobDetailModal';
+import { AnalyzePackModal, AnalysisScope } from './AnalyzePackModal';
+import { Link } from 'react-router-dom';
 
 interface VtoPackSummary {
   pack_id: string;
@@ -21,6 +23,8 @@ interface VtoPackSummary {
   metadata: {
     total_pairs: number;
     engine?: 'google' | 'bitstudio';
+    name?: string;
+    refinement_of_pack_id?: string;
   };
   total_jobs: number;
   completed_jobs: number;
@@ -97,6 +101,7 @@ export const RecentVtoPacks = () => {
   const [isDownloadingResults, setIsDownloadingResults] = useState<string | null>(null);
   const [isDownloadingDebug, setIsDownloadingDebug] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState<string | null>(null);
+  const [packToAnalyze, setPackToAnalyze] = useState<VtoPackSummary | null>(null);
 
   const { data: packs, isLoading: isLoadingPacks, error: packsError } = useQuery<VtoPackSummary[]>({
     queryKey: ['recentVtoPackSummaries', session?.user?.id],
@@ -158,22 +163,28 @@ export const RecentVtoPacks = () => {
     }
   };
 
-  const handleAnalyzePack = async (packId: string) => {
-    if (!session?.user) return;
-    setIsAnalyzing(packId);
+  const handleAnalyzePack = async (scope: AnalysisScope) => {
+    if (!packToAnalyze || !session?.user) return;
+    setIsAnalyzing(packToAnalyze.pack_id);
     const toastId = showLoading("Starting analysis...");
     try {
       const { data, error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-vto-reporter', {
-        body: { pack_id: packId, user_id: session.user.id }
+        body: { 
+          pack_id: packToAnalyze.pack_id, 
+          user_id: session.user.id,
+          analysis_scope: scope
+        }
       });
       if (error) throw error;
       dismissToast(toastId);
       showSuccess(data.message);
+      queryClient.invalidateQueries({ queryKey: ['vtoQaReportsAndPacks', session.user.id] });
     } catch (err: any) {
       dismissToast(toastId);
       showError(`Analysis failed: ${err.message}`);
     } finally {
       setIsAnalyzing(null);
+      setPackToAnalyze(null);
     }
   };
 
@@ -364,45 +375,54 @@ export const RecentVtoPacks = () => {
   }
 
   return (
-    <Accordion type="single" collapsible className="w-full space-y-4" onValueChange={setOpenPackId}>
-      {packs.map(pack => {
-        const inProgress = pack.in_progress_jobs > 0;
-        const hasFailures = pack.failed_jobs > 0;
-        const isComplete = !inProgress && pack.total_jobs > 0;
+    <>
+      <Accordion type="single" collapsible className="w-full space-y-4" onValueChange={setOpenPackId}>
+        {packs.map(pack => {
+          const inProgress = pack.in_progress_jobs > 0;
+          const hasFailures = pack.failed_jobs > 0;
+          const isComplete = !inProgress && pack.total_jobs > 0;
 
-        return (
-          <AccordionItem key={pack.pack_id} value={pack.pack_id} className="border rounded-md">
-            <AccordionTrigger className="p-4 hover:no-underline">
-              <div className="flex justify-between items-center w-full">
-                <div className="text-left">
-                  <p className="font-semibold">Batch from {new Date(pack.created_at).toLocaleString()}</p>
-                  <p className="text-sm text-muted-foreground">
-                    {pack.completed_jobs} / {pack.metadata?.total_pairs || pack.total_jobs} completed
-                  </p>
+          return (
+            <AccordionItem key={pack.pack_id} value={pack.pack_id} className="border rounded-md">
+              <AccordionTrigger className="p-4 hover:no-underline">
+                <div className="flex justify-between items-center w-full">
+                  <div className="text-left">
+                    <p className="font-semibold">Batch from {new Date(pack.created_at).toLocaleString()}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {pack.completed_jobs} / {pack.metadata?.total_pairs || pack.total_jobs} completed
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); setPackToAnalyze(pack); }} disabled={isAnalyzing === pack.pack_id}>
+                      {isAnalyzing === pack.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <BarChart2 className="h-4 w-4 mr-2" />}
+                      Analyze Pack
+                    </Button>
+                    <Button variant="outline" size="icon" className="h-8 w-8" onClick={(e) => { e.stopPropagation(); handleDownloadResults(pack.pack_id); }} disabled={isDownloadingResults === pack.pack_id}>
+                      {isDownloadingResults === pack.pack_id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                    </Button>
+                    <Button variant="outline" size="icon" className="h-8 w-8" onClick={(e) => { e.stopPropagation(); handleDownloadDebugPack(pack.pack_id); }} disabled={isDownloadingDebug === pack.pack_id}>
+                      {isDownloadingDebug === pack.pack_id ? <Loader2 className="h-4 w-4 animate-spin" /> : <HardDriveDownload className="h-4 w-4" />}
+                    </Button>
+                    {inProgress && <Loader2 className="h-5 w-5 animate-spin text-primary" />}
+                    {hasFailures && <XCircle className="h-5 w-5 text-destructive" />}
+                    {isComplete && !hasFailures && <CheckCircle className="h-5 w-5 text-green-600" />}
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleAnalyzePack(pack.pack_id); }} disabled={isAnalyzing === pack.pack_id}>
-                    {isAnalyzing === pack.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <BarChart2 className="h-4 w-4 mr-2" />}
-                    Analyze Pack
-                  </Button>
-                  <Button variant="outline" size="icon" className="h-8 w-8" onClick={(e) => { e.stopPropagation(); handleDownloadResults(pack.pack_id); }} disabled={isDownloadingResults === pack.pack_id}>
-                    {isDownloadingResults === pack.pack_id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                  </Button>
-                  <Button variant="outline" size="icon" className="h-8 w-8" onClick={(e) => { e.stopPropagation(); handleDownloadDebugPack(pack.pack_id); }} disabled={isDownloadingDebug === pack.pack_id}>
-                    {isDownloadingDebug === pack.pack_id ? <Loader2 className="h-4 w-4 animate-spin" /> : <HardDriveDownload className="h-4 w-4" />}
-                  </Button>
-                  {inProgress && <Loader2 className="h-5 w-5 animate-spin text-primary" />}
-                  {hasFailures && <XCircle className="h-5 w-5 text-destructive" />}
-                  {isComplete && !hasFailures && <CheckCircle className="h-5 w-5 text-green-600" />}
-                </div>
-              </div>
-            </AccordionTrigger>
-            <AccordionContent className="p-4 pt-0">
-              <VtoPackDetailView packId={pack.pack_id} isOpen={openPackId === pack.pack_id} />
-            </AccordionContent>
-          </AccordionItem>
-        )
-      })}
-    </Accordion>
+              </AccordionTrigger>
+              <AccordionContent className="p-4 pt-0">
+                <VtoPackDetailView packId={pack.pack_id} isOpen={openPackId === pack.pack_id} />
+              </AccordionContent>
+            </AccordionItem>
+          )
+        })}
+      </Accordion>
+      <AnalyzePackModal
+        isOpen={!!packToAnalyze}
+        onClose={() => setPackToAnalyze(null)}
+        onAnalyze={handleAnalyzePack}
+        isLoading={isAnalyzing === packToAnalyze?.pack_id}
+        packName={packToAnalyze?.metadata?.name || `Pack from ${new Date(packToAnalyze?.created_at || '').toLocaleString()}`}
+      />
+    </>
   );
 };
