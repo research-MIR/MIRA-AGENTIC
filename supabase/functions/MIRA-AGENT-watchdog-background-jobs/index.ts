@@ -118,7 +118,8 @@ serve(async (req) => {
     const pairJobThreshold = new Date(Date.now() - STALLED_PAIR_JOB_THRESHOLD_MINUTES * 60 * 1000).toISOString();
     const { data: stalledPairJobs, error: stalledPairError } = await supabase.from('mira-agent-batch-inpaint-pair-jobs').select('id, status, metadata').in('status', [
       'segmenting',
-      'delegated'
+      'delegated',
+      'processing_step_2'
     ]).lt('updated_at', pairJobThreshold);
     if (stalledPairError) {
       console.error(`[Watchdog-BG][${requestId}] Error querying for stalled pair jobs:`, stalledPairError.message);
@@ -138,6 +139,19 @@ serve(async (req) => {
             body: {
               pair_job_id: job.id,
               final_mask_url: job.metadata.debug_assets.expanded_mask_url
+            }
+          });
+        } else if (job.status === 'processing_step_2') {
+          console.log(`[Watchdog-BG][${requestId}] Re-triggering Step 2 (inpainting) for job ${job.id} stuck in processing.`);
+          const finalMaskUrl = job.metadata?.debug_assets?.expanded_mask_url;
+          if (!finalMaskUrl) {
+            console.error(`[Watchdog-BG][${requestId}] Cannot retry job ${job.id} stuck in step 2 because expanded_mask_url is missing.`);
+            return Promise.resolve();
+          }
+          return supabase.functions.invoke('MIRA-AGENT-worker-batch-inpaint-step2', {
+            body: {
+              pair_job_id: job.id,
+              final_mask_url: finalMaskUrl
             }
           });
         }

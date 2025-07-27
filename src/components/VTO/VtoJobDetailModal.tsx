@@ -24,6 +24,8 @@ export const VtoJobDetailModal = ({ job, isOpen, onClose }: VtoJobDetailModalPro
   const hasDebugAssets = !!job.metadata?.debug_assets;
   const hasFixHistory = !!job.metadata?.fix_history && job.metadata.fix_history.length > 0;
 
+  const sourceImageUrlForDisplay = job.metadata?.original_person_image_url_for_analysis || job.source_person_image_url;
+
   return (
     <>
       <Dialog open={isOpen} onOpenChange={onClose}>
@@ -36,7 +38,7 @@ export const VtoJobDetailModal = ({ job, isOpen, onClose }: VtoJobDetailModalPro
             <div className="space-y-2">
               <h3 className="text-sm font-semibold text-center">Source Person</h3>
               <div className="aspect-square bg-muted rounded-md">
-                <SecureImageDisplay imageUrl={job.source_person_image_url || null} alt="Source Person" />
+                <SecureImageDisplay imageUrl={sourceImageUrlForDisplay || null} alt="Source Person" />
               </div>
             </div>
             <div className="space-y-2">
