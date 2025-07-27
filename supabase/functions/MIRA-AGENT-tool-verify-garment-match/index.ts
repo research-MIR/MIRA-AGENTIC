@@ -4,7 +4,7 @@ import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-const MODEL_NAME = "gemini-2.5-flash-preview-05-20"; // Corrected model name as per user instruction
+const MODEL_NAME = "gemini-2.5-pro-preview-06-05"; // Upgraded Model
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const MAX_RETRIES = 3;
@@ -70,7 +70,7 @@ async function downloadAndEncodeImage(supabase: SupabaseClient, url: string): Pr
         }
         
         const bucketName = pathSegments[publicSegmentIndex + 1];
-        const filePath = pathSegments.slice(publicSegmentIndex + 2).join('/');
+        const filePath = decodeURIComponent(pathSegments.slice(publicSegmentIndex + 2).join('/'));
 
         if (!bucketName || !filePath) {
             throw new Error(`Could not parse bucket or path from Supabase URL: ${url}`);
@@ -120,7 +120,7 @@ serve(async (req) => {
         downloadAndEncodeImage(supabase, final_generated_url)
     ]);
 
-    const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+    const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
     const contents: Content[] = [{
         role: 'user',
         parts: [
@@ -132,6 +132,8 @@ serve(async (req) => {
     }];
 
     let result: GenerationResult | null = null;
+    let lastError: Error | null = null;
+
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
             console.log(`[VerifyGarmentMatch] Calling Gemini API, attempt ${attempt}...`);
@@ -142,15 +144,33 @@ serve(async (req) => {
                 safetySettings,
                 config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
             });
-            break; // Success
+            lastError = null; // Clear error on success
+            break; // Exit loop on success
         } catch (error) {
-            if (error.message.includes("503") && attempt < MAX_RETRIES) {
-                console.warn(`[VerifyGarmentMatch] Gemini API is overloaded (503). Retrying in ${RETRY_DELAY_MS}ms...`);
-                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
-            } else {
-                throw error; // Rethrow if it's not a 503 or if it's the last attempt
+            lastError = error;
+            console.warn(`[VerifyGarmentMatch] Attempt ${attempt} failed:`, error.message);
+            if (attempt < MAX_RETRIES) {
+                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS * attempt));
             }
         }
+    }
+
+    if (lastError) {
+        console.error(`[VerifyGarmentMatch] All retries failed. Last error:`, lastError.message);
+        // Create a fallback error report
+        const errorReport = {
+            is_match: false,
+            confidence_score: 0.0,
+            logo_present: false,
+            logo_correct: null,
+            mismatch_reason: "The AI quality check failed to produce a valid analysis after multiple retries.",
+            fix_suggestion: "This may be a temporary issue. You can try re-running the analysis manually from the report page.",
+            error: `Analysis failed: ${lastError.message}`
+        };
+        return new Response(JSON.stringify(errorReport), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            status: 200, // Return 200 so the calling function can process the failure report
+        });
     }
 
     if (!result) {
