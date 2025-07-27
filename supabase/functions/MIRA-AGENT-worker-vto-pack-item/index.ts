@@ -333,17 +333,41 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
   qa_history.push(newHistoryEntry);
 
   if (qaData.action === 'retry') {
-    console.log(`${logPrefix} QA requested a retry. Incrementing retry count and starting next generation pass.`);
-    const nextStep = `generate_step_${qa_retry_count + 2}`;
-    await supabase.from('mira-agent-bitstudio-jobs').update({
-      metadata: {
-        ...metadata,
-        qa_history: qa_history,
-        qa_retry_count: qa_retry_count + 1,
-        google_vto_step: nextStep
-      }
-    }).eq('id', pair_job_id);
-    invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id });
+    if (is_final_attempt) {
+        console.log(`${logPrefix} Final Google VTO attempt failed. Falling back to BitStudio engine.`);
+        await supabase.from('mira-agent-bitstudio-jobs').update({
+            metadata: { ...metadata, qa_history: qa_history, google_vto_step: 'fallback_to_bitstudio' }
+        }).eq('id', pair_job_id);
+        
+        const { error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
+            body: {
+                existing_job_id: pair_job_id,
+                mode: 'base',
+                user_id: job.user_id,
+                person_image_url: job.source_person_image_url,
+                garment_image_url: job.source_garment_image_url,
+                prompt: metadata.prompt_appendix,
+                num_images: 1,
+                resolution: 'high'
+            }
+        });
+        if (proxyError) throw proxyError;
+        console.log(`${logPrefix} BitStudio fallback job created. The BitStudio poller will now take over.`);
+        // The job will now be handled by the BitStudio poller, so this worker's job is done.
+        await triggerWatchdog(supabase, logPrefix);
+    } else {
+        console.log(`${logPrefix} QA requested a retry. Incrementing retry count and starting next generation pass.`);
+        const nextStep = `generate_step_${qa_retry_count + 2}`;
+        await supabase.from('mira-agent-bitstudio-jobs').update({
+            metadata: {
+                ...metadata,
+                qa_history: qa_history,
+                qa_retry_count: qa_retry_count + 1,
+                google_vto_step: nextStep
+            }
+        }).eq('id', pair_job_id);
+        invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id });
+    }
   } else { // action === 'select'
     console.log(`${logPrefix} QA selected an image. Proceeding to finalize.`);
     const bestImageBase64 = variations[qaData.best_image_index].base64Image;
