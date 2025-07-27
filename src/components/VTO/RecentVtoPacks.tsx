@@ -61,6 +61,8 @@ interface PackSummary {
   shape_mismatches: number;
   avg_body_preservation_score: number | null;
   has_refinement_pass: boolean;
+  in_progress_jobs: number;
+  completed_jobs: number;
 }
 
 const VtoPackDetailView = ({ packId, isOpen }: { packId: string, isOpen: boolean }) => {
@@ -187,6 +189,7 @@ export const RecentVtoPacks = () => {
             metadata: pack.metadata || {},
             total_jobs: 0, passed_perfect: 0, passed_pose_change: 0, passed_logo_issue: 0, passed_detail_issue: 0,
             failed_jobs: 0, failure_summary: {}, shape_mismatches: 0, avg_body_preservation_score: null, has_refinement_pass: false,
+            in_progress_jobs: 0, completed_jobs: 0,
         });
     }
 
@@ -473,6 +476,31 @@ export const RecentVtoPacks = () => {
     }
   };
 
+  const handleAnalyzePack = async (scope: AnalysisScope) => {
+    if (!packToAnalyze || !session?.user) return;
+    setIsAnalyzing(packToAnalyze.pack_id);
+    const toastId = showLoading("Starting analysis...");
+    try {
+      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-vto-reporter', {
+        body: { 
+          pack_id: packToAnalyze.pack_id, 
+          user_id: session.user.id,
+          analysis_scope: scope
+        }
+      });
+      if (error) throw error;
+      dismissToast(toastId);
+      showSuccess(data.message);
+      queryClient.invalidateQueries({ queryKey: ['vtoQaReportsAndPacks', session.user.id] });
+    } catch (err: any) {
+      dismissToast(toastId);
+      showError(`Analysis failed: ${err.message}`);
+    } finally {
+      setIsAnalyzing(null);
+      setPackToAnalyze(null);
+    }
+  };
+
   if (isLoadingPacks) {
     return <div className="space-y-4"><Skeleton className="h-20 w-full" /><Skeleton className="h-20 w-full" /></div>;
   }
@@ -481,7 +509,7 @@ export const RecentVtoPacks = () => {
     return <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Error</AlertTitle><AlertDescription>{packsError.message}</AlertDescription></Alert>;
   }
 
-  if (!packs || packs.length === 0) {
+  if (!reports?.packs || reports.packs.length === 0) {
     return <p className="text-center text-muted-foreground py-8">No recent batch jobs found.</p>;
   }
 
