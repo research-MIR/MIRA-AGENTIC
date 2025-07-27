@@ -287,9 +287,13 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
 
     if (qaData.action === 'retry') {
         if (is_escalation_check) {
-            console.warn(`[BITSTUDIO_FALLBACK][${pair_job_id}] QA failed on final Google attempt. Escalating to BitStudio. Using cropped person URL: ${job.metadata.cropped_person_url}`);
+            console.warn(`[BITSTUDIO_FALLBACK][${pair_job_id}] QA failed on final Google attempt. Escalating to BitStudio.`);
+            
+            const bestImageBase64 = variations[qaData.best_image_index].base64Image;
+            const fallbackSourceUrl = await uploadBase64ToStorage(supabase, bestImageBase64, job.user_id, 'fallback_source.png');
+            
             await supabase.from('mira-agent-bitstudio-jobs').update({
-                metadata: { ...metadata, qa_history: qa_history, google_vto_step: 'fallback_to_bitstudio' }
+                metadata: { ...metadata, qa_history: qa_history, google_vto_step: 'fallback_to_bitstudio', engine: 'bitstudio_fallback', fallback_source_image_url: fallbackSourceUrl.publicUrl }
             }).eq('id', pair_job_id);
             
             const { data: proxyData, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
@@ -297,7 +301,7 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
                     existing_job_id: pair_job_id,
                     mode: 'base',
                     user_id: job.user_id,
-                    person_image_url: job.metadata.cropped_person_url,
+                    person_image_url: fallbackSourceUrl.publicUrl, // Use the best failed image as the new source
                     garment_image_url: job.source_garment_image_url,
                     prompt: metadata.prompt_appendix,
                     num_images: 1,

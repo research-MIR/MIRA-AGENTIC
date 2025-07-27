@@ -8,6 +8,7 @@ import { useState } from "react";
 import { DebugStepsModal } from "./DebugStepsModal";
 import { FixHistoryModal } from "./FixHistoryModal";
 import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
 
 interface VtoJobDetailModalProps {
   job: BitStudioJob | null;
@@ -27,13 +28,24 @@ export const VtoJobDetailModal = ({ job, isOpen, onClose }: VtoJobDetailModalPro
 
   const isRefinementJob = !!job.metadata?.original_person_image_url_for_analysis;
 
+  const getEngineName = (engine?: string) => {
+    if (!engine) return 'Unknown';
+    if (engine === 'google') return 'Google VTO';
+    if (engine === 'bitstudio') return 'BitStudio VTO';
+    if (engine === 'bitstudio_fallback') return 'BitStudio VTO (Fallback)';
+    return engine;
+  };
+
   return (
     <>
       <Dialog open={isOpen} onOpenChange={onClose}>
         <DialogContent className={cn("transition-all duration-300", isRefinementJob ? "max-w-6xl" : "max-w-4xl")}>
           <DialogHeader>
             <DialogTitle>Job Details</DialogTitle>
-            <DialogDescription>Job ID: {job.id}</DialogDescription>
+            <DialogDescription>
+              Job ID: {job.id}
+              {job.metadata?.engine && <Badge variant="outline" className="ml-2">{getEngineName(job.metadata.engine)}</Badge>}
+            </DialogDescription>
           </DialogHeader>
           <div className={cn("grid gap-4 py-4", isRefinementJob ? "grid-cols-1 md:grid-cols-3" : "grid-cols-1 md:grid-cols-2")}>
             {isRefinementJob ? (

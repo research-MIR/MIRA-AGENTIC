@@ -8,6 +8,7 @@ import { useSecureImage } from "@/hooks/useSecureImage";
 import { BitStudioJob } from "@/types/vto";
 import { AlertTriangle, CheckCircle, Loader2, XCircle } from "lucide-react";
 import { useImagePreview } from "@/context/ImagePreviewContext";
+import { Badge } from '@/components/ui/badge';
 
 const SecureImageDisplay = ({ imageUrl, alt }: { imageUrl: string | null, alt: string }) => {
     const { displayUrl, isLoading, error } = useSecureImage(imageUrl);
@@ -46,6 +47,16 @@ export const RecentJobsList = ({ jobs, isLoading, selectedJobId, onSelectJob, mo
         }
     };
 
+    const EngineBadge = ({ engine }: { engine?: string }) => {
+        if (!engine) return null;
+        let text = '?';
+        let variant: "default" | "secondary" | "destructive" | "outline" = 'secondary';
+        if (engine === 'google') { text = 'G'; variant = 'secondary'; }
+        if (engine === 'bitstudio') { text = 'B'; variant = 'default'; }
+        if (engine === 'bitstudio_fallback') { text = 'B+'; variant = 'default'; }
+        return <Badge variant={variant} className="absolute top-1 left-1 z-10">{text}</Badge>;
+    };
+
     return (
         <Card>
             <CardHeader><CardTitle>{t('recentJobs')}</CardTitle></CardHeader>
@@ -62,8 +73,9 @@ export const RecentJobsList = ({ jobs, isLoading, selectedJobId, onSelectJob, mo
                                 const isInProgress = inProgressStatuses.includes(job.status);
 
                                 return (
-                                    <button key={job.id} onClick={() => handleThumbnailClick(job)} className={cn("border-2 rounded-lg p-0.5 flex-shrink-0 w-24 h-24 relative", selectedJobId === job.id ? "border-primary" : "border-transparent")}>
+                                    <button key={job.id} onClick={() => handleThumbnailClick(job)} className={cn("border-2 rounded-lg p-0.5 flex-shrink-0 w-24 h-24 relative group", selectedJobId === job.id ? "border-primary" : "border-transparent")}>
                                         <SecureImageDisplay imageUrl={urlToPreview || null} alt="Recent job" className="w-full h-full object-cover" />
+                                        <EngineBadge engine={job.metadata?.engine} />
                                         {isComplete && (
                                             <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity" />
                                         )}
