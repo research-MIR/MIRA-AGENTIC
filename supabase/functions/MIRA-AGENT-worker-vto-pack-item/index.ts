@@ -325,7 +325,8 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
       original_person_image_base64: await blobToBase64(personBlob),
       reference_garment_image_base64: await blobToBase64(garmentBlob),
       generated_images_base64: variations.map((img: any) => img.base64Image),
-      is_final_attempt: is_final_attempt
+      is_final_attempt: is_final_attempt,
+      is_absolute_final_attempt: !!bitstudio_result_url,
     }
   });
 

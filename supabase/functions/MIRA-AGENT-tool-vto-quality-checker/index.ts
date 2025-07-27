@@ -19,15 +19,17 @@ const safetySettings = [
 const systemPrompt = `You are a "VTO Quality Assurance AI". You will be given a reference garment image, an original person image, and a set of generated "try-on" images. Your sole task is to evaluate the generated images and decide on an action: 'select' the best one, or 'retry' if none are acceptable.
 
 ### Your Inputs:
-- **is_final_attempt (boolean):** A flag indicating if this is the last chance to select an image.
-- A series of images: REFERENCE GARMENT, ORIGINAL PERSON, and one or more GENERATED IMAGES. The generated images may come from different AI models or generation attempts.
+- **is_final_attempt (boolean):** A flag indicating if this is the last chance to select an image from the current generation engine.
+- **is_absolute_final_attempt (boolean):** A flag indicating this is the ABSOLUTE LAST CHANCE. The next step after this is failure.
+- A series of images: REFERENCE GARMENT, ORIGINAL PERSON, and one or more GENERATED IMAGES.
 
 ### Your Internal Thought Process (Chain-of-Thought)
 1.  **Analyze REFERENCE Garment:** Briefly describe its key features.
-2.  **Analyze Each Generated Image:** Evaluate each image based on the core criteria. Note which images are superior, especially if they come from different generation attempts (e.g., a final, higher-quality attempt).
-3.  **Make a Decision based on 'is_final_attempt':**
-    -   **If 'is_final_attempt' is FALSE:** Be highly critical. If you find a high-quality image that meets all criteria, your action is 'select'. If ALL images have significant flaws (distorted anatomy, incorrect garment shape, severe artifacts), your action MUST be 'retry'.
-    -   **If 'is_final_attempt' is TRUE:** Your standards should be slightly lower. You are now in the final selection phase. If there is at least one *acceptable* image that correctly depicts the garment, you MUST select the best one by setting \`action: "select"\`. However, if ALL provided images are fundamentally flawed (e.g., the garment is the wrong type, there are severe anatomical distortions, the image is completely unusable), you are authorized to select \`action: "retry"\`. This will trigger a final attempt using a different, more powerful AI engine. Do not select 'retry' for minor issues if an acceptable image exists.
+2.  **Analyze Each Generated Image:** Evaluate each image based on the core criteria.
+3.  **Make a Decision based on the attempt flags:**
+    -   **If 'is_absolute_final_attempt' is TRUE:** You are FORBIDDEN from choosing the 'retry' action. You MUST choose the 'select' action and pick the single best image from all provided generated images, no matter how flawed. Your reasoning should explain that this is the best available option after all attempts have been exhausted.
+    -   **If 'is_final_attempt' is TRUE (but 'is_absolute_final_attempt' is FALSE):** Your standards should be slightly lower. If there is at least one *acceptable* image, you MUST select the best one. However, if ALL provided images are fundamentally flawed, you are authorized to select \`action: "retry"\`. This will trigger a final attempt using a different, more powerful AI engine.
+    -   **If both flags are FALSE:** Be highly critical. If ALL images have significant flaws, your action MUST be 'retry'.
 4.  **State Your Final Choice & Justification:** Clearly state your decision and why it is the best choice based on the evaluation criteria.
 
 ### Evaluation Criteria (in order of importance):
@@ -74,7 +76,8 @@ serve(async (req) => {
         original_person_image_base64, 
         reference_garment_image_base64, 
         generated_images_base64,
-        is_final_attempt
+        is_final_attempt,
+        is_absolute_final_attempt
     } = await req.json();
 
     if (!original_person_image_base64 || !reference_garment_image_base64 || !generated_images_base64 || !Array.isArray(generated_images_base64) || generated_images_base64.length === 0) {
@@ -83,7 +86,7 @@ serve(async (req) => {
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
     
-    const userPromptText = `This is the evaluation. is_final_attempt is ${is_final_attempt}. Please analyze the following images and provide your decision.`;
+    const userPromptText = `This is the evaluation. is_final_attempt is ${is_final_attempt}. is_absolute_final_attempt is ${is_absolute_final_attempt}. Please analyze the following images and provide your decision.`;
     const parts: Part[] = [
         { text: userPromptText },
         { text: "--- ORIGINAL PERSON IMAGE ---" },
