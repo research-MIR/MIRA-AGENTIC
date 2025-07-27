@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from '@/components/ui/label';
@@ -7,15 +7,13 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { PlusCircle, X } from 'lucide-react';
 import { SecureImageDisplay } from '../SecureImageDisplay';
 import { useLanguage } from "@/context/LanguageContext";
+import { useDropzone } from '@/hooks/useDropzone';
+import { cn } from '@/lib/utils';
 
 const ImageUploader = ({ onFileSelect, title, imageUrl, onClear }: { onFileSelect: (file: File) => void, title: string, imageUrl: string | null, onClear: () => void }) => {
     const inputRef = React.useRef<HTMLInputElement>(null);
-    const { useDropzone } = require('@/hooks/useDropzone');
     const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: (e: React.DragEvent<HTMLElement>) => e.dataTransfer.files && onFileSelect(e.dataTransfer.files[0]) });
-    const { cn } = require('@/lib/utils');
-    const { PlusCircle } = require('lucide-react');
-    const { Input } = require('@/components/ui/input');
-
+  
     if (imageUrl) {
       return (
         <div className="relative aspect-square">
