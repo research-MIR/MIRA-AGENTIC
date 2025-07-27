@@ -15,29 +15,39 @@ serve(async (req) => {
   }
 
   try {
-    const { pack_id, user_id } = await req.json();
+    const { pack_id, user_id, analysis_scope = 'successful_only' } = await req.json();
     if (!pack_id || !user_id) {
       throw new Error("pack_id and user_id are required.");
     }
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
     const logPrefix = `[VTO-QA-Orchestrator][${pack_id}]`;
-    console.log(`${logPrefix} Starting analysis orchestration.`);
+    console.log(`${logPrefix} Starting analysis orchestration with scope: ${analysis_scope}.`);
 
-    // 1. Fetch all completed child jobs for the pack
-    const { data: completedJobs, error: fetchJobsError } = await supabase
+    // 1. Fetch all child jobs for the pack based on scope
+    let query = supabase
       .from('mira-agent-bitstudio-jobs')
       .select('id')
-      .eq('vto_pack_job_id', pack_id)
-      .eq('status', 'complete')
-      .not('final_image_url', 'is', null);
+      .eq('vto_pack_job_id', pack_id);
+
+    if (analysis_scope === 'successful_only') {
+      query = query
+        .eq('status', 'complete')
+        .not('final_image_url', 'is', null);
+    } else { // 'all_with_image'
+      query = query
+        .or('status.eq.complete,status.eq.failed,status.eq.permanently_failed')
+        .not('final_image_url', 'is', null);
+    }
+
+    const { data: jobsToConsider, error: fetchJobsError } = await query;
 
     if (fetchJobsError) throw new Error(`Failed to fetch child jobs: ${fetchJobsError.message}`);
-    if (!completedJobs || completedJobs.length === 0) {
-      return new Response(JSON.stringify({ success: true, message: "No completed jobs found in this pack to analyze." }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    if (!jobsToConsider || jobsToConsider.length === 0) {
+      return new Response(JSON.stringify({ success: true, message: "No jobs found in this pack matching the selected scope." }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
-    console.log(`${logPrefix} Found ${completedJobs.length} completed jobs in the pack.`);
-
+    console.log(`${logPrefix} Found ${jobsToConsider.length} jobs to analyze based on scope.`);
+    
     // 2. Fetch all existing QA reports for this pack to avoid duplicates
     const { data: existingReports, error: fetchReportsError } = await supabase
       .from('mira-agent-vto-qa-reports')
@@ -50,11 +60,11 @@ serve(async (req) => {
     console.log(`${logPrefix} Found ${analyzedJobIds.size} existing analysis reports.`);
 
     // 3. Filter out jobs that have already been analyzed
-    const jobsToAnalyze = completedJobs.filter(job => !analyzedJobIds.has(job.id));
+    const jobsToAnalyze = jobsToConsider.filter(job => !analyzedJobIds.has(job.id));
 
     if (jobsToAnalyze.length === 0) {
-      console.log(`${logPrefix} All completed jobs have already been analyzed.`);
-      return new Response(JSON.stringify({ success: true, message: "Analysis is already up-to-date for this pack." }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      console.log(`${logPrefix} All matching jobs have already been analyzed.`);
+      return new Response(JSON.stringify({ success: true, message: "Analysis is already up-to-date for this pack and scope." }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
     
     console.log(`${logPrefix} Found ${jobsToAnalyze.length} total jobs needing analysis. Queuing all of them.`);

@@ -11,6 +11,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
+import { AnalyzePackModal, AnalysisScope } from "@/components/VTO/AnalyzePackModal";
 
 interface QaReport {
   id: string;
@@ -64,8 +65,9 @@ const VtoReports = () => {
   const [isAnalyzing, setIsAnalyzing] = useState<string | null>(null);
   const [isRerunning, setIsRerunning] = useState<string | null>(null);
   const [isStartingRefinement, setIsStartingRefinement] = useState<string | null>(null);
+  const [packToAnalyze, setPackToAnalyze] = useState<PackSummary | null>(null);
 
-  const { data: reports, isLoading, error } = useQuery<any[]>({ // Using any for now to accommodate packs table
+  const { data: reports, isLoading, error } = useQuery<any>({ // Using any for now to accommodate packs table
     queryKey: ['vtoQaReportsAndPacks', session?.user?.id],
     queryFn: async () => {
       if (!session?.user) return [];
@@ -160,33 +162,28 @@ const VtoReports = () => {
     return allPacks.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   }, [reports]);
 
-  const handleResetAndAnalyze = async (packId: string) => {
-    if (!session?.user) return;
-    setIsAnalyzing(packId);
-    const toastId = showLoading("Resetting previous analysis...");
+  const handleAnalyzePack = async (scope: AnalysisScope) => {
+    if (!packToAnalyze || !session?.user) return;
+    setIsAnalyzing(packToAnalyze.pack_id);
+    const toastId = showLoading("Starting analysis...");
     try {
-      const { data: resetData, error: resetError } = await supabase.rpc('MIRA-AGENT-admin-reset-vto-pack-analysis', {
-        p_pack_id: packId,
-        p_user_id: session.user.id
+      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-vto-reporter', {
+        body: { 
+          pack_id: packToAnalyze.pack_id, 
+          user_id: session.user.id,
+          analysis_scope: scope
+        }
       });
-      if (resetError) throw resetError;
-      
+      if (error) throw error;
       dismissToast(toastId);
-      showSuccess(`Reset ${resetData} old reports. Starting new analysis...`);
-      
-      const { data: orchestratorData, error: orchestratorError } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-vto-reporter', {
-        body: { pack_id: packId, user_id: session.user.id }
-      });
-      if (orchestratorError) throw orchestratorError;
-
-      showSuccess(orchestratorData.message);
+      showSuccess(data.message);
       queryClient.invalidateQueries({ queryKey: ['vtoQaReportsAndPacks', session.user.id] });
-
     } catch (err: any) {
       dismissToast(toastId);
-      showError(`Operation failed: ${err.message}`);
+      showError(`Analysis failed: ${err.message}`);
     } finally {
       setIsAnalyzing(null);
+      setPackToAnalyze(null);
     }
   };
 
@@ -239,162 +236,153 @@ const VtoReports = () => {
   }
 
   return (
-    <div className="p-4 md:p-8 h-screen overflow-y-auto">
-      <header className="pb-4 mb-8 border-b">
-        <h1 className="text-3xl font-bold">{t('vtoAnalysisReports')}</h1>
-        <p className="text-muted-foreground">{t('vtoAnalysisReportsDescription')}</p>
-      </header>
-      <div className="space-y-4">
-        {packSummaries.map(report => {
-          const unknownFailures = report.failure_summary['Unknown'] || 0;
-          const isRefinementPack = !!report.metadata?.refinement_of_pack_id;
-          const hasRefinementPass = report.has_refinement_pass;
+    <>
+      <div className="p-4 md:p-8 h-screen overflow-y-auto">
+        <header className="pb-4 mb-8 border-b">
+          <h1 className="text-3xl font-bold">{t('vtoAnalysisReports')}</h1>
+          <p className="text-muted-foreground">{t('vtoAnalysisReportsDescription')}</p>
+        </header>
+        <div className="space-y-4">
+          {packSummaries.map(report => {
+            const unknownFailures = report.failure_summary['Unknown'] || 0;
+            const isRefinementPack = !!report.metadata?.refinement_of_pack_id;
+            const hasRefinementPass = report.has_refinement_pass;
 
-          return (
-            <Card key={report.pack_id}>
-              <CardHeader>
-                <CardTitle className="flex justify-between items-center">
-                  <div className="flex items-center gap-2">
-                    {isRefinementPack && <Wand2 className="h-5 w-5 text-purple-500" />}
-                    <span>{report.metadata?.name || `Pack from ${new Date(report.created_at).toLocaleString()}`}</span>
+            return (
+              <Card key={report.pack_id}>
+                <CardHeader>
+                  <CardTitle className="flex justify-between items-center">
+                    <div className="flex items-center gap-2">
+                      {isRefinementPack && <Wand2 className="h-5 w-5 text-purple-500" />}
+                      <span>{report.metadata?.name || `Pack from ${new Date(report.created_at).toLocaleString()}`}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {!isRefinementPack && (
+                        hasRefinementPass ? (
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button variant="secondary" size="sm" disabled={isStartingRefinement === report.pack_id}>
+                                {isStartingRefinement === report.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+                                Re-run Refinement Pass
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  This will permanently delete the existing refinement pass and all its associated images and jobs. A new refinement pass will then be created. This action cannot be undone.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => handleStartRefinementPass(report.pack_id)}>
+                                  Yes, Reset and Re-run
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        ) : (
+                          <Button variant="secondary" size="sm" onClick={() => handleStartRefinementPass(report.pack_id)} disabled={isStartingRefinement === report.pack_id}>
+                            {isStartingRefinement === report.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Wand2 className="h-4 w-4 mr-2" />}
+                            Start Refinement Pass
+                          </Button>
+                        )
+                      )}
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button variant="secondary" size="sm" disabled={unknownFailures === 0 || isRerunning === report.pack_id}>
+                            {isRerunning === report.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+                            {t('rerunUnknownFailures', { count: unknownFailures })}
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>{t('rerunFailedAnalysesTitle')}</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              {t('rerunFailedAnalysesDescription', { count: unknownFailures })}
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>{t('cancel')}</AlertDialogCancel>
+                            <AlertDialogAction onClick={() => handleRerunFailed(report.pack_id)}>
+                              {t('rerunFailedAnalysesAction')}
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                      <Button variant="outline" size="sm" onClick={() => setPackToAnalyze(report)} disabled={isAnalyzing === report.pack_id}>
+                        {isAnalyzing === report.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <BarChart2 className="h-4 w-4 mr-2" />}
+                        {t('analyzePack')}
+                      </Button>
+                      <Link to={`/vto-reports/${report.pack_id}`}>
+                        <Button>{t('viewReport')}</Button>
+                      </Link>
+                    </div>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="space-y-2">
+                    <h3 className="font-semibold text-sm">{t('overallPassRate')}</h3>
+                    <div className="flex items-center gap-4 flex-wrap">
+                      <div className="flex items-center gap-2 text-green-600"><CheckCircle className="h-5 w-5" /><span className="text-2xl font-bold">{report.passed_perfect}</span><span>Passed</span></div>
+                      <div className="flex items-center gap-2 text-yellow-600"><UserCheck2 className="h-5 w-5" /><span className="text-2xl font-bold">{report.passed_pose_change}</span><span>Passed (Pose Change)</span></div>
+                      <div className="flex items-center gap-2 text-orange-500"><BadgeAlert className="h-5 w-5" /><span className="text-2xl font-bold">{report.passed_logo_issue}</span><span>Passed (Logo Issue)</span></div>
+                      <div className="flex items-center gap-2 text-orange-500"><FileText className="h-5 w-5" /><span className="text-2xl font-bold">{report.passed_detail_issue}</span><span>Passed (Detail Issue)</span></div>
+                      <div className="flex items-center gap-2 text-destructive"><XCircle className="h-5 w-5" /><span className="text-2xl font-bold">{report.failed_jobs}</span><span>Failed</span></div>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    {!isRefinementPack && (
-                      hasRefinementPass ? (
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button variant="secondary" size="sm" disabled={isStartingRefinement === report.pack_id}>
-                              {isStartingRefinement === report.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
-                              Re-run Refinement Pass
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                This will permanently delete the existing refinement pass and all its associated images and jobs. A new refinement pass will then be created. This action cannot be undone.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Cancel</AlertDialogCancel>
-                              <AlertDialogAction onClick={() => handleStartRefinementPass(report.pack_id)}>
-                                Yes, Reset and Re-run
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      ) : (
-                        <Button variant="secondary" size="sm" onClick={() => handleStartRefinementPass(report.pack_id)} disabled={isStartingRefinement === report.pack_id}>
-                          {isStartingRefinement === report.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Wand2 className="h-4 w-4 mr-2" />}
-                          Start Refinement Pass
-                        </Button>
-                      )
+                  <div className="space-y-2">
+                    <h3 className="font-semibold text-sm">Integrity Scores</h3>
+                    <div className="flex items-center gap-4 flex-wrap">
+                      <div className="flex items-center gap-2">
+                        <Shirt className="h-5 w-5" />
+                        <span className="text-2xl font-bold">{report.shape_mismatches}</span>
+                        <span>Shape Mismatches</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <User className="h-5 w-5" />
+                        <span className="text-2xl font-bold">{report.avg_body_preservation_score?.toFixed(1) || 'N/A'}</span>
+                        <span>Avg. Body Preservation</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <h3 className="font-semibold text-sm">{t('failureReasons')}</h3>
+                    {Object.keys(report.failure_summary).length > 0 ? (
+                      <div className="text-xs text-muted-foreground space-y-1">
+                        {Object.entries(report.failure_summary).map(([reason, count]) => (
+                          <div key={reason} className="flex justify-between">
+                            <span className="capitalize">{reason.replace(/_/g, ' ')}</span>
+                            <span>{count}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="h-full bg-muted rounded-md flex items-center justify-center text-muted-foreground">
+                        <p>No failures recorded.</p>
+                      </div>
                     )}
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button variant="secondary" size="sm" disabled={unknownFailures === 0 || isRerunning === report.pack_id}>
-                          {isRerunning === report.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
-                          {t('rerunUnknownFailures', { count: unknownFailures })}
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>{t('rerunFailedAnalysesTitle')}</AlertDialogTitle>
-                          <AlertDialogDescription>
-                            {t('rerunFailedAnalysesDescription', { count: unknownFailures })}
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>{t('cancel')}</AlertDialogCancel>
-                          <AlertDialogAction onClick={() => handleRerunFailed(report.pack_id)}>
-                            {t('rerunFailedAnalysesAction')}
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button variant="outline" size="sm" disabled={isAnalyzing === report.pack_id}>
-                          {isAnalyzing === report.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <BarChart2 className="h-4 w-4 mr-2" />}
-                          Re-analyze Pack
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>Reset and Re-analyze?</AlertDialogTitle>
-                          <AlertDialogDescription>
-                            This will permanently delete all existing QA reports for this pack and generate new ones from scratch. This is useful if the analysis logic has been updated. This action cannot be undone.
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>Cancel</AlertDialogCancel>
-                          <AlertDialogAction onClick={() => handleResetAndAnalyze(report.pack_id)}>
-                            Yes, Reset & Re-analyze
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
-                    <Link to={`/vto-reports/${report.pack_id}`}>
-                      <Button>{t('viewReport')}</Button>
-                    </Link>
                   </div>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="space-y-2">
-                  <h3 className="font-semibold text-sm">{t('overallPassRate')}</h3>
-                  <div className="flex items-center gap-4 flex-wrap">
-                    <div className="flex items-center gap-2 text-green-600"><CheckCircle className="h-5 w-5" /><span className="text-2xl font-bold">{report.passed_perfect}</span><span>Passed</span></div>
-                    <div className="flex items-center gap-2 text-yellow-600"><UserCheck2 className="h-5 w-5" /><span className="text-2xl font-bold">{report.passed_pose_change}</span><span>Passed (Pose Change)</span></div>
-                    <div className="flex items-center gap-2 text-orange-500"><BadgeAlert className="h-5 w-5" /><span className="text-2xl font-bold">{report.passed_logo_issue}</span><span>Passed (Logo Issue)</span></div>
-                    <div className="flex items-center gap-2 text-orange-500"><FileText className="h-5 w-5" /><span className="text-2xl font-bold">{report.passed_detail_issue}</span><span>Passed (Detail Issue)</span></div>
-                    <div className="flex items-center gap-2 text-destructive"><XCircle className="h-5 w-5" /><span className="text-2xl font-bold">{report.failed_jobs}</span><span>Failed</span></div>
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <h3 className="font-semibold text-sm">Integrity Scores</h3>
-                  <div className="flex items-center gap-4 flex-wrap">
-                    <div className="flex items-center gap-2">
-                      <Shirt className="h-5 w-5" />
-                      <span className="text-2xl font-bold">{report.shape_mismatches}</span>
-                      <span>Shape Mismatches</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <User className="h-5 w-5" />
-                      <span className="text-2xl font-bold">{report.avg_body_preservation_score?.toFixed(1) || 'N/A'}</span>
-                      <span>Avg. Body Preservation</span>
-                    </div>
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <h3 className="font-semibold text-sm">{t('failureReasons')}</h3>
-                  {Object.keys(report.failure_summary).length > 0 ? (
-                    <div className="text-xs text-muted-foreground space-y-1">
-                      {Object.entries(report.failure_summary).map(([reason, count]) => (
-                        <div key={reason} className="flex justify-between">
-                          <span className="capitalize">{reason.replace(/_/g, ' ')}</span>
-                          <span>{count}</span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="h-full bg-muted rounded-md flex items-center justify-center text-muted-foreground">
-                      <p>No failures recorded.</p>
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          )
-        })}
-        {packSummaries.length === 0 && (
-          <div className="text-center py-16">
-            <h2 className="mt-4 text-xl font-semibold">{t('noReportsGenerated')}</h2>
-            <p className="mt-2 text-muted-foreground">{t('noReportsGeneratedDescription')}</p>
-          </div>
-        )}
+                </CardContent>
+              </Card>
+            )
+          })}
+          {packSummaries.length === 0 && (
+            <div className="text-center py-16">
+              <h2 className="mt-4 text-xl font-semibold">{t('noReportsGenerated')}</h2>
+              <p className="mt-2 text-muted-foreground">{t('noReportsGeneratedDescription')}</p>
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+      <AnalyzePackModal
+        isOpen={!!packToAnalyze}
+        onClose={() => setPackToAnalyze(null)}
+        onAnalyze={handleAnalyzePack}
+        isLoading={isAnalyzing === packToAnalyze?.pack_id}
+        packName={packToAnalyze?.metadata?.name || `Pack from ${new Date(packToAnalyze?.created_at || '').toLocaleString()}`}
+      />
+    </>
   );
 };
 
