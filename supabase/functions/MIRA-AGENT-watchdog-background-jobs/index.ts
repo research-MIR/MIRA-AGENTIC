@@ -10,13 +10,13 @@ const corsHeaders = {
 
 const STALLED_POLLER_THRESHOLD_SECONDS = 5;
 const STALLED_AGGREGATION_THRESHOLD_SECONDS = 20;
-const STALLED_PAIR_JOB_THRESHOLD_MINUTES = 2;
-const STALLED_GOOGLE_VTO_THRESHOLD_MINUTES = 2;
+const STALLED_PAIR_JOB_THRESHOLD_SECONDS = 30;
+const STALLED_GOOGLE_VTO_THRESHOLD_SECONDS = 30;
 const STALLED_QUEUED_VTO_THRESHOLD_SECONDS = 30;
-const STALLED_REFRAME_THRESHOLD_MINUTES = 1;
-const STALLED_FIXER_THRESHOLD_MINUTES = 2;
-const STALLED_QA_REPORT_THRESHOLD_MINUTES = 2;
-const STALLED_CHUNK_WORKER_THRESHOLD_MINUTES = 2;
+const STALLED_REFRAME_THRESHOLD_SECONDS = 30;
+const STALLED_FIXER_THRESHOLD_SECONDS = 30;
+const STALLED_QA_REPORT_THRESHOLD_SECONDS = 30;
+const STALLED_CHUNK_WORKER_THRESHOLD_SECONDS = 30;
 
 serve(async (req) => {
   const requestId = `watchdog-bg-${Date.now()}`;
@@ -118,7 +118,7 @@ serve(async (req) => {
     }
 
     // --- Task 4: Handle Stalled Batch Inpainting Pair Jobs ---
-    const pairJobThreshold = new Date(Date.now() - STALLED_PAIR_JOB_THRESHOLD_MINUTES * 60 * 1000).toISOString();
+    const pairJobThreshold = new Date(Date.now() - STALLED_PAIR_JOB_THRESHOLD_SECONDS * 1000).toISOString();
     const { data: stalledPairJobs, error: stalledPairError } = await supabase.from('mira-agent-batch-inpaint-pair-jobs').select('id, status, metadata').in('status', [
       'segmenting',
       'delegated',
@@ -167,7 +167,7 @@ serve(async (req) => {
     }
 
     // --- Task 5: Handle Stalled 'processing', 'awaiting_reframe' Google VTO Pack Jobs ---
-    const googleVtoThreshold = new Date(Date.now() - STALLED_GOOGLE_VTO_THRESHOLD_MINUTES * 60 * 1000).toISOString();
+    const googleVtoThreshold = new Date(Date.now() - STALLED_GOOGLE_VTO_THRESHOLD_SECONDS * 1000).toISOString();
     const { data: stalledGoogleVtoJobs, error: googleVtoError } = await supabase.from('mira-agent-bitstudio-jobs').select('id').eq('metadata->>engine', 'google').in('status', ['processing', 'awaiting_reframe']).lt('updated_at', googleVtoThreshold);
     if (googleVtoError) {
       console.error(`[Watchdog-BG][${requestId}] Error querying for stalled Google VTO jobs:`, googleVtoError.message);
@@ -302,7 +302,7 @@ serve(async (req) => {
     }
 
     // --- Task 10: Handle Stalled Reframe Worker Jobs ---
-    const reframeThreshold = new Date(Date.now() - STALLED_REFRAME_THRESHOLD_MINUTES * 60 * 1000).toISOString();
+    const reframeThreshold = new Date(Date.now() - STALLED_REFRAME_THRESHOLD_SECONDS * 1000).toISOString();
     const { data: stalledReframeJobs, error: stalledReframeError } = await supabase.from('mira-agent-jobs').select('id').eq('status', 'processing').in('context->>source', [
       'reframe',
       'reframe_from_recontext',
@@ -425,7 +425,7 @@ serve(async (req) => {
     }
 
     // --- NEW Task 15: Handle Stalled Fixer Jobs ---
-    const fixerThreshold = new Date(Date.now() - STALLED_FIXER_THRESHOLD_MINUTES * 60 * 1000).toISOString();
+    const fixerThreshold = new Date(Date.now() - STALLED_FIXER_THRESHOLD_SECONDS * 1000).toISOString();
     const { data: stalledFixerJobs, error: fixerError } = await supabase
       .from('mira-agent-bitstudio-jobs')
       .select('id, metadata')
@@ -455,7 +455,7 @@ serve(async (req) => {
     }
 
     // --- NEW Task 16: Handle Stalled QA Report Jobs ---
-    const qaReportThreshold = new Date(Date.now() - STALLED_QA_REPORT_THRESHOLD_MINUTES * 60 * 1000).toISOString();
+    const qaReportThreshold = new Date(Date.now() - STALLED_QA_REPORT_THRESHOLD_SECONDS * 1000).toISOString();
     const { data: stalledQaJobs, error: qaError } = await supabase
       .from('mira-agent-vto-qa-reports')
       .select('id')
@@ -474,7 +474,7 @@ serve(async (req) => {
     }
 
     // --- NEW Task 17: Handle Stalled Report Chunk Jobs ---
-    const chunkWorkerThreshold = new Date(Date.now() - STALLED_CHUNK_WORKER_THRESHOLD_MINUTES * 60 * 1000).toISOString();
+    const chunkWorkerThreshold = new Date(Date.now() - STALLED_CHUNK_WORKER_THRESHOLD_SECONDS * 1000).toISOString();
     const { data: stalledChunkJobs, error: stalledChunkError } = await supabase
       .from('mira-agent-vto-report-chunks')
       .select('id')
