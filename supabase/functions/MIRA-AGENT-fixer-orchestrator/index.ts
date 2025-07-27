@@ -101,21 +101,6 @@ async function downloadAndEncodeImage(supabase: SupabaseClient, url: string): Pr
     return { blob, base64, mimeType: blob.type || 'image/png' };
 }
 
-async function uploadToBitStudio(fileBlob: Blob, type: 'inpaint-base', filename: string): Promise<string> {
-  const formData = new FormData();
-  formData.append('file', fileBlob, filename);
-  formData.append('type', type);
-  const response = await fetch(`${BITSTUDIO_API_BASE}/images`, {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}` },
-    body: formData,
-  });
-  if (!response.ok) throw new Error(`BitStudio upload failed for type ${type}: ${await response.text()}`);
-  const result = await response.json();
-  if (!result.id) throw new Error(`BitStudio upload for ${type} did not return an ID.`);
-  return result.id;
-}
-
 serve(async (req) => {
   const { job_id, qa_report_object } = await req.json();
   if (!job_id) throw new Error("job_id is required for the fixer-orchestrator.");
@@ -129,11 +114,11 @@ serve(async (req) => {
     const { data: job, error: fetchError } = await supabase.from('mira-agent-bitstudio-jobs').select('metadata').eq('id', job_id).single();
     if (fetchError) throw fetchError;
 
-    const { retry_count = 0, fix_history = [], original_request_payload, reference_image_url, bitstudio_mask_image_id, bitstudio_garment_image_id } = job.metadata || {};
+    const { retry_count = 0, fix_history = [], original_request_payload, reference_image_url, bitstudio_mask_image_id, bitstudio_garment_image_id, bitstudio_person_image_id } = job.metadata || {};
     const { report: lastReport, failed_image_url } = qa_report_object;
 
-    if (!lastReport || !original_request_payload || !reference_image_url || !failed_image_url) {
-      throw new Error("Job is missing critical metadata for a fix attempt.");
+    if (!lastReport || !original_request_payload || !reference_image_url || !failed_image_url || !bitstudio_person_image_id || !bitstudio_mask_image_id || !bitstudio_garment_image_id) {
+      throw new Error("Job is missing critical metadata for a fix attempt (e.g., original image IDs, payload, or report).");
     }
 
     if (retry_count >= MAX_RETRIES) {
@@ -150,21 +135,20 @@ serve(async (req) => {
         downloadAndEncodeImage(supabase, failed_image_url)
     ]);
     
-    const sourceData = failedData;
-    console.log(`${logPrefix} All images downloaded. The FAILED image will now be used as the SOURCE for the next attempt.`);
+    const sourceDataForPrompt = failedData; 
+    console.log(`${logPrefix} Using FAILED image as visual context for the AI planner.`);
 
-    console.log(`${logPrefix} Uploading failed image as new source for inpainting...`);
-    const newSourceImageId = await uploadToBitStudio(failedData.blob, 'inpaint-base', 'failed_result_as_source.png');
-    console.log(`${logPrefix} New source image ID from BitStudio: ${newSourceImageId}`);
+    const sourceImageIdForNextAttempt = bitstudio_person_image_id;
+    console.log(`${logPrefix} Using ORIGINAL cropped source image ID for the next BitStudio attempt: ${sourceImageIdForNextAttempt}`);
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
     const geminiInputParts: Part[] = [
         { text: `A VTO job failed quality assurance. Here is the report and the original request payload that caused the failure. Your task is to construct a new, complete payload to fix the issue.` },
         { text: `--- QA REPORT --- \n ${JSON.stringify(lastReport, null, 2)}` },
         { text: `--- ORIGINAL PAYLOAD --- \n ${JSON.stringify(original_request_payload, null, 2)}` },
-        { text: `--- IMAGE IDENTIFIERS --- \n person_image_id: ${newSourceImageId}\n mask_image_id: ${bitstudio_mask_image_id}\n reference_image_id: ${bitstudio_garment_image_id}` },
+        { text: `--- IMAGE IDENTIFIERS --- \n person_image_id: ${sourceImageIdForNextAttempt}\n mask_image_id: ${bitstudio_mask_image_id}\n reference_image_id: ${bitstudio_garment_image_id}` },
         { text: `--- SOURCE IMAGE (This is the previous failed attempt) ---` },
-        { inlineData: { mimeType: sourceData.mimeType, data: sourceData.base64 } },
+        { inlineData: { mimeType: sourceDataForPrompt.mimeType, data: sourceDataForPrompt.base64 } },
         { text: `--- REFERENCE GARMENT ---` },
         { inlineData: { mimeType: referenceData.mimeType, data: referenceData.base64 } },
         { text: `--- FAILED RESULT TO ANALYZE (This is the same as the source image) ---` },
@@ -230,7 +214,6 @@ serve(async (req) => {
           body: { 
             retry_job_id: job_id, 
             payload: payload,
-            new_source_image_id: newSourceImageId
           }
         });
         if (proxyError) throw proxyError;
