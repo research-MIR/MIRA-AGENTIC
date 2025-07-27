@@ -14,6 +14,9 @@ const STALLED_PAIR_JOB_THRESHOLD_MINUTES = 2;
 const STALLED_GOOGLE_VTO_THRESHOLD_MINUTES = 2;
 const STALLED_QUEUED_VTO_THRESHOLD_SECONDS = 30;
 const STALLED_REFRAME_THRESHOLD_MINUTES = 1;
+const STALLED_FIXER_THRESHOLD_MINUTES = 2;
+const STALLED_QA_REPORT_THRESHOLD_MINUTES = 2;
+const STALLED_CHUNK_WORKER_THRESHOLD_MINUTES = 2;
 
 serve(async (req) => {
   const requestId = `watchdog-bg-${Date.now()}`;
@@ -47,7 +50,7 @@ serve(async (req) => {
       .select('id')
       .in('status', ['queued', 'processing'])
       .lt('last_polled_at', pollerThreshold)
-      .not('bitstudio_task_id', 'is', null); // More efficient: Select jobs that have a BitStudio task ID, which are the ones to be polled.
+      .not('bitstudio_task_id', 'is', null);
 
     if (stalledError) {
       console.error(`[Watchdog-BG][${requestId}] Error querying for stalled jobs:`, stalledError.message);
@@ -163,9 +166,9 @@ serve(async (req) => {
       console.log(`[Watchdog-BG][${requestId}] No stalled pair jobs found.`);
     }
 
-    // --- Task 5: Handle Stalled 'processing', 'awaiting_reframe', 'awaiting_fix', or 'fixing' Google VTO Pack Jobs ---
+    // --- Task 5: Handle Stalled 'processing', 'awaiting_reframe' Google VTO Pack Jobs ---
     const googleVtoThreshold = new Date(Date.now() - STALLED_GOOGLE_VTO_THRESHOLD_MINUTES * 60 * 1000).toISOString();
-    const { data: stalledGoogleVtoJobs, error: googleVtoError } = await supabase.from('mira-agent-bitstudio-jobs').select('id').eq('metadata->>engine', 'google').in('status', ['processing', 'awaiting_reframe', 'awaiting_fix', 'fixing']).lt('updated_at', googleVtoThreshold);
+    const { data: stalledGoogleVtoJobs, error: googleVtoError } = await supabase.from('mira-agent-bitstudio-jobs').select('id').eq('metadata->>engine', 'google').in('status', ['processing', 'awaiting_reframe']).lt('updated_at', googleVtoThreshold);
     if (googleVtoError) {
       console.error(`[Watchdog-BG][${requestId}] Error querying for stalled Google VTO jobs:`, googleVtoError.message);
     } else if (stalledGoogleVtoJobs && stalledGoogleVtoJobs.length > 0) {
@@ -178,7 +181,7 @@ serve(async (req) => {
       await Promise.allSettled(workerPromises);
       actionsTaken.push(`Re-triggered ${stalledGoogleVtoJobs.length} stalled Google VTO workers.`);
     } else {
-      console.log(`[Watchdog-BG][${requestId}] No stalled 'processing', 'awaiting_reframe', 'awaiting_fix', or 'fixing' Google VTO jobs found.`);
+      console.log(`[Watchdog-BG][${requestId}] No stalled 'processing' or 'awaiting_reframe' Google VTO jobs found.`);
     }
 
     // --- Task 6: Handle Stalled 'queued' Google VTO Pack Jobs ---
@@ -419,6 +422,74 @@ serve(async (req) => {
       actionsTaken.push(`Triggered final synthesis for ${readyPacks.length} VTO report packs.`);
     } else {
       console.log(`[Watchdog-BG][${requestId}] No VTO report packs are ready for final synthesis.`);
+    }
+
+    // --- NEW Task 15: Handle Stalled Fixer Jobs ---
+    const fixerThreshold = new Date(Date.now() - STALLED_FIXER_THRESHOLD_MINUTES * 60 * 1000).toISOString();
+    const { data: stalledFixerJobs, error: fixerError } = await supabase
+      .from('mira-agent-bitstudio-jobs')
+      .select('id, metadata')
+      .in('status', ['awaiting_fix', 'fixing'])
+      .lt('updated_at', fixerThreshold);
+
+    if (fixerError) {
+      console.error(`[Watchdog-BG][${requestId}] Error querying for stalled fixer jobs:`, fixerError.message);
+    } else if (stalledFixerJobs && stalledFixerJobs.length > 0) {
+      console.log(`[Watchdog-BG][${requestId}] Found ${stalledFixerJobs.length} stalled fixer job(s). Re-triggering orchestrator...`);
+      const fixerPromises = stalledFixerJobs.map(async (job) => {
+        const qaHistory = job.metadata?.qa_history;
+        if (!qaHistory || qaHistory.length === 0) {
+          console.error(`[Watchdog-BG][${requestId}] Cannot fix job ${job.id}: Missing QA history. Marking as permanently failed.`);
+          await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'permanently_failed', error_message: 'Cannot be fixed: QA history is missing.' }).eq('id', job.id);
+          return;
+        }
+        const lastReport = qaHistory[qaHistory.length - 1];
+        return supabase.functions.invoke('MIRA-AGENT-fixer-orchestrator', {
+          body: { job_id: job.id, qa_report_object: lastReport }
+        });
+      });
+      await Promise.allSettled(fixerPromises);
+      actionsTaken.push(`Re-triggered ${stalledFixerJobs.length} stalled fixer jobs.`);
+    } else {
+      console.log(`[Watchdog-BG][${requestId}] No stalled fixer jobs found.`);
+    }
+
+    // --- NEW Task 16: Handle Stalled QA Report Jobs ---
+    const qaReportThreshold = new Date(Date.now() - STALLED_QA_REPORT_THRESHOLD_MINUTES * 60 * 1000).toISOString();
+    const { data: stalledQaJobs, error: qaError } = await supabase
+      .from('mira-agent-vto-qa-reports')
+      .select('id')
+      .eq('status', 'processing')
+      .lt('updated_at', qaReportThreshold);
+
+    if (qaError) {
+      console.error(`[Watchdog-BG][${requestId}] Error querying for stalled QA jobs:`, qaError.message);
+    } else if (stalledQaJobs && stalledQaJobs.length > 0) {
+      console.log(`[Watchdog-BG][${requestId}] Found ${stalledQaJobs.length} stalled QA job(s). Resetting to 'pending'.`);
+      const jobIdsToReset = stalledQaJobs.map(j => j.id);
+      await supabase.from('mira-agent-vto-qa-reports').update({ status: 'pending', error_message: 'Reset by watchdog.' }).in('id', jobIdsToReset);
+      actionsTaken.push(`Reset ${stalledQaJobs.length} stalled QA jobs.`);
+    } else {
+      console.log(`[Watchdog-BG][${requestId}] No stalled QA jobs found.`);
+    }
+
+    // --- NEW Task 17: Handle Stalled Report Chunk Jobs ---
+    const chunkWorkerThreshold = new Date(Date.now() - STALLED_CHUNK_WORKER_THRESHOLD_MINUTES * 60 * 1000).toISOString();
+    const { data: stalledChunkJobs, error: stalledChunkError } = await supabase
+      .from('mira-agent-vto-report-chunks')
+      .select('id')
+      .eq('status', 'processing')
+      .lt('updated_at', chunkWorkerThreshold);
+
+    if (stalledChunkError) {
+      console.error(`[Watchdog-BG][${requestId}] Error querying for stalled chunk jobs:`, stalledChunkError.message);
+    } else if (stalledChunkJobs && stalledChunkJobs.length > 0) {
+      console.log(`[Watchdog-BG][${requestId}] Found ${stalledChunkJobs.length} stalled chunk job(s). Resetting to 'pending'.`);
+      const chunkIdsToReset = stalledChunkJobs.map(j => j.id);
+      await supabase.from('mira-agent-vto-report-chunks').update({ status: 'pending', error_message: 'Reset by watchdog.' }).in('id', chunkIdsToReset);
+      actionsTaken.push(`Reset ${stalledChunkJobs.length} stalled chunk jobs.`);
+    } else {
+      console.log(`[Watchdog-BG][${requestId}] No stalled chunk jobs found.`);
     }
 
     const finalMessage = actionsTaken.length > 0 ? actionsTaken.join(' ') : "No actions required. All jobs are running normally.";
