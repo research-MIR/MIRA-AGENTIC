@@ -25,12 +25,16 @@ You will receive a prompt containing:
 2.  **Image Data:** The actual visual data for the Source, Reference, and Failed images.
 3.  **QA Report:** The analysis of what went wrong.
 4.  **Original Payload:** The API request that produced the failed image.
+5.  **Pass Number:** An integer indicating if this was a first pass (1) or a second pass/refinement (2).
 
 ### Your Task:
 1.  **Visually Analyze:** Look at the provided image data to understand the failure described in the QA report.
 2.  **Formulate a Plan:** Decide whether to 'retry' with a new payload or 'give_up'.
 3.  **Construct the Output:**
     -   If retrying, create a new, complete JSON payload. **CRITICAL: In this new payload, you MUST include the 'person_image_id' from the 'IMAGE IDENTIFIERS' text block.**
+    -   **CRITICAL DENOISE LOGIC:** You MUST set the 'denoise' parameter in the new payload based on the 'Pass Number'.
+        -   If Pass Number is 1, set \`"denoise": 0.85\`.
+        -   If Pass Number is 2, set \`"denoise": 0.65\`.
     -   If giving up, provide a reason.
 
 ### Output Format & Rules:
@@ -42,11 +46,12 @@ Your entire response MUST be a single, valid JSON object. Do not include any oth
   "action": "retry",
   "payload": { 
     "person_image_id": "...",
+    "denoise": 0.85,
     ... 
   }
 }
 \`\`\`
-- The "payload" object MUST be the complete, new, corrected JSON payload to be sent to the BitStudio API. Start with the 'original_request_payload' and modify it according to the 'fix_suggestion'.
+- The "payload" object MUST be the complete, new, corrected JSON payload to be sent to the BitStudio API. Start with the 'original_request_payload' and modify it according to the 'fix_suggestion' and the mandatory denoise logic.
 
 **If you decide to give up:**
 \`\`\`json
@@ -90,6 +95,7 @@ async function downloadAndEncodeImage(supabase: SupabaseClient, url: string): Pr
         }
         blob = data;
     } else {
+        // Handle external URLs (like BitStudio)
         const response = await fetch(url);
         if (!response.ok) {
             throw new Error(`Failed to download image from external URL ${url}. Status: ${response.statusText}`);
@@ -115,7 +121,7 @@ serve(async (req) => {
     if (fetchError) throw fetchError;
 
     const { metadata, source_garment_image_url, bitstudio_mask_image_id, bitstudio_garment_image_id, bitstudio_person_image_id } = job;
-    const { retry_count = 0, fix_history = [], original_request_payload } = metadata || {};
+    const { retry_count = 0, fix_history = [], original_request_payload, pass_number = 1 } = metadata || {};
     const { report: lastReport, failed_image_url } = qa_report_object;
 
     if (!lastReport || !original_request_payload || !source_garment_image_url || !failed_image_url || !bitstudio_person_image_id || !bitstudio_mask_image_id || !bitstudio_garment_image_id) {
@@ -151,6 +157,7 @@ serve(async (req) => {
         { text: `--- QA REPORT --- \n ${JSON.stringify(lastReport, null, 2)}` },
         { text: `--- ORIGINAL PAYLOAD --- \n ${JSON.stringify(original_request_payload, null, 2)}` },
         { text: `--- IMAGE IDENTIFIERS --- \n person_image_id: ${sourceImageIdForNextAttempt}\n mask_image_id: ${bitstudio_mask_image_id}\n reference_image_id: ${bitstudio_garment_image_id}` },
+        { text: `--- PASS NUMBER --- \n ${pass_number}` },
         { text: `--- SOURCE IMAGE (This is the previous failed attempt) ---` },
         { inlineData: { mimeType: sourceDataForPrompt.mimeType, data: sourceDataForPrompt.base64 } },
         { text: `--- REFERENCE GARMENT ---` },

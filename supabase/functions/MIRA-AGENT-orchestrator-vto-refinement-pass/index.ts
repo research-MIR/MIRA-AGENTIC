@@ -101,6 +101,7 @@ serve(async (req) => {
       metadata: {
         is_helper_enabled: job.metadata?.is_helper_enabled !== false,
         pass_number: 2,
+        denoise: 0.75, // Set specific denoise for refinement pass
         original_person_image_url_for_analysis: job.source_person_image_url,
         original_vto_job_id: job.id,
         vto_pack_job_id: newVtoPackJobId, // Link to the new pack
