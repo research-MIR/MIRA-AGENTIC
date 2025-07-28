@@ -539,7 +539,7 @@ serve(async (req) => {
       console.log(`[Watchdog-BG][${requestId}] No jobs awaiting BitStudio fallback found.`);
     }
 
-    // --- NEW Task 19: Handle Google VTO Permanent Failures & Escalate ---
+    // --- Task 19: Handle Google VTO Permanent Failures & Escalate ---
     const { data: failedPrimaryJobs, error: failedPrimaryError } = await supabase
       .from('mira-agent-bitstudio-jobs')
       .select('id, user_id, source_person_image_url, source_garment_image_url, metadata')
@@ -551,6 +551,11 @@ serve(async (req) => {
       console.error(`[Watchdog-BG][${requestId}] Error querying for permanently failed primary jobs:`, failedPrimaryError.message);
     } else if (failedPrimaryJobs && failedPrimaryJobs.length > 0) {
       console.log(`[Watchdog-BG][${requestId}] Found ${failedPrimaryJobs.length} job(s) that failed the primary engine. Escalating to BitStudio fallback...`);
+      
+      failedPrimaryJobs.forEach(job => {
+        console.warn(`[Watchdog-BG][${requestId}] WARNING: Google VTO job ${job.id} has permanently failed. Escalating to BitStudio fallback engine.`);
+      });
+
       const escalationPromises = failedPrimaryJobs.map(async (job) => {
         try {
           await supabase.from('mira-agent-bitstudio-jobs').update({
