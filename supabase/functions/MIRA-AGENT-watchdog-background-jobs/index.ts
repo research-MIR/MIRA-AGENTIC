@@ -542,8 +542,10 @@ serve(async (req) => {
     // --- NEW Task 19: Handle Google VTO Permanent Failures & Escalate ---
     const { data: failedPrimaryJobs, error: failedPrimaryError } = await supabase
       .from('mira-agent-bitstudio-jobs')
-      .select('id, source_person_image_url, source_garment_image_url, metadata')
-      .eq('status', 'permanently_failed_primary');
+      .select('id, user_id, source_person_image_url, source_garment_image_url, metadata')
+      .eq('status', 'permanently_failed_primary')
+      .not('source_person_image_url', 'is', null)
+      .not('source_garment_image_url', 'is', null);
 
     if (failedPrimaryError) {
       console.error(`[Watchdog-BG][${requestId}] Error querying for permanently failed primary jobs:`, failedPrimaryError.message);
@@ -563,9 +565,7 @@ serve(async (req) => {
               user_id: job.user_id,
               person_image_url: job.source_person_image_url,
               garment_image_url: job.source_garment_image_url,
-              prompt: job.metadata?.prompt_appendix,
-              num_images: 1,
-              resolution: 'high'
+              metadata: job.metadata
             }
           });
           if (proxyError) throw proxyError;
