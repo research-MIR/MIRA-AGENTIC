@@ -91,7 +91,7 @@ serve(async (req) => {
     let finalResponse;
 
     if (cropping_mode === 'frame') {
-        console.log(`[BBox-Orchestrator] Applying 'frame' logic.`);
+        console.log(`[BBox-Orchestrator] Applying 'frame' logic with expansion.`);
         const abs_width = ((averageBox.x_max - averageBox.x_min) / 1000) * originalWidth;
         const abs_height = ((averageBox.y_max - averageBox.y_min) / 1000) * originalHeight;
 
@@ -117,15 +117,30 @@ serve(async (req) => {
         frameX = Math.max(0, Math.min(frameX, originalWidth - frameWidth));
         frameY = Math.max(0, Math.min(frameY, originalHeight - frameHeight));
 
+        // --- NEW EXPANSION STEP ---
+        const paddingPercentage = 0.15; // 15% expansion
+        const paddingX = frameWidth * paddingPercentage;
+        const paddingY = frameHeight * paddingPercentage;
+
+        const expandedFrameX = Math.max(0, frameX - paddingX / 2);
+        const expandedFrameY = Math.max(0, frameY - paddingY / 2);
+        const expandedFrameWidth = Math.min(originalWidth - expandedFrameX, frameWidth + paddingX);
+        const expandedFrameHeight = Math.min(originalHeight - expandedFrameY, frameHeight + paddingY);
+        
+        const final_y_min = (expandedFrameY / originalHeight) * 1000;
+        const final_x_min = (expandedFrameX / originalWidth) * 1000;
+        const final_y_max = ((expandedFrameY + expandedFrameHeight) / originalHeight) * 1000;
+        const final_x_max = ((expandedFrameX + expandedFrameWidth) / originalWidth) * 1000;
+
         finalResponse = {
             "person": [
-                Math.round((frameY / originalHeight) * 1000),
-                Math.round((frameX / originalWidth) * 1000),
-                Math.round(((frameY + frameHeight) / originalHeight) * 1000),
-                Math.round(((frameX + frameWidth) / originalWidth) * 1000)
+                Math.round(final_y_min),
+                Math.round(final_x_min),
+                Math.round(final_y_max),
+                Math.round(final_x_max)
             ]
         };
-        console.log(`[BBox-Orchestrator] 'Frame' logic complete. Final box:`, finalResponse.person);
+        console.log(`[BBox-Orchestrator] 'Frame' logic with expansion complete. Final box:`, finalResponse.person);
 
     } else {
         console.log(`[BBox-Orchestrator] Applying legacy 'expand' logic.`);
