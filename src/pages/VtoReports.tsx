@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
 import { useLanguage } from "@/context/LanguageContext";
-import { BarChart2, CheckCircle, XCircle, Loader2, AlertTriangle, UserCheck2, BadgeAlert, FileText, RefreshCw, Shirt, User, Wand2 } from "lucide-react";
+import { BarChart2, CheckCircle, XCircle, Loader2, AlertTriangle, UserCheck2, BadgeAlert, FileText, RefreshCw, Wand2 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -11,6 +11,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
+import { Progress } from "@/components/ui/progress";
 
 interface QaReport {
   id: string;
@@ -46,6 +47,7 @@ interface PackSummary {
     engine?: 'google' | 'bitstudio';
   };
   total_jobs: number;
+  completed_jobs: number;
   passed_perfect: number;
   passed_pose_change: number;
   passed_logo_issue: number;
@@ -111,8 +113,17 @@ const VtoReports = () => {
             pack_id: pack.id,
             created_at: pack.created_at,
             metadata: pack.metadata || {},
-            total_jobs: 0, passed_perfect: 0, passed_pose_change: 0, passed_logo_issue: 0, passed_detail_issue: 0,
-            failed_jobs: 0, failure_summary: {}, shape_mismatches: 0, avg_body_preservation_score: null, has_refinement_pass: false,
+            total_jobs: 0,
+            completed_jobs: 0,
+            passed_perfect: 0,
+            passed_pose_change: 0,
+            passed_logo_issue: 0,
+            passed_detail_issue: 0,
+            failed_jobs: 0,
+            failure_summary: {},
+            shape_mismatches: 0,
+            avg_body_preservation_score: null,
+            has_refinement_pass: false,
         });
     }
 
@@ -122,6 +133,7 @@ const VtoReports = () => {
       
       const summary = packsMap.get(report.vto_pack_job_id)!;
       summary.total_jobs++;
+      summary.completed_jobs++;
       
       const reportData = report.comparative_report;
       if (reportData) {
@@ -223,10 +235,18 @@ const VtoReports = () => {
             return (
               <Card key={report.pack_id}>
                 <CardHeader>
-                  <CardTitle className="flex justify-between items-center">
-                    <div className="flex items-center gap-2">
-                      {isRefinementPack && <Wand2 className="h-5 w-5 text-purple-500" />}
-                      <span>{report.metadata?.name || `Pack from ${new Date(report.created_at).toLocaleString()}`}</span>
+                  <CardTitle className="flex justify-between items-start">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        {isRefinementPack && <Wand2 className="h-5 w-5 text-purple-500" />}
+                        <span className="truncate">{report.metadata?.name || `Pack from ${new Date(report.created_at).toLocaleString()}`}</span>
+                      </div>
+                      <div className="flex items-center gap-2 mt-2">
+                        <Progress value={(report.completed_jobs / (report.metadata?.total_pairs || 1)) * 100} className="h-2 w-32" />
+                        <p className="text-sm text-muted-foreground">
+                          {report.completed_jobs} / {report.metadata?.total_pairs || report.total_jobs} analyzed
+                        </p>
+                      </div>
                     </div>
                     <div className="flex items-center gap-2">
                       {!isRefinementPack && (
@@ -240,7 +260,7 @@ const VtoReports = () => {
                             </AlertDialogTrigger>
                             <AlertDialogContent>
                               <AlertDialogHeader>
-                                <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                                <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
                                 <AlertDialogDescription>
                                   This will permanently delete the existing refinement pass and all its associated images and jobs. A new refinement pass will then be created. This action cannot be undone.
                                 </AlertDialogDescription>
@@ -343,6 +363,13 @@ const VtoReports = () => {
           )}
         </div>
       </div>
+      <AnalyzePackModal
+        isOpen={!!packToAnalyze}
+        onClose={() => setPackToAnalyze(null)}
+        onAnalyze={handleAnalyzePack}
+        isLoading={isAnalyzing === packToAnalyze?.pack_id}
+        packName={packToAnalyze?.metadata?.name || `Pack from ${new Date(packToAnalyze?.created_at || '').toLocaleString()}`}
+      />
     </>
   );
 };
