@@ -146,6 +146,7 @@ serve(async (req) => {
             case 'done':
             case 'fallback_to_bitstudio':
             case 'awaiting_stylist_choice':
+            case 'awaiting_auto_complete':
                 console.log(`${logPrefix} Job is already in a terminal or waiting state ('${step}'). Exiting gracefully.`);
                 break;
             default:
@@ -436,16 +437,26 @@ async function handleOutfitCompletenessCheck(supabase: SupabaseClient, job: any,
         if (stylistError) throw new Error(`Stylist chooser failed: ${stylistError.message}`);
         
         console.log(`${logPrefix} Stylist chose garment: ${chosenGarment.name}. Creating new VTO job.`);
-        await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
+        const { data: proxyData, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
             body: {
                 mode: 'base', user_id: user_id, person_image_base64: qa_best_image_base64, garment_image_url: chosenGarment.storage_path,
-                vto_pack_job_id: job.vto_pack_job_id, metadata: { ...metadata, auto_complete_outfit: false, pass_number: 2 }
+                vto_pack_job_id: job.vto_pack_job_id, metadata: { ...metadata, auto_complete_outfit: false, pass_number: 2, parent_vto_job_id: job.id }
             }
         });
-        
+        if (proxyError) throw new Error(`Failed to create auto-complete job: ${proxyError.message}`);
+        const childJobId = proxyData?.jobIds?.[0];
+        if (!childJobId) throw new Error("Auto-complete proxy did not return a job ID.");
+
         await supabase.from('mira-agent-bitstudio-jobs').update({
-            status: 'complete', final_image_url: null, metadata: { ...metadata, google_vto_step: 'done', outfit_completed: true }
+            status: 'awaiting_auto_complete', 
+            metadata: { 
+                ...metadata, 
+                google_vto_step: 'done', 
+                outfit_completed: true,
+                delegated_auto_complete_job_id: childJobId 
+            }
         }).eq('id', job.id);
+        console.log(`${logPrefix} Auto-complete job ${childJobId} created. Parent job is now awaiting result.`);
         await triggerWatchdog(supabase, logPrefix);
     }
 }

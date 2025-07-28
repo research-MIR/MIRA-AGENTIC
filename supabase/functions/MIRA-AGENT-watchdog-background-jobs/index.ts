@@ -492,7 +492,7 @@ serve(async (req) => {
       console.log(`[Watchdog-BG][${requestId}] No stalled chunk jobs found.`);
     }
 
-    // --- NEW Task 18: Handle VTO Jobs Awaiting BitStudio Fallback ---
+    // --- Task 18: Handle VTO Jobs Awaiting BitStudio Fallback ---
     const { data: awaitingFallbackJobs, error: fallbackError } = await supabase
       .from('mira-agent-bitstudio-jobs')
       .select('id, metadata')
@@ -537,6 +537,56 @@ serve(async (req) => {
       actionsTaken.push(`Checked status for ${awaitingFallbackJobs.length} jobs awaiting BitStudio fallback.`);
     } else {
       console.log(`[Watchdog-BG][${requestId}] No jobs awaiting BitStudio fallback found.`);
+    }
+
+    // --- Task 19: Handle jobs awaiting auto-complete ---
+    const { data: awaitingAutoCompleteJobs, error: autoCompleteError } = await supabase
+      .from('mira-agent-bitstudio-jobs')
+      .select('id, metadata')
+      .eq('status', 'awaiting_auto_complete');
+
+    if (autoCompleteError) {
+      console.error(`[Watchdog-BG][${requestId}] Error querying for jobs awaiting auto-complete:`, autoCompleteError.message);
+    } else if (awaitingAutoCompleteJobs && awaitingAutoCompleteJobs.length > 0) {
+      console.log(`[Watchdog-BG][${requestId}] Found ${awaitingAutoCompleteJobs.length} job(s) awaiting auto-complete. Checking status...`);
+      const autoCompleteCheckPromises = awaitingAutoCompleteJobs.map(async (parentJob) => {
+        const childJobId = parentJob.metadata?.delegated_auto_complete_job_id;
+        if (!childJobId) {
+            console.error(`[Watchdog-BG][${requestId}] Parent job ${parentJob.id} is awaiting auto-complete but has no child job ID. Marking as failed.`);
+            await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'failed', error_message: 'Missing child job ID for auto-complete.' }).eq('id', parentJob.id);
+            return;
+        }
+
+        const { data: childJob, error: childFetchError } = await supabase
+          .from('mira-agent-bitstudio-jobs')
+          .select('status, final_image_url, error_message')
+          .eq('id', childJobId)
+          .single();
+
+        if (childFetchError) {
+          console.error(`[Watchdog-BG][${requestId}] Could not fetch child job ${childJobId}:`, childFetchError.message);
+          return;
+        }
+
+        if (childJob.status === 'complete') {
+          console.log(`[Watchdog-BG][${requestId}] Child job ${childJobId} is complete. Finalizing parent job ${parentJob.id}.`);
+          await supabase.from('mira-agent-bitstudio-jobs').update({
+            status: 'complete',
+            final_image_url: childJob.final_image_url,
+            metadata: { ...parentJob.metadata, final_auto_complete_job_id: childJobId }
+          }).eq('id', parentJob.id);
+        } else if (childJob.status === 'failed' || childJob.status === 'permanently_failed') {
+          console.error(`[Watchdog-BG][${requestId}] Child job ${childJobId} failed. Propagating failure to parent job ${parentJob.id}.`);
+          await supabase.from('mira-agent-bitstudio-jobs').update({
+            status: 'failed',
+            error_message: `Delegated auto-complete job failed: ${childJob.error_message}`
+          }).eq('id', parentJob.id);
+        }
+      });
+      await Promise.allSettled(autoCompleteCheckPromises);
+      actionsTaken.push(`Checked status for ${awaitingAutoCompleteJobs.length} jobs awaiting auto-complete.`);
+    } else {
+      console.log(`[Watchdog-BG][${requestId}] No jobs awaiting auto-complete found.`);
     }
 
     const finalMessage = actionsTaken.length > 0 ? actionsTaken.join(' ') : "No actions required. All jobs are running normally.";
