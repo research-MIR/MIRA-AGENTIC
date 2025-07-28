@@ -2,7 +2,9 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { GoogleGenAI, Content, Part, HarmCategory, HarmBlockThreshold, GenerationResult } from 'https://esm.sh/@google/genai@0.15.0';
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-const MODEL_NAME = "gemini-1.5-flash-latest";
+const MODEL_NAME = "gemini-2.5-flash-lite-preview-06-17";
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 1000;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -76,13 +78,43 @@ serve(async (req) => {
         { inlineData: { mimeType: 'image/png', data: image_to_analyze_base64 } }
     ];
 
-    const result = await ai.models.generateContent({
-        model: MODEL_NAME,
-        contents: [{ role: 'user', parts }],
-        generationConfig: { responseMimeType: "application/json" },
-        safetySettings,
-        config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
-    });
+    let result: GenerationResult | null = null;
+    let lastError: Error | null = null;
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+            console.log(`[OutfitCompletenessAnalyzer] Calling Gemini API, attempt ${attempt}...`);
+            result = await ai.models.generateContent({
+                model: MODEL_NAME,
+                contents: [{ role: 'user', parts }],
+                generationConfig: { responseMimeType: "application/json" },
+                safetySettings,
+                config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
+            });
+            lastError = null; // Clear error on success
+            break; // Exit loop on success
+        } catch (error) {
+            lastError = error;
+            console.warn(`[OutfitCompletenessAnalyzer] Attempt ${attempt} failed:`, error.message);
+            if (error.message.includes("503") && attempt < MAX_RETRIES) {
+                const delay = RETRY_DELAY_MS * attempt; // Exponential backoff
+                console.log(`[OutfitCompletenessAnalyzer] Model is overloaded. Retrying in ${delay}ms...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            } else {
+                // Not a retryable error or it's the last attempt, so we'll throw after the loop
+                break;
+            }
+        }
+    }
+
+    if (lastError) {
+        console.error(`[OutfitCompletenessAnalyzer] All retries failed. Last error:`, lastError.message);
+        throw lastError;
+    }
+
+    if (!result) {
+        throw new Error("AI model failed to respond after all retries.");
+    }
 
     const analysisResult = extractJson(result.text);
 
