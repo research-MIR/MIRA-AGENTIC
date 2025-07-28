@@ -72,6 +72,9 @@ serve(async (req) => {
     if (!vto_image_base64 || !missing_item_type || !pack_id || !user_id) {
       throw new Error("vto_image_base64, missing_item_type, pack_id, and user_id are required.");
     }
+    
+    const logPrefix = `[StylistChooser][Pack ${pack_id.substring(0, 8)}]`;
+    console.log(`${logPrefix} Invoked. Missing item: '${missing_item_type}'.`);
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
     
@@ -93,9 +96,10 @@ serve(async (req) => {
     if (candidateGarments.length === 0) {
       throw new Error(`The selected pack does not contain any garments of type '${missing_item_type}'.`);
     }
+    console.log(`${logPrefix} Found ${candidateGarments.length} candidate garments of type '${missing_item_type}'.`);
 
     if (candidateGarments.length === 1) {
-        console.log("[StylistChooser] Only one candidate found. Selecting it automatically.");
+        console.log(`${logPrefix} Only one candidate found. Selecting it automatically.`);
         return new Response(JSON.stringify(candidateGarments[0]), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
@@ -106,12 +110,14 @@ serve(async (req) => {
         { text: `--- MISSING ITEM TYPE --- \n${missing_item_type}` }
     ];
 
+    console.log(`${logPrefix} Downloading candidate images for analysis...`);
     const candidateImagePromises = candidateGarments.map((garment, index) => 
         downloadImageAsPart(supabase, garment.storage_path, `CANDIDATE IMAGE ${index}`)
     );
     const candidateImagePartsArrays = await Promise.all(candidateImagePromises);
     parts.push(...candidateImagePartsArrays.flat());
 
+    console.log(`${logPrefix} Calling Gemini for stylistic choice...`);
     const result = await ai.models.generateContent({
         model: MODEL_NAME,
         contents: [{ role: 'user', parts }],
@@ -122,11 +128,14 @@ serve(async (req) => {
 
     const choice = extractJson(result.text);
     const chosenIndex = choice.best_garment_index;
+    console.log(`${logPrefix} AI Reasoning: "${choice.reasoning}"`);
+
     if (typeof chosenIndex !== 'number' || chosenIndex < 0 || chosenIndex >= candidateGarments.length) {
-        console.warn("AI returned an invalid index, selecting the first candidate as a fallback.", choice);
+        console.warn(`${logPrefix} AI returned an invalid index (${chosenIndex}). Selecting the first candidate as a fallback.`);
         return new Response(JSON.stringify(candidateGarments[0]), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
+    console.log(`${logPrefix} AI selected candidate index: ${chosenIndex}.`);
     return new Response(JSON.stringify(candidateGarments[chosenIndex]), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
