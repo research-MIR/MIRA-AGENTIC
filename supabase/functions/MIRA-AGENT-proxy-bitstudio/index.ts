@@ -109,7 +109,7 @@ serve(async (req) => {
     const { retry_job_id, payload: retryPayload, new_source_image_id, existing_job_id } = body;
 
     if (retry_job_id) {
-      // --- RETRY LOGIC ---
+      // --- RETRY LOGIC (from Fixer) ---
       console.log(`[BitStudioProxy][${requestId}] Handling retry for job ID: ${retry_job_id}`);
       const { data: jobToRetry, error: fetchError } = await supabase.from('mira-agent-bitstudio-jobs').select('*').eq('id', retry_job_id).single();
       if (fetchError) throw fetchError;
@@ -170,6 +170,55 @@ serve(async (req) => {
 
       supabase.functions.invoke('MIRA-AGENT-poller-bitstudio', { body: { job_id: retry_job_id } }).catch(console.error);
       return new Response(JSON.stringify({ success: true, jobId: retry_job_id, message: "Job successfully retried." }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+
+    } else if (existing_job_id) {
+      // --- ESCALATION LOGIC (from Google VTO worker) ---
+      console.log(`[BitStudioProxy][${requestId}] Handling escalation for existing job ID: ${existing_job_id}`);
+      const { person_image_url, garment_image_url, user_id, mode, metadata } = body;
+      if (!person_image_url || !garment_image_url || !user_id || !mode) {
+        throw new Error("Escalation requires person_image_url, garment_image_url, user_id, and mode.");
+      }
+
+      const [personBlob, garmentBlob] = await Promise.all([
+        downloadFromSupabase(supabase, person_image_url),
+        downloadFromSupabase(supabase, garment_image_url)
+      ]);
+
+      const [personImageId, outfitImageId] = await Promise.all([
+        uploadToBitStudio(personBlob, 'virtual-try-on-person', 'person.webp'),
+        uploadToBitStudio(garmentBlob, 'virtual-try-on-outfit', 'garment.webp')
+      ]);
+
+      const vtoPayload = {
+        person_image_id: personImageId,
+        outfit_image_id: outfitImageId,
+        resolution: 'high',
+        num_images: 1,
+        prompt: metadata?.prompt_appendix || ""
+      };
+
+      const vtoResponse = await fetch(`${BITSTUDIO_API_BASE}/images/virtual-try-on`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(vtoPayload)
+      });
+      if (!vtoResponse.ok) throw new Error(`BitStudio VTO escalation request failed: ${await vtoResponse.text()}`);
+      const vtoResult = await vtoResponse.json();
+      const taskId = vtoResult[0]?.id;
+      if (!taskId) throw new Error("BitStudio did not return a new task ID on escalation.");
+
+      const { error: updateError } = await supabase.from('mira-agent-bitstudio-jobs').update({
+        status: 'queued',
+        bitstudio_person_image_id: personImageId,
+        bitstudio_garment_image_id: outfitImageId,
+        bitstudio_task_id: taskId,
+        metadata: { ...metadata, engine: 'bitstudio_fallback', original_request_payload: vtoPayload }
+      }).eq('id', existing_job_id);
+      if (updateError) throw updateError;
+
+      supabase.functions.invoke('MIRA-AGENT-poller-bitstudio', { body: { job_id: existing_job_id } }).catch(console.error);
+      
+      return new Response(JSON.stringify({ success: true, jobId: existing_job_id, message: "Job successfully escalated to BitStudio." }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
     } else {
       // --- NEW JOB LOGIC ---
@@ -302,35 +351,18 @@ serve(async (req) => {
         const taskId = vtoResult[0]?.id;
         if (!taskId) throw new Error("BitStudio did not return a task ID for the VTO job.");
 
-        if (existing_job_id) {
-            console.log(`[BitStudioProxy][${requestId}] Updating existing job record: ${existing_job_id}`);
-            const { error: updateError } = await supabase.from('mira-agent-bitstudio-jobs').update({
-                status: 'queued',
-                bitstudio_person_image_id: personImageId, 
-                bitstudio_garment_image_id: outfitImageId, 
-                bitstudio_task_id: taskId,
-                metadata: {
-                  ...metadata,
-                  engine: 'bitstudio',
-                  original_request_payload: vtoPayload
-                }
-            }).eq('id', existing_job_id);
-            if (updateError) throw updateError;
-            jobIds.push(existing_job_id);
-        } else {
-            const { data: newJob, error: insertError } = await supabase.from('mira-agent-bitstudio-jobs').insert({
-              user_id, mode, status: 'queued', source_person_image_url: person_image_url, source_garment_image_url: garment_image_url,
-              bitstudio_person_image_id: personImageId, bitstudio_garment_image_id: outfitImageId, bitstudio_task_id: taskId,
-              batch_pair_job_id: batch_pair_job_id,
-              vto_pack_job_id: vto_pack_job_id,
-              metadata: {
-                engine: 'bitstudio',
-                original_request_payload: vtoPayload
-              }
-            }).select('id').single();
-            if (insertError) throw insertError;
-            jobIds.push(newJob.id);
-        }
+        const { data: newJob, error: insertError } = await supabase.from('mira-agent-bitstudio-jobs').insert({
+          user_id, mode, status: 'queued', source_person_image_url: person_image_url, source_garment_image_url: garment_image_url,
+          bitstudio_person_image_id: personImageId, bitstudio_garment_image_id: outfitImageId, bitstudio_task_id: taskId,
+          batch_pair_job_id: batch_pair_job_id,
+          vto_pack_job_id: vto_pack_job_id,
+          metadata: {
+            engine: 'bitstudio',
+            original_request_payload: vtoPayload
+          }
+        }).select('id').single();
+        if (insertError) throw insertError;
+        jobIds.push(newJob.id);
       }
 
       jobIds.forEach(jobId => {
