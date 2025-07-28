@@ -14,12 +14,14 @@ import { RecentVtoPacks } from "@/components/VTO/RecentVtoPacks";
 import { optimizeImage, sanitizeFilename } from "@/lib/utils";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 
 type WizardStep = 'select-mode' | 'provide-inputs' | 'review-queue';
 type VtoMode = 'one-to-many' | 'precise-pairs' | 'random-pairs';
+type CroppingMode = 'frame' | 'expand';
 
 const aspectRatioOptions = ["1:1", "16:9", "9:16", "4:3", "3:4", "21:9", "3:2", "2:3", "4:5", "5:4"];
 
@@ -34,6 +36,7 @@ const VirtualTryOnPacks = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [aspectRatio, setAspectRatio] = useState<string>("1:1");
   const [skipReframe, setSkipReframe] = useState(false);
+  const [croppingMode, setCroppingMode] = useState<CroppingMode>('frame');
 
   const handleSelectMode = (selectedMode: VtoMode) => {
     setMode(selectedMode);
@@ -110,6 +113,7 @@ const VirtualTryOnPacks = () => {
           engine: 'google',
           aspect_ratio: aspectRatio,
           skip_reframe: skipReframe,
+          cropping_mode: croppingMode,
         }
       });
 
@@ -153,7 +157,27 @@ const VirtualTryOnPacks = () => {
           <div className="max-w-2xl mx-auto space-y-6">
             <VtoReviewQueue queue={queue} />
             <Card>
-              <CardContent className="p-4 space-y-4">
+              <CardHeader><CardTitle>Advanced Settings</CardTitle></CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <Label>{t('croppingMode')}</Label>
+                  <RadioGroup value={croppingMode} onValueChange={(v) => setCroppingMode(v as CroppingMode)} className="mt-2 space-y-2">
+                    <div>
+                      <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="frame" id="crop-frame" />
+                        <Label htmlFor="crop-frame">{t('croppingModeFrame')}</Label>
+                      </div>
+                      <p className="text-xs text-muted-foreground ml-6">{t('croppingModeFrameDesc')}</p>
+                    </div>
+                    <div>
+                      <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="expand" id="crop-expand" />
+                        <Label htmlFor="crop-expand">{t('croppingModeExpand')}</Label>
+                      </div>
+                      <p className="text-xs text-muted-foreground ml-6">{t('croppingModeExpandDesc')}</p>
+                    </div>
+                  </RadioGroup>
+                </div>
                 <div className="flex items-center justify-between">
                   <Label htmlFor="skip-reframe-switch" className="flex items-center gap-2">
                     {t('skipReframe')}
@@ -161,24 +185,22 @@ const VirtualTryOnPacks = () => {
                   <Switch id="skip-reframe-switch" checked={skipReframe} onCheckedChange={setSkipReframe} />
                 </div>
                 <p className="text-xs text-muted-foreground">{t('skipReframeDescription')}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4 space-y-2">
-                <Label htmlFor="aspect-ratio-final" className={cn(skipReframe && "text-muted-foreground")}>{t('aspectRatio')}</Label>
-                <Select value={aspectRatio} onValueChange={setAspectRatio} disabled={skipReframe}>
-                  <SelectTrigger id="aspect-ratio-final">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {aspectRatioOptions.map(ratio => (
-                      <SelectItem key={ratio} value={ratio}>{ratio}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  {skipReframe ? t('aspectRatioDisabled') : t('aspectRatioDescription')}
-                </p>
+                <div className="space-y-2">
+                  <Label htmlFor="aspect-ratio-final" className={cn(skipReframe && "text-muted-foreground")}>{t('aspectRatio')}</Label>
+                  <Select value={aspectRatio} onValueChange={setAspectRatio} disabled={skipReframe}>
+                    <SelectTrigger id="aspect-ratio-final">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {aspectRatioOptions.map(ratio => (
+                        <SelectItem key={ratio} value={ratio}>{ratio}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    {skipReframe ? t('aspectRatioDisabled') : t('aspectRatioDescription')}
+                  </p>
+                </div>
               </CardContent>
             </Card>
             <Alert>

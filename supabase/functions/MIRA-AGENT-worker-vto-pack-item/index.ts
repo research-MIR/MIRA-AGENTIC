@@ -158,7 +158,12 @@ serve(async (req) => {
 
 async function handleStart(supabase: SupabaseClient, job: any, logPrefix: string) {
     console.log(`${logPrefix} Step 1: Getting bounding box and optimizing images.`);
-    const { data: bboxData, error: bboxError } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-bbox', { body: { image_url: job.source_person_image_url } });
+    const { data: bboxData, error: bboxError } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-bbox', { 
+        body: { 
+            image_url: job.source_person_image_url,
+            job_id: job.id
+        } 
+    });
     if (bboxError) throw bboxError;
     const personBox = bboxData?.person;
     if (!personBox || !Array.isArray(personBox) || personBox.length !== 4 || personBox.some((v: any) => typeof v !== 'number')) {

@@ -18,11 +18,26 @@ serve(async (req) => {
   }
 
   try {
-    const { image_url } = await req.json();
+    const { image_url, job_id } = await req.json();
     if (!image_url) throw new Error("image_url is required.");
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
     
+    let cropping_mode = 'expand'; // Default to legacy
+    if (job_id) {
+        const { data: job, error: jobError } = await supabase
+            .from('mira-agent-bitstudio-jobs')
+            .select('metadata')
+            .eq('id', job_id)
+            .single();
+        if (jobError) {
+            console.warn(`[BBox-Orchestrator] Could not fetch job ${job_id} to determine cropping mode. Defaulting to 'expand'. Error: ${jobError.message}`);
+        } else if (job?.metadata?.cropping_mode) {
+            cropping_mode = job.metadata.cropping_mode;
+        }
+    }
+    console.log(`[BBox-Orchestrator] Using cropping mode: '${cropping_mode}'`);
+
     const workerPromises = [];
     for (let i = 0; i < NUM_WORKERS; i++) {
         workerPromises.push(supabase.functions.invoke('MIRA-AGENT-worker-vto-get-bbox', {
@@ -73,31 +88,74 @@ serve(async (req) => {
 
     const { width: originalWidth, height: originalHeight } = successfulResults[0].original_dimensions;
     
-    const abs_width = ((averageBox.x_max - averageBox.x_min) / 1000) * originalWidth;
-    const abs_height = ((averageBox.y_max - averageBox.y_min) / 1000) * originalHeight;
+    let finalResponse;
 
-    const paddingPercentage = 0.30; // Increased from 0.20 to 0.30
-    const padding_x = abs_width * paddingPercentage;
-    const padding_y = abs_height * paddingPercentage;
+    if (cropping_mode === 'frame') {
+        console.log(`[BBox-Orchestrator] Applying 'frame' logic.`);
+        const abs_width = ((averageBox.x_max - averageBox.x_min) / 1000) * originalWidth;
+        const abs_height = ((averageBox.y_max - averageBox.y_min) / 1000) * originalHeight;
 
-    const dilated_x_abs = Math.max(0, ((averageBox.x_min / 1000) * originalWidth) - padding_x / 2);
-    const dilated_y_abs = Math.max(0, ((averageBox.y_min / 1000) * originalHeight) - padding_y / 2);
-    const dilated_width_abs = Math.min(originalWidth - dilated_x_abs, abs_width + padding_x);
-    const dilated_height_abs = Math.min(originalHeight - dilated_y_abs, abs_height + padding_y);
+        if (abs_width <= 0 || abs_height <= 0) throw new Error("Detected bounding box has zero or negative dimensions.");
 
-    const final_y_min = (dilated_y_abs / originalHeight) * 1000;
-    const final_x_min = (dilated_x_abs / originalWidth) * 1000;
-    const final_y_max = ((dilated_y_abs + dilated_height_abs) / originalHeight) * 1000;
-    const final_x_max = ((dilated_x_abs + dilated_width_abs) / originalWidth) * 1000;
+        const subjectAspectRatio = abs_width / abs_height;
+        
+        let frameWidth, frameHeight;
+        if (originalWidth / originalHeight > subjectAspectRatio) {
+            frameHeight = originalHeight;
+            frameWidth = originalHeight * subjectAspectRatio;
+        } else {
+            frameWidth = originalWidth;
+            frameHeight = originalWidth / subjectAspectRatio;
+        }
 
-    const finalResponse = {
-        "person": [
-            Math.round(final_y_min),
-            Math.round(final_x_min),
-            Math.round(final_y_max),
-            Math.round(final_x_max)
-        ]
-    };
+        const subjectCenterX = ((averageBox.x_min + averageBox.x_max) / 2 / 1000) * originalWidth;
+        const subjectCenterY = ((averageBox.y_min + averageBox.y_max) / 2 / 1000) * originalHeight;
+
+        let frameX = subjectCenterX - (frameWidth / 2);
+        let frameY = subjectCenterY - (frameHeight / 2);
+
+        frameX = Math.max(0, Math.min(frameX, originalWidth - frameWidth));
+        frameY = Math.max(0, Math.min(frameY, originalHeight - frameHeight));
+
+        finalResponse = {
+            "person": [
+                Math.round((frameY / originalHeight) * 1000),
+                Math.round((frameX / originalWidth) * 1000),
+                Math.round(((frameY + frameHeight) / originalHeight) * 1000),
+                Math.round(((frameX + frameWidth) / originalWidth) * 1000)
+            ]
+        };
+        console.log(`[BBox-Orchestrator] 'Frame' logic complete. Final box:`, finalResponse.person);
+
+    } else {
+        console.log(`[BBox-Orchestrator] Applying legacy 'expand' logic.`);
+        const abs_width = ((averageBox.x_max - averageBox.x_min) / 1000) * originalWidth;
+        const abs_height = ((averageBox.y_max - averageBox.y_min) / 1000) * originalHeight;
+
+        const paddingPercentage = 0.30;
+        const padding_x = abs_width * paddingPercentage;
+        const padding_y = abs_height * paddingPercentage;
+
+        const dilated_x_abs = Math.max(0, ((averageBox.x_min / 1000) * originalWidth) - padding_x / 2);
+        const dilated_y_abs = Math.max(0, ((averageBox.y_min / 1000) * originalHeight) - padding_y / 2);
+        const dilated_width_abs = Math.min(originalWidth - dilated_x_abs, abs_width + padding_x);
+        const dilated_height_abs = Math.min(originalHeight - dilated_y_abs, abs_height + padding_y);
+
+        const final_y_min = (dilated_y_abs / originalHeight) * 1000;
+        const final_x_min = (dilated_x_abs / originalWidth) * 1000;
+        const final_y_max = ((dilated_y_abs + dilated_height_abs) / originalHeight) * 1000;
+        const final_x_max = ((dilated_x_abs + dilated_width_abs) / originalWidth) * 1000;
+
+        finalResponse = {
+            "person": [
+                Math.round(final_y_min),
+                Math.round(final_x_min),
+                Math.round(final_y_max),
+                Math.round(final_x_max)
+            ]
+        };
+        console.log(`[BBox-Orchestrator] 'Expand' logic complete. Final box:`, finalResponse.person);
+    }
 
     return new Response(JSON.stringify(finalResponse), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

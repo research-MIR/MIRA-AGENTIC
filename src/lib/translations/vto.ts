@@ -151,6 +151,11 @@ Prima di tentare di nuovo, controlla se il tuo lavoro appare nella lista dei "Jo
     addSelected: "Aggiungi Selezionati",
     wardrobeIsEmpty: "Il tuo Armadio è vuoto.",
     wardrobeIsEmptyDesc: "Carica indumenti qui o nella pagina Armadio per usarli nei tuoi pack.",
+    croppingMode: "Modalità di Ritaglio",
+    croppingModeFrame: "Inquadra (Consigliato)",
+    croppingModeFrameDesc: "Inquadra intelligentemente il soggetto in base alla sua posa per risultati coerenti.",
+    croppingModeExpand: "Espandi (Legacy)",
+    croppingModeExpandDesc: "Espande il riquadro di rilevamento di un 30% fisso. Può essere meno coerente.",
   },
   en: {
     proMode: "Pro Mode",
@@ -304,5 +309,10 @@ Before trying again, please check if your job shows up in the "Recent Jobs" list
     addSelected: "Add Selected",
     wardrobeIsEmpty: "Your wardrobe is empty.",
     wardrobeIsEmptyDesc: "Upload garments here or in the Wardrobe page to use them in your packs.",
+    croppingMode: "Cropping Mode",
+    croppingModeFrame: "Frame (Recommended)",
+    croppingModeFrameDesc: "Intelligently frames the subject based on their pose for consistent results.",
+    croppingModeExpand: "Expand (Legacy)",
+    croppingModeExpandDesc: "Expands the detected bounding box by a fixed 30%. Can be less consistent.",
   },
 };
