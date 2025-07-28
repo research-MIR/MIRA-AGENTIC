@@ -107,35 +107,36 @@ serve(async (req) => {
       }
     }
     const { retry_job_id, payload: retryPayload, new_source_image_id, existing_job_id } = body;
-    const jobIds: string[] = [];
-    const jobIdToUpdate = retry_job_id || existing_job_id;
 
-    if (jobIdToUpdate) {
-      // --- UPDATE/RETRY LOGIC ---
-      console.log(`[BitStudioProxy][${requestId}] Handling update/retry for job ID: ${jobIdToUpdate}`);
-      const { data: jobToUpdate, error: fetchError } = await supabase.from('mira-agent-bitstudio-jobs').select('*').eq('id', jobIdToUpdate).single();
+    if (retry_job_id) {
+      // --- RETRY LOGIC ---
+      console.log(`[BitStudioProxy][${requestId}] Handling retry for job ID: ${retry_job_id}`);
+      const { data: jobToRetry, error: fetchError } = await supabase.from('mira-agent-bitstudio-jobs').select('*').eq('id', retry_job_id).single();
       if (fetchError) throw fetchError;
 
-      let finalPayload;
-      if (retry_job_id) {
-        finalPayload = retryPayload;
-      } else {
-        finalPayload = {
-            person_image_id: new_source_image_id || jobToUpdate.bitstudio_person_image_id,
-            outfit_image_id: jobToUpdate.bitstudio_garment_image_id,
-            resolution: 'high',
-            num_images: 1,
-            prompt: body.prompt
-        };
+      if (!retryPayload) {
+        throw new Error("Retry request is missing the 'payload' object from the orchestrator.");
       }
 
       let newTaskId: string;
-      if (jobToUpdate.mode === 'inpaint') {
+      let apiResponse;
+
+      if (jobToRetry.mode === 'inpaint') {
         console.log(`[BitStudioProxy][${requestId}] Executing INPAINT retry logic.`);
-        const sourceIdForInpaint = finalPayload.person_image_id || new_source_image_id || jobToUpdate.bitstudio_person_image_id;
+        
+        const sourceIdForInpaint = retryPayload.person_image_id || new_source_image_id || jobToRetry.bitstudio_person_image_id;
         if (!sourceIdForInpaint) throw new Error("Cannot retry inpaint: missing source image ID.");
+        
+        const finalPayload = { ...retryPayload };
+        delete finalPayload.person_image_id;
+
+        if (finalPayload.resolution === 'hd') {
+            console.log(`[BitStudioProxy][${requestId}] Mapping invalid resolution 'hd' to 'high'.`);
+            finalPayload.resolution = 'high';
+        }
+
         const inpaintUrl = `${BITSTUDIO_API_BASE}/images/${sourceIdForInpaint}/inpaint`;
-        const apiResponse = await fetch(inpaintUrl, {
+        apiResponse = await fetch(inpaintUrl, {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}`, 'Content-Type': 'application/json' },
             body: JSON.stringify(finalPayload)
@@ -149,7 +150,7 @@ serve(async (req) => {
         const vtoResponse = await fetch(`${BITSTUDIO_API_BASE}/images/virtual-try-on`, {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify(finalPayload)
+            body: JSON.stringify(retryPayload)
         });
         if (!vtoResponse.ok) throw new Error(`BitStudio VTO retry request failed: ${await vtoResponse.text()}`);
         const vtoResult = await vtoResponse.json();
@@ -157,29 +158,25 @@ serve(async (req) => {
         if (!newTaskId) throw new Error("BitStudio did not return a new task ID on retry.");
       }
 
-      const newMetadata = {
-        ...jobToUpdate.metadata,
-        ...body.metadata,
-        original_request_payload: finalPayload,
-        retry_count: (jobToUpdate.metadata.retry_count || 0) + 1
-      };
-
       const { error: updateError } = await supabase.from('mira-agent-bitstudio-jobs').update({
         status: 'queued',
-        bitstudio_person_image_id: new_source_image_id || jobToUpdate.bitstudio_person_image_id,
+        bitstudio_person_image_id: new_source_image_id || jobToRetry.bitstudio_person_image_id,
         bitstudio_task_id: newTaskId,
-        metadata: newMetadata,
+        metadata: { ...jobToRetry.metadata, engine: 'bitstudio', prompt_used: retryPayload.prompt, retry_count: (jobToRetry.metadata.retry_count || 0) + 1 },
         error_message: null,
         last_polled_at: new Date().toISOString(),
-      }).eq('id', jobIdToUpdate);
+      }).eq('id', retry_job_id);
       if (updateError) throw updateError;
 
-      jobIds.push(jobIdToUpdate);
+      supabase.functions.invoke('MIRA-AGENT-poller-bitstudio', { body: { job_id: retry_job_id } }).catch(console.error);
+      return new Response(JSON.stringify({ success: true, jobId: retry_job_id, message: "Job successfully retried." }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
     } else {
       // --- NEW JOB LOGIC ---
       const { user_id, mode, batch_pair_job_id, vto_pack_job_id, metadata } = body;
       if (!user_id || !mode) throw new Error("user_id and mode are required for new jobs.");
+
+      const jobIds: string[] = [];
 
       if (mode === 'inpaint') {
         const { base64_image_data, base64_mask_data, source_cropped_url, mask_url, reference_image_url, prompt, denoise, resolution, num_images } = body;
@@ -305,29 +302,46 @@ serve(async (req) => {
         const taskId = vtoResult[0]?.id;
         if (!taskId) throw new Error("BitStudio did not return a task ID for the VTO job.");
 
-        const { data: newJob, error: insertError } = await supabase.from('mira-agent-bitstudio-jobs').insert({
-          user_id, mode, status: 'queued', source_person_image_url: person_image_url, source_garment_image_url: garment_image_url,
-          bitstudio_person_image_id: personImageId, bitstudio_garment_image_id: outfitImageId, bitstudio_task_id: taskId,
-          batch_pair_job_id: batch_pair_job_id,
-          vto_pack_job_id: vto_pack_job_id,
-          metadata: {
-            engine: 'bitstudio',
-            original_request_payload: vtoPayload
-          }
-        }).select('id').single();
-        if (insertError) throw insertError;
-        jobIds.push(newJob.id);
+        if (existing_job_id) {
+            console.log(`[BitStudioProxy][${requestId}] Updating existing job record: ${existing_job_id}`);
+            const { error: updateError } = await supabase.from('mira-agent-bitstudio-jobs').update({
+                status: 'queued',
+                bitstudio_person_image_id: personImageId, 
+                bitstudio_garment_image_id: outfitImageId, 
+                bitstudio_task_id: taskId,
+                metadata: {
+                  ...metadata,
+                  engine: 'bitstudio',
+                  original_request_payload: vtoPayload
+                }
+            }).eq('id', existing_job_id);
+            if (updateError) throw updateError;
+            jobIds.push(existing_job_id);
+        } else {
+            const { data: newJob, error: insertError } = await supabase.from('mira-agent-bitstudio-jobs').insert({
+              user_id, mode, status: 'queued', source_person_image_url: person_image_url, source_garment_image_url: garment_image_url,
+              bitstudio_person_image_id: personImageId, bitstudio_garment_image_id: outfitImageId, bitstudio_task_id: taskId,
+              batch_pair_job_id: batch_pair_job_id,
+              vto_pack_job_id: vto_pack_job_id,
+              metadata: {
+                engine: 'bitstudio',
+                original_request_payload: vtoPayload
+              }
+            }).select('id').single();
+            if (insertError) throw insertError;
+            jobIds.push(newJob.id);
+        }
       }
+
+      jobIds.forEach(jobId => {
+        supabase.functions.invoke('MIRA-AGENT-poller-bitstudio', { body: { job_id: jobId } }).catch(console.error);
+      });
+
+      return new Response(JSON.stringify({ success: true, jobIds }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 200,
+      });
     }
-
-    jobIds.forEach(jobId => {
-      supabase.functions.invoke('MIRA-AGENT-poller-bitstudio', { body: { job_id: jobId } }).catch(console.error);
-    });
-
-    return new Response(JSON.stringify({ success: true, jobIds }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 200,
-    });
   } catch (error) {
     console.error(`[BitStudioProxy][${requestId}] Error:`, error);
     return new Response(JSON.stringify({ error: error.message }), {
