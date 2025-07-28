@@ -59,6 +59,7 @@ interface VtoPackSummary {
 }
 
 export const RecentVtoPacks = () => {
+  const { t } = useLanguage();
   const { supabase, session } = useSession();
   const queryClient = useQueryClient();
   const [openPackId, setOpenPackId] = useState<string | null>(null);
@@ -372,7 +373,7 @@ export const RecentVtoPacks = () => {
     return <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Error</AlertTitle><AlertDescription>{packsError.message}</AlertDescription></Alert>;
   }
 
-  if (!packs || packs.length === 0) {
+  if (!reports?.packs || reports.packs.length === 0) {
     return <p className="text-center text-muted-foreground py-8">No recent batch jobs found.</p>;
   }
 
