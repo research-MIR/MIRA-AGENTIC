@@ -18,6 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Slider } from "@/components/ui/slider";
 
 type WizardStep = 'select-mode' | 'provide-inputs' | 'review-queue';
 type VtoMode = 'one-to-many' | 'precise-pairs' | 'random-pairs';
@@ -37,6 +38,7 @@ const VirtualTryOnPacks = () => {
   const [aspectRatio, setAspectRatio] = useState<string>("1:1");
   const [skipReframe, setSkipReframe] = useState(false);
   const [croppingMode, setCroppingMode] = useState<CroppingMode>('frame');
+  const [expansionPercentage, setExpansionPercentage] = useState(30);
 
   const handleSelectMode = (selectedMode: VtoMode) => {
     setMode(selectedMode);
@@ -114,6 +116,7 @@ const VirtualTryOnPacks = () => {
           aspect_ratio: aspectRatio,
           skip_reframe: skipReframe,
           cropping_mode: croppingMode,
+          expansion_percentage: expansionPercentage,
         }
       });
 
@@ -177,6 +180,17 @@ const VirtualTryOnPacks = () => {
                       <p className="text-xs text-muted-foreground ml-6">{t('croppingModeExpandDesc')}</p>
                     </div>
                   </RadioGroup>
+                </div>
+                <div>
+                  <Label>{t('expansionPercentage')}: {expansionPercentage}%</Label>
+                  <Slider
+                    value={[expansionPercentage]}
+                    onValueChange={(v) => setExpansionPercentage(v[0])}
+                    min={0}
+                    max={100}
+                    step={5}
+                  />
+                  <p className="text-xs text-muted-foreground">{t('expansionPercentageDesc')}</p>
                 </div>
                 <div className="flex items-center justify-between">
                   <Label htmlFor="skip-reframe-switch" className="flex items-center gap-2">

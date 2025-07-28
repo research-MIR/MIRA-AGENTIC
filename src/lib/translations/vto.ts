@@ -156,6 +156,8 @@ Prima di tentare di nuovo, controlla se il tuo lavoro appare nella lista dei "Jo
     croppingModeFrameDesc: "Inquadra intelligentemente il soggetto in base alla sua posa per risultati coerenti.",
     croppingModeExpand: "Espandi (Legacy)",
     croppingModeExpandDesc: "Espande il riquadro di rilevamento di un 30% fisso. Può essere meno coerente.",
+    expansionPercentage: "Percentuale di Espansione",
+    expansionPercentageDesc: "Controlla di quanto viene espanso il riquadro di ritaglio. Valori più alti danno più spazio attorno al soggetto.",
   },
   en: {
     proMode: "Pro Mode",
@@ -314,5 +316,7 @@ Before trying again, please check if your job shows up in the "Recent Jobs" list
     croppingModeFrameDesc: "Intelligently frames the subject based on their pose for consistent results.",
     croppingModeExpand: "Expand (Legacy)",
     croppingModeExpandDesc: "Expands the detected bounding box by a fixed 30%. Can be less consistent.",
+    expansionPercentage: "Expansion Percentage",
+    expansionPercentageDesc: "Controls how much the cropping box is expanded. Higher values give more room around the subject.",
   },
 };

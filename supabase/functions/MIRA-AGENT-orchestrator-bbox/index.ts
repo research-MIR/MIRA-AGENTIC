@@ -24,6 +24,8 @@ serve(async (req) => {
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
     
     let cropping_mode = 'expand'; // Default to legacy
+    let expansion_percentage = 30; // Default value
+
     if (job_id) {
         const { data: job, error: jobError } = await supabase
             .from('mira-agent-bitstudio-jobs')
@@ -31,12 +33,17 @@ serve(async (req) => {
             .eq('id', job_id)
             .single();
         if (jobError) {
-            console.warn(`[BBox-Orchestrator] Could not fetch job ${job_id} to determine cropping mode. Defaulting to 'expand'. Error: ${jobError.message}`);
-        } else if (job?.metadata?.cropping_mode) {
-            cropping_mode = job.metadata.cropping_mode;
+            console.warn(`[BBox-Orchestrator] Could not fetch job ${job_id}. Using defaults.`);
+        } else {
+            if (job?.metadata?.cropping_mode) {
+                cropping_mode = job.metadata.cropping_mode;
+            }
+            if (job?.metadata?.expansion_percentage !== undefined) {
+                expansion_percentage = job.metadata.expansion_percentage;
+            }
         }
     }
-    console.log(`[BBox-Orchestrator] Using cropping mode: '${cropping_mode}'`);
+    console.log(`[BBox-Orchestrator] Using cropping_mode: '${cropping_mode}', expansion_percentage: ${expansion_percentage}%`);
 
     const workerPromises = [];
     for (let i = 0; i < NUM_WORKERS; i++) {
@@ -91,7 +98,7 @@ serve(async (req) => {
     let finalResponse;
 
     if (cropping_mode === 'frame') {
-        console.log(`[BBox-Orchestrator] Applying HYBRID 'frame' logic with 30% expansion.`);
+        console.log(`[BBox-Orchestrator] Applying HYBRID 'frame' logic with ${expansion_percentage}% expansion.`);
         const abs_width = ((averageBox.x_max - averageBox.x_min) / 1000) * originalWidth;
         const abs_height = ((averageBox.y_max - averageBox.y_min) / 1000) * originalHeight;
 
@@ -118,8 +125,7 @@ serve(async (req) => {
         frameX = Math.max(0, Math.min(frameX, originalWidth - frameWidth));
         frameY = Math.max(0, Math.min(frameY, originalHeight - frameHeight));
 
-        // --- NEW HYBRID LOGIC: Expand the calculated frame by 30% ---
-        const expansionFactor = 1.30;
+        const expansionFactor = 1 + (expansion_percentage / 100);
         const expandedWidth = frameWidth * expansionFactor;
         const expandedHeight = frameHeight * expansionFactor;
 
@@ -144,7 +150,6 @@ serve(async (req) => {
         if (finalY + finalHeight > originalHeight) {
             finalHeight = originalHeight - finalY;
         }
-        // --- END OF HYBRID LOGIC ---
 
         finalResponse = {
             "person": [
@@ -157,11 +162,11 @@ serve(async (req) => {
         console.log(`[BBox-Orchestrator] Hybrid 'Frame' logic complete. Final box:`, finalResponse.person);
 
     } else {
-        console.log(`[BBox-Orchestrator] Applying legacy 'expand' logic.`);
+        console.log(`[BBox-Orchestrator] Applying legacy 'expand' logic with ${expansion_percentage}% expansion.`);
         const abs_width = ((averageBox.x_max - averageBox.x_min) / 1000) * originalWidth;
         const abs_height = ((averageBox.y_max - averageBox.y_min) / 1000) * originalHeight;
 
-        const paddingPercentage = 0.30;
+        const paddingPercentage = expansion_percentage / 100;
         const padding_x = abs_width * paddingPercentage;
         const padding_y = abs_height * paddingPercentage;
 
