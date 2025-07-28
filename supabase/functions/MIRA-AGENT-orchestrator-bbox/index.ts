@@ -93,13 +93,21 @@ serve(async (req) => {
     if (cropping_mode === 'frame') {
         console.log(`[BBox-Orchestrator] Applying 'frame' logic.`);
         const paddingFactor = 1.10; // 10% padding
+        const MIN_ASPECT_RATIO = 2 / 3; // Enforce a minimum "square-ish" ratio (e.g., 2:3 portrait)
+
         const abs_width = ((averageBox.x_max - averageBox.x_min) / 1000) * originalWidth;
         const abs_height = ((averageBox.y_max - averageBox.y_min) / 1000) * originalHeight;
 
         if (abs_width <= 0 || abs_height <= 0) throw new Error("Detected bounding box has zero or negative dimensions.");
 
-        const subjectAspectRatio = abs_width / abs_height;
+        let subjectAspectRatio = abs_width / abs_height;
         
+        // Enforce minimum aspect ratio
+        if (subjectAspectRatio < MIN_ASPECT_RATIO) {
+            console.log(`[BBox-Orchestrator] Subject ratio (${subjectAspectRatio.toFixed(2)}) is slimmer than min (${MIN_ASPECT_RATIO.toFixed(2)}). Adjusting.`);
+            subjectAspectRatio = MIN_ASPECT_RATIO;
+        }
+
         let frameWidth, frameHeight;
         if (originalWidth / originalHeight > subjectAspectRatio) {
             frameHeight = originalHeight;
