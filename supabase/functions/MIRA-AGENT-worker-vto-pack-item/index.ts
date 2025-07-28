@@ -145,7 +145,8 @@ serve(async (req) => {
                 break;
             case 'done':
             case 'fallback_to_bitstudio':
-                console.log(`${logPrefix} Job is already in a terminal state ('${step}'). Exiting gracefully.`);
+            case 'awaiting_stylist_choice':
+                console.log(`${logPrefix} Job is already in a terminal or waiting state ('${step}'). Exiting gracefully.`);
                 break;
             default:
                 throw new Error(`Unknown step: ${step}`);
@@ -411,6 +412,11 @@ async function handleOutfitCompletenessCheck(supabase: SupabaseClient, job: any,
         invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
         return;
     }
+
+    // Update status before long-running task
+    await supabase.from('mira-agent-bitstudio-jobs').update({
+        metadata: { ...metadata, google_vto_step: 'awaiting_stylist_choice' }
+    }).eq('id', job.id);
 
     const { data: analysisData, error: analysisError } = await supabase.functions.invoke('MIRA-AGENT-analyzer-outfit-completeness', {
         body: { image_to_analyze_base64: qa_best_image_base64, vto_garment_type: garment_analysis.type_of_fit }
