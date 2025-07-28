@@ -105,7 +105,7 @@ serve(async (req) => {
 
   try {
     const { data: fetchedJob, error: fetchError } = await supabase.from('mira-agent-bitstudio-jobs').select('*').eq('id', pair_job_id).single();
-    if (fetchError) throw fetchError;
+    if (fetchError) throw new Error(fetchError.message || 'Failed to fetch job.');
     job = fetchedJob;
 
     if (reframe_result_url) {
@@ -149,10 +149,12 @@ serve(async (req) => {
     }
     return new Response(JSON.stringify({ success: true, message: "Step initiated." }), { headers: corsHeaders });
   } catch (error) {
-    console.error(`${logPrefix} Error:`, error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`${logPrefix} Error:`, errorMessage);
     
-    if (job && job.metadata?.google_vto_step?.startsWith('generate_step')) {
-        console.warn(`[BITSTUDIO_FALLBACK][${job.id}] A Google VTO generation step failed after all retries. Escalating to BitStudio.`);
+    const currentStep = job?.metadata?.google_vto_step;
+    if (job && (currentStep?.startsWith('generate_step') || currentStep === 'quality_check')) {
+        console.warn(`[BITSTUDIO_FALLBACK][${job.id}] A Google VTO generation or quality check step failed. Escalating to BitStudio. Triggering reason: ${errorMessage}`);
         try {
             await supabase.from('mira-agent-bitstudio-jobs').update({
                 metadata: { ...job.metadata, google_vto_step: 'fallback_to_bitstudio', engine: 'bitstudio_fallback' }
@@ -170,7 +172,7 @@ serve(async (req) => {
                     resolution: 'high'
                 }
             });
-            if (proxyError) throw proxyError;
+            if (proxyError) throw new Error(proxyError.message || 'Proxy invocation failed.');
 
             console.log(`${logPrefix} BitStudio fallback job created with ID ${proxyData.jobIds[0]}. The BitStudio poller will now take over.`);
             await supabase.from('mira-agent-bitstudio-jobs').update({
@@ -182,15 +184,16 @@ serve(async (req) => {
             return new Response(JSON.stringify({ success: true, message: "Escalated to BitStudio fallback." }), { headers: corsHeaders });
 
         } catch (fallbackError) {
-            console.error(`${logPrefix} CRITICAL: BitStudio fallback attempt also failed:`, fallbackError);
-            await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'failed', error_message: `Google VTO failed and BitStudio fallback also failed: ${fallbackError.message}` }).eq('id', pair_job_id);
+            const fallbackErrorMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+            console.error(`${logPrefix} CRITICAL: BitStudio fallback attempt also failed:`, fallbackErrorMessage);
+            await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'failed', error_message: `Google VTO failed and BitStudio fallback also failed: ${fallbackErrorMessage}` }).eq('id', pair_job_id);
             await triggerWatchdog(supabase, logPrefix);
-            return new Response(JSON.stringify({ error: fallbackError.message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
+            return new Response(JSON.stringify({ error: fallbackErrorMessage }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
         }
     } else {
-        await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'failed', error_message: error.message }).eq('id', pair_job_id);
+        await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'failed', error_message: errorMessage }).eq('id', pair_job_id);
         await triggerWatchdog(supabase, logPrefix);
-        return new Response(JSON.stringify({ error: error.message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
+        return new Response(JSON.stringify({ error: errorMessage }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
     }
   }
 });
@@ -203,7 +206,7 @@ async function handleStart(supabase: SupabaseClient, job: any, logPrefix: string
             job_id: job.id
         } 
     });
-    if (bboxError) throw bboxError;
+    if (bboxError) throw new Error(bboxError.message || 'BBox orchestrator failed.');
     const personBox = bboxData?.person;
     if (!personBox || !Array.isArray(personBox) || personBox.length !== 4 || personBox.some((v: any) => typeof v !== 'number')) {
         throw new Error("Orchestrator did not return a valid bounding box array.");
@@ -264,11 +267,13 @@ async function invokeWithRetry(supabase: SupabaseClient, functionName: string, p
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
             const { data, error } = await supabase.functions.invoke(functionName, payload);
-            if (error) throw error;
+            if (error) {
+                throw new Error(error.message || 'Function invocation failed with an unknown error.');
+            }
             return data; // Success
         } catch (err) {
-            lastError = err;
-            console.warn(`${logPrefix} Invocation of '${functionName}' failed on attempt ${attempt}/${maxRetries}. Error: ${err.message}`);
+            lastError = err instanceof Error ? err : new Error(String(err));
+            console.warn(`${logPrefix} Invocation of '${functionName}' failed on attempt ${attempt}/${maxRetries}. Error: ${lastError.message}`);
             if (attempt < maxRetries) {
                 const delay = 1500 * attempt;
                 console.warn(`${logPrefix} Waiting ${delay}ms before retrying...`);
@@ -276,7 +281,7 @@ async function invokeWithRetry(supabase: SupabaseClient, functionName: string, p
             }
         }
     }
-    throw lastError;
+    throw lastError || new Error("Function failed after all retries without a specific error.");
 }
 
 async function handleGenerateStep(supabase: SupabaseClient, job: any, sampleStep: number, nextStep: string, logPrefix: string) {
@@ -340,7 +345,7 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
     personBlob = null; // GC
     garmentBlob = null; // GC
 
-    if (error) throw error;
+    if (error) throw new Error(error.message || 'QA tool invocation failed.');
     
     if (qaData.error) {
         console.warn(`[VTO-Pack-Worker-QA][${job.id}] The quality checker tool reported an internal failure: ${qaData.error}. Treating this as a failed check and retrying.`);
@@ -409,7 +414,7 @@ async function handleReframe(supabase: SupabaseClient, job: any, logPrefix: stri
             parent_vto_job_id: job.id
         }
     });
-    if (reframeError) throw reframeError;
+    if (reframeError) throw new Error(reframeError.message || 'Reframe proxy failed.');
     await supabase.from('mira-agent-bitstudio-jobs').update({
         status: 'awaiting_reframe',
         metadata: { ...job.metadata, google_vto_step: 'done', delegated_reframe_job_id: reframeJobData.jobId, qa_best_image_base64: null }
