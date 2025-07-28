@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { NavLink, useNavigate, useParams } from "react-router-dom";
 import { Button } from "./ui/button";
-import { MessageSquare, Image, GalleryHorizontal, LogOut, HelpCircle, LogIn, Shirt, Code, Wand2, PencilRuler, Pencil, Trash2, Settings, FolderPlus, LayoutGrid, Cog, Brush, Users, MessageSquareQuote, ChevronRight, FlaskConical, Shapes, BoxSelect, ClipboardCheck } from "lucide-react";
+import { MessageSquare, Image, GalleryHorizontal, LogOut, HelpCircle, LogIn, Shirt, Code, Wand2, PencilRuler, Pencil, Trash2, Settings, FolderPlus, LayoutGrid, Cog, Brush, Users, MessageSquareQuote, ChevronRight, FlaskConical, Shapes, BoxSelect, ClipboardCheck, Package } from "lucide-react";
 import { useSession } from "./Auth/SessionContextProvider";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -163,6 +163,10 @@ export const Sidebar = () => {
           <NavLink id="wardrobe-nav-link" to="/wardrobe" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
             <ClipboardCheck size={20} />
             {t('wardrobe')}
+          </NavLink>
+          <NavLink id="wardrobe-packs-nav-link" to="/wardrobe-packs" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
+            <Package size={20} />
+            {t('wardrobePacks')}
           </NavLink>
           
           <Collapsible open={isAdvancedOpen} onOpenChange={setIsAdvancedOpen}>
