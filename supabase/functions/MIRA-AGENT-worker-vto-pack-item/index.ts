@@ -405,6 +405,7 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
                 if (analysisError) throw new Error(`Outfit completeness analysis failed: ${analysisError.message}`);
                 completenessAnalysis = analysisData;
                 console.log(`${logPrefix} Outfit completeness check successful. Is complete: ${completenessAnalysis.is_outfit_complete}`);
+                console.log(`${logPrefix} Full Outfit Completeness Analysis:`, JSON.stringify(completenessAnalysis, null, 2));
             } catch (err) {
                 console.warn(`${logPrefix} Outfit completeness check failed, but proceeding with finalization. Error: ${err.message}`);
                 completenessAnalysis = { error: err.message };
