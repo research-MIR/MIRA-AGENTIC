@@ -16,6 +16,7 @@ interface Garment {
     intended_gender: 'male' | 'female' | 'unisex';
     type_of_fit: 'upper body' | 'lower body' | 'full body';
     primary_color: string;
+    style_tags?: string[];
   } | null;
 }
 
@@ -63,7 +64,7 @@ const Wardrobe = () => {
                 <div className="aspect-square bg-muted">
                   <SecureImageDisplay imageUrl={garment.storage_path} alt={garment.name} />
                 </div>
-                <div className="p-2 text-xs space-y-1">
+                <div className="p-2 text-xs space-y-1 border-t">
                   <p className="font-semibold truncate">{garment.name}</p>
                   {garment.attributes && (
                     <div className="flex flex-wrap gap-1">
