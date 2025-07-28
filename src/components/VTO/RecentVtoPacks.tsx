@@ -12,6 +12,7 @@ import JSZip from 'jszip';
 import { VtoPackDetailView } from './VtoPackDetailView';
 import { AnalyzePackModal, AnalysisScope } from './AnalyzePackModal';
 import { Link } from 'react-router-dom';
+import { useLanguage } from '@/context/LanguageContext';
 
 interface QaReport {
   id: string;
