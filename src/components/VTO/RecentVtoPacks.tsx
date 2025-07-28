@@ -4,96 +4,59 @@ import { useSession } from '@/components/Auth/SessionContextProvider';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
-import { AlertTriangle, CheckCircle, Loader2, XCircle, Download, HardDriveDownload, BarChart2 } from 'lucide-react';
-import { SecureImageDisplay } from './SecureImageDisplay';
-import { BitStudioJob } from '@/types/vto';
+import { AlertTriangle, CheckCircle, Loader2, XCircle, Download, HardDriveDownload, BarChart2, RefreshCw, Wand2 } from 'lucide-react';
 import { RealtimeChannel } from '@supabase/supabase-js';
 import { Button } from '../ui/button';
 import { showError, showLoading, dismissToast, showSuccess } from '@/utils/toast';
 import JSZip from 'jszip';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { useVtoPackJobs } from '@/hooks/useVtoPackJobs';
-import { VtoJobDetailModal } from './VtoJobDetailModal';
+import { VtoPackDetailView } from './VtoPackDetailView';
 import { AnalyzePackModal, AnalysisScope } from './AnalyzePackModal';
 import { Link } from 'react-router-dom';
+
+interface QaReport {
+  id: string;
+  vto_pack_job_id: string;
+  created_at: string;
+  comparative_report: {
+    overall_pass: boolean;
+    pass_with_notes: boolean;
+    pass_notes_category: 'logo_fidelity' | 'detail_accuracy' | 'minor_artifact' | null;
+    failure_category: string | null;
+    pose_and_body_analysis?: {
+        pose_changed: boolean;
+        scores: {
+            body_type_preservation?: number;
+        }
+    },
+    garment_comparison?: {
+        generated_garment_type?: string;
+    },
+    garment_analysis?: {
+        garment_type?: string;
+    }
+  } | null;
+}
 
 interface VtoPackSummary {
   pack_id: string;
   created_at: string;
   metadata: {
-    total_pairs: number;
-    engine?: 'google' | 'bitstudio';
     name?: string;
     refinement_of_pack_id?: string;
+    total_pairs: number;
+    engine?: 'google' | 'bitstudio';
   };
   total_jobs: number;
-  completed_jobs: number;
+  passed_perfect: number;
+  passed_pose_change: number;
+  passed_logo_issue: number;
+  passed_detail_issue: number;
   failed_jobs: number;
-  in_progress_jobs: number;
+  failure_summary: Record<string, number>;
+  shape_mismatches: number;
+  avg_body_preservation_score: number | null;
+  has_refinement_pass: boolean;
 }
-
-const VtoPackDetailView = ({ packId, isOpen }: { packId: string, isOpen: boolean }) => {
-  const { data: childJobs, isLoading } = useVtoPackJobs(packId, isOpen);
-  const [selectedJob, setSelectedJob] = useState<BitStudioJob | null>(null);
-
-  if (isLoading) {
-    return <div className="flex justify-center p-4"><Loader2 className="h-6 w-6 animate-spin" /></div>;
-  }
-
-  return (
-    <>
-      <div className="flex flex-wrap gap-2">
-        {childJobs?.map(job => {
-          const isFailed = job.status === 'failed' || job.status === 'permanently_failed';
-          const inProgressStatuses = ['processing', 'queued', 'segmenting', 'delegated', 'compositing', 'awaiting_fix', 'fixing', 'pending'];
-          const isInProgress = inProgressStatuses.includes(job.status);
-          const isComplete = job.status === 'complete' || job.status === 'done';
-
-          return (
-            <div 
-              key={job.id} 
-              className="w-32 h-32 relative group cursor-pointer"
-              onClick={() => setSelectedJob(job)}
-            >
-              <SecureImageDisplay 
-                imageUrl={job.final_image_url || job.source_person_image_url || null} 
-                alt="Job result" 
-                className="w-full h-full object-cover rounded-md"
-              />
-              {isComplete && <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity" />}
-              {isFailed && (
-                job.final_image_url ? (
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <div className="absolute inset-0 bg-yellow-500/70 flex items-center justify-center rounded-md">
-                          <AlertTriangle className="h-8 w-8 text-white" />
-                        </div>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>Job failed quality checks but produced an image.</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                ) : (
-                  <div className="absolute inset-0 bg-destructive/70 flex items-center justify-center rounded-md">
-                    <XCircle className="h-8 w-8 text-destructive-foreground" />
-                  </div>
-                )
-              )}
-              {isInProgress && <div className="absolute inset-0 bg-black/70 flex items-center justify-center rounded-md"><Loader2 className="h-8 w-8 animate-spin text-white" /></div>}
-            </div>
-          )
-        })}
-      </div>
-      <VtoJobDetailModal 
-        isOpen={!!selectedJob}
-        onClose={() => setSelectedJob(null)}
-        job={selectedJob}
-      />
-    </>
-  );
-};
 
 export const RecentVtoPacks = () => {
   const { supabase, session } = useSession();
@@ -103,66 +66,103 @@ export const RecentVtoPacks = () => {
   const [isDownloadingDebug, setIsDownloadingDebug] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState<string | null>(null);
   const [packToAnalyze, setPackToAnalyze] = useState<VtoPackSummary | null>(null);
+  const [isRerunning, setIsRerunning] = useState<string | null>(null);
+  const [isStartingRefinement, setIsStartingRefinement] = useState<string | null>(null);
 
-  const { data: packs, isLoading: isLoadingPacks, error: packsError } = useQuery<VtoPackSummary[]>({
-    queryKey: ['recentVtoPackSummaries', session?.user?.id],
+  const { data: reports, isLoading: isLoadingPacks, error: packsError } = useQuery<any>({ // Using any for now to accommodate packs table
+    queryKey: ['vtoQaReportsAndPacks', session?.user?.id],
     queryFn: async () => {
       if (!session?.user) return [];
-      const { data, error } = await supabase.rpc('get_vto_pack_summaries', { p_user_id: session.user.id });
-      if (error) throw error;
-      return data;
+      const { data: reports, error: reportsError } = await supabase.rpc('get_vto_qa_reports_for_user', { p_user_id: session.user.id });
+      if (reportsError) throw reportsError;
+
+      const { data: packs, error: packsError } = await supabase.from('mira-agent-vto-packs-jobs').select('id, created_at, metadata').eq('user_id', session.user.id);
+      if (packsError) throw packsError;
+
+      return { reports, packs };
     },
     enabled: !!session?.user,
   });
 
   useEffect(() => {
     if (!session?.user?.id) return;
-
     const channel: RealtimeChannel = supabase
-      .channel(`vto-pack-summary-tracker-${session.user.id}`)
+      .channel(`vto-qa-reports-tracker-${session.user.id}`)
+      .on<QaReport>(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'mira-agent-vto-qa-reports', filter: `user_id=eq.${session.user.id}` },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ['vtoQaReportsAndPacks', session.user.id] });
+        }
+      )
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'mira-agent-bitstudio-jobs', filter: `user_id=eq.${session.user.id}` },
-        (payload) => {
-          if (payload.new.vto_pack_job_id) {
-            console.log('[RecentVtoPacks] Realtime update received, invalidating summaries.');
-            queryClient.invalidateQueries({ queryKey: ['recentVtoPackSummaries', session.user.id] });
-            queryClient.invalidateQueries({ queryKey: ['vtoPackJobs', payload.new.vto_pack_job_id] });
-          }
+        { event: '*', schema: 'public', table: 'mira-agent-vto-packs-jobs', filter: `user_id=eq.${session.user.id}` },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ['vtoQaReportsAndPacks', session.user.id] });
         }
       )
       .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => { supabase.removeChannel(channel); };
   }, [session?.user?.id, supabase, queryClient]);
 
-  const downloadFromSupabase = async (url: string | null): Promise<Blob | null> => {
-    if (!url) return null;
-    try {
-        const urlObj = new URL(url);
-        const pathSegments = urlObj.pathname.split('/');
-        const objectSegmentIndex = pathSegments.indexOf('object');
-        if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) {
-            console.error(`Could not parse bucket from URL: ${url}`);
-            return null;
-        }
-        const bucketName = pathSegments[objectSegmentIndex + 2];
-        const pathStartIndex = urlObj.pathname.indexOf(bucketName) + bucketName.length + 1;
-        const storagePath = decodeURIComponent(urlObj.pathname.substring(pathStartIndex));
+  const packSummaries = useMemo((): VtoPackSummary[] => {
+    if (!reports?.packs) return [];
+    const packsMap = new Map<string, VtoPackSummary>();
 
-        const { data, error } = await supabase.storage.from(bucketName).download(storagePath);
-        if (error) {
-            console.error(`Failed to download ${storagePath}:`, error);
-            return null;
-        }
-        return data;
-    } catch (e) {
-        console.error(`Error in downloadFromSupabase for URL ${url}:`, e);
-        return null;
+    // Initialize all packs from the packs table
+    for (const pack of reports.packs) {
+        packsMap.set(pack.id, {
+            pack_id: pack.id,
+            created_at: pack.created_at,
+            metadata: pack.metadata || {},
+            total_jobs: 0, passed_perfect: 0, passed_pose_change: 0, passed_logo_issue: 0, passed_detail_issue: 0,
+            failed_jobs: 0, failure_summary: {}, shape_mismatches: 0, avg_body_preservation_score: null, has_refinement_pass: false,
+        });
     }
-  };
+
+    // Populate with report data
+    for (const report of reports.reports) {
+      if (!packsMap.has(report.vto_pack_job_id)) continue;
+      
+      const summary = packsMap.get(report.vto_pack_job_id)!;
+      summary.total_jobs++;
+      
+      const reportData = report.comparative_report;
+      if (reportData) {
+        if (reportData.overall_pass) {
+          if (reportData.pass_with_notes) {
+              if (reportData.pass_notes_category === 'logo_fidelity') summary.passed_logo_issue++;
+              else if (reportData.pass_notes_category === 'detail_accuracy') summary.passed_detail_issue++;
+          } else if (reportData.pose_and_body_analysis?.pose_changed) {
+              summary.passed_pose_change++;
+          } else {
+              summary.passed_perfect++;
+          }
+        } else {
+          summary.failed_jobs++;
+          const reason = reportData.failure_category || "Unknown";
+          summary.failure_summary[reason] = (summary.failure_summary[reason] || 0) + 1;
+        }
+        if (reportData.garment_analysis?.garment_type && reportData.garment_comparison?.generated_garment_type && reportData.garment_analysis.garment_type !== reportData.garment_comparison.generated_garment_type) {
+            summary.shape_mismatches++;
+        }
+        const bodyScore = reportData.pose_and_body_analysis?.scores?.body_type_preservation;
+        if (typeof bodyScore === 'number') {
+            const currentTotal = (summary.avg_body_preservation_score || 0) * (summary.total_jobs - 1);
+            summary.avg_body_preservation_score = (currentTotal + bodyScore) / summary.total_jobs;
+        }
+      }
+    }
+
+    const allPacks = Array.from(packsMap.values());
+    // Second pass to determine if a refinement pass exists for each pack
+    allPacks.forEach(pack => {
+        pack.has_refinement_pass = allPacks.some(p => p.metadata?.refinement_of_pack_id === pack.pack_id);
+    });
+
+    return allPacks.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  }, [reports]);
 
   const handleAnalyzePack = async (scope: AnalysisScope) => {
     if (!packToAnalyze || !session?.user) return;
@@ -212,8 +212,9 @@ export const RecentVtoPacks = () => {
 
       const zip = new JSZip();
       const imagePromises = jobs.map(async (job) => {
-        const blob = await downloadFromSupabase(job.final_image_url);
-        if (blob) {
+        const response = await fetch(job.final_image_url!);
+        if (response.ok) {
+          const blob = await response.blob();
           zip.file(`result_${job.id}.png`, blob);
         }
       });
@@ -378,17 +379,21 @@ export const RecentVtoPacks = () => {
   return (
     <>
       <Accordion type="single" collapsible className="w-full space-y-4" onValueChange={setOpenPackId}>
-        {packs.map(pack => {
+        {packSummaries.map(pack => {
           const inProgress = pack.in_progress_jobs > 0;
           const hasFailures = pack.failed_jobs > 0;
           const isComplete = !inProgress && pack.total_jobs > 0;
+          const isRefinementPack = !!pack.metadata?.refinement_of_pack_id;
 
           return (
             <AccordionItem key={pack.pack_id} value={pack.pack_id} className="border rounded-md">
               <AccordionTrigger className="p-4 hover:no-underline">
                 <div className="flex justify-between items-center w-full">
                   <div className="text-left">
-                    <p className="font-semibold">Batch from {new Date(pack.created_at).toLocaleString()}</p>
+                    <p className="font-semibold flex items-center gap-2">
+                      {isRefinementPack && <Wand2 className="h-4 w-4 text-purple-500" />}
+                      {pack.metadata?.name || `Pack from ${new Date(pack.created_at).toLocaleString()}`}
+                    </p>
                     <p className="text-sm text-muted-foreground">
                       {pack.completed_jobs} / {pack.metadata?.total_pairs || pack.total_jobs} completed
                     </p>
@@ -396,8 +401,11 @@ export const RecentVtoPacks = () => {
                   <div className="flex items-center gap-2">
                     <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); setPackToAnalyze(pack); }} disabled={isAnalyzing === pack.pack_id}>
                       {isAnalyzing === pack.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <BarChart2 className="h-4 w-4 mr-2" />}
-                      Analyze Pack
+                      Analyze
                     </Button>
+                    <Link to={`/vto-reports/${pack.pack_id}`} onClick={(e) => e.stopPropagation()}>
+                      <Button variant="outline" size="sm">View Report</Button>
+                    </Link>
                     <Button variant="outline" size="icon" className="h-8 w-8" onClick={(e) => { e.stopPropagation(); handleDownloadResults(pack.pack_id); }} disabled={isDownloadingResults === pack.pack_id}>
                       {isDownloadingResults === pack.pack_id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
                     </Button>

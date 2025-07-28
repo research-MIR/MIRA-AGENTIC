@@ -10,17 +10,14 @@ export const useVtoPackJobs = (packId: string | null, enabled: boolean = true) =
     queryFn: async () => {
       if (!session?.user || !packId) return [];
       
-      // Fetch standard bitstudio jobs
+      // Fetch standard bitstudio jobs for this pack
       const { data: bitstudioJobs, error: bitstudioError } = await supabase
           .from('mira-agent-bitstudio-jobs')
           .select('*')
-          .eq('vto_pack_job_id', packId)
-          .in('status', ['complete', 'done'])
-          .not('final_image_url', 'is', null)
-          .or('metadata->>pass_number.is.null, metadata->>pass_number.neq.2');
+          .eq('vto_pack_job_id', packId);
       if (bitstudioError) throw bitstudioError;
 
-      // Check if it's a refinement pack
+      // Check if this pack is a refinement pack to also fetch precursor jobs
       const { data: packMeta, error: packError } = await supabase
           .from('mira-agent-vto-packs-jobs')
           .select('metadata')
@@ -29,6 +26,7 @@ export const useVtoPackJobs = (packId: string | null, enabled: boolean = true) =
       if (packError) throw packError;
 
       if (packMeta.metadata?.refinement_of_pack_id) {
+          // This is a refinement pack, so its jobs originate from batch_inpaint_jobs
           const { data: batchJobs, error: batchError } = await supabase
               .from('mira-agent-batch-inpaint-jobs')
               .select('id')
@@ -45,6 +43,7 @@ export const useVtoPackJobs = (packId: string | null, enabled: boolean = true) =
 
               const processedPairJobIds = new Set((bitstudioJobs || []).map(j => j.batch_pair_job_id).filter(Boolean));
               
+              // These are jobs that haven't been delegated to bitstudio yet
               const precursorJobs = (pairJobs || [])
                   .filter(job => !processedPairJobIds.has(job.id))
                   .map(job => ({
