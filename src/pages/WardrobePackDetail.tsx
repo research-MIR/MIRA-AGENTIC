@@ -11,11 +11,17 @@ import { Button } from "@/components/ui/button";
 import { showError, showSuccess } from "@/utils/toast";
 import { SecureImageDisplay } from "@/components/VTO/SecureImageDisplay";
 import { AddGarmentsModal } from "@/components/Wardrobe/AddGarmentsModal";
+import { Badge } from "@/components/ui/badge";
 
 interface Garment {
   id: string;
   name: string;
   storage_path: string;
+  attributes: {
+    intended_gender: 'male' | 'female' | 'unisex';
+    type_of_fit: 'upper body' | 'lower body' | 'full body';
+    primary_color: string;
+  } | null;
 }
 
 const WardrobePackDetail = () => {
@@ -94,10 +100,18 @@ const WardrobePackDetail = () => {
                   <div className="aspect-square bg-muted">
                     <SecureImageDisplay imageUrl={garment.storage_path} alt={garment.name} />
                   </div>
-                  <Button variant="destructive" size="icon" className="absolute top-2 right-2 h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => handleRemoveGarment(garment.id)}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  {garment.attributes && (
+                    <div className="p-2 text-xs space-y-1 border-t">
+                      <div className="flex flex-wrap gap-1">
+                        <Badge variant="outline" className="capitalize">{garment.attributes.intended_gender}</Badge>
+                        <Badge variant="secondary" className="capitalize">{garment.attributes.type_of_fit}</Badge>
+                      </div>
+                    </div>
+                  )}
                 </CardContent>
+                <Button variant="destructive" size="icon" className="absolute top-2 right-2 h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => handleRemoveGarment(garment.id)}>
+                  <Trash2 className="h-4 w-4" />
+                </Button>
               </Card>
             ))}
           </div>
@@ -113,6 +127,7 @@ const WardrobePackDetail = () => {
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
         packId={packId!}
+        existingGarments={garments || []}
         existingGarmentIds={garments?.map(g => g.id) || []}
       />
     </>

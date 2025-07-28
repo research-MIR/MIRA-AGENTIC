@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -19,6 +19,10 @@ interface Garment {
   id: string;
   name: string;
   storage_path: string;
+  attributes: {
+    type_of_fit: 'upper body' | 'lower body' | 'full body';
+    [key: string]: any;
+  } | null;
 }
 
 interface AddGarmentsModalProps {
@@ -26,9 +30,12 @@ interface AddGarmentsModalProps {
   onClose: () => void;
   packId: string;
   existingGarmentIds: string[];
+  existingGarments: Garment[];
 }
 
-export const AddGarmentsModal = ({ isOpen, onClose, packId, existingGarmentIds }: AddGarmentsModalProps) => {
+const MAX_PER_ZONE = 10;
+
+export const AddGarmentsModal = ({ isOpen, onClose, packId, existingGarmentIds, existingGarments }: AddGarmentsModalProps) => {
   const { supabase, session } = useSession();
   const { t } = useLanguage();
   const queryClient = useQueryClient();
@@ -40,12 +47,22 @@ export const AddGarmentsModal = ({ isOpen, onClose, packId, existingGarmentIds }
     queryKey: ['allGarmentsForPack', session?.user?.id, existingGarmentIds],
     queryFn: async () => {
       if (!session?.user) return [];
-      const { data, error } = await supabase.from('mira-agent-garments').select('id, name, storage_path').eq('user_id', session.user.id);
+      const { data, error } = await supabase.from('mira-agent-garments').select('id, name, storage_path, attributes').eq('user_id', session.user.id);
       if (error) throw error;
       return data.filter(g => !existingGarmentIds.includes(g.id));
     },
     enabled: isOpen,
   });
+
+  const existingCounts = useMemo(() => {
+    const counts: Record<string, number> = { 'upper body': 0, 'lower body': 0, 'full body': 0 };
+    existingGarments.forEach(g => {
+      if (g.attributes?.type_of_fit) {
+        counts[g.attributes.type_of_fit]++;
+      }
+    });
+    return counts;
+  }, [existingGarments]);
 
   const handleFileUpload = async (files: FileList | null) => {
     if (!files || files.length === 0 || !session?.user) return;
@@ -54,13 +71,18 @@ export const AddGarmentsModal = ({ isOpen, onClose, packId, existingGarmentIds }
 
     setIsAdding(true);
     const toastId = showLoading(`Processing ${imageFiles.length} image(s)...`);
+    
+    const currentCounts = { ...existingCounts };
+    const skippedFiles: string[] = [];
+    const itemsToInsert: { pack_id: string; garment_id: string }[] = [];
 
     try {
       const processFile = async (file: File) => {
         const hash = await calculateFileHash(file);
-        const { data: existing } = await supabase.from('mira-agent-garments').select('id').eq('user_id', session.user.id).eq('image_hash', hash).single();
+        const { data: existing } = await supabase.from('mira-agent-garments').select('id, attributes').eq('user_id', session.user.id).eq('image_hash', hash).single();
         
         let garmentId = existing?.id;
+        let garmentAttributes = existing?.attributes;
 
         if (!garmentId) {
           const optimizedFile = await optimizeImage(file);
@@ -74,6 +96,7 @@ export const AddGarmentsModal = ({ isOpen, onClose, packId, existingGarmentIds }
             body: { image_base64: (await fileToBase64(optimizedFile)), mime_type: optimizedFile.type }
           });
           if (analysisError) throw new Error(`Analysis failed for ${file.name}: ${analysisError.message}`);
+          garmentAttributes = analysis;
 
           const { data: newGarment, error: insertError } = await supabase.from('mira-agent-garments').insert({
             user_id: session.user.id,
@@ -86,13 +109,18 @@ export const AddGarmentsModal = ({ isOpen, onClose, packId, existingGarmentIds }
           garmentId = newGarment.id;
         }
         
-        if (garmentId && !existingGarmentIds.includes(garmentId)) {
-          return { pack_id: packId, garment_id: garmentId };
+        const zone = garmentAttributes?.type_of_fit;
+        if (zone && currentCounts[zone] < MAX_PER_ZONE) {
+            if (garmentId && !existingGarmentIds.includes(garmentId)) {
+                itemsToInsert.push({ pack_id: packId, garment_id: garmentId });
+                currentCounts[zone]++;
+            }
+        } else {
+            skippedFiles.push(file.name);
         }
-        return null;
       };
 
-      const itemsToInsert = (await Promise.all(imageFiles.map(processFile))).filter(Boolean);
+      await Promise.all(imageFiles.map(processFile));
 
       if (itemsToInsert.length > 0) {
         const { error: linkError } = await supabase.from('mira-agent-garment-pack-items').insert(itemsToInsert);
@@ -100,7 +128,11 @@ export const AddGarmentsModal = ({ isOpen, onClose, packId, existingGarmentIds }
       }
       
       dismissToast(toastId);
-      showSuccess(`${itemsToInsert.length} garments processed and added to pack.`);
+      let successMessage = `${itemsToInsert.length} garments processed and added to pack.`;
+      if (skippedFiles.length > 0) {
+        successMessage += ` ${skippedFiles.length} files were skipped as their body zone is full.`;
+      }
+      showSuccess(successMessage);
       queryClient.invalidateQueries({ queryKey: ['garmentsInPack', packId] });
       queryClient.invalidateQueries({ queryKey: ['allGarmentsForPack'] });
       onClose();
@@ -114,11 +146,22 @@ export const AddGarmentsModal = ({ isOpen, onClose, packId, existingGarmentIds }
 
   const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: (e) => handleFileUpload(e.dataTransfer.files) });
 
-  const toggleSelection = (id: string) => {
+  const toggleSelection = (garment: Garment) => {
+    const zone = garment.attributes?.type_of_fit;
+    if (!zone) return;
+
     setSelectedIds(prev => {
       const newSet = new Set(prev);
-      if (newSet.has(id)) newSet.delete(id);
-      else newSet.add(id);
+      if (newSet.has(garment.id)) {
+        newSet.delete(garment.id);
+      } else {
+        const selectedInZone = Array.from(newSet).map(id => allGarments?.find(g => g.id === id)).filter(g => g?.attributes?.type_of_fit === zone).length;
+        if (existingCounts[zone] + selectedInZone < MAX_PER_ZONE) {
+          newSet.add(garment.id);
+        } else {
+          showError(`Cannot add more than ${MAX_PER_ZONE} items for the '${zone}' category.`);
+        }
+      }
       return newSet;
     });
   };
@@ -192,13 +235,20 @@ export const AddGarmentsModal = ({ isOpen, onClose, packId, existingGarmentIds }
                 ) : allGarments && allGarments.length > 0 ? (
                   allGarments.map(garment => {
                     const isSelected = selectedIds.has(garment.id);
+                    const zone = garment.attributes?.type_of_fit;
+                    const isDisabled = zone ? existingCounts[zone] >= MAX_PER_ZONE : false;
                     return (
-                      <div key={garment.id} className="relative cursor-pointer" onClick={() => toggleSelection(garment.id)}>
+                      <div key={garment.id} className={cn("relative cursor-pointer", isDisabled && "opacity-50 cursor-not-allowed")} onClick={() => !isDisabled && toggleSelection(garment)}>
                         <SecureImageDisplay imageUrl={garment.storage_path} alt={garment.name} />
                         {isSelected && (
                           <div className="absolute inset-0 bg-black/60 flex items-center justify-center rounded-md">
                             <CheckCircle className="h-8 w-8 text-white" />
                           </div>
+                        )}
+                        {isDisabled && !isSelected && (
+                            <div className="absolute inset-0 bg-black/60 flex items-center justify-center rounded-md">
+                                <p className="text-white text-xs font-bold text-center">Zone Full</p>
+                            </div>
                         )}
                       </div>
                     );
