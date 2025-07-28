@@ -7,7 +7,7 @@ import { VtoJobDetailModal } from './VtoJobDetailModal';
 import { BitStudioJob } from '@/types/vto';
 import { Badge } from '@/components/ui/badge';
 
-const VtoPackDetailView = ({ packId, isOpen }: { packId: string, isOpen: boolean }) => {
+export const VtoPackDetailView = ({ packId, isOpen }: { packId: string, isOpen: boolean }) => {
   const { data: childJobs, isLoading } = useVtoPackJobs(packId, isOpen);
   const [selectedJob, setSelectedJob] = useState<BitStudioJob | null>(null);
 
@@ -81,5 +81,3 @@ const VtoPackDetailView = ({ packId, isOpen }: { packId: string, isOpen: boolean
     </>
   );
 };
-
-export default VtoPackDetailView;
