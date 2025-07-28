@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { useLanguage } from "@/context/LanguageContext";
 import { Button } from "@/components/ui/button";
@@ -6,7 +6,7 @@ import { VtoModeSelector } from "@/components/VTO/VtoModeSelector";
 import { VtoInputProvider, QueueItem } from "@/components/VTO/VtoInputProvider";
 import { VtoReviewQueue } from "@/components/VTO/VtoReviewQueue";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Wand2, Loader2, Info, History } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -23,6 +23,11 @@ type WizardStep = 'select-mode' | 'provide-inputs' | 'review-queue';
 type VtoMode = 'one-to-many' | 'precise-pairs' | 'random-pairs';
 type CroppingMode = 'frame' | 'expand';
 
+interface GarmentPack {
+  id: string;
+  name: string;
+}
+
 const aspectRatioOptions = ["1:1", "16:9", "9:16", "4:3", "3:4", "21:9", "3:2", "2:3", "4:5", "5:4"];
 
 const VirtualTryOnPacks = () => {
@@ -38,6 +43,18 @@ const VirtualTryOnPacks = () => {
   const [skipReframe, setSkipReframe] = useState(false);
   const [croppingMode, setCroppingMode] = useState<CroppingMode>('frame');
   const [autoComplete, setAutoComplete] = useState(true);
+  const [autoCompletePackId, setAutoCompletePackId] = useState<string | null>(null);
+
+  const { data: garmentPacks, isLoading: isLoadingGarmentPacks } = useQuery<GarmentPack[]>({
+    queryKey: ['garmentPacks', session?.user?.id],
+    queryFn: async () => {
+      if (!session?.user) return [];
+      const { data, error } = await supabase.from('mira-agent-garment-packs').select('id, name').eq('user_id', session.user.id);
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!session?.user,
+  });
 
   const handleSelectMode = (selectedMode: VtoMode) => {
     setMode(selectedMode);
@@ -59,6 +76,10 @@ const VirtualTryOnPacks = () => {
 
   const handleGenerate = async () => {
     if (queue.length === 0) return;
+    if (autoComplete && !autoCompletePackId) {
+      showError("Please select a Garment Pack for the auto-complete feature.");
+      return;
+    }
     setIsLoading(true);
     const toastId = showLoading(`Uploading assets and queuing ${queue.length} jobs...`);
 
@@ -114,6 +135,7 @@ const VirtualTryOnPacks = () => {
           skip_reframe: skipReframe,
           cropping_mode: croppingMode,
           auto_complete_outfit: autoComplete,
+          auto_complete_pack_id: autoComplete ? autoCompletePackId : null,
         }
       });
 
@@ -166,6 +188,28 @@ const VirtualTryOnPacks = () => {
                   <Switch id="auto-complete-switch" checked={autoComplete} onCheckedChange={setAutoComplete} />
                 </div>
                 <p className="text-xs text-muted-foreground">{t('autoCompleteOutfitDesc')}</p>
+                
+                {autoComplete && (
+                  <div className="space-y-2 pl-2 border-l-2 border-primary/50">
+                    <Label htmlFor="pack-select">{t('selectGarmentPack')}</Label>
+                    <Select value={autoCompletePackId || ""} onValueChange={setAutoCompletePackId}>
+                      <SelectTrigger id="pack-select">
+                        <SelectValue placeholder={t('selectGarmentPackPlaceholder')} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {isLoadingGarmentPacks ? (
+                          <SelectItem value="loading" disabled>Loading...</SelectItem>
+                        ) : (
+                          garmentPacks?.map(pack => (
+                            <SelectItem key={pack.id} value={pack.id}>{pack.name}</SelectItem>
+                          ))
+                        )}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">{t('selectGarmentPackDesc')}</p>
+                  </div>
+                )}
+
                 <div className="space-y-2">
                   <Label>{t('croppingMode')}</Label>
                   <RadioGroup value={croppingMode} onValueChange={(v) => setCroppingMode(v as CroppingMode)} className="mt-2 space-y-2">

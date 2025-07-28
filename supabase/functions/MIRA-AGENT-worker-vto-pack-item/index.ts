@@ -395,49 +395,54 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
         if (garmentAnalysis?.type_of_fit && metadata.auto_complete_outfit) {
             console.log(`${logPrefix} Running outfit completeness check...`);
             try {
-                const { data: analysisData, error: analysisError } = await supabase.functions.invoke('MIRA-AGENT-analyzer-outfit-completeness', {
-                    body: {
-                        image_to_analyze_base64: bestImageBase64,
-                        vto_garment_type: garmentAnalysis.type_of_fit
+                const autoCompletePackId = metadata.auto_complete_pack_id;
+                if (!autoCompletePackId) {
+                    console.warn(`${logPrefix} Auto-complete is enabled but no garment pack was selected. Skipping stylist.`);
+                } else {
+                    const { data: analysisData, error: analysisError } = await supabase.functions.invoke('MIRA-AGENT-analyzer-outfit-completeness', {
+                        body: {
+                            image_to_analyze_base64: bestImageBase64,
+                            vto_garment_type: garmentAnalysis.type_of_fit
+                        }
+                    });
+                    if (analysisError) throw new Error(`Outfit completeness analysis failed: ${analysisError.message}`);
+                    completenessAnalysis = analysisData;
+                    console.log(`${logPrefix} Outfit completeness check successful. Is complete: ${completenessAnalysis.is_outfit_complete}`);
+                    
+                    if (!completenessAnalysis.is_outfit_complete && completenessAnalysis.missing_items.length > 0) {
+                        const missingItem = completenessAnalysis.missing_items[0];
+                        console.log(`${logPrefix} Outfit incomplete. Missing: ${missingItem}. Invoking stylist with pack ID: ${autoCompletePackId}.`);
+                        const { data: chosenGarment, error: stylistError } = await supabase.functions.invoke('MIRA-AGENT-stylist-chooser', {
+                            body: {
+                                vto_image_base64: bestImageBase64,
+                                missing_item_type: missingItem,
+                                pack_id: autoCompletePackId,
+                                user_id: job.user_id
+                            }
+                        });
+                        if (stylistError) throw new Error(`Stylist chooser failed: ${stylistError.message}`);
+                        
+                        console.log(`${logPrefix} Stylist chose garment: ${chosenGarment.name}. Creating new VTO job.`);
+                        await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
+                            body: {
+                                mode: 'base',
+                                user_id: job.user_id,
+                                person_image_base64: bestImageBase64,
+                                garment_image_url: chosenGarment.storage_path,
+                                vto_pack_job_id: job.vto_pack_job_id,
+                                metadata: { ...metadata, auto_complete_outfit: false } // Prevent infinite loops
+                            }
+                        });
+                        
+                        // Mark original job as complete but point to the new one
+                        await supabase.from('mira-agent-bitstudio-jobs').update({
+                            status: 'complete',
+                            final_image_url: null, // No final image for this intermediate step
+                            metadata: { ...metadata, google_vto_step: 'done', outfit_completed: true }
+                        }).eq('id', pair_job_id);
+                        await triggerWatchdog(supabase, logPrefix);
+                        return; // End execution for this job
                     }
-                });
-                if (analysisError) throw new Error(`Outfit completeness analysis failed: ${analysisError.message}`);
-                completenessAnalysis = analysisData;
-                console.log(`${logPrefix} Outfit completeness check successful. Is complete: ${completenessAnalysis.is_outfit_complete}`);
-                
-                if (!completenessAnalysis.is_outfit_complete && completenessAnalysis.missing_items.length > 0) {
-                    const missingItem = completenessAnalysis.missing_items[0];
-                    console.log(`${logPrefix} Outfit incomplete. Missing: ${missingItem}. Invoking stylist...`);
-                    const { data: chosenGarment, error: stylistError } = await supabase.functions.invoke('MIRA-AGENT-stylist-chooser', {
-                        body: {
-                            vto_image_base64: bestImageBase64,
-                            missing_item_type: missingItem,
-                            pack_id: job.vto_pack_job_id,
-                            user_id: job.user_id
-                        }
-                    });
-                    if (stylistError) throw new Error(`Stylist chooser failed: ${stylistError.message}`);
-                    
-                    console.log(`${logPrefix} Stylist chose garment: ${chosenGarment.name}. Creating new VTO job.`);
-                    await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
-                        body: {
-                            mode: 'base',
-                            user_id: job.user_id,
-                            person_image_base64: bestImageBase64,
-                            garment_image_url: chosenGarment.storage_path,
-                            vto_pack_job_id: job.vto_pack_job_id,
-                            metadata: { ...metadata, auto_complete_outfit: false } // Prevent infinite loops
-                        }
-                    });
-                    
-                    // Mark original job as complete but point to the new one
-                    await supabase.from('mira-agent-bitstudio-jobs').update({
-                        status: 'complete',
-                        final_image_url: null, // No final image for this intermediate step
-                        metadata: { ...metadata, google_vto_step: 'done', outfit_completed: true }
-                    }).eq('id', pair_job_id);
-                    await triggerWatchdog(supabase, logPrefix);
-                    return; // End execution for this job
                 }
 
             } catch (err) {

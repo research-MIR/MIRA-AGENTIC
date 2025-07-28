@@ -17,7 +17,7 @@ serve(async (req) => {
   }
 
   try {
-    const { pairs, user_id, engine = 'google', aspect_ratio, skip_reframe = false, cropping_mode = 'frame', auto_complete_outfit = false } = await req.json();
+    const { pairs, user_id, engine = 'google', aspect_ratio, skip_reframe = false, cropping_mode = 'frame', auto_complete_outfit = false, auto_complete_pack_id = null } = await req.json();
     if (!pairs || !Array.isArray(pairs) || pairs.length === 0 || !user_id) {
       throw new Error("`pairs` array and `user_id` are required.");
     }
@@ -27,7 +27,7 @@ serve(async (req) => {
 
     const { data: batchJob, error: batchError } = await supabase
       .from('mira-agent-vto-packs-jobs')
-      .insert({ user_id, metadata: { total_pairs: pairs.length, engine: engine, aspect_ratio: aspect_ratio, skip_reframe: skip_reframe, cropping_mode: cropping_mode, auto_complete_outfit: auto_complete_outfit } })
+      .insert({ user_id, metadata: { total_pairs: pairs.length, engine: engine, aspect_ratio: aspect_ratio, skip_reframe: skip_reframe, cropping_mode: cropping_mode, auto_complete_outfit: auto_complete_outfit, auto_complete_pack_id: auto_complete_pack_id } })
       .select('id')
       .single();
     
@@ -49,6 +49,7 @@ serve(async (req) => {
             skip_reframe: skip_reframe,
             cropping_mode: cropping_mode,
             auto_complete_outfit: auto_complete_outfit,
+            auto_complete_pack_id: auto_complete_pack_id,
             ...pair.metadata
         }
     }));
