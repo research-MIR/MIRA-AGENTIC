@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { VtoJobDetailModal } from './VtoJobDetailModal';
 import { BitStudioJob } from '@/types/vto';
 import { Badge } from '@/components/ui/badge';
+import { BeforeAfterThumbnail } from './BeforeAfterThumbnail';
 
 export const VtoPackDetailView = ({ packId, isOpen }: { packId: string, isOpen: boolean }) => {
   const { data: childJobs, isLoading } = useVtoPackJobs(packId, isOpen);
@@ -27,6 +28,17 @@ export const VtoPackDetailView = ({ packId, isOpen }: { packId: string, isOpen: 
     <>
       <div className="flex flex-wrap gap-2">
         {childJobs?.map(job => {
+          if (job.metadata?.pass_number === 2) {
+            return (
+              <BeforeAfterThumbnail
+                key={job.id}
+                job={job}
+                onClick={() => setSelectedJob(job)}
+                isSelected={selectedJob?.id === job.id}
+              />
+            );
+          }
+
           const isFailed = job.status === 'failed' || job.status === 'permanently_failed';
           const inProgressStatuses = ['processing', 'queued', 'segmenting', 'delegated', 'compositing', 'awaiting_fix', 'fixing', 'pending'];
           const isInProgress = inProgressStatuses.includes(job.status);

@@ -27,6 +27,7 @@ export const VtoJobDetailModal = ({ job, isOpen, onClose }: VtoJobDetailModalPro
   const hasFixHistory = !!job.metadata?.fix_history && job.metadata.fix_history.length > 0;
 
   const isRefinementJob = !!job.metadata?.original_person_image_url_for_analysis;
+  const isAutoCompleteJob = job.metadata?.pass_number === 2;
 
   const getEngineName = (engine?: string) => {
     if (!engine) return 'Unknown';
@@ -39,7 +40,7 @@ export const VtoJobDetailModal = ({ job, isOpen, onClose }: VtoJobDetailModalPro
   return (
     <>
       <Dialog open={isOpen} onOpenChange={onClose}>
-        <DialogContent className={cn("transition-all duration-300", isRefinementJob ? "max-w-6xl" : "max-w-4xl")}>
+        <DialogContent className={cn("transition-all duration-300", (isRefinementJob || isAutoCompleteJob) ? "max-w-6xl" : "max-w-4xl")}>
           <DialogHeader>
             <DialogTitle>Job Details</DialogTitle>
             <DialogDescription>
@@ -66,6 +67,21 @@ export const VtoJobDetailModal = ({ job, isOpen, onClose }: VtoJobDetailModalPro
                   <h3 className="text-sm font-semibold text-center">Final Refined Result</h3>
                   <div className="aspect-square bg-muted rounded-md">
                     <SecureImageDisplay imageUrl={job.final_image_url || null} alt="Final Result" />
+                  </div>
+                </div>
+              </>
+            ) : isAutoCompleteJob ? (
+              <>
+                <div className="space-y-2">
+                  <h3 className="text-sm font-semibold text-center">Before Auto-Complete</h3>
+                  <div className="aspect-square bg-muted rounded-md">
+                    <SecureImageDisplay imageUrl={job.source_person_image_url || null} alt="Before Auto-Complete" />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-sm font-semibold text-center">After Auto-Complete</h3>
+                  <div className="aspect-square bg-muted rounded-md">
+                    <SecureImageDisplay imageUrl={job.final_image_url || null} alt="After Auto-Complete" />
                   </div>
                 </div>
               </>
