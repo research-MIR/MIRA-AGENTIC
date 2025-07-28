@@ -37,6 +37,7 @@ const VirtualTryOnPacks = () => {
   const [aspectRatio, setAspectRatio] = useState<string>("1:1");
   const [skipReframe, setSkipReframe] = useState(false);
   const [croppingMode, setCroppingMode] = useState<CroppingMode>('frame');
+  const [autoComplete, setAutoComplete] = useState(true);
 
   const handleSelectMode = (selectedMode: VtoMode) => {
     setMode(selectedMode);
@@ -87,10 +88,8 @@ const VirtualTryOnPacks = () => {
       };
 
       const pairsForBackend = await Promise.all(queue.map(async (item) => {
-        // A person URL is always pre-existing from the model generation step
         const person_url = item.person.url;
         
-        // A garment URL is either from an existing Armadio item (storage_path) or needs to be created by uploading a new file
         const garment_url = item.garment.file 
             ? await uploadFile(item.garment.file, 'garment') 
             : item.garment.url;
@@ -114,6 +113,7 @@ const VirtualTryOnPacks = () => {
           aspect_ratio: aspectRatio,
           skip_reframe: skipReframe,
           cropping_mode: croppingMode,
+          auto_complete_outfit: autoComplete,
         }
       });
 
@@ -159,7 +159,14 @@ const VirtualTryOnPacks = () => {
             <Card>
               <CardHeader><CardTitle>Advanced Settings</CardTitle></CardHeader>
               <CardContent className="space-y-4">
-                <div>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="auto-complete-switch" className="flex items-center gap-2">
+                    {t('autoCompleteOutfit')}
+                  </Label>
+                  <Switch id="auto-complete-switch" checked={autoComplete} onCheckedChange={setAutoComplete} />
+                </div>
+                <p className="text-xs text-muted-foreground">{t('autoCompleteOutfitDesc')}</p>
+                <div className="space-y-2">
                   <Label>{t('croppingMode')}</Label>
                   <RadioGroup value={croppingMode} onValueChange={(v) => setCroppingMode(v as CroppingMode)} className="mt-2 space-y-2">
                     <div>

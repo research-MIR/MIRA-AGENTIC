@@ -17,17 +17,17 @@ serve(async (req) => {
   }
 
   try {
-    const { pairs, user_id, engine = 'google', aspect_ratio, skip_reframe = false, cropping_mode = 'frame' } = await req.json();
+    const { pairs, user_id, engine = 'google', aspect_ratio, skip_reframe = false, cropping_mode = 'frame', auto_complete_outfit = false } = await req.json();
     if (!pairs || !Array.isArray(pairs) || pairs.length === 0 || !user_id) {
       throw new Error("`pairs` array and `user_id` are required.");
     }
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-    console.log(`[VTO-Packs-Orchestrator] Received request for ${pairs.length} pairs for user ${user_id} using engine: ${engine}. Aspect Ratio: ${aspect_ratio}. Skip Reframe: ${skip_reframe}. Cropping Mode: ${cropping_mode}`);
+    console.log(`[VTO-Packs-Orchestrator] Received request for ${pairs.length} pairs for user ${user_id} using engine: ${engine}. Aspect Ratio: ${aspect_ratio}. Skip Reframe: ${skip_reframe}. Cropping Mode: ${cropping_mode}. Auto-Complete: ${auto_complete_outfit}`);
 
     const { data: batchJob, error: batchError } = await supabase
       .from('mira-agent-vto-packs-jobs')
-      .insert({ user_id, metadata: { total_pairs: pairs.length, engine: engine, aspect_ratio: aspect_ratio, skip_reframe: skip_reframe, cropping_mode: cropping_mode } })
+      .insert({ user_id, metadata: { total_pairs: pairs.length, engine: engine, aspect_ratio: aspect_ratio, skip_reframe: skip_reframe, cropping_mode: cropping_mode, auto_complete_outfit: auto_complete_outfit } })
       .select('id')
       .single();
     
@@ -48,7 +48,8 @@ serve(async (req) => {
             final_aspect_ratio: aspect_ratio,
             skip_reframe: skip_reframe,
             cropping_mode: cropping_mode,
-            ...pair.metadata // Pass through any extra metadata from the frontend
+            auto_complete_outfit: auto_complete_outfit,
+            ...pair.metadata
         }
     }));
 
@@ -77,7 +78,6 @@ serve(async (req) => {
 
     console.log(`[VTO-Packs-Orchestrator] Successfully inserted all ${totalInserted} pair jobs with 'pending' status.`);
 
-    // --- NEW: Log unique garments to the Armadio ---
     console.log(`[VTO-Packs-Orchestrator] Logging unique garments to the Armadio...`);
     const uniqueGarments = new Map<string, any>();
     pairs.forEach((pair: any) => {
@@ -95,7 +95,7 @@ serve(async (req) => {
 
     if (uniqueGarments.size > 0) {
         const garmentsToInsert = Array.from(uniqueGarments.values())
-            .filter(g => g.image_hash) // Only insert new garments that have a hash
+            .filter(g => g.image_hash)
             .map(g => ({
                 user_id: user_id,
                 storage_path: g.storage_path,
@@ -118,7 +118,6 @@ serve(async (req) => {
             console.log(`[VTO-Packs-Orchestrator] No new garments with hashes to log.`);
         }
     }
-    // --- END OF NEW LOGIC ---
 
     return new Response(JSON.stringify({ success: true, message: `${totalInserted} jobs have been queued for processing.` }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

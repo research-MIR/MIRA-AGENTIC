@@ -156,6 +156,8 @@ Prima di tentare di nuovo, controlla se il tuo lavoro appare nella lista dei "Jo
     croppingModeFrameDesc: "Inquadra intelligentemente il soggetto in base alla sua posa per risultati coerenti.",
     croppingModeExpand: "Espandi (Legacy)",
     croppingModeExpandDesc: "Espande il riquadro di rilevamento di un 30% fisso. Può essere meno coerente.",
+    autoCompleteOutfit: "Completa Outfit Automaticamente",
+    autoCompleteOutfitDesc: "Se attivato, l'IA tenterà di aggiungere capi mancanti (es. pantaloni, scarpe) per creare un look completo.",
   },
   en: {
     proMode: "Pro Mode",
@@ -314,5 +316,7 @@ Before trying again, please check if your job shows up in the "Recent Jobs" list
     croppingModeFrameDesc: "Intelligently frames the subject based on their pose for consistent results.",
     croppingModeExpand: "Expand (Legacy)",
     croppingModeExpandDesc: "Expands the detected bounding box by a fixed 30%. Can be less consistent.",
+    autoCompleteOutfit: "Auto-Complete Outfit",
+    autoCompleteOutfitDesc: "If enabled, the AI will attempt to add missing items (e.g., pants, shoes) to create a full look.",
   },
 };
