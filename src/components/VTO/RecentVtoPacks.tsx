@@ -1,18 +1,21 @@
-import { useMemo, useEffect, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useSession } from '@/components/Auth/SessionContextProvider';
-import { Skeleton } from '@/components/ui/skeleton';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
-import { AlertTriangle, CheckCircle, Loader2, XCircle, Download, HardDriveDownload, BarChart2, RefreshCw, Wand2 } from 'lucide-react';
-import { RealtimeChannel } from '@supabase/supabase-js';
-import { Button } from '../ui/button';
-import { showError, showLoading, dismissToast, showSuccess } from '@/utils/toast';
+import { useMemo, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import { useLanguage } from "@/context/LanguageContext";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { Progress } from "@/components/ui/progress";
+import { BarChart2, CheckCircle, XCircle, Loader2, AlertTriangle, UserCheck2, BadgeAlert, FileText, RefreshCw, Wand2, Download, HardDriveDownload } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSession } from "@/components/Auth/SessionContextProvider";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { RealtimeChannel } from "@supabase/supabase-js";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import JSZip from 'jszip';
 import { VtoPackDetailView } from './VtoPackDetailView';
 import { AnalyzePackModal, AnalysisScope } from './AnalyzePackModal';
-import { Link } from 'react-router-dom';
-import { useLanguage } from '@/context/LanguageContext';
 
 interface QaReport {
   id: string;
@@ -38,7 +41,7 @@ interface QaReport {
   } | null;
 }
 
-interface VtoPackSummary {
+interface PackSummary {
   pack_id: string;
   created_at: string;
   metadata: {
@@ -48,6 +51,7 @@ interface VtoPackSummary {
     engine?: 'google' | 'bitstudio';
   };
   total_jobs: number;
+  completed_jobs: number;
   passed_perfect: number;
   passed_pose_change: number;
   passed_logo_issue: number;
@@ -67,11 +71,11 @@ export const RecentVtoPacks = () => {
   const [isDownloadingResults, setIsDownloadingResults] = useState<string | null>(null);
   const [isDownloadingDebug, setIsDownloadingDebug] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState<string | null>(null);
-  const [packToAnalyze, setPackToAnalyze] = useState<VtoPackSummary | null>(null);
+  const [packToAnalyze, setPackToAnalyze] = useState<PackSummary | null>(null);
   const [isRerunning, setIsRerunning] = useState<string | null>(null);
   const [isStartingRefinement, setIsStartingRefinement] = useState<string | null>(null);
 
-  const { data: reports, isLoading: isLoadingPacks, error: packsError } = useQuery<any>({ // Using any for now to accommodate packs table
+  const { data: reports, isLoading, error } = useQuery<any>({
     queryKey: ['vtoQaReportsAndPacks', session?.user?.id],
     queryFn: async () => {
       if (!session?.user) return [];
@@ -89,7 +93,7 @@ export const RecentVtoPacks = () => {
   useEffect(() => {
     if (!session?.user?.id) return;
     const channel: RealtimeChannel = supabase
-      .channel(`vto-qa-reports-tracker-${session.user.id}`)
+      .channel(`vto-qa-reports-tracker-recent-packs-${session.user.id}`)
       .on<QaReport>(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'mira-agent-vto-qa-reports', filter: `user_id=eq.${session.user.id}` },
@@ -108,27 +112,35 @@ export const RecentVtoPacks = () => {
     return () => { supabase.removeChannel(channel); };
   }, [session?.user?.id, supabase, queryClient]);
 
-  const packSummaries = useMemo((): VtoPackSummary[] => {
+  const packSummaries = useMemo((): PackSummary[] => {
     if (!reports?.packs) return [];
-    const packsMap = new Map<string, VtoPackSummary>();
+    const packsMap = new Map<string, PackSummary>();
 
-    // Initialize all packs from the packs table
     for (const pack of reports.packs) {
         packsMap.set(pack.id, {
             pack_id: pack.id,
             created_at: pack.created_at,
             metadata: pack.metadata || {},
-            total_jobs: 0, passed_perfect: 0, passed_pose_change: 0, passed_logo_issue: 0, passed_detail_issue: 0,
-            failed_jobs: 0, failure_summary: {}, shape_mismatches: 0, avg_body_preservation_score: null, has_refinement_pass: false,
+            total_jobs: 0,
+            completed_jobs: 0,
+            passed_perfect: 0,
+            passed_pose_change: 0,
+            passed_logo_issue: 0,
+            passed_detail_issue: 0,
+            failed_jobs: 0,
+            failure_summary: {},
+            shape_mismatches: 0,
+            avg_body_preservation_score: null,
+            has_refinement_pass: false,
         });
     }
 
-    // Populate with report data
     for (const report of reports.reports) {
       if (!packsMap.has(report.vto_pack_job_id)) continue;
       
       const summary = packsMap.get(report.vto_pack_job_id)!;
       summary.total_jobs++;
+      summary.completed_jobs++;
       
       const reportData = report.comparative_report;
       if (reportData) {
@@ -158,7 +170,6 @@ export const RecentVtoPacks = () => {
     }
 
     const allPacks = Array.from(packsMap.values());
-    // Second pass to determine if a refinement pass exists for each pack
     allPacks.forEach(pack => {
         pack.has_refinement_pass = allPacks.some(p => p.metadata?.refinement_of_pack_id === pack.pack_id);
     });
@@ -191,187 +202,52 @@ export const RecentVtoPacks = () => {
     }
   };
 
-  const handleDownloadResults = async (packId: string) => {
-    setIsDownloadingResults(packId);
-    const toastId = showLoading("Fetching job results...");
+  const handleRerunFailed = async (packId: string) => {
+    if (!session?.user) return;
+    setIsRerunning(packId);
+    const toastId = showLoading("Re-queuing failed analysis jobs...");
     try {
-      const { data: jobs, error } = await supabase
-        .from('mira-agent-bitstudio-jobs')
-        .select('id, final_image_url')
-        .eq('vto_pack_job_id', packId)
-        .in('status', ['complete', 'done'])
-        .not('final_image_url', 'is', null);
-      if (error) throw error;
-
-      if (jobs.length === 0) {
+        const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-rerun-failed-analyses', {
+            body: { pack_id: packId, user_id: session.user.id }
+        });
+        if (error) throw error;
         dismissToast(toastId);
-        showSuccess("No completed images to download for this pack.");
-        return;
-      }
-
-      dismissToast(toastId);
-      showLoading(`Downloading ${jobs.length} images...`);
-
-      const zip = new JSZip();
-      const imagePromises = jobs.map(async (job) => {
-        const response = await fetch(job.final_image_url!);
-        if (response.ok) {
-          const blob = await response.blob();
-          zip.file(`result_${job.id}.png`, blob);
-        }
-      });
-      await Promise.all(imagePromises);
-
-      dismissToast(toastId);
-      showLoading("Zipping files...");
-
-      const content = await zip.generateAsync({ type: "blob" });
-      const link = document.createElement('a');
-      link.href = URL.createObjectURL(content);
-      link.download = `results_pack_${packId}.zip`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(link.href);
-
-      dismissToast(toastId);
-      showSuccess("Download started!");
+        showSuccess(data.message);
+        queryClient.invalidateQueries({ queryKey: ['vtoQaReportsAndPacks', session.user.id] });
     } catch (err: any) {
-      dismissToast(toastId);
-      showError(`Download failed: ${err.message}`);
+        dismissToast(toastId);
+        showError(`Operation failed: ${err.message}`);
     } finally {
-      setIsDownloadingResults(null);
+        setIsRerunning(null);
     }
   };
 
-  const handleDownloadDebugPack = async (packId: string) => {
-    setIsDownloadingDebug(packId);
-    const toastId = showLoading("Fetching all job assets...");
+  const handleStartRefinementPass = async (packId: string) => {
+    if (!session?.user) return;
+    setIsStartingRefinement(packId);
+    const toastId = showLoading("Starting refinement pass...");
     try {
-      const { data: jobs, error } = await supabase
-        .from('mira-agent-bitstudio-jobs')
-        .select('id, source_person_image_url, source_garment_image_url, final_image_url')
-        .eq('vto_pack_job_id', packId);
-      if (error) throw error;
-
-      if (jobs.length === 0) {
-        dismissToast(toastId);
-        showSuccess("No jobs found in this pack.");
-        return;
-      }
-
-      dismissToast(toastId);
-      showLoading(`Processing ${jobs.length} jobs for debug pack...`);
-
-      const zip = new JSZip();
-      const individualAssetsFolder = zip.folder("individual_assets");
-      const comparisonSheetsFolder = zip.folder("_comparison_sheets");
-
-      const jobPromises = jobs.map(async (job) => {
-        try {
-          const [personBlob, garmentBlob, resultBlob] = await Promise.all([
-            downloadFromSupabase(job.source_person_image_url),
-            downloadFromSupabase(job.source_garment_image_url),
-            downloadFromSupabase(job.final_image_url)
-          ]);
-
-          const jobFolder = individualAssetsFolder!.folder(job.id);
-          if (personBlob) jobFolder!.file("source_person.png", personBlob);
-          if (garmentBlob) jobFolder!.file("source_garment.png", garmentBlob);
-          if (resultBlob) jobFolder!.file("final_result.png", resultBlob);
-
-          // Create comparison sheet
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d');
-          if (!ctx) return;
-
-          const personImg = personBlob ? await createImageBitmap(personBlob) : null;
-          const garmentImg = garmentBlob ? await createImageBitmap(garmentBlob) : null;
-          const resultImg = resultBlob ? await createImageBitmap(resultBlob) : null;
-
-          const images = [personImg, garmentImg, resultImg];
-          const maxWidth = Math.max(...images.map(img => img?.width || 0));
-          const maxHeight = Math.max(...images.map(img => img?.height || 0));
-
-          if (maxWidth === 0 || maxHeight === 0) {
-            console.warn(`Skipping comparison sheet for job ${job.id} as no images could be loaded.`);
-            return;
-          }
-
-          const padding = 40;
-          const labelHeight = 60;
-          const fontSize = 30;
-
-          canvas.width = (maxWidth * 3) + (padding * 4);
-          canvas.height = maxHeight + (padding * 2) + labelHeight;
-          
-          ctx.fillStyle = '#f0f0f0';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-          ctx.fillStyle = '#333';
-          ctx.font = `${fontSize}px sans-serif`;
-          ctx.textAlign = 'center';
-
-          const drawImageWithLabel = (img: ImageBitmap | null, slotIndex: number, label: string) => {
-            const slotX = padding + (maxWidth + padding) * slotIndex;
-            
-            ctx.fillText(label, slotX + maxWidth / 2, padding + fontSize);
-            
-            const targetX = slotX;
-            const targetY = padding + labelHeight;
-            
-            if (img) {
-              const xOffset = (maxWidth - img.width) / 2;
-              const yOffset = (maxHeight - img.height) / 2;
-              ctx.drawImage(img, targetX + xOffset, targetY + yOffset);
-            } else {
-              ctx.fillStyle = '#ddd';
-              ctx.fillRect(targetX, targetY, maxWidth, maxHeight);
-            }
-          };
-
-          drawImageWithLabel(personImg, 0, "Source Person");
-          drawImageWithLabel(garmentImg, 1, "Garment");
-          drawImageWithLabel(resultImg, 2, "Final Result");
-
-          const comparisonBlob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
-          if (comparisonBlob) {
-            comparisonSheetsFolder!.file(`${job.id}_comparison.png`, comparisonBlob);
-          }
-        } catch (e) {
-          console.error(`Failed to process job ${job.id}:`, e);
-        }
+      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-vto-refinement-pass', {
+        body: { pack_id: packId, user_id: session.user.id }
       });
-
-      await Promise.all(jobPromises);
-
+      if (error) throw error;
       dismissToast(toastId);
-      showLoading("Zipping debug files...");
-
-      const content = await zip.generateAsync({ type: "blob" });
-      const link = document.createElement('a');
-      link.href = URL.createObjectURL(content);
-      link.download = `debug_pack_${packId}.zip`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(link.href);
-
-      dismissToast(toastId);
-      showSuccess("Debug pack download started!");
+      showSuccess(data.message);
+      queryClient.invalidateQueries({ queryKey: ['vtoQaReportsAndPacks', session.user.id] });
     } catch (err: any) {
       dismissToast(toastId);
-      showError(`Download failed: ${err.message}`);
+      showError(`Failed to start refinement pass: ${err.message}`);
     } finally {
-      setIsDownloadingDebug(null);
+      setIsStartingRefinement(null);
     }
   };
 
-  if (isLoadingPacks) {
+  if (isLoading) {
     return <div className="space-y-4"><Skeleton className="h-20 w-full" /><Skeleton className="h-20 w-full" /></div>;
   }
 
-  if (packsError) {
-    return <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Error</AlertTitle><AlertDescription>{packsError.message}</AlertDescription></Alert>;
+  if (error) {
+    return <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Error</AlertTitle><AlertDescription>{error.message}</AlertDescription></Alert>;
   }
 
   if (!reports?.packs || reports.packs.length === 0) {
@@ -382,10 +258,9 @@ export const RecentVtoPacks = () => {
     <>
       <Accordion type="single" collapsible className="w-full space-y-4" onValueChange={setOpenPackId}>
         {packSummaries.map(pack => {
-          const inProgress = pack.in_progress_jobs > 0;
-          const hasFailures = pack.failed_jobs > 0;
-          const isComplete = !inProgress && pack.total_jobs > 0;
+          const unknownFailures = pack.failure_summary['Unknown'] || 0;
           const isRefinementPack = !!pack.metadata?.refinement_of_pack_id;
+          const hasRefinementPass = pack.has_refinement_pass;
 
           return (
             <AccordionItem key={pack.pack_id} value={pack.pack_id} className="border rounded-md">
@@ -393,30 +268,17 @@ export const RecentVtoPacks = () => {
                 <div className="flex justify-between items-center w-full">
                   <div className="text-left">
                     <p className="font-semibold flex items-center gap-2">
-                      {isRefinementPack && <Wand2 className="h-4 w-4 text-purple-500" />}
-                      {pack.metadata?.name || `Pack from ${new Date(pack.created_at).toLocaleString()}`}
+                      {isRefinementPack && <Wand2 className="h-5 w-5 text-purple-500" />}
+                      <span>{pack.metadata?.name || `Pack from ${new Date(pack.created_at).toLocaleString()}`}</span>
                     </p>
                     <p className="text-sm text-muted-foreground">
                       {pack.completed_jobs} / {pack.metadata?.total_pairs || pack.total_jobs} completed
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); setPackToAnalyze(pack); }} disabled={isAnalyzing === pack.pack_id}>
-                      {isAnalyzing === pack.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <BarChart2 className="h-4 w-4 mr-2" />}
-                      Analyze
-                    </Button>
                     <Link to={`/vto-reports/${pack.pack_id}`} onClick={(e) => e.stopPropagation()}>
                       <Button variant="outline" size="sm">View Report</Button>
                     </Link>
-                    <Button variant="outline" size="icon" className="h-8 w-8" onClick={(e) => { e.stopPropagation(); handleDownloadResults(pack.pack_id); }} disabled={isDownloadingResults === pack.pack_id}>
-                      {isDownloadingResults === pack.pack_id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                    </Button>
-                    <Button variant="outline" size="icon" className="h-8 w-8" onClick={(e) => { e.stopPropagation(); handleDownloadDebugPack(pack.pack_id); }} disabled={isDownloadingDebug === pack.pack_id}>
-                      {isDownloadingDebug === pack.pack_id ? <Loader2 className="h-4 w-4 animate-spin" /> : <HardDriveDownload className="h-4 w-4" />}
-                    </Button>
-                    {inProgress && <Loader2 className="h-5 w-5 animate-spin text-primary" />}
-                    {hasFailures && <XCircle className="h-5 w-5 text-destructive" />}
-                    {isComplete && !hasFailures && <CheckCircle className="h-5 w-5 text-green-600" />}
                   </div>
                 </div>
               </AccordionTrigger>
