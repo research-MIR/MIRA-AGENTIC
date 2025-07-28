@@ -377,21 +377,48 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
     } else { // action === 'select'
         console.log(`${logPrefix} QA selected an image. Proceeding to finalize.`);
         const bestImageBase64 = variations[qaData.best_image_index].base64Image;
+        
+        // --- NEW OUTFIT COMPLETENESS CHECK ---
+        let completenessAnalysis = null;
+        const garmentAnalysis = job.metadata?.garment_analysis;
+        if (garmentAnalysis?.type_of_fit) {
+            console.log(`${logPrefix} Running outfit completeness check...`);
+            try {
+                const { data: analysisData, error: analysisError } = await supabase.functions.invoke('MIRA-AGENT-analyzer-outfit-completeness', {
+                    body: {
+                        image_to_analyze_base64: bestImageBase64,
+                        vto_garment_type: garmentAnalysis.type_of_fit
+                    }
+                });
+                if (analysisError) throw new Error(`Outfit completeness analysis failed: ${analysisError.message}`);
+                completenessAnalysis = analysisData;
+                console.log(`${logPrefix} Outfit completeness check successful. Is complete: ${completenessAnalysis.is_outfit_complete}`);
+            } catch (err) {
+                console.warn(`${logPrefix} Outfit completeness check failed, but proceeding with finalization. Error: ${err.message}`);
+                completenessAnalysis = { error: err.message };
+            }
+        } else {
+            console.warn(`${logPrefix} Skipping outfit completeness check: garment_analysis.type_of_fit is missing.`);
+        }
+        // --- END OF NEW CHECK ---
+
         const shouldSkipReframe = metadata.skip_reframe === true || metadata.final_aspect_ratio === '1:1';
+        const finalMetadata = { ...metadata, qa_history: qa_history, '[outfit_completeness_analysis]': completenessAnalysis };
 
         if (shouldSkipReframe) {
             console.log(`${logPrefix} Reframe is skipped. Finalizing job.`);
             const finalImage = await uploadBase64ToStorage(supabase, bestImageBase64, job.user_id, 'final_vto_pack.png');
+            
             await supabase.from('mira-agent-bitstudio-jobs').update({
                 status: 'complete',
                 final_image_url: finalImage.publicUrl,
-                metadata: { ...metadata, qa_history: qa_history, qa_best_image_base64: null, google_vto_step: 'done' }
+                metadata: { ...finalMetadata, qa_best_image_base64: null, google_vto_step: 'done' }
             }).eq('id', pair_job_id);
             console.log(`${logPrefix} Job finalized with 1:1 image.`);
             await triggerWatchdog(supabase, logPrefix);
         } else {
             await supabase.from('mira-agent-bitstudio-jobs').update({
-                metadata: { ...metadata, qa_history: qa_history, qa_best_image_base64: bestImageBase64, google_vto_step: 'reframe' }
+                metadata: { ...finalMetadata, qa_best_image_base64: bestImageBase64, google_vto_step: 'reframe' }
             }).eq('id', pair_job_id);
             invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id });
         }
