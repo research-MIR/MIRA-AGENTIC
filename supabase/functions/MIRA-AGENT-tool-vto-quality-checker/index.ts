@@ -1,12 +1,8 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { GoogleGenAI, Content, Part, HarmCategory, HarmBlockThreshold, GenerationResult } from 'https://esm.sh/@google/genai@0.15.0';
-import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const MODEL_NAME = "gemini-2.5-flash";
-const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1000;
 
@@ -87,121 +83,80 @@ Your entire response MUST be a single, valid JSON object with the following stru
 `;
 
 function extractJson(text: string): any {
-  const match = text.match(/```json\s*([\s\S]*?)\s*```/);
-  if (match && match[1]) return JSON.parse(match[1]);
-  try {
-    return JSON.parse(text);
-  } catch (e) {
-    throw new Error("The model returned a response that could not be parsed as JSON.");
-  }
+    const match = text.match(/```json\s*([\s\S]*?)\s*```/);
+    if (match && match[1]) return JSON.parse(match[1]);
+    try {
+        return JSON.parse(text);
+    } catch (e) {
+        throw new Error("The model returned a response that could not be parsed as JSON.");
+    }
 }
 
 serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response(null, {
-      headers: corsHeaders
-    });
-  }
+  if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
+
   try {
     const { original_person_image_base64, reference_garment_image_base64, generated_images_base64, is_escalation_check, is_absolute_final_attempt } = await req.json();
     if (!original_person_image_base64 || !reference_garment_image_base64 || !generated_images_base64 || !Array.isArray(generated_images_base64) || generated_images_base64.length === 0) {
       throw new Error("original_person_image_base64, reference_garment_image_base64, and a non-empty generated_images_base64 array are required.");
     }
-    const ai = new GoogleGenAI({
-      apiKey: GEMINI_API_KEY
-    });
+    const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
     const userPromptText = `This is the evaluation. is_escalation_check is ${is_escalation_check}. is_absolute_final_attempt is ${is_absolute_final_attempt}. Please analyze the following images and provide your decision.`;
     const parts: Part[] = [
-      {
-        text: userPromptText
-      },
-      {
-        text: "--- ORIGINAL PERSON IMAGE ---"
-      },
-      {
-        inlineData: {
-          mimeType: 'image/png',
-          data: original_person_image_base64
-        }
-      },
-      {
-        text: "--- REFERENCE GARMENT IMAGE ---"
-      },
-      {
-        inlineData: {
-          mimeType: 'image/png',
-          data: reference_garment_image_base64
-        }
-      }
+        { text: userPromptText },
+        { text: "--- ORIGINAL PERSON IMAGE ---" },
+        { inlineData: { mimeType: 'image/png', data: original_person_image_base64 } },
+        { text: "--- REFERENCE GARMENT IMAGE ---" },
+        { inlineData: { mimeType: 'image/png', data: reference_garment_image_base64 } }
     ];
     generated_images_base64.forEach((base64: string, index: number) => {
-      parts.push({
-        text: `--- GENERATED IMAGE ${index} ---`
-      });
-      parts.push({
-        inlineData: {
-          mimeType: 'image/png',
-          data: base64
-        }
-      });
+        parts.push({ text: `--- GENERATED IMAGE ${index} ---` });
+        parts.push({ inlineData: { mimeType: 'image/png', data: base64 } });
     });
+
     let result: GenerationResult | null = null;
     let lastError: Error | null = null;
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-      try {
-        console.log(`[VTO-QualityChecker] Calling Gemini API, attempt ${attempt}...`);
-        result = await ai.models.generateContent({
-          model: MODEL_NAME,
-          contents: [
-            {
-              role: 'user',
-              parts
+        try {
+            console.log(`[VTO-QualityChecker] Calling Gemini API, attempt ${attempt}...`);
+            result = await ai.models.generateContent({
+                model: MODEL_NAME,
+                contents: [{ role: 'user', parts }],
+                generationConfig: { responseMimeType: "application/json" },
+                safetySettings,
+                config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
+            });
+            lastError = null; // Clear error on success
+            break; // Exit loop on success
+        } catch (error) {
+            lastError = error;
+            console.warn(`[VTO-QualityChecker] Attempt ${attempt} failed:`, error.message);
+            if (attempt < MAX_RETRIES) {
+                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS * attempt));
             }
-          ],
-          generationConfig: {
-            responseMimeType: "application/json"
-          },
-          safetySettings,
-          config: {
-            systemInstruction: {
-              role: "system",
-              parts: [
-                {
-                  text: systemPrompt
-                }
-              ]
-            }
-          }
-        });
-        lastError = null; // Clear error on success
-        break; // Exit loop on success
-      } catch (error) {
-        lastError = error;
-        console.warn(`[VTO-QualityChecker] Attempt ${attempt} failed:`, error.message);
-        if (attempt < MAX_RETRIES) {
-          await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS * attempt));
         }
-      }
     }
+
     if (lastError) {
-      throw lastError;
+        throw lastError;
     }
+
     if (!result || !result.text) {
-      throw new Error("AI model failed to respond after all retries.");
+        throw new Error("AI model failed to respond after all retries.");
     }
+
     const responseJson = extractJson(result.text);
     const { action, best_image_index, reasoning } = responseJson;
     if (!action || typeof best_image_index !== 'number' || !reasoning) {
-      throw new Error("AI did not return a valid response with action, best_image_index, and reasoning.");
+        throw new Error("AI did not return a valid response with action, best_image_index, and reasoning.");
     }
     console.warn(`[VTO_QA_DECISION] Full AI Response: ${JSON.stringify(responseJson)}`);
+
     return new Response(JSON.stringify(responseJson), {
-      headers: {
-        ...corsHeaders,
-        'Content-Type': 'application/json'
-      },
-      status: 200
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      status: 200,
     });
+
   } catch (error) {
     console.error("[VTO-QualityChecker] Error:", error);
     console.warn(`[VTO-QualityChecker-FALLBACK] The tool encountered an unrecoverable error. Returning a structured failure report to the worker.`);
@@ -212,10 +167,7 @@ serve(async (req) => {
         error: `Analysis failed: ${error.message}`
     };
     return new Response(JSON.stringify(errorReport), {
-      headers: {
-        ...corsHeaders,
-        'Content-Type': 'application/json'
-      },
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200, // Return 200 OK so the calling function doesn't crash
     });
   }
