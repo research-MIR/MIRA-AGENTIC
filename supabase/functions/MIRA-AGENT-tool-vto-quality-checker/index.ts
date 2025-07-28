@@ -4,7 +4,7 @@ import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-const MODEL_NAME = "gemini-1.5-flash-latest";
+const MODEL_NAME = "gemini-2.5-flash";
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const MAX_RETRIES = 3;
@@ -58,7 +58,7 @@ An image is considered fundamentally flawed and MUST be rejected if it meets any
 
 ### Evaluation Criteria (in order of importance):
 1.  **Garment Similarity (Highest Priority):** The garment on the model must be the most accurate reproduction of the reference garment. This is the most important factor. A failure here means the image is fundamentally flawed.
-2.  **Outfit Coherence (Positive Tie-Breaker):** After confirming garment similarity, evaluate the rest of the outfit. An image that shows a complete, plausible outfit (e.g., the AI adds matching pants to a hoodie) is **STRONGLY PREFERRED** and should be selected over an otherwise equal image that leaves the model in their base underwear. **Crucially, a complete outfit is a bonus, not a requirement. Its absence is NOT a flaw and is NEVER a reason to select the 'retry' action on its own.** A retry should only be triggered by fundamental flaws in the garment swap itself or severe image artifacts.
+2.  **Outfit Coherence (Positive Tie-Breaker):** After confirming garment similarity, evaluate the rest of the outfit. An image that shows a complete, plausible outfit (e.g., the AI adds matching pants to a hoodie) is **STRONGLY PREFERRED** and should be selected over an otherwise equal image that leaves the model in their base underwear. **Crucially, a complete outfit is a bonus, not a requirement. Its absence is NOT a flaw and is NEVER a reason to select the 'retry' action on its own. - EVEN IF THE GARMENT IMAGE PRESENTS ONLY A LOWER BODY OR UPPER BODY IS 100% FINE TO HAVE IT IN A COMPLETE OUTFIT, IS EVEN PREFERABLE - NEVER A COMPLETED OUTFIT ON ITS OWN EVEN OF A SINGLE GARMENT, IS TO BE CONSIDERED A ERROR** A retry should only be triggered by fundamental flaws in the garment swap itself or severe image artifacts.
 3.  **Pose Preservation (Tertiary Priority):** The model's pose should be as close as possible to their original pose.
 4.  **Image Quality & Artifacts:** The image should be free of obvious AI artifacts or distortions.
 
