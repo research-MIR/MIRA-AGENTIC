@@ -17,6 +17,8 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const TEMP_UPLOAD_BUCKET = 'mira-agent-user-uploads';
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
 
+const ENABLE_BITSTUDIO_FALLBACK = false; // FEATURE FLAG
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -153,7 +155,7 @@ serve(async (req) => {
     console.error(`${logPrefix} Error:`, errorMessage);
     
     const currentStep = job?.metadata?.google_vto_step;
-    if (job && (currentStep?.startsWith('generate_step') || currentStep === 'quality_check')) {
+    if (job && (currentStep?.startsWith('generate_step') || currentStep === 'quality_check') && ENABLE_BITSTUDIO_FALLBACK) {
         console.warn(`[BITSTUDIO_FALLBACK][${job.id}] A Google VTO generation or quality check step failed. Escalating to BitStudio. Triggering reason: ${errorMessage}`);
         try {
             await supabase.from('mira-agent-bitstudio-jobs').update({
@@ -191,6 +193,9 @@ serve(async (req) => {
             return new Response(JSON.stringify({ error: fallbackErrorMessage }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
         }
     } else {
+        if (job && (currentStep?.startsWith('generate_step') || currentStep === 'quality_check')) {
+            console.warn(`[BITSTUDIO_FALLBACK][${job.id}] Fallback is disabled. Job will fail.`);
+        }
         await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'failed', error_message: errorMessage }).eq('id', pair_job_id);
         await triggerWatchdog(supabase, logPrefix);
         return new Response(JSON.stringify({ error: errorMessage }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
@@ -365,7 +370,12 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
 
     if (qaData.action === 'retry') {
         if (is_escalation_check) {
-            throw new Error("QA requested a retry on an escalation check, which should trigger the main catch block for fallback.");
+            if (ENABLE_BITSTUDIO_FALLBACK) {
+                throw new Error("QA requested a retry on an escalation check, which should trigger the main catch block for fallback.");
+            } else {
+                console.warn(`[VTO-Pack-Worker-QA][${job.id}] Fallback disabled. QA requested retry on final attempt, but we are overriding to 'select' the best available image (index ${qaData.best_image_index}).`);
+                qaData.action = 'select'; // Force the 'select' path
+            }
         } else {
             console.log(`${logPrefix} QA requested a retry. Incrementing retry count and starting next generation pass.`);
             const nextStep = `generate_step_${qa_retry_count + 2}`;
@@ -373,12 +383,14 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
                 metadata: { ...metadata, qa_history: qa_history, qa_retry_count: qa_retry_count + 1, google_vto_step: nextStep }
             }).eq('id', pair_job_id);
             invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id });
+            return; // Exit here since we've dispatched the next step
         }
-    } else { // action === 'select'
+    }
+    
+    if (qaData.action === 'select') {
         console.log(`${logPrefix} QA selected an image. Proceeding to finalize.`);
         const bestImageBase64 = variations[qaData.best_image_index].base64Image;
         
-        // --- NEW OUTFIT COMPLETENESS CHECK ---
         let completenessAnalysis = null;
         const garmentAnalysis = job.metadata?.garment_analysis;
         if (garmentAnalysis?.type_of_fit) {
@@ -400,7 +412,6 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
         } else {
             console.warn(`${logPrefix} Skipping outfit completeness check: garment_analysis.type_of_fit is missing.`);
         }
-        // --- END OF NEW CHECK ---
 
         const shouldSkipReframe = metadata.skip_reframe === true || metadata.final_aspect_ratio === '1:1';
         const finalMetadata = { ...metadata, qa_history: qa_history, '[outfit_completeness_analysis]': completenessAnalysis };
