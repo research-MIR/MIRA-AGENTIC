@@ -91,7 +91,7 @@ serve(async (req) => {
     let finalResponse;
 
     if (cropping_mode === 'frame') {
-        console.log(`[BBox-Orchestrator] Applying 'frame' logic.`);
+        console.log(`[BBox-Orchestrator] Applying HYBRID 'frame' logic with 30% expansion.`);
         const abs_width = ((averageBox.x_max - averageBox.x_min) / 1000) * originalWidth;
         const abs_height = ((averageBox.y_max - averageBox.y_min) / 1000) * originalHeight;
 
@@ -114,18 +114,47 @@ serve(async (req) => {
         let frameX = subjectCenterX - (frameWidth / 2);
         let frameY = subjectCenterY - (frameHeight / 2);
 
+        // Clamp the initial frame to the image bounds
         frameX = Math.max(0, Math.min(frameX, originalWidth - frameWidth));
         frameY = Math.max(0, Math.min(frameY, originalHeight - frameHeight));
 
+        // --- NEW HYBRID LOGIC: Expand the calculated frame by 30% ---
+        const expansionFactor = 1.30;
+        const expandedWidth = frameWidth * expansionFactor;
+        const expandedHeight = frameHeight * expansionFactor;
+
+        // Recalculate origin to keep it centered
+        let finalX = frameX - (expandedWidth - frameWidth) / 2;
+        let finalY = frameY - (expandedHeight - frameHeight) / 2;
+        let finalWidth = expandedWidth;
+        let finalHeight = expandedHeight;
+
+        // Clamp the final expanded box to the original image dimensions
+        if (finalX < 0) {
+            finalWidth += finalX; // Reduce width by the amount it goes off-screen
+            finalX = 0;
+        }
+        if (finalY < 0) {
+            finalHeight += finalY; // Reduce height by the amount it goes off-screen
+            finalY = 0;
+        }
+        if (finalX + finalWidth > originalWidth) {
+            finalWidth = originalWidth - finalX;
+        }
+        if (finalY + finalHeight > originalHeight) {
+            finalHeight = originalHeight - finalY;
+        }
+        // --- END OF HYBRID LOGIC ---
+
         finalResponse = {
             "person": [
-                Math.round((frameY / originalHeight) * 1000),
-                Math.round((frameX / originalWidth) * 1000),
-                Math.round(((frameY + frameHeight) / originalHeight) * 1000),
-                Math.round(((frameX + frameWidth) / originalWidth) * 1000)
+                Math.round((finalY / originalHeight) * 1000),
+                Math.round((finalX / originalWidth) * 1000),
+                Math.round(((finalY + finalHeight) / originalHeight) * 1000),
+                Math.round(((finalX + finalWidth) / originalWidth) * 1000)
             ]
         };
-        console.log(`[BBox-Orchestrator] 'Frame' logic complete. Final box:`, finalResponse.person);
+        console.log(`[BBox-Orchestrator] Hybrid 'Frame' logic complete. Final box:`, finalResponse.person);
 
     } else {
         console.log(`[BBox-Orchestrator] Applying legacy 'expand' logic.`);
