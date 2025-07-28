@@ -13,7 +13,7 @@ const corsHeaders = {
 
 const systemPrompt = `You are an expert fashion cataloger. Analyze the provided garment image and return a JSON object with the following attributes:
 
-*   **\`type_of_fit\`**: Your assessment of which part of the body the garment covers. Must be one of: **'upper body'**, **'lower body'**, or **'full body'**. (e.g., a bra is 'upper body', boxer shorts are 'lower body', a dress is 'full body').
+*   **\`type_of_fit\`**: Your assessment of which part of the body the garment covers. It MUST be one of these exact string values: **'upper_body'**, **'lower_body'**, or **'full_body'**. Do NOT use spaces.
 *   **\`intended_gender\`**: Your assessment of the target gender. Must be one of: **'female'**, **'male'**, or **'unisex'**. **Use 'unisex' sparingly**, only for items that are truly gender-neutral like scarves or some hats.
 *   \`primary_color\`: The dominant color.
 *   \`style_tags\`: An array of relevant style keywords.

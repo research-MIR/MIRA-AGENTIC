@@ -92,7 +92,13 @@ serve(async (req) => {
       .in('id', garmentIds);
     if (garmentsError) throw garmentsError;
 
-    const candidateGarments = allGarments.filter(g => g.attributes?.type_of_fit === missing_item_type);
+    const candidateGarments = allGarments.filter(g => {
+        const fitType = g.attributes?.type_of_fit;
+        if (!fitType) return false;
+        // Handle both 'upper body' and 'upper_body' by normalizing them
+        return fitType.replace(/\s+/g, '_') === missing_item_type;
+    });
+
     if (candidateGarments.length === 0) {
       throw new Error(`The selected pack does not contain any garments of type '${missing_item_type}'.`);
     }

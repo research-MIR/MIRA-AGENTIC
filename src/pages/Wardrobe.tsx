@@ -14,7 +14,7 @@ interface Garment {
   storage_path: string;
   attributes: {
     intended_gender: 'male' | 'female' | 'unisex';
-    type_of_fit: 'upper body' | 'lower body' | 'full body';
+    type_of_fit: 'upper body' | 'lower body' | 'full body' | 'upper_body' | 'lower_body' | 'full_body';
     primary_color: string;
     style_tags?: string[];
   } | null;
@@ -69,7 +69,7 @@ const Wardrobe = () => {
                   {garment.attributes && (
                     <div className="flex flex-wrap gap-1">
                       <Badge variant="outline" className="capitalize">{garment.attributes.intended_gender}</Badge>
-                      <Badge variant="secondary" className="capitalize">{garment.attributes.type_of_fit}</Badge>
+                      <Badge variant="secondary" className="capitalize">{garment.attributes.type_of_fit.replace(/_/g, ' ')}</Badge>
                     </div>
                   )}
                 </div>
