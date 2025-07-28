@@ -492,7 +492,7 @@ serve(async (req) => {
       console.log(`[Watchdog-BG][${requestId}] No stalled chunk jobs found.`);
     }
 
-    // --- Task 18: Handle VTO Jobs Awaiting BitStudio Fallback ---
+    // --- NEW Task 18: Handle VTO Jobs Awaiting BitStudio Fallback ---
     const { data: awaitingFallbackJobs, error: fallbackError } = await supabase
       .from('mira-agent-bitstudio-jobs')
       .select('id, metadata')
@@ -539,61 +539,6 @@ serve(async (req) => {
       console.log(`[Watchdog-BG][${requestId}] No jobs awaiting BitStudio fallback found.`);
     }
 
-    // --- Task 19: Handle Google VTO Permanent Failures & Escalate ---
-    const { data: failedPrimaryJobs, error: failedPrimaryError } = await supabase
-      .from('mira-agent-bitstudio-jobs')
-      .select('id, user_id, source_person_image_url, source_garment_image_url, metadata')
-      .eq('status', 'permanently_failed_primary')
-      .not('source_person_image_url', 'is', null)
-      .not('source_garment_image_url', 'is', null);
-
-    if (failedPrimaryError) {
-      console.error(`[Watchdog-BG][${requestId}] Error querying for permanently failed primary jobs:`, failedPrimaryError.message);
-    } else if (failedPrimaryJobs && failedPrimaryJobs.length > 0) {
-      console.log(`[Watchdog-BG][${requestId}] Found ${failedPrimaryJobs.length} job(s) that failed the primary engine. Escalating to BitStudio fallback...`);
-      
-      failedPrimaryJobs.forEach(job => {
-        console.warn(`[Watchdog-BG][${requestId}] WARNING: Google VTO job ${job.id} has permanently failed. Escalating to BitStudio fallback engine.`);
-      });
-
-      const escalationPromises = failedPrimaryJobs.map(async (job) => {
-        try {
-          await supabase.from('mira-agent-bitstudio-jobs').update({
-            status: 'awaiting_bitstudio_fallback',
-            metadata: { ...job.metadata, engine: 'bitstudio_fallback' }
-          }).eq('id', job.id);
-
-          const { data: proxyData, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
-            body: {
-              existing_job_id: job.id,
-              mode: 'base',
-              user_id: job.user_id,
-              person_image_url: job.source_person_image_url,
-              garment_image_url: job.source_garment_image_url,
-              metadata: job.metadata
-            }
-          });
-          if (proxyError) throw proxyError;
-          
-          await supabase.from('mira-agent-bitstudio-jobs').update({
-            metadata: { ...job.metadata, delegated_bitstudio_job_id: proxyData.jobIds[0] }
-          }).eq('id', job.id);
-
-          console.log(`[Watchdog-BG][${requestId}] Successfully escalated job ${job.id} to BitStudio job ${proxyData.jobIds[0]}.`);
-        } catch (escalationError) {
-          console.error(`[Watchdog-BG][${requestId}] Failed to escalate job ${job.id}:`, escalationError.message);
-          await supabase.from('mira-agent-bitstudio-jobs').update({
-            status: 'failed',
-            error_message: `Escalation to fallback engine failed: ${escalationError.message}`
-          }).eq('id', job.id);
-        }
-      });
-      await Promise.allSettled(escalationPromises);
-      actionsTaken.push(`Escalated ${failedPrimaryJobs.length} failed primary jobs to the BitStudio fallback.`);
-    } else {
-      console.log(`[Watchdog-BG][${requestId}] No jobs awaiting fallback escalation.`);
-    }
-
     const finalMessage = actionsTaken.length > 0 ? actionsTaken.join(' ') : "No actions required. All jobs are running normally.";
     console.log(`[Watchdog-BG][${requestId}] Check complete. ${finalMessage}`);
     
@@ -608,4 +553,5 @@ serve(async (req) => {
       status: 500
     });
   }
+  // The advisory lock is automatically released when the function execution ends.
 });
