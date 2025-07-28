@@ -92,6 +92,7 @@ serve(async (req) => {
 
     if (cropping_mode === 'frame') {
         console.log(`[BBox-Orchestrator] Applying 'frame' logic.`);
+        const paddingFactor = 1.10; // 10% padding
         const abs_width = ((averageBox.x_max - averageBox.x_min) / 1000) * originalWidth;
         const abs_height = ((averageBox.y_max - averageBox.y_min) / 1000) * originalHeight;
 
@@ -107,6 +108,10 @@ serve(async (req) => {
             frameWidth = originalWidth;
             frameHeight = originalWidth / subjectAspectRatio;
         }
+
+        // Apply padding factor
+        frameWidth *= paddingFactor;
+        frameHeight *= paddingFactor;
 
         const subjectCenterX = ((averageBox.x_min + averageBox.x_max) / 2 / 1000) * originalWidth;
         const subjectCenterY = ((averageBox.y_min + averageBox.y_max) / 2 / 1000) * originalHeight;
