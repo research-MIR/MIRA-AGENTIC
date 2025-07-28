@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -7,9 +7,13 @@ import { useSession } from '@/components/Auth/SessionContextProvider';
 import { showError, showSuccess, showLoading, dismissToast } from '@/utils/toast';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { CheckCircle, Loader2 } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { CheckCircle, Loader2, UploadCloud } from 'lucide-react';
+import { cn, optimizeImage, calculateFileHash, sanitizeFilename } from '@/lib/utils';
 import { SecureImageDisplay } from '@/components/VTO/SecureImageDisplay';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useDropzone } from '@/hooks/useDropzone';
+import { Input } from '@/components/ui/input';
+import { useLanguage } from '@/context/LanguageContext';
 
 interface Garment {
   id: string;
@@ -26,12 +30,14 @@ interface AddGarmentsModalProps {
 
 export const AddGarmentsModal = ({ isOpen, onClose, packId, existingGarmentIds }: AddGarmentsModalProps) => {
   const { supabase, session } = useSession();
+  const { t } = useLanguage();
   const queryClient = useQueryClient();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isAdding, setIsAdding] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: allGarments, isLoading, error } = useQuery<Garment[]>({
-    queryKey: ['allGarmentsForPack', session?.user?.id],
+    queryKey: ['allGarmentsForPack', session?.user?.id, existingGarmentIds],
     queryFn: async () => {
       if (!session?.user) return [];
       const { data, error } = await supabase.from('mira-agent-garments').select('id, name, storage_path').eq('user_id', session.user.id);
@@ -41,19 +47,83 @@ export const AddGarmentsModal = ({ isOpen, onClose, packId, existingGarmentIds }
     enabled: isOpen,
   });
 
+  const handleFileUpload = async (files: FileList | null) => {
+    if (!files || files.length === 0 || !session?.user) return;
+    const imageFiles = Array.from(files).filter(file => file.type.startsWith('image/'));
+    if (imageFiles.length === 0) return showError("Please select valid image files.");
+
+    setIsAdding(true);
+    const toastId = showLoading(`Processing ${imageFiles.length} image(s)...`);
+
+    try {
+      const processFile = async (file: File) => {
+        const hash = await calculateFileHash(file);
+        const { data: existing } = await supabase.from('mira-agent-garments').select('id').eq('user_id', session.user.id).eq('image_hash', hash).single();
+        
+        let garmentId = existing?.id;
+
+        if (!garmentId) {
+          const optimizedFile = await optimizeImage(file);
+          const filePath = `${session.user.id}/wardrobe/${Date.now()}-${sanitizeFilename(file.name)}`;
+          const { error: uploadError } = await supabase.storage.from('mira-agent-user-uploads').upload(filePath, optimizedFile);
+          if (uploadError) throw new Error(`Upload failed for ${file.name}: ${uploadError.message}`);
+          
+          const { data: { publicUrl } } = supabase.storage.from('mira-agent-user-uploads').getPublicUrl(filePath);
+          
+          const { data: analysis, error: analysisError } = await supabase.functions.invoke('MIRA-AGENT-tool-analyze-garment-attributes', {
+            body: { image_base64: (await fileToBase64(optimizedFile)), mime_type: optimizedFile.type }
+          });
+          if (analysisError) throw new Error(`Analysis failed for ${file.name}: ${analysisError.message}`);
+
+          const { data: newGarment, error: insertError } = await supabase.from('mira-agent-garments').insert({
+            user_id: session.user.id,
+            name: file.name,
+            storage_path: publicUrl,
+            attributes: analysis,
+            image_hash: hash,
+          }).select('id').single();
+          if (insertError) throw new Error(`Failed to save garment ${file.name}: ${insertError.message}`);
+          garmentId = newGarment.id;
+        }
+        
+        if (garmentId && !existingGarmentIds.includes(garmentId)) {
+          return { pack_id: packId, garment_id: garmentId };
+        }
+        return null;
+      };
+
+      const itemsToInsert = (await Promise.all(imageFiles.map(processFile))).filter(Boolean);
+
+      if (itemsToInsert.length > 0) {
+        const { error: linkError } = await supabase.from('mira-agent-garment-pack-items').insert(itemsToInsert);
+        if (linkError) throw linkError;
+      }
+      
+      dismissToast(toastId);
+      showSuccess(`${itemsToInsert.length} garments processed and added to pack.`);
+      queryClient.invalidateQueries({ queryKey: ['garmentsInPack', packId] });
+      queryClient.invalidateQueries({ queryKey: ['allGarmentsForPack'] });
+      onClose();
+    } catch (err: any) {
+      dismissToast(toastId);
+      showError(err.message);
+    } finally {
+      setIsAdding(false);
+    }
+  };
+
+  const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: (e) => handleFileUpload(e.dataTransfer.files) });
+
   const toggleSelection = (id: string) => {
     setSelectedIds(prev => {
       const newSet = new Set(prev);
-      if (newSet.has(id)) {
-        newSet.delete(id);
-      } else {
-        newSet.add(id);
-      }
+      if (newSet.has(id)) newSet.delete(id);
+      else newSet.add(id);
       return newSet;
     });
   };
 
-  const handleAdd = async () => {
+  const handleAddFromWardrobe = async () => {
     if (selectedIds.size === 0) return;
     setIsAdding(true);
     const toastId = showLoading(`Adding ${selectedIds.size} garments...`);
@@ -75,45 +145,78 @@ export const AddGarmentsModal = ({ isOpen, onClose, packId, existingGarmentIds }
     }
   };
 
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve((reader.result as string).split(',')[1]);
+      reader.onerror = (error) => reject(error);
+    });
+  };
+
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-3xl">
         <DialogHeader>
           <DialogTitle>Add Garments to Pack</DialogTitle>
-          <DialogDescription>Select garments from your wardrobe to add to this pack.</DialogDescription>
+          <DialogDescription>Upload new garments or add existing ones from your wardrobe.</DialogDescription>
         </DialogHeader>
-        <ScrollArea className="h-96 my-4">
-          <div className="grid grid-cols-4 gap-4 pr-4">
-            {isLoading ? (
-              [...Array(8)].map((_, i) => <Skeleton key={i} className="aspect-square w-full" />)
-            ) : error ? (
-              <Alert variant="destructive"><AlertTitle>Error</AlertTitle><AlertDescription>{error.message}</AlertDescription></Alert>
-            ) : allGarments && allGarments.length > 0 ? (
-              allGarments.map(garment => {
-                const isSelected = selectedIds.has(garment.id);
-                return (
-                  <div key={garment.id} className="relative cursor-pointer" onClick={() => toggleSelection(garment.id)}>
-                    <SecureImageDisplay imageUrl={garment.storage_path} alt={garment.name} />
-                    {isSelected && (
-                      <div className="absolute inset-0 bg-black/60 flex items-center justify-center rounded-md">
-                        <CheckCircle className="h-8 w-8 text-white" />
+        <Tabs defaultValue="upload">
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="upload">{t('uploadNew')}</TabsTrigger>
+            <TabsTrigger value="wardrobe">{t('selectFromWardrobe')}</TabsTrigger>
+          </TabsList>
+          <TabsContent value="upload">
+            <div {...dropzoneProps} className={cn("mt-4 h-80 flex flex-col items-center justify-center rounded-lg border-2 border-dashed transition-colors", isDraggingOver ? "border-primary bg-primary/10" : "border-border")}>
+              {isAdding ? (
+                <>
+                  <Loader2 className="h-12 w-12 animate-spin text-primary" />
+                  <p className="mt-4 text-muted-foreground">Processing...</p>
+                </>
+              ) : (
+                <>
+                  <UploadCloud className="h-12 w-12 text-muted-foreground" />
+                  <p className="mt-4 text-muted-foreground">Drag & drop images here, or click to select files</p>
+                  <Input {...dropzoneProps} ref={fileInputRef} id="file-upload" type="file" multiple accept="image/*" className="hidden" onChange={(e) => handleFileUpload(e.target.files)} />
+                </>
+              )}
+            </div>
+          </TabsContent>
+          <TabsContent value="wardrobe">
+            <ScrollArea className="h-80 my-4">
+              <div className="grid grid-cols-4 gap-4 pr-4">
+                {isLoading ? (
+                  [...Array(8)].map((_, i) => <Skeleton key={i} className="aspect-square w-full" />)
+                ) : error ? (
+                  <Alert variant="destructive"><AlertTitle>Error</AlertTitle><AlertDescription>{error.message}</AlertDescription></Alert>
+                ) : allGarments && allGarments.length > 0 ? (
+                  allGarments.map(garment => {
+                    const isSelected = selectedIds.has(garment.id);
+                    return (
+                      <div key={garment.id} className="relative cursor-pointer" onClick={() => toggleSelection(garment.id)}>
+                        <SecureImageDisplay imageUrl={garment.storage_path} alt={garment.name} />
+                        {isSelected && (
+                          <div className="absolute inset-0 bg-black/60 flex items-center justify-center rounded-md">
+                            <CheckCircle className="h-8 w-8 text-white" />
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                );
-              })
-            ) : (
-              <p className="col-span-4 text-center text-muted-foreground">Your wardrobe is empty or all items are already in this pack.</p>
-            )}
-          </div>
-        </ScrollArea>
-        <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleAdd} disabled={isAdding || selectedIds.size === 0}>
-            {isAdding && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Add {selectedIds.size} Garment(s)
-          </Button>
-        </DialogFooter>
+                    );
+                  })
+                ) : (
+                  <p className="col-span-4 text-center text-muted-foreground">{t('wardrobeIsEmpty')}</p>
+                )}
+              </div>
+            </ScrollArea>
+            <DialogFooter>
+              <Button variant="ghost" onClick={onClose}>Cancel</Button>
+              <Button onClick={handleAddFromWardrobe} disabled={isAdding || selectedIds.size === 0}>
+                {isAdding && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {t('addSelected')} ({selectedIds.size})
+              </Button>
+            </DialogFooter>
+          </TabsContent>
+        </Tabs>
       </DialogContent>
     </Dialog>
   );

@@ -17,6 +17,10 @@ export const wardrobeTranslations = {
     createPack: "Crea Pack",
     noGarmentPacksTitle: "Nessun Pack di Capi",
     noGarmentPacksDescription: "Crea il tuo primo pack per iniziare a organizzare il tuo armadio.",
+    uploadNew: "Carica Nuovo",
+    selectFromWardrobe: "Seleziona dall'Armadio",
+    addSelected: "Aggiungi Selezionati",
+    wardrobeIsEmpty: "Il tuo armadio è vuoto o tutti i capi sono già in questo pack.",
   },
   en: {
     wardrobe: "Wardrobe",
@@ -36,5 +40,9 @@ export const wardrobeTranslations = {
     createPack: "Create Pack",
     noGarmentPacksTitle: "No Garment Packs",
     noGarmentPacksDescription: "Create your first pack to start organizing your wardrobe.",
+    uploadNew: "Upload New",
+    selectFromWardrobe: "Select from Wardrobe",
+    addSelected: "Add Selected",
+    wardrobeIsEmpty: "Your wardrobe is empty or all items are already in this pack.",
   },
 };
