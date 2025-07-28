@@ -67,7 +67,7 @@ An image is considered fundamentally flawed and MUST be rejected if it meets any
 ### Your Output:
 Your entire response MUST be a single, valid JSON object with the following structure.
 
-**CRITICAL OUTPUT RULE:** You MUST ALWAYS return a \`best_image_index\`, even if your action is 'retry'. In a 'retry' scenario, this index should point to the image that is the *best candidate for a fix* or has the fewest flaws, even if it is ultimately unacceptable. The \`best_image_index\` can NEVER be \`null\`.
+**CRITICAL OUTPUT RULE:** Your JSON response MUST ALWAYS contain a valid "best_image_index" key with a number value (0, 1, 2, etc.). This is non-negotiable. If your action is "retry", you MUST still select the index of the image that is the "least bad" or has the most potential for a fix, even if it is unacceptable. The value for "best_image_index" can NEVER be \`null\`.
 
 **If action is 'select':**
 \`\`\`json
