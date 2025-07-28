@@ -184,26 +184,9 @@ serve(async (req) => {
       }
     }
     if (lastError) {
-      console.error(`[VTO-QualityChecker] All retries failed. Last error:`, lastError.message);
-      // Create a fallback error report
-      const errorReport = {
-        is_match: false,
-        confidence_score: 0.0,
-        logo_present: false,
-        logo_correct: null,
-        mismatch_reason: "The AI quality check failed to produce a valid analysis after multiple retries.",
-        fix_suggestion: "This may be a temporary issue. You can try re-running the analysis manually from the report page.",
-        error: `Analysis failed: ${lastError.message}`
-      };
-      return new Response(JSON.stringify(errorReport), {
-        headers: {
-          ...corsHeaders,
-          'Content-Type': 'application/json'
-        },
-        status: 200
-      });
+      throw lastError;
     }
-    if (!result) {
+    if (!result || !result.text) {
       throw new Error("AI model failed to respond after all retries.");
     }
     const responseJson = extractJson(result.text);
@@ -221,14 +204,19 @@ serve(async (req) => {
     });
   } catch (error) {
     console.error("[VTO-QualityChecker] Error:", error);
-    return new Response(JSON.stringify({
-      error: error.message
-    }), {
+    console.warn(`[VTO-QualityChecker-FALLBACK] The tool encountered an unrecoverable error. Returning a structured failure report to the worker.`);
+    const errorReport = {
+        action: "retry", // Tell the worker to retry the generation
+        best_image_index: 0, // Must provide a valid index, even on failure
+        reasoning: "The Quality Assurance AI failed to produce a valid analysis. This may be a temporary issue. Retrying the generation pass is recommended.",
+        error: `Analysis failed: ${error.message}`
+    };
+    return new Response(JSON.stringify(errorReport), {
       headers: {
         ...corsHeaders,
         'Content-Type': 'application/json'
       },
-      status: 500
+      status: 200, // Return 200 OK so the calling function doesn't crash
     });
   }
 });
