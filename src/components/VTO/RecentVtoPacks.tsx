@@ -75,7 +75,7 @@ export const RecentVtoPacks = () => {
   const [isRerunning, setIsRerunning] = useState<string | null>(null);
   const [isStartingRefinement, setIsStartingRefinement] = useState<string | null>(null);
 
-  const { data: reports, isLoading, error } = useQuery<any>({
+  const { data: queryData, isLoading, error } = useQuery<any>({
     queryKey: ['vtoQaReportsAndPacks', session?.user?.id],
     queryFn: async () => {
       if (!session?.user) return [];
@@ -85,7 +85,14 @@ export const RecentVtoPacks = () => {
       const { data: packs, error: packsError } = await supabase.from('mira-agent-vto-packs-jobs').select('id, created_at, metadata').eq('user_id', session.user.id);
       if (packsError) throw packsError;
 
-      return { reports, packs };
+      const { data: jobs, error: jobsError } = await supabase
+        .from('mira-agent-bitstudio-jobs')
+        .select('id, vto_pack_job_id, status')
+        .eq('user_id', session.user.id)
+        .not('vto_pack_job_id', 'is', null);
+      if (jobsError) throw jobsError;
+
+      return { reports, packs, jobs };
     },
     enabled: !!session?.user,
   });
@@ -108,40 +115,46 @@ export const RecentVtoPacks = () => {
           queryClient.invalidateQueries({ queryKey: ['vtoQaReportsAndPacks', session.user.id] });
         }
       )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'mira-agent-bitstudio-jobs', filter: `user_id=eq.${session.user.id}` },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ['vtoQaReportsAndPacks', session.user.id] });
+        }
+      )
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [session?.user?.id, supabase, queryClient]);
 
   const packSummaries = useMemo((): PackSummary[] => {
-    if (!reports?.packs) return [];
+    if (!queryData?.packs || !queryData?.jobs) return [];
     const packsMap = new Map<string, PackSummary>();
 
-    for (const pack of reports.packs) {
+    for (const pack of queryData.packs) {
         packsMap.set(pack.id, {
             pack_id: pack.id,
             created_at: pack.created_at,
             metadata: pack.metadata || {},
             total_jobs: 0,
             completed_jobs: 0,
-            passed_perfect: 0,
-            passed_pose_change: 0,
-            passed_logo_issue: 0,
-            passed_detail_issue: 0,
-            failed_jobs: 0,
-            failure_summary: {},
-            shape_mismatches: 0,
-            avg_body_preservation_score: null,
-            has_refinement_pass: false,
+            passed_perfect: 0, passed_pose_change: 0, passed_logo_issue: 0, passed_detail_issue: 0,
+            failed_jobs: 0, failure_summary: {}, shape_mismatches: 0, avg_body_preservation_score: null, has_refinement_pass: false,
         });
     }
 
-    for (const report of reports.reports) {
+    for (const job of queryData.jobs) {
+        if (job.vto_pack_job_id && packsMap.has(job.vto_pack_job_id)) {
+            const summary = packsMap.get(job.vto_pack_job_id)!;
+            summary.total_jobs++;
+            if (job.status === 'complete' || job.status === 'done' || job.status === 'failed' || job.status === 'permanently_failed') {
+                summary.completed_jobs++;
+            }
+        }
+    }
+
+    for (const report of queryData.reports || []) {
       if (!packsMap.has(report.vto_pack_job_id)) continue;
-      
       const summary = packsMap.get(report.vto_pack_job_id)!;
-      summary.total_jobs++;
-      summary.completed_jobs++;
-      
       const reportData = report.comparative_report;
       if (reportData) {
         if (reportData.overall_pass) {
@@ -158,14 +171,6 @@ export const RecentVtoPacks = () => {
           const reason = reportData.failure_category || "Unknown";
           summary.failure_summary[reason] = (summary.failure_summary[reason] || 0) + 1;
         }
-        if (reportData.garment_analysis?.garment_type && reportData.garment_comparison?.generated_garment_type && reportData.garment_analysis.garment_type !== reportData.garment_comparison.generated_garment_type) {
-            summary.shape_mismatches++;
-        }
-        const bodyScore = reportData.pose_and_body_analysis?.scores?.body_type_preservation;
-        if (typeof bodyScore === 'number') {
-            const currentTotal = (summary.avg_body_preservation_score || 0) * (summary.total_jobs - 1);
-            summary.avg_body_preservation_score = (currentTotal + bodyScore) / summary.total_jobs;
-        }
       }
     }
 
@@ -175,7 +180,7 @@ export const RecentVtoPacks = () => {
     });
 
     return allPacks.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-  }, [reports]);
+  }, [queryData]);
 
   const handleAnalyzePack = async (scope: AnalysisScope) => {
     if (!packToAnalyze || !session?.user) return;
@@ -202,46 +207,6 @@ export const RecentVtoPacks = () => {
     }
   };
 
-  const handleRerunFailed = async (packId: string) => {
-    if (!session?.user) return;
-    setIsRerunning(packId);
-    const toastId = showLoading("Re-queuing failed analysis jobs...");
-    try {
-        const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-rerun-failed-analyses', {
-            body: { pack_id: packId, user_id: session.user.id }
-        });
-        if (error) throw error;
-        dismissToast(toastId);
-        showSuccess(data.message);
-        queryClient.invalidateQueries({ queryKey: ['vtoQaReportsAndPacks', session.user.id] });
-    } catch (err: any) {
-        dismissToast(toastId);
-        showError(`Operation failed: ${err.message}`);
-    } finally {
-        setIsRerunning(null);
-    }
-  };
-
-  const handleStartRefinementPass = async (packId: string) => {
-    if (!session?.user) return;
-    setIsStartingRefinement(packId);
-    const toastId = showLoading("Starting refinement pass...");
-    try {
-      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-vto-refinement-pass', {
-        body: { pack_id: packId, user_id: session.user.id }
-      });
-      if (error) throw error;
-      dismissToast(toastId);
-      showSuccess(data.message);
-      queryClient.invalidateQueries({ queryKey: ['vtoQaReportsAndPacks', session.user.id] });
-    } catch (err: any) {
-      dismissToast(toastId);
-      showError(`Failed to start refinement pass: ${err.message}`);
-    } finally {
-      setIsStartingRefinement(null);
-    }
-  };
-
   if (isLoading) {
     return <div className="space-y-4"><Skeleton className="h-20 w-full" /><Skeleton className="h-20 w-full" /></div>;
   }
@@ -250,7 +215,7 @@ export const RecentVtoPacks = () => {
     return <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Error</AlertTitle><AlertDescription>{error.message}</AlertDescription></Alert>;
   }
 
-  if (!reports?.packs || reports.packs.length === 0) {
+  if (!queryData?.packs || queryData.packs.length === 0) {
     return <p className="text-center text-muted-foreground py-8">No recent batch jobs found.</p>;
   }
 
@@ -258,10 +223,7 @@ export const RecentVtoPacks = () => {
     <>
       <Accordion type="single" collapsible className="w-full space-y-4" onValueChange={setOpenPackId}>
         {packSummaries.map(pack => {
-          const unknownFailures = pack.failure_summary['Unknown'] || 0;
           const isRefinementPack = !!pack.metadata?.refinement_of_pack_id;
-          const hasRefinementPass = pack.has_refinement_pass;
-
           return (
             <AccordionItem key={pack.pack_id} value={pack.pack_id} className="border rounded-md">
               <AccordionTrigger className="p-4 hover:no-underline">
@@ -271,11 +233,18 @@ export const RecentVtoPacks = () => {
                       {isRefinementPack && <Wand2 className="h-5 w-5 text-purple-500" />}
                       <span>{pack.metadata?.name || `Pack from ${new Date(pack.created_at).toLocaleString()}`}</span>
                     </p>
-                    <p className="text-sm text-muted-foreground">
-                      {pack.completed_jobs} / {pack.metadata?.total_pairs || pack.total_jobs} completed
-                    </p>
+                    <div className="flex items-center gap-2 mt-2">
+                      <Progress value={(pack.completed_jobs / (pack.metadata?.total_pairs || 1)) * 100} className="h-2 w-32" />
+                      <p className="text-sm text-muted-foreground">
+                        {pack.completed_jobs} / {pack.metadata?.total_pairs || pack.total_jobs} completed
+                      </p>
+                    </div>
                   </div>
                   <div className="flex items-center gap-2">
+                    <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); setPackToAnalyze(pack); }}>
+                      {isAnalyzing === pack.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <BarChart2 className="h-4 w-4 mr-2" />}
+                      Analyze
+                    </Button>
                     <Link to={`/vto-reports/${pack.pack_id}`} onClick={(e) => e.stopPropagation()}>
                       <Button variant="outline" size="sm">View Report</Button>
                     </Link>
