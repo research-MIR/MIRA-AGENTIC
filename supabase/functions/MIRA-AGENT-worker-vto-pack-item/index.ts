@@ -105,29 +105,9 @@ serve(async (req) => {
   let job;
 
   try {
-    // --- ATOMIC UPDATE TO CLAIM THE JOB ---
-    const { data: claimedJobs, error: claimError, count } = await supabase
-      .from('mira-agent-bitstudio-jobs')
-      .update({ status: 'processing' })
-      .eq('id', pair_job_id)
-      .in('status', ['pending', 'queued'])
-      .select('*');
-
-    if (claimError) {
-        console.error(`${logPrefix} Error trying to claim job:`, claimError.message);
-        throw claimError;
-    }
-
-    if (!claimedJobs || count === 0) {
-        console.log(`${logPrefix} Job was already claimed by another instance or is not in a startable state. Exiting gracefully.`);
-        return new Response(JSON.stringify({ success: true, message: "Job already claimed or not in a valid state for processing." }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            status: 200,
-        });
-    }
-    // --- END OF ATOMIC UPDATE ---
-    job = claimedJobs[0];
-    console.log(`${logPrefix} Successfully claimed job. Proceeding with step: ${job.metadata?.google_vto_step || 'start'}`);
+    const { data: fetchedJob, error: fetchError } = await supabase.from('mira-agent-bitstudio-jobs').select('*').eq('id', pair_job_id).single();
+    if (fetchError) throw new Error(fetchError.message || 'Failed to fetch job.');
+    job = fetchedJob;
 
     if (reframe_result_url) {
         console.log(`${logPrefix} Received reframe result. Finalizing job.`);
@@ -138,6 +118,7 @@ serve(async (req) => {
         console.log(`${logPrefix} Received BitStudio fallback result. Running final quality check.`);
         await handleQualityCheck(supabase, job, logPrefix, bitstudio_result_url);
     } else {
+        console.log(`${logPrefix} Starting job.`);
         const step = job.metadata?.google_vto_step || 'start';
         console.log(`${logPrefix} Current step: ${step}`);
         switch (step) {
@@ -422,8 +403,8 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
         
         await supabase.from('mira-agent-bitstudio-jobs').update({
             metadata: { ...metadata, qa_history: qa_history, qa_best_image_base64: bestImageBase64, google_vto_step: 'outfit_completeness_check' }
-        }).eq('id', job.id);
-        invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
+        }).eq('id', pair_job_id);
+        invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id });
     }
 }
 
