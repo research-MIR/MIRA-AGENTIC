@@ -306,7 +306,9 @@ async function handlePollingPosesState(supabase: any, job: any) {
     const queueData = await queueResponse.json();
 
     for (const [index, poseJob] of updatedPoseJobs.entries()) {
-        if (poseJob.status === 'complete' || poseJob.status === 'failed' || poseJob.status === 'analyzing') continue;
+        if (poseJob.status === 'complete' || poseJob.status === 'failed' || poseJob.status === 'analyzing' || !poseJob.comfyui_prompt_id) {
+            continue;
+        }
 
         const isJobInQueue = queueData.queue_running.some((item: any) => item[1] === poseJob.comfyui_prompt_id) || 
                              queueData.queue_pending.some((item: any) => item[1] === poseJob.comfyui_prompt_id);
@@ -321,7 +323,7 @@ async function handlePollingPosesState(supabase: any, job: any) {
         
         if (historyResponse.ok) {
             const historyData = await historyResponse.json();
-            const promptHistory = historyData[job.comfyui_prompt_id];
+            const promptHistory = historyData[poseJob.comfyui_prompt_id];
             const outputNode = await findOutputImage(promptHistory?.outputs, FINAL_OUTPUT_NODE_ID_POSE, FALLBACK_NODE_IDS_POSE);
             if (outputNode) {
                 const image = outputNode;
