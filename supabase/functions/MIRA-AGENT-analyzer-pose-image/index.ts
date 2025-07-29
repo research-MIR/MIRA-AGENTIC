@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
+import { GoogleGenAI, Content, Part, HarmCategory, HarmBlockThreshold, GenerationResult } from 'https://esm.sh/@google/genai@0.15.0';
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { GoogleGenAI, Content, Part } from 'https://esm.sh/@google/genai@0.15.0';
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
@@ -13,34 +13,55 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const systemPrompt = `You are a "Quality Assurance AI" for a photorealistic model generation pipeline. You will be given two images: a "BASE MODEL" image (showing the model in neutral underwear) and a "GENERATED POSE" image. Your sole task is to analyze the "GENERATED POSE" and return a structured JSON object.
+const systemPrompt = `You are a "Quality Assurance AI" for a photorealistic model generation pipeline. You will be given a user's creative brief and four images of the same human model, labeled "Image 0", "Image 1", "Image 2", and "Image 3". Your sole task is to evaluate them and choose the single best one that matches the brief, and identify the model's gender.
 
-### Task 1: Shoot Focus Analysis
-Analyze the framing of the "GENERATED POSE" image to determine the shoot focus. You MUST use the following logic:
-1.  Could at least 40% of a typical upper-body garment (like a t-shirt or blazer) be visible in this shot?
-2.  If NO, the shoot focus is **"lower_body"**.
-3.  If YES, then ask: Could at least 40% of a typical lower-body garment (like trousers or a skirt) be visible?
-4.  If NO, the shoot focus is **"upper_body"**.
-5.  If YES to both questions, the shoot focus is **"full_body"**.
+### Evaluation Criteria (in order of importance):
+1.  **Pose Compliance (Highest Priority):** The model MUST be in a neutral, frontal, standing A-pose with arms relaxed at the sides and a neutral facial expression. Reject any image with a dynamic, angled, or expressive pose, even if it is otherwise high quality. The goal is a clean, standard e-commerce base model.
+2.  **Prompt Coherence:** Does the model in the image accurately reflect the user's 'Model Description'? (e.g., if the user asked for "long blonde hair," does the model have it?).
+3.  **Anatomical Correctness:** The model must have realistic human anatomy. Check for common AI errors like incorrect hands, distorted limbs, or unnatural facial features. Reject any image with clear anatomical flaws.
+4.  **Photorealism:** The image should look like a real photograph. Assess the skin texture, lighting, and overall quality.
+5.  **Aesthetic Appeal (Tie-breaker only):** If multiple images perfectly satisfy all the above criteria, use general aesthetic appeal as the final deciding factor.
 
-### Task 2: Garment Analysis
-1.  Identify the primary garment the model is wearing in the "GENERATED POSE" image (e.g., "simple grey bra," "blue denim jacket").
-2.  Classify the body part that this garment covers. The value MUST be one of: **"upper_body"**, **"lower_body"**, or **"full_body"**.
+### Gender Identification:
+After selecting the best image, you MUST identify the gender of the model. The value must be one of two strings: "male" or "female".
 
-### Task 3: Visual Comparison (CRITICAL)
-You must perform a direct visual comparison. Is the garment worn in the "GENERATED POSE" image the **exact, identical, pixel-for-pixel same garment** as the one worn in the "BASE MODEL" image? Your answer for the \`is_identical_to_base_garment\` field must be a boolean (\`true\` or \`false\`). Be extremely strict. Any change in color, shape, texture, or style means it is not identical.
+### Your Output:
+Your entire response MUST be a single, valid JSON object with TWO keys: "best_image_index" and "gender".
 
-### Output Format
-Your entire response MUST be a single, valid JSON object with the following structure. Do not include any other text or explanations.
-
+**Example Output:**
+\`\`\`json
 {
-  "shoot_focus": "upper_body" | "lower_body" | "full_body",
-  "garment": {
-    "description": "A concise text description of the garment.",
-    "coverage": "upper_body" | "lower_body" | "full_body",
-    "is_identical_to_base_garment": true | false
-  }
-}`;
+  "best_image_index": 2,
+  "gender": "female"
+}
+\`\`\`
+`;
+
+async function downloadImageAsPart(supabase: SupabaseClient, publicUrl: string, label: string): Promise<Part[]> {
+    const url = new URL(publicUrl);
+    const pathSegments = url.pathname.split('/');
+    
+    const objectSegmentIndex = pathSegments.indexOf('object');
+    if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) {
+        throw new Error(`Could not parse bucket name from Supabase URL: ${publicUrl}`);
+    }
+    
+    const bucketName = pathSegments[objectSegmentIndex + 2];
+    const filePath = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
+
+    if (!bucketName || !filePath) {
+        throw new Error(`Could not parse bucket or path from Supabase URL: ${publicUrl}`);
+    }
+
+    const { data: fileBlob, error: downloadError } = await supabase.storage.from(bucketName).download(filePath);
+    if (downloadError) throw new Error(`Supabase download failed for ${label}: ${downloadError.message}`);
+
+    const mimeType = fileBlob.type;
+    const buffer = await fileBlob.arrayBuffer();
+    const base64 = encodeBase64(buffer);
+
+    return [{ text: `--- ${label} ---` }, { inlineData: { mimeType, data: base64 } }];
+}
 
 function extractJson(text: string): any {
     const match = text.match(/```json\s*([\s\S]*?)\s*```/);
@@ -48,18 +69,6 @@ function extractJson(text: string): any {
     try { return JSON.parse(text); } catch (e) {
         throw new Error("The model returned a response that could not be parsed as JSON.");
     }
-}
-
-async function downloadImageAsPart(supabase: SupabaseClient, publicUrl: string): Promise<Part[]> {
-    const url = new URL(publicUrl);
-    const pathSegments = url.pathname.split('/');
-    const bucketName = pathSegments[pathSegments.indexOf('public') + 1];
-    const filePath = decodeURIComponent(pathSegments.slice(pathSegments.indexOf(bucketName) + 1).join('/'));
-    const { data, error } = await supabase.storage.from(bucketName).download(filePath);
-    if (error) throw new Error(`Failed to download image from storage: ${error.message}`);
-    const buffer = await data.arrayBuffer();
-    const base64 = encodeBase64(buffer);
-    return [{ inlineData: { mimeType: data.type, data: base64 } }];
 }
 
 serve(async (req) => {
@@ -72,14 +81,20 @@ serve(async (req) => {
 
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
   const logPrefix = `[PoseAnalyzer][${job_id}]`;
-  console.log(`${logPrefix} Analyzing pose: "${pose_prompt}"`);
+  const isBasePoseAnalysis = image_url === base_model_image_url;
+
+  if (isBasePoseAnalysis) {
+    console.log(`${logPrefix} [BASE POSE ANALYSIS] Starting analysis for base A-pose model.`);
+  } else {
+    console.log(`${logPrefix} Analyzing pose: "${pose_prompt}"`);
+  }
 
   try {
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
     
     const [poseImageParts, baseModelImageParts] = await Promise.all([
-        downloadImageAsPart(supabase, image_url),
-        downloadImageAsPart(supabase, base_model_image_url)
+        downloadImageAsPart(supabase, image_url, "GENERATED POSE"),
+        downloadImageAsPart(supabase, base_model_image_url, "BASE MODEL")
     ]);
 
     const finalParts: Part[] = [
@@ -97,7 +112,11 @@ serve(async (req) => {
     });
 
     const analysisResult = extractJson(result.text);
-    console.log(`${logPrefix} Analysis complete:`, JSON.stringify(analysisResult));
+    if (isBasePoseAnalysis) {
+        console.log(`${logPrefix} [BASE POSE ANALYSIS] Analysis complete. Result:`, JSON.stringify(analysisResult));
+    } else {
+        console.log(`${logPrefix} Analysis complete:`, JSON.stringify(analysisResult));
+    }
 
     // Fetch the job, update the specific pose, and save it back
     const { data: job, error: fetchError } = await supabase
@@ -126,14 +145,22 @@ serve(async (req) => {
 
     if (updateError) throw updateError;
 
-    console.log(`${logPrefix} Successfully saved analysis to job.`);
+    if (isBasePoseAnalysis) {
+        console.log(`${logPrefix} [BASE POSE ANALYSIS] Successfully saved analysis to job.`);
+    } else {
+        console.log(`${logPrefix} Successfully saved analysis to job.`);
+    }
     return new Response(JSON.stringify({ success: true, analysis: analysisResult }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });
 
   } catch (error) {
-    console.error(`${logPrefix} Error:`, error);
+    if (isBasePoseAnalysis) {
+        console.error(`${logPrefix} [BASE POSE ANALYSIS] Error:`, error);
+    } else {
+        console.error(`${logPrefix} Error:`, error);
+    }
     // Attempt to mark the pose as failed so it doesn't get stuck in 'analyzing'
     try {
         const { data: job, error: fetchError } = await supabase.from('mira-agent-model-generation-jobs').select('final_posed_images').eq('id', job_id).single();

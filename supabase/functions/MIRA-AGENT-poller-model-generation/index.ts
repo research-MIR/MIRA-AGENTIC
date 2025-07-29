@@ -171,7 +171,7 @@ serve(async (req) => {
     return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
 
   } catch (error) {
-    console.error(`[ModelGenPoller][${job_id}] Error:`, error);
+    console.error(`[ModelGenPoller][${job.id}] Error:`, error);
     await supabase.from('mira-agent-model-generation-jobs').update({ status: 'failed', error_message: error.message }).eq('id', job_id);
     return new Response(JSON.stringify({ error: error.message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
   }
@@ -243,6 +243,7 @@ async function handleBaseGenerationCompleteState(supabase: any, job: any) {
 async function handleGeneratingPosesState(supabase: any, job: any) {
     console.log(`[ModelGenPoller][${job.id}] State: GENERATING_POSES.`);
     
+    console.log(`[ModelGenPoller][${job.id}] [BASE POSE ANALYSIS] Creating special job for base A-pose.`);
     const basePose = {
         pose_prompt: "Neutral A-pose, frontal",
         comfyui_prompt_id: null,
@@ -252,6 +253,7 @@ async function handleGeneratingPosesState(supabase: any, job: any) {
     };
 
     // Immediately trigger analysis for the base pose
+    console.log(`[ModelGenPoller][${job.id}] [BASE POSE ANALYSIS] Invoking analyzer for base A-pose.`);
     supabase.functions.invoke('MIRA-AGENT-analyzer-pose-image', {
         body: {
             job_id: job.id,
@@ -260,7 +262,7 @@ async function handleGeneratingPosesState(supabase: any, job: any) {
             pose_prompt: basePose.pose_prompt
         }
     }).catch(err => {
-        console.error(`[ModelGenPoller][${job.id}] Failed to invoke analyzer for base pose:`, err);
+        console.error(`[ModelGenPoller][${job.id}] [BASE POSE ANALYSIS] CRITICAL: Failed to invoke analyzer for base pose:`, err);
     });
 
     const poseJobs = [basePose];
