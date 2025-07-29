@@ -106,30 +106,27 @@ serve(async (req) => {
 
   try {
     // --- ATOMIC UPDATE TO CLAIM THE JOB ---
-    const { data: claimedJob, error: claimError } = await supabase
+    const { data: claimedJobs, error: claimError, count } = await supabase
       .from('mira-agent-bitstudio-jobs')
       .update({ status: 'processing' })
       .eq('id', pair_job_id)
       .in('status', ['pending', 'queued'])
-      .select('*')
-      .single();
+      .select('*');
 
     if (claimError) {
         console.error(`${logPrefix} Error trying to claim job:`, claimError.message);
         throw claimError;
     }
 
-    if (!claimedJob) {
-        console.log(`${logPrefix} Job was already claimed or is not in a startable state. Checking current status...`);
-        const { data: currentJob } = await supabase.from('mira-agent-bitstudio-jobs').select('status').eq('id', pair_job_id).single();
-        console.log(`${logPrefix} Current job status is '${currentJob?.status}'. Exiting gracefully.`);
-        return new Response(JSON.stringify({ success: true, message: "Job already claimed or not in a valid state." }), {
+    if (!claimedJobs || count === 0) {
+        console.log(`${logPrefix} Job was already claimed by another instance or is not in a startable state. Exiting gracefully.`);
+        return new Response(JSON.stringify({ success: true, message: "Job already claimed or not in a valid state for processing." }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
             status: 200,
         });
     }
     // --- END OF ATOMIC UPDATE ---
-    job = claimedJob;
+    job = claimedJobs[0];
     console.log(`${logPrefix} Successfully claimed job. Proceeding with step: ${job.metadata?.google_vto_step || 'start'}`);
 
     if (reframe_result_url) {
@@ -425,8 +422,8 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
         
         await supabase.from('mira-agent-bitstudio-jobs').update({
             metadata: { ...metadata, qa_history: qa_history, qa_best_image_base64: bestImageBase64, google_vto_step: 'outfit_completeness_check' }
-        }).eq('id', pair_job_id);
-        invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id });
+        }).eq('id', job.id);
+        invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
     }
 }
 
