@@ -1,18 +1,22 @@
 // Forcing redeployment to sync secrets
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+
 const COMFYUI_ENDPOINT_URL = Deno.env.get('COMFYUI_ENDPOINT_URL');
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const UPLOAD_BUCKET = 'mira-agent-user-uploads';
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS"
 };
+
 // --- CONFIGURABLE PROMPTS ---
 const EDITING_TASK_WITH_IMAGE_REFERENCE = "change their pose to match my reference, keep everything else the same";
 const EDITING_TASK_WITH_TEXT_REFERENCE = "change their pose to match my reference, IGNORE EVERYTHING ELSE OUTSIDE OF THE POSE, keep everything else the same";
+
 const GEMINI_SYSTEM_PROMPT = `You are an expert prompt engineer for a powerful image-to-image editing model called "Kontext". Your sole purpose is to receive a user's editing request and image(s), and translate that request into a single, optimized, and highly effective prompt for the Kontext model. The final prompt must be in English and must not exceed 512 tokens.
 Your process is to first apply the General Principles, then the crucial Reference Image Handling rule, and finally review the Advanced Examples to guide your prompt construction.
 
@@ -71,17 +75,8 @@ Summary of Your Task:
 
 IF YOU SEE THE SAME IDENTICAL IMAGE TWO TIMES, IGNORE THE REPETITION, FOCUS ON THE FIRST COPY
 
-NOTES:
-IF YOU ARE TASKED WITH ADDING A LOWER BODY GARMENT YOU CANNOT MODIFY OR EDIT AT ALL THE FEETS IF EXPOSED - AND IF YOU HAVE MAKE THEM WEAR A COHERENT PAIR OF SHOES - CLOSED SHOES
-IF YOU ARE GENERATING AN UPPER BODY GARMENT GENERATE IT CLOSED IF NOT REQUESTED OTHERWISE - AND TRY TO NOT EDIT TOUCH OR MODIFY HANDS IF POSSIBLE
-IF THE USER ASKS YOU TO PUT A GARMENT ON THE MODEL FOR THE POSE YOU HAVE TO ONLY ADD THAT GARMENT, WITHOUT COMPLITING THE OUTFIT (AND YOU PROMPT MUST MAKE VER YCLEAR THAT TH REST REMAINS IDENTICAL OUTSIDE OF THE SWAP) - OBVIUSLY LOWER BODY AND SHOES DO NOT CONFLICT ONE ANOTHWER
-IF THE USER ASKS TO ADD A GARMENT YOU CANNOT NOT INCLUDE THAT INTO THE PROMPT - THAT MUST BE PART OF THE FINAL ISTRUCTION
-IF THE USER ASKS FOR GARMENTS USUALLY WORN OPEN CLARIFY I NTHE ISTRUCTION THAT THEY ARE BEING WORN CLOSED OR THAT THERE IS A GARMENT UNDER THEM, LIKE A TSHIRT
-
-ANATHOMIC NOTE:
-TRY TO CHANGE THE LEAST AMOUNT POSSIBLE HANDS OR FEET 
-
 Your output is NOT a conversation; it is ONLY the final, optimized prompt. Analyze the request and the single image canvas. Apply all relevant principles, especially the Hyper-Detailed Identity Lockdown and the Golden Rule of Reference Handling, to construct a single, precise, and explicit instruction. Describe what to change, but describe what to keep in even greater detail.`;
+
 const unifiedWorkflowTemplate = `{
   "6": {
     "inputs": {
@@ -495,105 +490,105 @@ const unifiedWorkflowTemplate = `{
     }
   }
 }`;
-async function downloadFromSupabase(supabase, publicUrl) {
-  const url = new URL(publicUrl);
-  const pathSegments = url.pathname.split('/');
-  const bucketName = pathSegments[pathSegments.indexOf('public') + 1];
-  const filePath = pathSegments.slice(pathSegments.indexOf(bucketName) + 1).join('/');
-  const { data, error } = await supabase.storage.from(bucketName).download(filePath);
-  if (error) throw new Error(`Supabase download failed: ${error.message}`);
-  return data;
+
+async function downloadFromSupabase(supabase: any, publicUrl: string): Promise<Blob> {
+    const url = new URL(publicUrl);
+    const pathSegments = url.pathname.split('/');
+    const bucketName = pathSegments[pathSegments.indexOf('public') + 1];
+    const filePath = pathSegments.slice(pathSegments.indexOf(bucketName) + 1).join('/');
+    const { data, error } = await supabase.storage.from(bucketName).download(filePath);
+    if (error) throw new Error(`Supabase download failed: ${error.message}`);
+    return data;
 }
-async function uploadToComfyUI(comfyUiUrl, imageBlob, filename) {
+
+async function uploadToComfyUI(comfyUiUrl: string, imageBlob: Blob, filename: string) {
   const formData = new FormData();
   formData.append('image', imageBlob, filename);
   formData.append('overwrite', 'true');
   const uploadUrl = `${comfyUiUrl}/upload/image`;
-  const response = await fetch(uploadUrl, {
-    method: 'POST',
-    body: formData
-  });
+  const response = await fetch(uploadUrl, { method: 'POST', body: formData });
   if (!response.ok) throw new Error(`ComfyUI upload failed: ${await response.text()}`);
   const data = await response.json();
   return data.name;
 }
-serve(async (req)=>{
+
+serve(async (req) => {
   const requestId = `pose-generator-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
-  if (req.method === 'OPTIONS') {
-    return new Response(null, {
-      headers: corsHeaders
-    });
-  }
+  if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
   if (!COMFYUI_ENDPOINT_URL) throw new Error("COMFYUI_ENDPOINT_URL is not set.");
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+  const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
   const sanitizedAddress = COMFYUI_ENDPOINT_URL.replace(/\/+$/, "");
+
   try {
     const { base_model_url, pose_prompt, pose_image_url } = await req.json();
     if (!base_model_url || !pose_prompt) {
       throw new Error("base_model_url and pose_prompt are required.");
     }
+
     console.log(`[PoseGenerator][${requestId}] Downloading base model from: ${base_model_url}`);
     const baseModelBlob = await downloadFromSupabase(supabase, base_model_url);
     const uniqueBaseModelFilename = `base_model_${requestId}.png`;
     const baseModelFilename = await uploadToComfyUI(sanitizedAddress, baseModelBlob, uniqueBaseModelFilename);
     console.log(`[PoseGenerator][${requestId}] Base model uploaded to ComfyUI as: ${baseModelFilename}`);
+
     const finalWorkflow = JSON.parse(unifiedWorkflowTemplate);
+
     // Set the base image and the main system prompt for Gemini
     finalWorkflow['214'].inputs.image = baseModelFilename;
     finalWorkflow['195'].inputs.String = GEMINI_SYSTEM_PROMPT;
+    
     if (pose_image_url) {
       console.log(`[PoseGenerator][${requestId}] Pose reference image provided. Downloading from: ${pose_image_url}`);
       const poseImageBlob = await downloadFromSupabase(supabase, pose_image_url);
       const uniquePoseRefFilename = `pose_ref_${requestId}.png`;
       const poseImageFilename = await uploadToComfyUI(sanitizedAddress, poseImageBlob, uniquePoseRefFilename);
+      
       // Set up the workflow for image reference
       finalWorkflow['215'].inputs.image = poseImageFilename;
       finalWorkflow['230'].inputs.Number = "2"; // Switch to use image reference path
+
       finalWorkflow['193'].inputs.String = EDITING_TASK_WITH_IMAGE_REFERENCE;
-      finalWorkflow['217'].inputs.String = "";
+      finalWorkflow['217'].inputs.String = ""; 
+
       console.log(`[PoseGenerator][${requestId}] Pose reference uploaded as: ${poseImageFilename}. Switch set to 2.`);
     } else {
       console.log(`[PoseGenerator][${requestId}] No pose reference image provided. Using text prompt. Switch set to 1.`);
+      
       finalWorkflow['230'].inputs.Number = "1"; // Switch to use text-only path
+
       const textRefTask = `${EDITING_TASK_WITH_TEXT_REFERENCE}. The user's specific instruction is: '${pose_prompt}'`;
       finalWorkflow['217'].inputs.String = textRefTask;
+
       finalWorkflow['193'].inputs.String = "";
     }
+
     const queueUrl = `${sanitizedAddress}/prompt`;
-    const payload = {
-      prompt: finalWorkflow
-    };
+    const payload = { prompt: finalWorkflow };
+    
     console.log(`[PoseGenerator][${requestId}] Sending final payload to ComfyUI...`);
+
     const response = await fetch(queueUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
     if (!response.ok) throw new Error(`ComfyUI server error: ${await response.text()}`);
+    
     const data = await response.json();
     if (!data.prompt_id) throw new Error("ComfyUI did not return a prompt_id.");
     console.log(`[PoseGenerator][${requestId}] Job queued successfully with prompt_id: ${data.prompt_id}`);
-    return new Response(JSON.stringify({
-      comfyui_prompt_id: data.prompt_id
-    }), {
-      headers: {
-        ...corsHeaders,
-        'Content-Type': 'application/json'
-      },
-      status: 200
+
+    return new Response(JSON.stringify({ comfyui_prompt_id: data.prompt_id }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      status: 200,
     });
+
   } catch (error) {
     console.error(`[PoseGenerator][${requestId}] Error:`, error);
-    return new Response(JSON.stringify({
-      error: error.message
-    }), {
-      headers: {
-        ...corsHeaders,
-        'Content-Type': 'application/json'
-      },
-      status: 500
+    return new Response(JSON.stringify({ error: error.message }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      status: 500,
     });
   }
 });
