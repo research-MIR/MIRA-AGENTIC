@@ -185,7 +185,12 @@ async function handlePendingState(supabase: any, job: any) {
     if (promptError) throw new Error(`Prompt generation failed: ${promptError.message}`);
     const finalPrompt = promptData.final_prompt;
 
-    console.log(`[ModelGenPoller][${job.id}] Base prompt generated. Generating 4 base images...`);
+    // Store the final prompt used for generation in the job's metadata
+    await supabase.from('mira-agent-model-generation-jobs').update({
+        metadata: { ...job.metadata, final_prompt_used: finalPrompt }
+    }).eq('id', job.id);
+
+    console.log(`[ModelGenPoller][${job.id}] Base prompt generated and saved. Generating 4 base images...`);
     const { data: modelDetails, error: modelError } = await supabase.from('mira-agent-models').select('provider').eq('model_id_string', job.context.selectedModelId).single();
     if (modelError) throw new Error(`Could not find model details for ${job.context.selectedModelId}`);
     
@@ -220,7 +225,8 @@ async function handleBaseGenerationCompleteState(supabase: any, job: any) {
             body: { 
                 image_urls: job.base_generation_results.map((img: any) => img.url),
                 model_description: job.model_description,
-                set_description: job.set_description
+                set_description: job.set_description,
+                final_generation_prompt: job.metadata?.final_prompt_used
             }
         });
         if (qaError) throw new Error(`Quality assurance failed: ${qaError.message}`);
