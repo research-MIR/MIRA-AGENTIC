@@ -110,7 +110,7 @@ You MUST describe the background and lighting from the source image and include 
 ### Your Output:
 Your output is NOT a conversation; it is ONLY the final, optimized prompt. Analyze the request and the single image canvas. Apply all relevant principles to construct a single, precise, and explicit instruction. Describe what to change (the garment), but describe what to keep (pose, identity, background, lighting) in even greater detail.`;
 
-const unifiedWorkflowTemplate = `{
+const twoPassWorkflowTemplate = `{
   "6": { "inputs": { "text": ["192", 0], "clip": ["212", 1] }, "class_type": "CLIPTextEncode", "_meta": { "title": "CLIP Text Encode (Positive Prompt)" } },
   "35": { "inputs": { "guidance": 3.5, "conditioning": ["177", 0] }, "class_type": "FluxGuidance", "_meta": { "title": "FluxGuidance" } },
   "37": { "inputs": { "unet_name": "flux1-kontext-dev.safetensors", "weight_dtype": "default" }, "class_type": "UNETLoader", "_meta": { "title": "Load Diffusion Model" } },
@@ -159,6 +159,36 @@ const unifiedWorkflowTemplate = `{
   "267": { "inputs": { "method": "hm-mvgd-hm", "strength": 0.30000000000000004, "image_ref": ["214", 0], "image_target": ["236", 0] }, "class_type": "ColorMatch", "_meta": { "title": "Color Match" } },
   "271": { "inputs": { "scheduler": "simple", "steps": 20, "denoise": 0.7500000000000001, "model": ["212", 0] }, "class_type": "BasicScheduler", "_meta": { "title": "BasicScheduler" } },
   "273": { "inputs": { "clamp": true, "gamma": 1, "contrast": 1, "exposure": 0, "offset": 0, "hue": 0, "saturation": 1.1000000000000003, "value": 1, "image": ["267", 0] }, "class_type": "Color Correct (mtb)", "_meta": { "title": "Color Correct (mtb)" } }
+}`;
+
+const singlePassWorkflowTemplate = `{
+  "6": { "inputs": { "text": ["192", 0], "clip": ["212", 1] }, "class_type": "CLIPTextEncode", "_meta": { "title": "CLIP Text Encode (Positive Prompt)" } },
+  "35": { "inputs": { "guidance": 3.5, "conditioning": ["177", 0] }, "class_type": "FluxGuidance", "_meta": { "title": "FluxGuidance" } },
+  "37": { "inputs": { "unet_name": "flux1-kontext-dev.safetensors", "weight_dtype": "default" }, "class_type": "UNETLoader", "_meta": { "title": "Load Diffusion Model" } },
+  "38": { "inputs": { "clip_name1": "clip_l.safetensors", "clip_name2": "t5xxl_fp16.safetensors", "type": "flux", "device": "default" }, "class_type": "DualCLIPLoader", "_meta": { "title": "DualCLIPLoader" } },
+  "39": { "inputs": { "vae_name": "ae.safetensors" }, "class_type": "VAELoader", "_meta": { "title": "Load VAE" } },
+  "124": { "inputs": { "pixels": ["214", 0], "vae": ["39", 0] }, "class_type": "VAEEncode", "_meta": { "title": "VAE Encode" } },
+  "135": { "inputs": { "conditioning": ["250", 0] }, "class_type": "ConditioningZeroOut", "_meta": { "title": "ConditioningZeroOut" } },
+  "177": { "inputs": { "conditioning": ["6", 0], "latent": ["124", 0] }, "class_type": "ReferenceLatent", "_meta": { "title": "ReferenceLatent" } },
+  "190": { "inputs": { "prompt": ["232", 0], "safety_settings": "BLOCK_NONE", "response_type": "text", "model": "gemini-2.5-pro", "api_key": "AIzaSyByuyPAPHMnftan3cvqaZRTTwlGATYinnA", "proxy": "", "system_instruction": ["195", 0], "error_fallback_value": "", "seed": 1551174521, "temperature": 0.7500000000000001, "num_predict": 0, "image_1": ["214", 0], "image_2": ["229", 0] }, "class_type": "Ask_Gemini", "_meta": { "title": "Ask Gemini" } },
+  "192": { "inputs": { "value": ["190", 0] }, "class_type": "PrimitiveString", "_meta": { "title": "String" } },
+  "193": { "inputs": { "String": "change their pose to match my reference, keep everything else the same,IGNORE EVERYTHING ELSE OUTSIDE OF THE POSE" }, "class_type": "String", "_meta": { "title": "editing task" } },
+  "195": { "inputs": { "String": "placeholder_for_system_prompt" }, "class_type": "String", "_meta": { "title": "roleprompt for editing task" } },
+  "196": { "inputs": { "cfg": 1, "nag_scale": 7.5, "nag_tau": 2.5, "nag_alpha": 0.25, "nag_sigma_end": 0.75, "model": ["212", 0], "positive": ["35", 0], "negative": ["135", 0], "nag_negative": ["198", 0], "latent_image": ["124", 0] }, "class_type": "NAGCFGGuider", "_meta": { "title": "NAGCFGGuider" } },
+  "197": { "inputs": { "noise": ["200", 0], "guider": ["196", 0], "sampler": ["202", 0], "sigmas": ["204", 0], "latent_image": ["124", 0] }, "class_type": "SamplerCustomAdvanced", "_meta": { "title": "SamplerCustomAdvanced" } },
+  "198": { "inputs": { "conditioning": ["250", 0] }, "class_type": "ConditioningZeroOut", "_meta": { "title": "ConditioningZeroOut" } },
+  "200": { "inputs": { "noise_seed": 315883858628164 }, "class_type": "RandomNoise", "_meta": { "title": "RandomNoise" } },
+  "202": { "inputs": { "sampler_name": "euler" }, "class_type": "KSamplerSelect", "_meta": { "title": "KSamplerSelect" } },
+  "204": { "inputs": { "scheduler": "simple", "steps": 20, "denoise": 0.8500000000000002, "model": ["37", 0] }, "class_type": "BasicScheduler", "_meta": { "title": "BasicScheduler" } },
+  "212": { "inputs": { "lora_name": "42lux-UltimateAtHome-flux-highresfix%20(1).safetensors", "strength_model": 0.12000000000000002, "strength_clip": 0.12000000000000002, "model": ["37", 0], "clip": ["38", 0] }, "class_type": "LoraLoader", "_meta": { "title": "Load LoRA" } },
+  "213": { "inputs": { "filename_prefix": "ComfyUI", "images": ["254", 0] }, "class_type": "SaveImage", "_meta": { "title": "Output_BackUP-version" } },
+  "214": { "inputs": { "image": "ComfyUI_00110_.png" }, "class_type": "LoadImage", "_meta": { "title": "Original_Image" } },
+  "215": { "inputs": { "image": "ComfyUI_00111_.png" }, "class_type": "LoadImage", "_meta": { "title": "Pose_image" } },
+  "229": { "inputs": { "select": ["230", 0], "images1": ["214", 0], "images2_opt": ["215", 0] }, "class_type": "ImageMaskSwitch", "_meta": { "title": "Switch (images, mask)" } },
+  "230": { "inputs": { "Number": "1" }, "class_type": "Int", "_meta": { "title": "Switch with reference (2) or not (1) PROMPT" } },
+  "232": { "inputs": { "select": ["230", 0], "sel_mode": false, "input1": ["193", 0], "input2": ["193", 0] }, "class_type": "ImpactSwitch", "_meta": { "title": "Switch (Any)" } },
+  "250": { "inputs": { "text": "", "clip": ["212", 1] }, "class_type": "CLIPTextEncode", "_meta": { "title": "CLIP Text Encode (Positive Prompt)" } },
+  "254": { "inputs": { "samples": ["197", 0], "vae": ["39", 0] }, "class_type": "VAEDecode", "_meta": { "title": "VAE Decode" } }
 }`;
 
 async function downloadFromSupabase(supabase: any, publicUrl: string): Promise<Blob> {
@@ -217,38 +247,39 @@ serve(async (req) => {
     const { task_type } = extractJson(triageResult.text);
     console.log(`[PoseGenerator][${requestId}] Intent classified as: '${task_type}'`);
 
-    // --- Step 2: Select the appropriate system prompt and dynamic task descriptions ---
+    // --- Step 2: Select workflow and configure prompts ---
+    let finalWorkflowString: string;
     let selectedSystemPrompt: string;
     let editingTaskWithImage: string;
     let editingTaskWithText: string;
 
-    switch (task_type) {
-        case 'garment':
+    if (task_type === 'both') {
+        finalWorkflowString = twoPassWorkflowTemplate;
+        selectedSystemPrompt = POSE_CHANGE_SYSTEM_PROMPT; // Pass 1 is always pose
+        editingTaskWithImage = "change their pose and garment to match my reference, keep everything else the same";
+        editingTaskWithText = "change their pose and garment to match my reference, IGNORE EVERYTHING ELSE OUTSIDE OF THE POSE AND GARMENT, keep everything else the same";
+    } else {
+        finalWorkflowString = singlePassWorkflowTemplate;
+        if (task_type === 'garment') {
             selectedSystemPrompt = GARMENT_SWAP_SYSTEM_PROMPT;
             editingTaskWithImage = "change their garment to match my reference, keep everything else the same";
             editingTaskWithText = "change their garment to match my reference, IGNORE EVERYTHING ELSE OUTSIDE OF THE GARMENT, keep everything else the same";
-            break;
-        case 'both':
-            selectedSystemPrompt = POSE_CHANGE_SYSTEM_PROMPT; // Defaulting to pose for now
-            editingTaskWithImage = "change their pose and garment to match my reference, keep everything else the same";
-            editingTaskWithText = "change their pose and garment to match my reference, IGNORE EVERYTHING ELSE OUTSIDE OF THE POSE AND GARMENT, keep everything else the same";
-            break;
-        case 'pose':
-        default:
+        } else { // 'pose'
             selectedSystemPrompt = POSE_CHANGE_SYSTEM_PROMPT;
             editingTaskWithImage = "change their pose to match my reference, keep everything else the same";
             editingTaskWithText = "change their pose to match my reference, IGNORE EVERYTHING ELSE OUTSIDE OF THE POSE, keep everything else the same";
-            break;
+        }
     }
 
-    // --- Step 3: Proceed with the original logic, but using the selected prompt and tasks ---
-    console.log(`[PoseGenerator][${requestId}] Step 2: Downloading base model from: ${base_model_url}`);
+    const finalWorkflow = JSON.parse(finalWorkflowString);
+
+    // --- Step 3: Populate workflow with assets and prompts ---
+    console.log(`[PoseGenerator][${requestId}] Step 3: Downloading base model from: ${base_model_url}`);
     const baseModelBlob = await downloadFromSupabase(supabase, base_model_url);
     const uniqueBaseModelFilename = `base_model_${requestId}.png`;
     const baseModelFilename = await uploadToComfyUI(sanitizedAddress, baseModelBlob, uniqueBaseModelFilename);
     console.log(`[PoseGenerator][${requestId}] Base model uploaded to ComfyUI as: ${baseModelFilename}`);
 
-    const finalWorkflow = JSON.parse(unifiedWorkflowTemplate);
     finalWorkflow['214'].inputs.image = baseModelFilename;
     finalWorkflow['195'].inputs.String = selectedSystemPrompt;
     
@@ -261,29 +292,25 @@ serve(async (req) => {
       finalWorkflow['215'].inputs.image = poseImageFilename;
       finalWorkflow['230'].inputs.Number = "2";
       finalWorkflow['193'].inputs.String = editingTaskWithImage;
-      finalWorkflow['217'].inputs.String = ""; 
+      if (finalWorkflow['217']) finalWorkflow['217'].inputs.String = ""; 
       console.log(`[PoseGenerator][${requestId}] Pose reference uploaded as: ${poseImageFilename}.`);
     } else {
       console.log(`[PoseGenerator][${requestId}] No pose reference image provided. Using text prompt.`);
       finalWorkflow['230'].inputs.Number = "1";
       const textRefTask = `${editingTaskWithText}. The user's specific instruction is: '${pose_prompt}'`;
-      finalWorkflow['217'].inputs.String = textRefTask;
+      if (finalWorkflow['217']) finalWorkflow['217'].inputs.String = textRefTask;
       finalWorkflow['193'].inputs.String = "";
     }
 
-    // --- NEW: Inject the garment request into the second pass ---
-    if (task_type === 'garment' || task_type === 'both') {
+    if (task_type === 'both') {
+        finalWorkflow['253'].inputs.String = GARMENT_SWAP_SYSTEM_PROMPT;
         finalWorkflow['257'].inputs.String = pose_prompt;
-    } else {
-        // If it's just a pose change, we don't need a garment prompt for the second pass.
-        // We can use a neutral placeholder or an empty string.
-        finalWorkflow['257'].inputs.String = "a person"; 
     }
 
     const queueUrl = `${sanitizedAddress}/prompt`;
     const payload = { prompt: finalWorkflow };
     
-    console.log(`[PoseGenerator][${requestId}] Step 3: Sending final payload to ComfyUI...`);
+    console.log(`[PoseGenerator][${requestId}] Step 4: Sending final payload to ComfyUI...`);
     const response = await fetch(queueUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
