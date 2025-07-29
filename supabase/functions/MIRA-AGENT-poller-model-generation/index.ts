@@ -254,45 +254,61 @@ async function handleGeneratingPosesState(supabase: any, job: any) {
     const basePose = {
         pose_prompt: "Neutral A-pose, frontal",
         comfyui_prompt_id: null,
-        status: 'analyzing', // Set to analyzing immediately
+        status: 'analyzing',
         final_url: job.base_model_image_url,
         is_upscaled: false,
-        analysis_started_at: new Date().toISOString(), // Add timestamp
+        analysis_started_at: new Date().toISOString(),
     };
 
-    // Immediately trigger analysis for the base pose
     supabase.functions.invoke('MIRA-AGENT-analyzer-pose-image', {
         body: {
             job_id: job.id,
             image_url: job.base_model_image_url,
-            base_model_image_url: job.base_model_image_url, // It's its own base
+            base_model_image_url: job.base_model_image_url,
             pose_prompt: basePose.pose_prompt
         }
-    }).catch(err => {
-        console.error(`[ModelGenPoller][${job.id}] ERROR: Failed to invoke analyzer for base pose:`, err);
-    });
+    }).catch(err => console.error(`[ModelGenPoller][${job.id}] ERROR: Failed to invoke analyzer for base pose:`, err));
 
-    const poseJobs = [basePose];
-
-    for (const pose of job.pose_prompts) {
+    const poseGenerationPromises = job.pose_prompts.map((pose: any) => {
         const payload = {
             base_model_url: job.base_model_image_url,
             pose_prompt: pose.value,
             pose_image_url: pose.type === 'image' ? pose.value : null,
         };
-        const { data: result, error } = await supabase.functions.invoke('MIRA-AGENT-tool-comfyui-pose-generator', { body: payload });
-        if (error) throw error;
-        poseJobs.push({
-            pose_prompt: pose.value,
-            comfyui_prompt_id: result.comfyui_prompt_id,
-            status: 'processing',
-            final_url: null,
-            is_upscaled: false,
-        });
-    }
+        return supabase.functions.invoke('MIRA-AGENT-tool-comfyui-pose-generator', { body: payload });
+    });
+
+    const results = await Promise.allSettled(poseGenerationPromises);
+
+    const newPoseJobs = results.map((result, index) => {
+        const originalPose = job.pose_prompts[index];
+        if (result.status === 'fulfilled' && result.value.data?.comfyui_prompt_id) {
+            return {
+                pose_prompt: originalPose.value,
+                comfyui_prompt_id: result.value.data.comfyui_prompt_id,
+                status: 'processing',
+                final_url: null,
+                is_upscaled: false,
+            };
+        } else {
+            const errorMessage = result.status === 'rejected' ? result.reason.message : 'Failed to get prompt_id';
+            console.error(`[ModelGenPoller][${job.id}] Failed to dispatch pose job for prompt "${originalPose.value}": ${errorMessage}`);
+            return {
+                pose_prompt: originalPose.value,
+                comfyui_prompt_id: null,
+                status: 'failed',
+                error_message: errorMessage,
+                final_url: null,
+                is_upscaled: false,
+            };
+        }
+    });
+
+    const finalPoseArray = [basePose, ...newPoseJobs];
+
     await supabase.from('mira-agent-model-generation-jobs').update({ 
         status: 'polling_poses', 
-        final_posed_images: poseJobs 
+        final_posed_images: finalPoseArray 
     }).eq('id', job.id);
     
     console.log(`[ModelGenPoller][${job.id}] All pose jobs dispatched. Re-invoking poller to start polling.`);
