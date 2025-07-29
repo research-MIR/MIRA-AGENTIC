@@ -246,10 +246,22 @@ async function handleGeneratingPosesState(supabase: any, job: any) {
     const basePose = {
         pose_prompt: "Neutral A-pose, frontal",
         comfyui_prompt_id: null,
-        status: 'complete',
+        status: 'analyzing', // Set to analyzing immediately
         final_url: job.base_model_image_url,
         is_upscaled: false,
     };
+
+    // Immediately trigger analysis for the base pose
+    supabase.functions.invoke('MIRA-AGENT-analyzer-pose-image', {
+        body: {
+            job_id: job.id,
+            image_url: job.base_model_image_url,
+            base_model_image_url: job.base_model_image_url, // It's its own base
+            pose_prompt: basePose.pose_prompt
+        }
+    }).catch(err => {
+        console.error(`[ModelGenPoller][${job.id}] Failed to invoke analyzer for base pose:`, err);
+    });
 
     const poseJobs = [basePose];
 

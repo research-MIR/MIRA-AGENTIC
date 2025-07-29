@@ -121,7 +121,15 @@ export const JobPoseDisplay = ({ job }: JobPoseDisplayProps) => {
                     {pose.analysis && (
                       <>
                         <Badge variant="secondary" className="absolute top-1 left-1 z-10 capitalize">{pose.analysis.shoot_focus.replace('_', ' ')}</Badge>
-                        <Badge variant="default" className="absolute top-1 right-1 z-10 capitalize">{pose.analysis.garment.coverage.replace('_', ' ')}</Badge>
+                        {pose.analysis.garment.is_identical_to_base_garment ? (
+                          <Badge variant="outline" className="absolute top-1 right-1 z-10 capitalize bg-green-100 text-green-800 border-green-300 dark:bg-green-900/50 dark:text-green-300 dark:border-green-700">
+                            Base Underwear
+                          </Badge>
+                        ) : (
+                          <Badge variant="default" className="absolute top-1 right-1 z-10 capitalize">
+                            {pose.analysis.garment.coverage.replace('_', ' ')}
+                          </Badge>
+                        )}
                       </>
                     )}
                     <PoseStatusIcon pose={pose} />
