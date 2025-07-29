@@ -7,22 +7,51 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 
-// --- NEW: Triage System Prompt ---
-const TRIAGE_SYSTEM_PROMPT = `You are a task classification AI. Analyze the user's prompt and determine if their primary intent is to change the model's pose, change their garment, or both. Your response MUST be a single JSON object with one key, 'task_type', set to one of three possible string values: 'pose', 'garment', or 'both'.
+const TRIAGE_SYSTEM_PROMPT = `You are a task classification and information extraction AI. Analyze the user's prompt and determine their primary intent. Your response MUST be a single JSON object with two keys: 'task_type' and 'garment_description'.
 
-Example 1:
+### Task Type Rules:
+- If the user's primary intent is to change the model's pose, set 'task_type' to 'pose'.
+- If the user's primary intent is to change the model's garment, set 'task_type' to 'garment'.
+- If the user's intent is to change both the pose and the garment, set 'task_type' to 'both'.
+
+### Garment Description Rules:
+- If 'task_type' is 'garment' or 'both', you MUST extract the part of the user's prompt that describes the new clothing.
+- The extracted description should be a concise, clear string.
+- If 'task_type' is 'pose', 'garment_description' MUST be null.
+
+### Examples:
+
+**Example 1:**
 User says "make her walk towards the camera."
-Your Output: { "task_type": "pose" }
+Your Output:
+\`\`\`json
+{
+  "task_type": "pose",
+  "garment_description": null
+}
+\`\`\`
 
-Example 2:
+**Example 2:**
 User says "change her shirt to a red t-shirt."
-Your Output: { "task_type": "garment" }
+Your Output:
+\`\`\`json
+{
+  "task_type": "garment",
+  "garment_description": "a red t-shirt"
+}
+\`\`\`
 
-Example 3:
+**Example 3:**
 User says "show him running, wearing a black hoodie."
-Your Output: { "task_type": "both" }`;
+Your Output:
+\`\`\`json
+{
+  "task_type": "both",
+  "garment_description": "a black hoodie"
+}
+\`\`\`
+`;
 
-// --- RENAMED: The original prompt, now specialized for POSE changes ---
 const POSE_CHANGE_SYSTEM_PROMPT = `You are an expert prompt engineer for a powerful image-to-image editing model called "Kontext". Your sole purpose is to receive a user's editing request and image(s), and translate that request into a single, optimized, and highly effective prompt for the Kontext model. The final prompt must be in English and must not exceed 512 tokens.
 Your process is to first apply the General Principles, then the crucial Reference Image Handling rule, and finally review the Advanced Examples to guide your prompt construction.
 
@@ -83,7 +112,6 @@ IF YOU SEE THE SAME IDENTICAL IMAGE TWO TIMES, IGNORE THE REPETITION, FOCUS ON T
 
 Your output is NOT a conversation; it is ONLY the final, optimized prompt. Analyze the request and the single image canvas. Apply all relevant principles, especially the Hyper-Detailed Identity Lockdown and the Golden Rule of Reference Handling, to construct a single, precise, and explicit instruction. Describe what to change, but describe what to keep in even greater detail. `;
 
-// --- NEW: System prompt specialized for GARMENT changes ---
 const GARMENT_SWAP_SYSTEM_PROMPT = `You are an expert prompt engineer for a powerful image-to-image editing model called "Kontext". Your sole purpose is to receive a user's editing request and image(s), and translate that request into a single, optimized, and highly effective prompt for the Kontext model to **swap a model's clothing while preserving their pose and identity**. The final prompt must be in English and must not exceed 512 tokens.
 
 ### Core Operating Principles & Methodologies
@@ -122,7 +150,7 @@ const twoPassWorkflowTemplate = `{
   "190": { "inputs": { "prompt": ["232", 0], "safety_settings": "BLOCK_NONE", "response_type": "text", "model": "gemini-2.5-pro", "api_key": "AIzaSyByuyPAPHMnftan3cvqaZRTTwlGATYinnA", "proxy": "", "system_instruction": ["195", 0], "error_fallback_value": "", "seed": 1551174521, "temperature": 0.7500000000000001, "num_predict": 0, "image_1": ["214", 0], "image_2": ["229", 0] }, "class_type": "Ask_Gemini", "_meta": { "title": "Ask Gemini" } },
   "192": { "inputs": { "value": ["190", 0] }, "class_type": "PrimitiveString", "_meta": { "title": "String" } },
   "193": { "inputs": { "String": "change their pose to match my reference, keep everything else the same,IGNORE EVERYTHING ELSE OUTSIDE OF THE POSE" }, "class_type": "String", "_meta": { "title": "editing task" } },
-  "194": { "inputs": { "text_0": "Change the pose of the woman with long, wavy blonde hair and tanned skin. Her new pose should be as follows: she is standing with her body angled slightly to her left, her left arm is bent with her hand resting on her left hip, her right arm is relaxed at her side, and her head is turned to face the camera with a wide, open-mouthed smile. It is absolutely critical to preserve her exact identity by maintaining her specific facial structure, tanned skin tone, brown eyes, and unique smile. Her taupe-grey bra and underwear set must remain completely unchanged. The solid medium-grey studio background, including the soft, even lighting and the subtle shadow cast on the floor, must be preserved in every detail.", "text": ["192", 0] }, "class_type": "ShowText|pysssss", "_meta": { "title": "Show Text 🐍" } },
+  "194": { "inputs": { "text_0": "Replace the woman's taupe bra with a classic-fit, crewneck t-shirt made of cotton jersey. The main body of the t-shirt is solid red, and the short sleeves are solid blue. The t-shirt should fit her naturally, conforming to her pose. Her taupe panties must remain completely unchanged and visible below the new t-shirt.\\n\\nIt is absolutely critical to preserve the model's exact pose, including their arm, leg, and head position. She is standing in a full-body shot, angled slightly towards her left, with her left hand placed on her hip and her right arm hanging relaxed at her side. Her head is tilted slightly to her right.\\n\\nYou must lock down and perfectly preserve the model's identity: she is a woman with tanned skin, voluminous wavy shoulder-length blonde hair, dark brown eyes, high cheekbones, and a wide, open-mouthed smile. Her athletic body shape must remain identical.\\n\\nThe background and lighting must be perfectly preserved. Maintain the seamless, solid neutral gray studio backdrop, the slightly lighter gray floor, and the soft, diffused frontal lighting that creates gentle highlights and soft shadows.", "text": ["248", 0] }, "class_type": "ShowText|pysssss", "_meta": { "title": "Show Text 🐍" } },
   "195": { "inputs": { "String": "placeholder_for_system_prompt" }, "class_type": "String", "_meta": { "title": "roleprompt for editing task" } },
   "196": { "inputs": { "cfg": 1, "nag_scale": 7.5, "nag_tau": 2.5, "nag_alpha": 0.25, "nag_sigma_end": 0.75, "model": ["212", 0], "positive": ["35", 0], "negative": ["135", 0], "nag_negative": ["198", 0], "latent_image": ["124", 0] }, "class_type": "NAGCFGGuider", "_meta": { "title": "NAGCFGGuider" } },
   "197": { "inputs": { "noise": ["200", 0], "guider": ["196", 0], "sampler": ["202", 0], "sigmas": ["204", 0], "latent_image": ["124", 0] }, "class_type": "SamplerCustomAdvanced", "_meta": { "title": "SamplerCustomAdvanced" } },
@@ -213,7 +241,7 @@ async function uploadToComfyUI(comfyUiUrl: string, imageBlob: Blob, filename: st
 }
 
 function extractJson(text: string): any {
-    const match = text.match(/```json\\s*([\\s\\S]*?)\\s*```/);
+    const match = text.match(/```json\s*([\s\S]*?)\s*```/);
     if (match && match[1]) return JSON.parse(match[1]);
     try { return JSON.parse(text); } catch (e) {
         throw new Error("The model returned a response that could not be parsed as JSON.");
@@ -222,7 +250,7 @@ function extractJson(text: string): any {
 
 serve(async (req) => {
   const requestId = `pose-generator-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
-  if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
+  if (req.method === 'OPTIONS') { return new Response(null, { headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type' } }); }
   if (!COMFYUI_ENDPOINT_URL) throw new Error("COMFYUI_ENDPOINT_URL is not set.");
 
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
@@ -244,8 +272,8 @@ serve(async (req) => {
         generationConfig: { responseMimeType: "application/json" },
         config: { systemInstruction: { role: "system", parts: [{ text: TRIAGE_SYSTEM_PROMPT }] } }
     });
-    const { task_type } = extractJson(triageResult.text);
-    console.log(`[PoseGenerator][${requestId}] Intent classified as: '${task_type}'`);
+    const { task_type, garment_description } = extractJson(triageResult.text);
+    console.log(`[PoseGenerator][${requestId}] Intent classified as: '${task_type}'. Garment: '${garment_description || 'N/A'}'`);
 
     // --- Step 2: Select workflow and configure prompts ---
     let finalWorkflowString: string;
@@ -304,7 +332,7 @@ serve(async (req) => {
 
     if (task_type === 'both') {
         finalWorkflow['253'].inputs.String = GARMENT_SWAP_SYSTEM_PROMPT;
-        finalWorkflow['257'].inputs.String = pose_prompt;
+        finalWorkflow['257'].inputs.String = garment_description || "";
     }
 
     const queueUrl = `${sanitizedAddress}/prompt`;
@@ -323,14 +351,14 @@ serve(async (req) => {
     console.log(`[PoseGenerator][${requestId}] Job queued successfully with prompt_id: ${data.prompt_id}`);
 
     return new Response(JSON.stringify({ comfyui_prompt_id: data.prompt_id }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type' },
       status: 200,
     });
 
   } catch (error) {
     console.error(`[PoseGenerator][${requestId}] Error:`, error);
     return new Response(JSON.stringify({ error: error.message }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type' },
       status: 500,
     });
   }
