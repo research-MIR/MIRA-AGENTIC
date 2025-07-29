@@ -116,24 +116,37 @@ const GARMENT_SWAP_SYSTEM_PROMPT = `You are an expert prompt engineer for a powe
 
 ### Core Operating Principles & Methodologies
 
-**I. Pose Preservation Mandate (HIGHEST PRIORITY):**
-Your most critical task is to ensure the model's pose does not change.
+**I. General Principles for All Edits**
+These are your foundational rules for constructing any prompt.
+A. Core Mandate: Specificity and Preservation
+Be Specific: Always translate vague user requests into precise instructions.
+Preserve by Default: Your most important task is to identify what should not change. Proactively add clauses to preserve key aspects of the image. This is especially true for the person's face, pose, and any clothing items not being explicitly changed. When in doubt, add a preservation instruction.
+Identify Subjects Clearly: Never use vague pronouns. Describe the subject based on the reference image ("the man in the orange jacket").
+
+B. Hyper-Detailed Character & Identity LOCKDOWN
+This is one of your most critical tasks. A simple "preserve face" clause is a failure. You must actively describe the person's specific features from the image and embed these descriptions directly into the preservation command. This locks down their identity.
+Your Mandate:
+Analyze & Describe: Look at the person in the image and identify their specific, observable features (e.g., 'square jaw', 'light olive skin', 'short black fade', 'blue eyes', 'freckles on cheeks').
+Embed in Prompt: Weave these exact descriptions into your preservation clause to leave no room for interpretation.
+
+C. Pose Preservation Mandate
+Your second most critical task is to ensure the model's pose does not change.
 1.  **Analyze the Pose:** You MUST visually analyze the pose in the SOURCE IMAGE.
 2.  **Describe the Pose:** In your final prompt, you MUST include a detailed, explicit description of the model's pose (e.g., "standing with hands on hips," "walking towards the camera," "sitting with legs crossed").
 3.  **Lock the Pose:** Your prompt MUST contain a clause like "It is absolutely critical to preserve the model's exact pose, including their arm, leg, and head position."
 
-**II. Hyper-Detailed Character & Identity LOCKDOWN:**
-This is your second most critical task. A simple "preserve face" clause is a failure. You must actively describe the person's specific features from the image and embed these descriptions directly into the preservation command. This locks down their identity.
-- **Analyze & Describe:** Look at the person in the image and identify their specific, observable features (e.g., 'square jaw', 'light olive skin', 'short black fade', 'blue eyes', 'freckles on cheeks').
-- **Embed in Prompt:** Weave these exact descriptions into your preservation clause to leave no room for interpretation.
+D. Composition and Background Control
+You MUST describe the background and lighting from the source image and include a command to preserve them perfectly. Example: "Maintain the identical camera angle, framing, and perspective. The background, a bustling city street with yellow taxis and glass-front buildings, must be preserved in every detail, including the specific reflections and the soft daytime lighting."
 
-**III. Background & Lighting Preservation:**
-You MUST describe the background and lighting from the source image and include a command to preserve them perfectly.
+**II. The Golden Rule of Reference Image Handling**
+This is the most important rule for any request involving a reference image.
+Technical Reality: The Kontext model only sees one image canvas. If a reference image is provided, it will be pre-processed onto that same canvas, typically side-by-side.
+Your Mandate: DESCRIBE, DON'T POINT. You must never create a prompt that says "use the reference image" or "make it look like the other picture." This will fail.
+Your Method: Your prompt must be self-contained. You must visually analyze the reference portion of the image, extract the key attributes (pattern, color, shape, texture, fit), and then verbally describe those attributes as the desired change for the content portion of the image.
 
-**IV. The Creative Task: Garment Swapping**
+**III. The Creative Task: Garment Swapping**
 - Your primary creative task is to describe the new garment requested by the user.
 - Replace the description of the model's current clothing with a hyper-detailed description of the new garment.
-- If the user provides a reference image for the garment, you must follow the "Golden Rule of Reference Image Handling": visually analyze the reference, extract its key attributes (color, pattern, texture, fit), and verbally describe those attributes in your prompt. DO NOT say "make it look like the reference."
 
 ### Your Output:
 Your output is NOT a conversation; it is ONLY the final, optimized prompt. Analyze the request and the single image canvas. Apply all relevant principles to construct a single, precise, and explicit instruction. Describe what to change (the garment), but describe what to keep (pose, identity, background, lighting) in even greater detail.`;
@@ -278,24 +291,20 @@ serve(async (req) => {
     // --- Step 2: Select workflow and configure prompts ---
     let finalWorkflowString: string;
     let selectedSystemPrompt: string;
-    let editingTaskWithImage: string;
-    let editingTaskWithText: string;
+    let editingTask: string;
 
     if (task_type === 'both') {
         finalWorkflowString = twoPassWorkflowTemplate;
         selectedSystemPrompt = POSE_CHANGE_SYSTEM_PROMPT; // Pass 1 is always pose
-        editingTaskWithImage = "change their pose and garment to match my reference, keep everything else the same";
-        editingTaskWithText = "change their pose and garment to match my reference, IGNORE EVERYTHING ELSE OUTSIDE OF THE POSE AND GARMENT, keep everything else the same";
+        editingTask = pose_prompt; // Use the full original prompt for the pose pass
     } else {
         finalWorkflowString = singlePassWorkflowTemplate;
         if (task_type === 'garment') {
             selectedSystemPrompt = GARMENT_SWAP_SYSTEM_PROMPT;
-            editingTaskWithImage = "change their garment to match my reference, keep everything else the same";
-            editingTaskWithText = "change their garment to match my reference, IGNORE EVERYTHING ELSE OUTSIDE OF THE GARMENT, keep everything else the same";
+            editingTask = `Change the current garment to: ${garment_description}`;
         } else { // 'pose'
             selectedSystemPrompt = POSE_CHANGE_SYSTEM_PROMPT;
-            editingTaskWithImage = "change their pose to match my reference, keep everything else the same";
-            editingTaskWithText = "change their pose to match my reference, IGNORE EVERYTHING ELSE OUTSIDE OF THE POSE, keep everything else the same";
+            editingTask = pose_prompt;
         }
     }
 
@@ -310,7 +319,7 @@ serve(async (req) => {
 
     finalWorkflow['214'].inputs.image = baseModelFilename;
     finalWorkflow['195'].inputs.String = selectedSystemPrompt;
-    
+
     if (pose_image_url) {
       console.log(`[PoseGenerator][${requestId}] Pose reference image provided. Downloading from: ${pose_image_url}`);
       const poseImageBlob = await downloadFromSupabase(supabase, pose_image_url);
@@ -318,16 +327,13 @@ serve(async (req) => {
       const poseImageFilename = await uploadToComfyUI(sanitizedAddress, poseImageBlob, uniquePoseRefFilename);
       
       finalWorkflow['215'].inputs.image = poseImageFilename;
-      finalWorkflow['230'].inputs.Number = "2";
-      finalWorkflow['193'].inputs.String = editingTaskWithImage;
-      if (finalWorkflow['217']) finalWorkflow['217'].inputs.String = ""; 
+      finalWorkflow['230'].inputs.Number = "2"; // Use image reference
+      finalWorkflow['193'].inputs.String = editingTask; // The task is the same, but the model will see the reference
       console.log(`[PoseGenerator][${requestId}] Pose reference uploaded as: ${poseImageFilename}.`);
     } else {
       console.log(`[PoseGenerator][${requestId}] No pose reference image provided. Using text prompt.`);
-      finalWorkflow['230'].inputs.Number = "1";
-      const textRefTask = `${editingTaskWithText}. The user's specific instruction is: '${pose_prompt}'`;
-      if (finalWorkflow['217']) finalWorkflow['217'].inputs.String = textRefTask;
-      finalWorkflow['193'].inputs.String = "";
+      finalWorkflow['230'].inputs.Number = "1"; // Use text reference
+      finalWorkflow['193'].inputs.String = editingTask;
     }
 
     if (task_type === 'both') {
