@@ -7,6 +7,7 @@ const COMFYUI_ENDPOINT_URL = Deno.env.get('COMFYUI_ENDPOINT_URL');
 const POLLING_INTERVAL_MS = 5000;
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
 const MAX_RETRIES = 2;
+const ANALYSIS_STALLED_THRESHOLD_SECONDS = 60; // New timeout for analysis step
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -83,6 +84,7 @@ async function uploadImageToComfyUI(comfyUiUrl: string, imageBlob: Blob, filenam
 
 async function findOutputImage(historyOutputs: any, primaryNodeId: string, fallbackNodeIds: string[]): Promise<any | null> {
     if (!historyOutputs) return null;
+    // First, check the preferred nodes for efficiency
     const nodesToCheck = [primaryNodeId, ...fallbackNodeIds];
     for (const nodeId of nodesToCheck) {
         const nodeOutput = historyOutputs[nodeId];
@@ -90,14 +92,14 @@ async function findOutputImage(historyOutputs: any, primaryNodeId: string, fallb
             return nodeOutput.images[0];
         }
     }
-    // Final fallback: check all nodes
+    // If not found, do a full scan of all outputs as a fallback
     for (const nodeId in historyOutputs) {
         const outputData = historyOutputs[nodeId];
         if (outputData.images && Array.isArray(outputData.images) && outputData.images.length > 0) {
             return outputData.images[0];
         }
     }
-    return null;
+    return null; // Truly no image found
 }
 
 async function createGalleryEntry(supabase: any, job: any, finalResult: any) {
@@ -255,6 +257,7 @@ async function handleGeneratingPosesState(supabase: any, job: any) {
         status: 'analyzing', // Set to analyzing immediately
         final_url: job.base_model_image_url,
         is_upscaled: false,
+        analysis_started_at: new Date().toISOString(), // Add timestamp
     };
 
     // Immediately trigger analysis for the base pose
@@ -306,8 +309,31 @@ async function handlePollingPosesState(supabase: any, job: any) {
     const queueData = await queueResponse.json();
 
     for (const [index, poseJob] of updatedPoseJobs.entries()) {
-        if (poseJob.status === 'complete' || poseJob.status === 'failed' || poseJob.status === 'analyzing' || !poseJob.comfyui_prompt_id) {
+        if (poseJob.status === 'complete' || poseJob.status === 'failed') {
             continue;
+        }
+
+        // Self-healing for stalled analysis
+        if (poseJob.status === 'analyzing') {
+            const analysisStartedAt = poseJob.analysis_started_at ? new Date(poseJob.analysis_started_at) : null;
+            if (analysisStartedAt && (new Date().getTime() - analysisStartedAt.getTime()) > ANALYSIS_STALLED_THRESHOLD_SECONDS * 1000) {
+                console.warn(`[ModelGenPoller][${job.id}] Pose at index ${index} has been 'analyzing' for too long. Re-triggering analysis.`);
+                updatedPoseJobs[index].analysis_started_at = new Date().toISOString(); // Update timestamp
+                hasChanged = true;
+                supabase.functions.invoke('MIRA-AGENT-analyzer-pose-image', {
+                    body: {
+                        job_id: job.id,
+                        image_url: poseJob.final_url,
+                        base_model_image_url: job.base_model_image_url,
+                        pose_prompt: poseJob.pose_prompt
+                    }
+                }).catch(err => console.error(`[ModelGenPoller][${job.id}] ERROR: Failed to re-invoke analyzer for stalled pose ${index}:`, err));
+            }
+            continue;
+        }
+
+        if (!poseJob.comfyui_prompt_id) {
+            continue; // Skip invalid entries like the base pose placeholder
         }
 
         const isJobInQueue = queueData.queue_running.some((item: any) => item[1] === poseJob.comfyui_prompt_id) || 
@@ -341,6 +367,7 @@ async function handlePollingPosesState(supabase: any, job: any) {
                 updatedPoseJobs[index].status = 'analyzing';
                 updatedPoseJobs[index].final_url = publicUrl;
                 updatedPoseJobs[index].is_upscaled = false;
+                updatedPoseJobs[index].analysis_started_at = new Date().toISOString(); // Add timestamp
                 hasChanged = true;
                 console.log(`[ModelGenPoller][${job.id}] Pose job generated. Stored at Supabase URL: ${publicUrl}. Triggering analysis.`);
 
