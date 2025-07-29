@@ -171,7 +171,7 @@ serve(async (req) => {
     return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
 
   } catch (error) {
-    console.error(`[ModelGenPoller][${job_id}] Error:`, error);
+    console.error(`[ModelGenPoller][${job_id}] ERROR:`, error);
     await supabase.from('mira-agent-model-generation-jobs').update({ status: 'failed', error_message: error.message }).eq('id', job_id);
     return new Response(JSON.stringify({ error: error.message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
   }
@@ -266,7 +266,7 @@ async function handleGeneratingPosesState(supabase: any, job: any) {
             pose_prompt: basePose.pose_prompt
         }
     }).catch(err => {
-        console.error(`[ModelGenPoller][${job.id}] Failed to invoke analyzer for base pose:`, err);
+        console.error(`[ModelGenPoller][${job.id}] ERROR: Failed to invoke analyzer for base pose:`, err);
     });
 
     const poseJobs = [basePose];
@@ -350,13 +350,20 @@ async function handlePollingPosesState(supabase: any, job: any) {
                         pose_prompt: updatedPoseJobs[index].pose_prompt
                     }
                 }).catch(err => {
-                    console.error(`[ModelGenPoller][${job.id}] Failed to invoke analyzer for pose ${index}:`, err);
+                    console.error(`[ModelGenPoller][${job.id}] ERROR: Failed to invoke analyzer for pose ${index}:`, err);
                 });
             } else {
                 console.warn(`[ModelGenPoller][${job.id}] Pose job ${poseJob.comfyui_prompt_id} finished with no output. Attempting retry.`);
                 const currentRetries = poseJob.retry_count || 0;
                 if (currentRetries < MAX_RETRIES) {
-                    const pose = job.pose_prompts[index];
+                    const pose = job.pose_prompts[index - 1]; // FIX: Adjust index to account for basePose
+                    if (!pose) {
+                        console.error(`[ModelGenPoller][${job.id}] ERROR: Could not find matching pose in pose_prompts for retry at index ${index - 1}. Prompt: "${poseJob.pose_prompt}"`);
+                        updatedPoseJobs[index].status = 'failed';
+                        updatedPoseJobs[index].error_message = 'Internal error: Could not find original prompt for retry.';
+                        hasChanged = true;
+                        continue;
+                    }
                     const { data: result, error } = await supabase.functions.invoke('MIRA-AGENT-tool-comfyui-pose-generator', { body: { base_model_url: job.base_model_image_url, pose_prompt: pose.value, pose_image_url: pose.type === 'image' ? pose.value : null } });
                     if (error) {
                         updatedPoseJobs[index].status = 'failed';
@@ -373,7 +380,7 @@ async function handlePollingPosesState(supabase: any, job: any) {
                 hasChanged = true;
             }
         } else {
-            console.error(`[ModelGenPoller][${job.id}] Pose job ${poseJob.comfyui_prompt_id} not found in queue or history. Marking as failed.`);
+            console.error(`[ModelGenPoller][${job.id}] ERROR: Pose job ${poseJob.comfyui_prompt_id} not found in queue or history. Marking as failed.`);
             updatedPoseJobs[index].status = 'failed';
             updatedPoseJobs[index].error_message = 'Job not found in ComfyUI history.';
             hasChanged = true;
@@ -381,7 +388,7 @@ async function handlePollingPosesState(supabase: any, job: any) {
     }
 
     if (updatedPoseJobs.some(p => p.status === 'failed')) {
-        console.error(`[ModelGenPoller][${job.id}] At least one pose failed permanently. Failing the entire job.`);
+        console.error(`[ModelGenPoller][${job.id}] ERROR: At least one pose failed permanently. Failing the entire job.`);
         await supabase.from('mira-agent-model-generation-jobs').update({ status: 'failed', error_message: 'One or more poses failed to generate.', final_posed_images: updatedPoseJobs }).eq('id', job.id);
         return;
     }
@@ -519,7 +526,7 @@ async function handleUpscalingPosesState(supabase: any, job: any) {
                 
                 return { final_url: poseToProcess.final_url, upscale_prompt_id: queueData.prompt_id, success: true };
             } catch (error) {
-                console.error(`[ModelGenPoller][${job.id}] Failed to start upscale for pose ${poseToProcess.pose_prompt}:`, error.message);
+                console.error(`[ModelGenPoller][${job.id}] ERROR: Failed to start upscale for pose ${poseToProcess.pose_prompt}:`, error.message);
                 return { final_url: poseToProcess.final_url, error_message: error.message, success: false };
             }
         });
