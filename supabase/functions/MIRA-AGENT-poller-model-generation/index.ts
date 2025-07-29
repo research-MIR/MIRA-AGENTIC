@@ -300,7 +300,10 @@ async function handlePollingPosesState(supabase: any, job: any) {
     const queueData = await queueResponse.json();
 
     for (const [index, poseJob] of updatedPoseJobs.entries()) {
-        if (poseJob.status === 'complete' || poseJob.status === 'failed' || poseJob.status === 'analyzing') continue;
+        if (poseJob.status === 'complete' || poseJob.status === 'failed') continue;
+
+        // If the job is analyzing, we don't need to poll ComfyUI for it.
+        if (poseJob.status === 'analyzing') continue;
 
         const isJobInQueue = queueData.queue_running.some((item: any) => item[1] === poseJob.comfyui_prompt_id) || 
                              queueData.queue_pending.some((item: any) => item[1] === poseJob.comfyui_prompt_id);
