@@ -1,12 +1,12 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { ModelGenerator } from "@/components/GenerateModels/ModelGenerator";
 import { useLanguage } from "@/context/LanguageContext";
-import { Loader2, Wand2, Users } from "lucide-react";
+import { Loader2, Wand2, Users, ArrowLeft, Trash2 } from "lucide-react";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { PackStatusIndicator } from "@/components/GenerateModels/PackStatusIndicator";
 import { JobProgressBar } from "@/components/GenerateModels/JobProgressBar";
@@ -22,6 +22,7 @@ import { ResultsDisplay } from "@/components/GenerateModels/ResultsDisplay";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { showError, showSuccess } from "@/utils/toast";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 
 interface PoseAnalysis {
   shoot_focus: 'upper_body' | 'lower_body' | 'full_body';
@@ -37,6 +38,7 @@ interface Pose {
   is_upscaled?: boolean;
   status: string;
   pose_prompt: string;
+  jobId: string;
   analysis?: PoseAnalysis;
 }
 
@@ -61,6 +63,7 @@ const ModelPackDetail = () => {
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [selectedBaseModelId, setSelectedBaseModelId] = useState<string | null>(null);
   const [selectedGender, setSelectedGender] = useState<'male' | 'female' | null>(null);
+  const [jobToRemove, setJobToRemove] = useState<string | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
 
   const { data: pack, isLoading: isLoadingPack, error: packError } = useQuery({
@@ -121,6 +124,22 @@ const ModelPackDetail = () => {
       showSuccess("Model approved. Generating poses...");
       queryClient.invalidateQueries({ queryKey: ['modelsForPack', packId] });
     }
+  };
+
+  const handleRemoveModelFromPack = async () => {
+    if (!jobToRemove) return;
+    const { error } = await supabase
+      .from('mira-agent-model-generation-jobs')
+      .update({ pack_id: null })
+      .eq('id', jobToRemove);
+    
+    if (error) {
+      showError(`Failed to remove model: ${error.message}`);
+    } else {
+      showSuccess("Model removed from pack.");
+      queryClient.invalidateQueries({ queryKey: ['modelsForPack', packId] });
+    }
+    setJobToRemove(null);
   };
 
   const packStatus = useMemo(() => {
@@ -194,6 +213,10 @@ const ModelPackDetail = () => {
     <>
       <div className="p-4 md:p-8 h-screen flex flex-col">
         <header className="pb-4 mb-4 border-b shrink-0">
+          <Link to="/model-packs" className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground mb-2">
+            <ArrowLeft className="h-4 w-4" />
+            Back to All Packs
+          </Link>
           <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
                   <h1 className="text-3xl font-bold">{pack.name}</h1>
@@ -225,7 +248,20 @@ const ModelPackDetail = () => {
                         <ScrollArea className="h-32">
                           <div className="flex gap-4 pb-2">
                             {jobs?.map(job => (
-                              <RecentJobThumbnail key={job.id} job={job} onClick={() => setSelectedJobId(job.id)} isSelected={selectedJobId === job.id} />
+                              <div key={job.id} className="relative group">
+                                <RecentJobThumbnail job={job} onClick={() => setSelectedJobId(job.id)} isSelected={selectedJobId === job.id} />
+                                <AlertDialog>
+                                  <AlertDialogTrigger asChild>
+                                    <Button variant="destructive" size="icon" className="absolute top-0 right-0 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity">
+                                      <Trash2 className="h-3 w-3" />
+                                    </Button>
+                                  </AlertDialogTrigger>
+                                  <AlertDialogContent>
+                                    <AlertDialogHeader><AlertDialogTitle>Remove Model from Pack?</AlertDialogTitle><AlertDialogDescription>This will only remove the model from this pack. The original generation job will not be deleted.</AlertDialogDescription></AlertDialogHeader>
+                                    <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={() => handleRemoveModelFromPack()}>Remove</AlertDialogAction></AlertDialogFooter>
+                                  </AlertDialogContent>
+                                </AlertDialog>
+                              </div>
                             ))}
                           </div>
                         </ScrollArea>
@@ -283,6 +319,12 @@ const ModelPackDetail = () => {
         </div>
       </div>
       <UpscalePosesModal isOpen={isUpscaleModalOpen} onClose={() => setIsUpscaleModalOpen(false)} jobs={jobs || []} packId={packId!} />
+      <AlertDialog open={!!jobToRemove} onOpenChange={(open) => !open && setJobToRemove(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader><AlertDialogTitle>Remove Model from Pack?</AlertDialogTitle><AlertDialogDescription>This will only remove the model from this pack. The original generation job will not be deleted.</AlertDialogDescription></AlertDialogHeader>
+          <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={handleRemoveModelFromPack}>Remove</AlertDialogAction></AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 };
