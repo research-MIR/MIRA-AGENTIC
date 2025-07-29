@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
 import { useLanguage } from "@/context/LanguageContext";
-import { BarChart2, CheckCircle, XCircle, Loader2, AlertTriangle, UserCheck2, BadgeAlert, FileText, RefreshCw, Shirt, User, Wand2 } from "lucide-react";
+import { BarChart2, CheckCircle, XCircle, Loader2, AlertTriangle, UserCheck2, BadgeAlert, FileText, RefreshCw, Wand2, Download, HardDriveDownload } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -11,6 +11,9 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
+import JSZip from 'jszip';
+import { VtoPackDetailView } from '@/components/VTO/VtoPackDetailView';
+import { AnalyzePackModal, AnalysisScope } from '@/components/VTO/AnalyzePackModal';
 
 interface QaReport {
   id: string;
@@ -62,7 +65,6 @@ const VtoReports = () => {
   const { supabase, session } = useSession();
   const queryClient = useQueryClient();
   const [isRerunning, setIsRerunning] = useState<string | null>(null);
-  const [isStartingRefinement, setIsStartingRefinement] = useState<string | null>(null);
 
   const { data: reports, isLoading, error } = useQuery<any>({ // Using any for now to accommodate packs table
     queryKey: ['vtoQaReportsAndPacks', session?.user?.id],
@@ -179,26 +181,6 @@ const VtoReports = () => {
     }
   };
 
-  const handleStartRefinementPass = async (packId: string) => {
-    if (!session?.user) return;
-    setIsStartingRefinement(packId);
-    const toastId = showLoading("Starting refinement pass...");
-    try {
-      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-vto-refinement-pass', {
-        body: { pack_id: packId, user_id: session.user.id }
-      });
-      if (error) throw error;
-      dismissToast(toastId);
-      showSuccess(data.message);
-      queryClient.invalidateQueries({ queryKey: ['vtoQaReportsAndPacks', session.user.id] });
-    } catch (err: any) {
-      dismissToast(toastId);
-      showError(`Failed to start refinement pass: ${err.message}`);
-    } finally {
-      setIsStartingRefinement(null);
-    }
-  };
-
   if (isLoading) {
     return <div className="p-8 space-y-4"><Skeleton className="h-32 w-full" /><Skeleton className="h-32 w-full" /></div>;
   }
@@ -218,7 +200,6 @@ const VtoReports = () => {
           {packSummaries.map(report => {
             const unknownFailures = report.failure_summary['Unknown'] || 0;
             const isRefinementPack = !!report.metadata?.refinement_of_pack_id;
-            const hasRefinementPass = report.has_refinement_pass;
 
             return (
               <Card key={report.pack_id}>
@@ -229,37 +210,6 @@ const VtoReports = () => {
                       <span>{report.metadata?.name || `Pack from ${new Date(report.created_at).toLocaleString()}`}</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      {!isRefinementPack && (
-                        hasRefinementPass ? (
-                          <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                              <Button variant="secondary" size="sm" disabled={isStartingRefinement === report.pack_id}>
-                                {isStartingRefinement === report.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
-                                Re-run Refinement Pass
-                              </Button>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                              <AlertDialogHeader>
-                                <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-                                <AlertDialogDescription>
-                                  This will permanently delete the existing refinement pass and all its associated images and jobs. A new refinement pass will then be created. This action cannot be undone.
-                                </AlertDialogDescription>
-                              </AlertDialogHeader>
-                              <AlertDialogFooter>
-                                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                <AlertDialogAction onClick={() => handleStartRefinementPass(report.pack_id)}>
-                                  Yes, Reset and Re-run
-                                </AlertDialogAction>
-                              </AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
-                        ) : (
-                          <Button variant="secondary" size="sm" onClick={() => handleStartRefinementPass(report.pack_id)} disabled={isStartingRefinement === report.pack_id}>
-                            {isStartingRefinement === report.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Wand2 className="h-4 w-4 mr-2" />}
-                            Start Refinement Pass
-                          </Button>
-                        )
-                      )}
                       <AlertDialog>
                         <AlertDialogTrigger asChild>
                           <Button variant="secondary" size="sm" disabled={unknownFailures === 0 || isRerunning === report.pack_id}>
