@@ -270,7 +270,9 @@ serve(async (req) => {
   const sanitizedAddress = COMFYUI_ENDPOINT_URL.replace(/\/+$/, "");
 
   try {
-    const { base_model_url, pose_prompt, pose_image_url } = await req.json();
+    const body = await req.json();
+    console.log(`[PoseGenerator][${requestId}] INFO: Received request body:`, JSON.stringify(body));
+    const { base_model_url, pose_prompt, pose_image_url } = body;
     if (!base_model_url || !pose_prompt) {
       throw new Error("base_model_url and pose_prompt are required.");
     }
@@ -278,15 +280,16 @@ serve(async (req) => {
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
 
     // --- Step 1: Triage the user's request ---
-    console.log(`[PoseGenerator][${requestId}] Step 1: Classifying user intent...`);
+    console.log(`[PoseGenerator][${requestId}] INFO: Step 1: Classifying user intent...`);
     const triageResult = await ai.models.generateContent({
         model: "gemini-2.5-flash-lite-preview-06-17",
         contents: [{ role: 'user', parts: [{ text: pose_prompt }] }],
         generationConfig: { responseMimeType: "application/json" },
         config: { systemInstruction: { role: "system", parts: [{ text: TRIAGE_SYSTEM_PROMPT }] } }
     });
+    console.warn(`[PoseGenerator][${requestId}] DEBUG: Raw triage response from Gemini:`, triageResult.text);
     const { task_type, garment_description } = extractJson(triageResult.text);
-    console.log(`[PoseGenerator][${requestId}] Intent classified as: '${task_type}'. Garment: '${garment_description || 'N/A'}'`);
+    console.log(`[PoseGenerator][${requestId}] INFO: Intent classified as: '${task_type}'. Garment: '${garment_description || 'N/A'}'`);
 
     // --- Step 2: Select workflow and configure prompts ---
     let finalWorkflowString: string;
@@ -307,21 +310,22 @@ serve(async (req) => {
             editingTask = pose_prompt;
         }
     }
+    console.log(`[PoseGenerator][${requestId}] INFO: Workflow selected. Type: ${task_type}. Editing Task: "${editingTask}"`);
 
     const finalWorkflow = JSON.parse(finalWorkflowString);
 
     // --- Step 3: Populate workflow with assets and prompts ---
-    console.log(`[PoseGenerator][${requestId}] Step 3: Downloading base model from: ${base_model_url}`);
+    console.log(`[PoseGenerator][${requestId}] INFO: Step 3: Downloading base model from: ${base_model_url}`);
     const baseModelBlob = await downloadFromSupabase(supabase, base_model_url);
     const uniqueBaseModelFilename = `base_model_${requestId}.png`;
     const baseModelFilename = await uploadToComfyUI(sanitizedAddress, baseModelBlob, uniqueBaseModelFilename);
-    console.log(`[PoseGenerator][${requestId}] Base model uploaded to ComfyUI as: ${baseModelFilename}`);
+    console.log(`[PoseGenerator][${requestId}] INFO: Base model uploaded to ComfyUI as: ${baseModelFilename}`);
 
     finalWorkflow['214'].inputs.image = baseModelFilename;
     finalWorkflow['195'].inputs.String = selectedSystemPrompt;
 
     if (pose_image_url) {
-      console.log(`[PoseGenerator][${requestId}] Pose reference image provided. Downloading from: ${pose_image_url}`);
+      console.log(`[PoseGenerator][${requestId}] INFO: Pose reference image provided. Downloading from: ${pose_image_url}`);
       const poseImageBlob = await downloadFromSupabase(supabase, pose_image_url);
       const uniquePoseRefFilename = `pose_ref_${requestId}.png`;
       const poseImageFilename = await uploadToComfyUI(sanitizedAddress, poseImageBlob, uniquePoseRefFilename);
@@ -329,9 +333,9 @@ serve(async (req) => {
       finalWorkflow['215'].inputs.image = poseImageFilename;
       finalWorkflow['230'].inputs.Number = "2"; // Use image reference
       finalWorkflow['193'].inputs.String = editingTask; // The task is the same, but the model will see the reference
-      console.log(`[PoseGenerator][${requestId}] Pose reference uploaded as: ${poseImageFilename}.`);
+      console.log(`[PoseGenerator][${requestId}] INFO: Pose reference uploaded as: ${poseImageFilename}.`);
     } else {
-      console.log(`[PoseGenerator][${requestId}] No pose reference image provided. Using text prompt.`);
+      console.log(`[PoseGenerator][${requestId}] INFO: No pose reference image provided. Using text prompt.`);
       finalWorkflow['230'].inputs.Number = "1"; // Use text reference
       finalWorkflow['193'].inputs.String = editingTask;
     }
@@ -344,7 +348,8 @@ serve(async (req) => {
     const queueUrl = `${sanitizedAddress}/prompt`;
     const payload = { prompt: finalWorkflow };
     
-    console.log(`[PoseGenerator][${requestId}] Step 4: Sending final payload to ComfyUI...`);
+    console.log(`[PoseGenerator][${requestId}] INFO: Step 4: Sending final payload to ComfyUI...`);
+    console.warn(`[PoseGenerator][${requestId}] DEBUG: Final ComfyUI Payload:`, JSON.stringify(payload, null, 2));
     const response = await fetch(queueUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -354,7 +359,7 @@ serve(async (req) => {
     
     const data = await response.json();
     if (!data.prompt_id) throw new Error("ComfyUI did not return a prompt_id.");
-    console.log(`[PoseGenerator][${requestId}] Job queued successfully with prompt_id: ${data.prompt_id}`);
+    console.log(`[PoseGenerator][${requestId}] INFO: Job queued successfully with prompt_id: ${data.prompt_id}`);
 
     return new Response(JSON.stringify({ comfyui_prompt_id: data.prompt_id }), {
       headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type' },
@@ -362,7 +367,7 @@ serve(async (req) => {
     });
 
   } catch (error) {
-    console.error(`[PoseGenerator][${requestId}] Error:`, error);
+    console.error(`[PoseGenerator][${requestId}] ERROR:`, error);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type' },
       status: 500,
