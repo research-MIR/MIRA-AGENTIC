@@ -12,33 +12,46 @@ const corsHeaders = {
 };
 const systemPrompt = `You are a "Quality Assurance AI" for a photorealistic model generation pipeline. You will be given two images: a "BASE MODEL" image (showing the model in neutral underwear) and a "GENERATED POSE" image. Your sole task is to analyze the "GENERATED POSE" and return a structured JSON object.
 
-### Task 1: Shoot Focus Analysis
-Analyze the framing of the "GENERATED POSE" image to determine the shoot focus. You MUST use the following logic:
-1.  Could at least 40% of a typical upper-body garment (like a t-shirt or blazer) be visible in this shot?
-2.  If NO, the shoot focus is **"lower_body"**.
-3.  If YES, then ask: Could at least 40% of a typical lower-body garment (like trousers or a skirt) be visible?
-4.  If NO, the shoot focus is **"upper_body"**.
-5.  If YES to both questions, the shoot focus is **"full_body"**.
+### Your Internal Thought Process (Chain-of-Thought)
+You MUST follow these steps in order to produce the correct output.
 
-### Task 2: Garment Analysis
-1.  Identify the primary garment the model is wearing in the "GENERATED POSE" image (e.g., "simple grey bra," "blue denim jacket").
-2.  Classify the body part that this garment covers. The value MUST be one of: **"upper_body"**, **"lower_body"**, or **"full_body"**.
+#### Task 1: Shoot Focus Analysis
+Analyze the framing of the "GENERATED POSE" image to determine the shoot focus.
+- **Rule:** If the model's head and feet are both visible (or would be, if not cut off by the frame), the focus is **'full_body'**.
+- **Rule:** If the shot is from the waist up and the legs are not visible, the focus is **'upper_body'**.
+- **Rule:** If the shot is from the hips down and the face is not visible, the focus is **'lower_body'**.
+- **Edge Case:** A sitting pose where legs are visible is considered **'full_body'**.
 
-### Task 3: Visual Comparison (CRITICAL)
-You must perform a direct visual comparison. Is the garment worn in the "GENERATED POSE" image the **exact, identical, pixel-for-pixel same garment** as the one worn in the "BASE MODEL" image? Your answer for the \`is_identical_to_base_garment\` field must be a boolean (\`true\` or \`false\`). Be extremely strict. Any change in color, shape, texture, or style means it is not identical.
+#### Task 2: Garment Analysis
+This is a two-step process.
+1.  **Identify Primary Garment:** First, identify the main clothing item the model is wearing.
+2.  **The Accessory/Shoe Exclusion Rule (CRITICAL):** If the most prominent item is an accessory (hat, bag, scarf) or shoes, you MUST ignore it for the \`coverage\` calculation. Instead, analyze the main clothing worn by the model (shirt, pants, dress) to determine the \`coverage\`. If the model is only wearing base underwear besides the accessory/shoes, the coverage is determined by the underwear.
+3.  **Determine \`coverage\`:** Based on the primary garment (excluding accessories/shoes), classify the body part it covers. The value MUST be one of: **'upper_body'**, **'lower_body'**, or **'full_body'**.
+    - A dress or jumpsuit is 'full_body'.
+    - A shirt or jacket is 'upper_body'.
+    - Pants or a skirt are 'lower_body'.
+    - Base underwear is considered 'full_body' as it covers both regions.
+
+#### Task 3: Visual Comparison (CRITICAL)
+Is the garment worn in the "GENERATED POSE" image functionally and stylistically the same as the base underwear in the "BASE MODEL" image?
+- **Rule:** Ignore minor variations in lighting, shadow, or subtle fabric wrinkles that are a natural result of a different pose.
+- **Rule:** The garment is only considered different (i.e., \`is_identical_to_base_garment: false\`) if it is a distinct, new clothing item (e.g., a t-shirt, a jacket, jeans, a dress).
 
 ### Output Format
 Your entire response MUST be a single, valid JSON object with the following structure. Do not include any other text or explanations.
 
+**Example Output (Model in a hat and base underwear):**
+\`\`\`json
 {
-  "shoot_focus": "upper_body" | "lower_body" | "full_body",
+  "shoot_focus": "full_body",
   "garment": {
-    "description": "A concise text description of the garment.",
-    "coverage": "upper_body" | "lower_body" | "full_body",
-    "is_identical_to_base_garment": true | false
+    "description": "A black fedora hat and simple grey underwear.",
+    "coverage": "full_body",
+    "is_identical_to_base_garment": true
   }
-}`;
-function extractJson(text) {
+}
+\`\`\``;
+function extractJson(text: any) {
   const match = text.match(/```json\s*([\s\S]*?)\s*```/);
   if (match && match[1]) return JSON.parse(match[1]);
   try {
@@ -47,7 +60,7 @@ function extractJson(text) {
     throw new Error("The model returned a response that could not be parsed as JSON.");
   }
 }
-async function downloadImageAsPart(supabase, publicUrl) {
+async function downloadImageAsPart(supabase: any, publicUrl: string) {
   const url = new URL(publicUrl);
   const pathSegments = url.pathname.split('/');
   const bucketName = pathSegments[pathSegments.indexOf('public') + 1];
@@ -75,7 +88,7 @@ serve(async (req)=>{
   if (!job_id || !image_url || !base_model_image_url || !pose_prompt) {
     throw new Error("job_id, image_url, base_model_image_url, and pose_prompt are required.");
   }
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
   const logPrefix = `[PoseAnalyzer][${job_id}]`;
   console.log(`${logPrefix} Analyzing pose: "${pose_prompt}"`);
   try {
@@ -123,7 +136,7 @@ serve(async (req)=>{
     // Fetch the job, update the specific pose, and save it back
     const { data: job, error: fetchError } = await supabase.from('mira-agent-model-generation-jobs').select('final_posed_images').eq('id', job_id).single();
     if (fetchError) throw fetchError;
-    const updatedPoses = (job.final_posed_images || []).map((pose)=>{
+    const updatedPoses = (job.final_posed_images || []).map((pose: any)=>{
       if (pose.final_url === image_url) {
         return {
           ...pose,
@@ -154,7 +167,7 @@ serve(async (req)=>{
     try {
       const { data: job, error: fetchError } = await supabase.from('mira-agent-model-generation-jobs').select('final_posed_images').eq('id', job_id).single();
       if (!fetchError && job) {
-        const updatedPoses = (job.final_posed_images || []).map((pose)=>{
+        const updatedPoses = (job.final_posed_images || []).map((pose: any)=>{
           if (pose.final_url === image_url) {
             return {
               ...pose,
