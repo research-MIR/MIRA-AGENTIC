@@ -7,10 +7,6 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 
-// --- CONFIGURABLE PROMPTS ---
-const EDITING_TASK_WITH_IMAGE_REFERENCE = "change their pose to match my reference, keep everything else the same";
-const EDITING_TASK_WITH_TEXT_REFERENCE = "change their pose to match my reference, IGNORE EVERYTHING ELSE OUTSIDE OF THE POSE, keep everything else the same";
-
 // --- NEW: Triage System Prompt ---
 const TRIAGE_SYSTEM_PROMPT = `You are a task classification AI. Analyze the user's prompt and determine if their primary intent is to change the model's pose, change their garment, or both. Your response MUST be a single JSON object with one key, 'task_type', set to one of three possible string values: 'pose', 'garment', or 'both'.
 
@@ -201,20 +197,31 @@ serve(async (req) => {
     const { task_type } = extractJson(triageResult.text);
     console.log(`[PoseGenerator][${requestId}] Intent classified as: '${task_type}'`);
 
-    // --- Step 2: Select the appropriate system prompt ---
+    // --- Step 2: Select the appropriate system prompt and dynamic task descriptions ---
     let selectedSystemPrompt: string;
+    let editingTaskWithImage: string;
+    let editingTaskWithText: string;
+
     switch (task_type) {
         case 'garment':
             selectedSystemPrompt = GARMENT_SWAP_SYSTEM_PROMPT;
+            editingTaskWithImage = "change their garment to match my reference, keep everything else the same";
+            editingTaskWithText = "change their garment to match my reference, IGNORE EVERYTHING ELSE OUTSIDE OF THE GARMENT, keep everything else the same";
+            break;
+        case 'both':
+            selectedSystemPrompt = POSE_CHANGE_SYSTEM_PROMPT; // Defaulting to pose for now
+            editingTaskWithImage = "change their pose and garment to match my reference, keep everything else the same";
+            editingTaskWithText = "change their pose and garment to match my reference, IGNORE EVERYTHING ELSE OUTSIDE OF THE POSE AND GARMENT, keep everything else the same";
             break;
         case 'pose':
-        case 'both': // Defaulting 'both' to 'pose' as per plan
         default:
             selectedSystemPrompt = POSE_CHANGE_SYSTEM_PROMPT;
+            editingTaskWithImage = "change their pose to match my reference, keep everything else the same";
+            editingTaskWithText = "change their pose to match my reference, IGNORE EVERYTHING ELSE OUTSIDE OF THE POSE, keep everything else the same";
             break;
     }
 
-    // --- Step 3: Proceed with the original logic, but using the selected prompt ---
+    // --- Step 3: Proceed with the original logic, but using the selected prompt and tasks ---
     console.log(`[PoseGenerator][${requestId}] Step 2: Downloading base model from: ${base_model_url}`);
     const baseModelBlob = await downloadFromSupabase(supabase, base_model_url);
     const uniqueBaseModelFilename = `base_model_${requestId}.png`;
@@ -223,7 +230,7 @@ serve(async (req) => {
 
     const finalWorkflow = JSON.parse(unifiedWorkflowTemplate);
     finalWorkflow['214'].inputs.image = baseModelFilename;
-    finalWorkflow['195'].inputs.String = selectedSystemPrompt; // Use the dynamically selected prompt
+    finalWorkflow['195'].inputs.String = selectedSystemPrompt;
     
     if (pose_image_url) {
       console.log(`[PoseGenerator][${requestId}] Pose reference image provided. Downloading from: ${pose_image_url}`);
@@ -233,13 +240,13 @@ serve(async (req) => {
       
       finalWorkflow['215'].inputs.image = poseImageFilename;
       finalWorkflow['230'].inputs.Number = "2";
-      finalWorkflow['193'].inputs.String = EDITING_TASK_WITH_IMAGE_REFERENCE;
+      finalWorkflow['193'].inputs.String = editingTaskWithImage;
       finalWorkflow['217'].inputs.String = ""; 
       console.log(`[PoseGenerator][${requestId}] Pose reference uploaded as: ${poseImageFilename}.`);
     } else {
       console.log(`[PoseGenerator][${requestId}] No pose reference image provided. Using text prompt.`);
       finalWorkflow['230'].inputs.Number = "1";
-      const textRefTask = `${EDITING_TASK_WITH_TEXT_REFERENCE}. The user's specific instruction is: '${pose_prompt}'`;
+      const textRefTask = `${editingTaskWithText}. The user's specific instruction is: '${pose_prompt}'`;
       finalWorkflow['217'].inputs.String = textRefTask;
       finalWorkflow['193'].inputs.String = "";
     }
