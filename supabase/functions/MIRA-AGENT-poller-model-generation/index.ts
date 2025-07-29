@@ -260,7 +260,22 @@ async function handleGeneratingPosesState(supabase: any, job: any) {
         analysis_started_at: new Date().toISOString(),
     };
 
-    // Immediately trigger analysis for the base pose
+    const newPosePlaceholders = job.pose_prompts.map((pose: any) => ({
+        pose_prompt: pose.value,
+        comfyui_prompt_id: null,
+        status: 'pending',
+        final_url: null,
+        is_upscaled: false,
+    }));
+
+    const finalPoseArray = [basePose, ...newPosePlaceholders];
+
+    await supabase.from('mira-agent-model-generation-jobs').update({ 
+        status: 'generating_poses', // Keep this status for now
+        final_posed_images: finalPoseArray 
+    }).eq('id', job.id);
+
+    // Now dispatch all jobs
     supabase.functions.invoke('MIRA-AGENT-analyzer-pose-image', {
         body: {
             job_id: job.id,
@@ -270,10 +285,9 @@ async function handleGeneratingPosesState(supabase: any, job: any) {
         }
     }).catch(err => console.error(`[ModelGenPoller][${job.id}] ERROR: Failed to invoke analyzer for base pose:`, err));
 
-    // Dispatch all pose generation jobs in parallel. The generator tool itself will update the database.
     const poseGenerationPromises = job.pose_prompts.map((pose: any) => {
         const payload = {
-            job_id: job.id, // Pass the main job ID
+            job_id: job.id,
             base_model_url: job.base_model_image_url,
             pose_prompt: pose.value,
             pose_image_url: pose.type === 'image' ? pose.value : null,
@@ -281,8 +295,6 @@ async function handleGeneratingPosesState(supabase: any, job: any) {
         return supabase.functions.invoke('MIRA-AGENT-tool-comfyui-pose-generator', { body: payload });
     });
 
-    // We don't need to wait for all of them to finish, just dispatch them.
-    // However, we should log if any dispatches fail.
     Promise.allSettled(poseGenerationPromises).then(results => {
         const failedCount = results.filter(r => r.status === 'rejected').length;
         if (failedCount > 0) {
@@ -290,16 +302,13 @@ async function handleGeneratingPosesState(supabase: any, job: any) {
         } else {
             console.log(`[ModelGenPoller][${job.id}] All ${job.pose_prompts.length} pose generation jobs dispatched successfully.`);
         }
+        // Finally, update the status to polling
+        supabase.from('mira-agent-model-generation-jobs').update({ status: 'polling_poses' }).eq('id', job.id)
+            .then(() => {
+                console.log(`[ModelGenPoller][${job.id}] Status updated to polling_poses. Re-invoking poller.`);
+                supabase.functions.invoke('MIRA-AGENT-poller-model-generation', { body: { job_id: job.id } }).catch(console.error);
+            });
     });
-
-    // Update the main job status to start polling
-    await supabase.from('mira-agent-model-generation-jobs').update({ 
-        status: 'polling_poses', 
-        final_posed_images: [basePose] // Start with just the base pose
-    }).eq('id', job.id);
-    
-    console.log(`[ModelGenPoller][${job.id}] All pose jobs dispatched. Re-invoking poller to start polling.`);
-    supabase.functions.invoke('MIRA-AGENT-poller-model-generation', { body: { job_id: job.id } }).catch(console.error);
 }
 
 async function handlePollingPosesState(supabase: any, job: any) {

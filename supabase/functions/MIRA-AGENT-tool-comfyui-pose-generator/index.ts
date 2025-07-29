@@ -362,37 +362,20 @@ serve(async (req) => {
     const comfyui_prompt_id = data.prompt_id;
     console.log(`[PoseGenerator][${requestId}] INFO: Job queued successfully with prompt_id: ${comfyui_prompt_id}`);
 
-    // --- NEW DATABASE UPDATE LOGIC ---
-    console.log(`[PoseGenerator][${requestId}] INFO: Updating main job ${job_id} with new pose...`);
+    // --- ATOMIC DATABASE UPDATE ---
+    console.log(`[PoseGenerator][${requestId}] INFO: Atomically updating main job ${job_id} with new pose...`);
+    const { error: rpcError } = await supabase.rpc('update_pose_with_prompt_id', {
+        p_job_id: job_id,
+        p_pose_prompt: pose_prompt,
+        p_comfyui_id: comfyui_prompt_id
+    });
+
+    if (rpcError) {
+        throw new Error(`Failed to update job ${job_id} via RPC: ${rpcError.message}`);
+    }
     
-    const { data: job, error: fetchError } = await supabase
-      .from('mira-agent-model-generation-jobs')
-      .select('final_posed_images')
-      .eq('id', job_id)
-      .single();
-
-    if (fetchError) throw new Error(`Failed to fetch job ${job_id} to update poses: ${fetchError.message}`);
-
-    const newPoseObject = {
-        pose_prompt: pose_prompt,
-        comfyui_prompt_id: comfyui_prompt_id,
-        status: 'processing',
-        final_url: null,
-        is_upscaled: false,
-    };
-
-    const currentPoses = job.final_posed_images || [];
-    const updatedPoses = [...currentPoses, newPoseObject];
-
-    const { error: updateError } = await supabase
-      .from('mira-agent-model-generation-jobs')
-      .update({ final_posed_images: updatedPoses })
-      .eq('id', job_id);
-
-    if (updateError) throw new Error(`Failed to update job ${job_id} with new pose: ${updateError.message}`);
-    
-    console.log(`[PoseGenerator][${requestId}] INFO: Main job ${job_id} updated successfully.`);
-    // --- END OF NEW LOGIC ---
+    console.log(`[PoseGenerator][${requestId}] INFO: Main job ${job_id} updated successfully via RPC.`);
+    // --- END OF ATOMIC UPDATE ---
 
     return new Response(JSON.stringify({ comfyui_prompt_id: comfyui_prompt_id }), {
       headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type' },
