@@ -24,21 +24,25 @@ export const isPoseCompatible = (garment: AnalyzedGarment, pose: Pose, isStrict:
   const poseGarment = pose.analysis.garment;
 
   // Rule 1: Primary Framing Check
-  if (garmentFit === 'upper body' && !['upper_body', 'full_body'].includes(shootFocus)) {
+  if (garmentFit === 'upper_body' && !['upper_body', 'full_body'].includes(shootFocus)) {
     console.log(`${logPrefix} INCOMPATIBLE: Upper body garment cannot be placed on a lower body shot.`);
     return { compatible: false, reason: `Cannot place an upper body garment on a ${shootFocus} shot.` };
   }
-  if (garmentFit === 'lower body' && !['lower_body', 'full_body'].includes(shootFocus)) {
+  if (garmentFit === 'lower_body' && !['lower_body', 'full_body'].includes(shootFocus)) {
     console.log(`${logPrefix} INCOMPATIBLE: Lower body garment cannot be placed on an upper body shot.`);
     return { compatible: false, reason: `Cannot place a lower body garment on an ${shootFocus} shot.` };
   }
-  if (garmentFit === 'full body' && shootFocus !== 'full_body') {
+  if (garmentFit === 'full_body' && shootFocus !== 'full_body') {
     console.log(`${logPrefix} INCOMPATIBLE: Full body garment requires a full body shot.`);
     return { compatible: false, reason: `Cannot place a full body garment on a ${shootFocus} shot.` };
   }
+  if (garmentFit === 'shoes' && shootFocus !== 'full_body') {
+    console.log(`${logPrefix} INCOMPATIBLE: Shoes require a full body shot.`);
+    return { compatible: false, reason: `Cannot place shoes on a ${shootFocus} shot.` };
+  }
 
   // Rule 2: Garment Conflict & Context Check
-  if (garmentFit === 'upper body') {
+  if (garmentFit === 'upper_body') {
     // Valid if the pose shows base underwear OR just pants. Invalid if it shows a different fashion top.
     const isValid = poseGarment.is_identical_to_base_garment === true || poseGarment.coverage === 'lower_body';
     if (!isValid) {
@@ -47,7 +51,7 @@ export const isPoseCompatible = (garment: AnalyzedGarment, pose: Pose, isStrict:
     }
   }
 
-  if (garmentFit === 'lower body') {
+  if (garmentFit === 'lower_body') {
     // Valid ONLY if the pose shows a REAL upper body garment. Invalid if topless OR only base bra.
     const isValid = poseGarment.coverage === 'upper_body' && poseGarment.is_identical_to_base_garment === false;
     if (!isValid) {
@@ -56,7 +60,7 @@ export const isPoseCompatible = (garment: AnalyzedGarment, pose: Pose, isStrict:
     }
   }
 
-  if (garmentFit === 'full body') {
+  if (garmentFit === 'full_body') {
     // Valid ONLY if the pose shows the base underwear.
     const isValid = poseGarment.is_identical_to_base_garment === true;
     if (!isValid) {

@@ -30,7 +30,7 @@ export interface PoseAnalysis {
   shoot_focus: 'upper_body' | 'lower_body' | 'full_body';
   garment: {
     description: string;
-    coverage: 'upper_body' | 'lower_body' | 'full_body';
+    coverage: 'upper_body' | 'lower_body' | 'full_body' | 'shoes';
     is_identical_to_base_garment: boolean;
   };
 }
@@ -48,7 +48,7 @@ export interface AnalyzedGarment {
   previewUrl: string;
   analysis: {
     intended_gender: 'male' | 'female' | 'unisex';
-    type_of_fit: 'upper body' | 'lower body' | 'full body';
+    type_of_fit: 'upper_body' | 'lower_body' | 'full_body' | 'shoes';
     [key: string]: any;
   } | null;
   isAnalyzing: boolean;

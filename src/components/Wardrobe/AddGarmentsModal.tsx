@@ -20,8 +20,10 @@ interface Garment {
   name: string;
   storage_path: string;
   attributes: {
-    type_of_fit: 'upper body' | 'lower body' | 'full body';
-    [key: string]: any;
+    intended_gender: 'male' | 'female' | 'unisex';
+    type_of_fit: 'upper_body' | 'lower_body' | 'full_body' | 'shoes';
+    primary_color: string;
+    style_tags?: string[];
   } | null;
 }
 
@@ -55,10 +57,13 @@ export const AddGarmentsModal = ({ isOpen, onClose, packId, existingGarmentIds, 
   });
 
   const existingCounts = useMemo(() => {
-    const counts: Record<string, number> = { 'upper body': 0, 'lower body': 0, 'full body': 0 };
+    const counts: Record<string, number> = { 'upper_body': 0, 'lower_body': 0, 'full_body': 0, 'shoes': 0 };
     existingGarments.forEach(g => {
       if (g.attributes?.type_of_fit) {
-        counts[g.attributes.type_of_fit]++;
+        const fitType = g.attributes.type_of_fit.replace(/ /g, '_');
+        if (counts.hasOwnProperty(fitType)) {
+          counts[fitType]++;
+        }
       }
     });
     return counts;
@@ -79,7 +84,7 @@ export const AddGarmentsModal = ({ isOpen, onClose, packId, existingGarmentIds, 
     try {
       const processFile = async (file: File) => {
         const hash = await calculateFileHash(file);
-        const { data: existing } = await supabase.from('mira-agent-garments').select('id, attributes').eq('user_id', session.user.id).eq('image_hash', hash).single();
+        const { data: existing } = await supabase.from('mira-agent-garments').select('id, attributes').eq('user_id', session!.user.id).eq('image_hash', hash).single();
         
         let garmentId = existing?.id;
         let garmentAttributes = existing?.attributes;
@@ -159,7 +164,7 @@ export const AddGarmentsModal = ({ isOpen, onClose, packId, existingGarmentIds, 
         if (existingCounts[zone] + selectedInZone < MAX_PER_ZONE) {
           newSet.add(garment.id);
         } else {
-          showError(`Cannot add more than ${MAX_PER_ZONE} items for the '${zone}' category.`);
+          showError(`Cannot add more than ${MAX_PER_ZONE} items for the '${zone.replace(/_/g, ' ')}' category.`);
         }
       }
       return newSet;
