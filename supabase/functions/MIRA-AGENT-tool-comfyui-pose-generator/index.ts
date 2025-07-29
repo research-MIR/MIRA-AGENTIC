@@ -272,9 +272,9 @@ serve(async (req) => {
   try {
     const body = await req.json();
     console.log(`[PoseGenerator][${requestId}] INFO: Received request body:`, JSON.stringify(body));
-    const { base_model_url, pose_prompt, pose_image_url } = body;
-    if (!base_model_url || !pose_prompt) {
-      throw new Error("base_model_url and pose_prompt are required.");
+    const { base_model_url, pose_prompt, pose_image_url, job_id } = body;
+    if (!base_model_url || !pose_prompt || !job_id) {
+      throw new Error("base_model_url, pose_prompt, and job_id are required.");
     }
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
@@ -359,9 +359,42 @@ serve(async (req) => {
     
     const data = await response.json();
     if (!data.prompt_id) throw new Error("ComfyUI did not return a prompt_id.");
-    console.log(`[PoseGenerator][${requestId}] INFO: Job queued successfully with prompt_id: ${data.prompt_id}`);
+    const comfyui_prompt_id = data.prompt_id;
+    console.log(`[PoseGenerator][${requestId}] INFO: Job queued successfully with prompt_id: ${comfyui_prompt_id}`);
 
-    return new Response(JSON.stringify({ comfyui_prompt_id: data.prompt_id }), {
+    // --- NEW DATABASE UPDATE LOGIC ---
+    console.log(`[PoseGenerator][${requestId}] INFO: Updating main job ${job_id} with new pose...`);
+    
+    const { data: job, error: fetchError } = await supabase
+      .from('mira-agent-model-generation-jobs')
+      .select('final_posed_images')
+      .eq('id', job_id)
+      .single();
+
+    if (fetchError) throw new Error(`Failed to fetch job ${job_id} to update poses: ${fetchError.message}`);
+
+    const newPoseObject = {
+        pose_prompt: pose_prompt,
+        comfyui_prompt_id: comfyui_prompt_id,
+        status: 'processing',
+        final_url: null,
+        is_upscaled: false,
+    };
+
+    const currentPoses = job.final_posed_images || [];
+    const updatedPoses = [...currentPoses, newPoseObject];
+
+    const { error: updateError } = await supabase
+      .from('mira-agent-model-generation-jobs')
+      .update({ final_posed_images: updatedPoses })
+      .eq('id', job_id);
+
+    if (updateError) throw new Error(`Failed to update job ${job_id} with new pose: ${updateError.message}`);
+    
+    console.log(`[PoseGenerator][${requestId}] INFO: Main job ${job_id} updated successfully.`);
+    // --- END OF NEW LOGIC ---
+
+    return new Response(JSON.stringify({ comfyui_prompt_id: comfyui_prompt_id }), {
       headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type' },
       status: 200,
     });

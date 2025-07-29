@@ -260,6 +260,7 @@ async function handleGeneratingPosesState(supabase: any, job: any) {
         analysis_started_at: new Date().toISOString(),
     };
 
+    // Immediately trigger analysis for the base pose
     supabase.functions.invoke('MIRA-AGENT-analyzer-pose-image', {
         body: {
             job_id: job.id,
@@ -269,8 +270,10 @@ async function handleGeneratingPosesState(supabase: any, job: any) {
         }
     }).catch(err => console.error(`[ModelGenPoller][${job.id}] ERROR: Failed to invoke analyzer for base pose:`, err));
 
+    // Dispatch all pose generation jobs in parallel. The generator tool itself will update the database.
     const poseGenerationPromises = job.pose_prompts.map((pose: any) => {
         const payload = {
+            job_id: job.id, // Pass the main job ID
             base_model_url: job.base_model_image_url,
             pose_prompt: pose.value,
             pose_image_url: pose.type === 'image' ? pose.value : null,
@@ -278,37 +281,21 @@ async function handleGeneratingPosesState(supabase: any, job: any) {
         return supabase.functions.invoke('MIRA-AGENT-tool-comfyui-pose-generator', { body: payload });
     });
 
-    const results = await Promise.allSettled(poseGenerationPromises);
-
-    const newPoseJobs = results.map((result, index) => {
-        const originalPose = job.pose_prompts[index];
-        if (result.status === 'fulfilled' && result.value.data?.comfyui_prompt_id) {
-            return {
-                pose_prompt: originalPose.value,
-                comfyui_prompt_id: result.value.data.comfyui_prompt_id,
-                status: 'processing',
-                final_url: null,
-                is_upscaled: false,
-            };
+    // We don't need to wait for all of them to finish, just dispatch them.
+    // However, we should log if any dispatches fail.
+    Promise.allSettled(poseGenerationPromises).then(results => {
+        const failedCount = results.filter(r => r.status === 'rejected').length;
+        if (failedCount > 0) {
+            console.error(`[ModelGenPoller][${job.id}] Failed to dispatch ${failedCount} pose generation jobs.`);
         } else {
-            const errorMessage = result.status === 'rejected' ? result.reason.message : 'Failed to get prompt_id';
-            console.error(`[ModelGenPoller][${job.id}] Failed to dispatch pose job for prompt "${originalPose.value}": ${errorMessage}`);
-            return {
-                pose_prompt: originalPose.value,
-                comfyui_prompt_id: null,
-                status: 'failed',
-                error_message: errorMessage,
-                final_url: null,
-                is_upscaled: false,
-            };
+            console.log(`[ModelGenPoller][${job.id}] All ${job.pose_prompts.length} pose generation jobs dispatched successfully.`);
         }
     });
 
-    const finalPoseArray = [basePose, ...newPoseJobs];
-
+    // Update the main job status to start polling
     await supabase.from('mira-agent-model-generation-jobs').update({ 
         status: 'polling_poses', 
-        final_posed_images: finalPoseArray 
+        final_posed_images: [basePose] // Start with just the base pose
     }).eq('id', job.id);
     
     console.log(`[ModelGenPoller][${job.id}] All pose jobs dispatched. Re-invoking poller to start polling.`);
