@@ -1,7 +1,7 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { AlertTriangle, Eye, History } from "lucide-react";
+import { AlertTriangle, Eye, History, Layers } from "lucide-react";
 import { BitStudioJob } from "@/types/vto";
 import { SecureImageDisplay } from "./SecureImageDisplay";
 import { useState } from "react";
@@ -9,6 +9,7 @@ import { DebugStepsModal } from "./DebugStepsModal";
 import { FixHistoryModal } from "./FixHistoryModal";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
+import { ImageCompareModal } from "@/components/ImageCompareModal";
 
 interface VtoJobDetailModalProps {
   job: BitStudioJob | null;
@@ -19,6 +20,7 @@ interface VtoJobDetailModalProps {
 export const VtoJobDetailModal = ({ job, isOpen, onClose }: VtoJobDetailModalProps) => {
   const [isDebugModalOpen, setIsDebugModalOpen] = useState(false);
   const [isFixHistoryModalOpen, setIsFixHistoryModalOpen] = useState(false);
+  const [isCompareModalOpen, setIsCompareModalOpen] = useState(false);
 
   if (!isOpen || !job) return null;
 
@@ -36,6 +38,9 @@ export const VtoJobDetailModal = ({ job, isOpen, onClose }: VtoJobDetailModalPro
     if (engine === 'bitstudio_fallback') return 'BitStudio VTO (Fallback)';
     return engine;
   };
+
+  const beforeImageUrl = job.source_person_image_url;
+  const afterImageUrl = job.final_image_url;
 
   return (
     <>
@@ -112,12 +117,26 @@ export const VtoJobDetailModal = ({ job, isOpen, onClose }: VtoJobDetailModalPro
           <DialogFooter className="gap-2">
             {hasDebugAssets && <Button variant="secondary" onClick={() => setIsDebugModalOpen(true)}><Eye className="mr-2 h-4 w-4" />Show Debug</Button>}
             {hasFixHistory && <Button variant="secondary" onClick={() => setIsFixHistoryModalOpen(true)}><History className="mr-2 h-4 w-4" />Fix History</Button>}
+            {beforeImageUrl && afterImageUrl && (
+              <Button variant="outline" onClick={() => setIsCompareModalOpen(true)}>
+                <Layers className="mr-2 h-4 w-4" />
+                Compare
+              </Button>
+            )}
             <Button onClick={onClose}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
       <DebugStepsModal isOpen={isDebugModalOpen} onClose={() => setIsDebugModalOpen(false)} assets={job.metadata?.debug_assets || null} />
       <FixHistoryModal isOpen={isFixHistoryModalOpen} onClose={() => setIsFixHistoryModalOpen(false)} job={job} />
+      {beforeImageUrl && afterImageUrl && (
+        <ImageCompareModal
+          isOpen={isCompareModalOpen}
+          onClose={() => setIsCompareModalOpen(false)}
+          beforeUrl={beforeImageUrl}
+          afterUrl={afterImageUrl}
+        />
+      )}
     </>
   );
 };
