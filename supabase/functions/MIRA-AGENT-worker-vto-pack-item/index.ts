@@ -105,9 +105,32 @@ serve(async (req) => {
   let job;
 
   try {
-    const { data: fetchedJob, error: fetchError } = await supabase.from('mira-agent-bitstudio-jobs').select('*').eq('id', pair_job_id).single();
-    if (fetchError) throw new Error(fetchError.message || 'Failed to fetch job.');
-    job = fetchedJob;
+    // --- ATOMIC UPDATE TO CLAIM THE JOB ---
+    const { data: claimedJob, error: claimError } = await supabase
+      .from('mira-agent-bitstudio-jobs')
+      .update({ status: 'processing' })
+      .eq('id', pair_job_id)
+      .in('status', ['pending', 'queued'])
+      .select('*')
+      .single();
+
+    if (claimError) {
+        console.error(`${logPrefix} Error trying to claim job:`, claimError.message);
+        throw claimError;
+    }
+
+    if (!claimedJob) {
+        console.log(`${logPrefix} Job was already claimed or is not in a startable state. Checking current status...`);
+        const { data: currentJob } = await supabase.from('mira-agent-bitstudio-jobs').select('status').eq('id', pair_job_id).single();
+        console.log(`${logPrefix} Current job status is '${currentJob?.status}'. Exiting gracefully.`);
+        return new Response(JSON.stringify({ success: true, message: "Job already claimed or not in a valid state." }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            status: 200,
+        });
+    }
+    // --- END OF ATOMIC UPDATE ---
+    job = claimedJob;
+    console.log(`${logPrefix} Successfully claimed job. Proceeding with step: ${job.metadata?.google_vto_step || 'start'}`);
 
     if (reframe_result_url) {
         console.log(`${logPrefix} Received reframe result. Finalizing job.`);
@@ -118,7 +141,6 @@ serve(async (req) => {
         console.log(`${logPrefix} Received BitStudio fallback result. Running final quality check.`);
         await handleQualityCheck(supabase, job, logPrefix, bitstudio_result_url);
     } else {
-        console.log(`${logPrefix} Starting job.`);
         const step = job.metadata?.google_vto_step || 'start';
         console.log(`${logPrefix} Current step: ${step}`);
         switch (step) {
