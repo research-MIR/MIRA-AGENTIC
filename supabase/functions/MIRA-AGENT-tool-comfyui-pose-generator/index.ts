@@ -1,23 +1,33 @@
-// Forcing redeployment to sync secrets
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { GoogleGenAI } from 'https://esm.sh/@google/genai@0.15.0';
 
 const COMFYUI_ENDPOINT_URL = Deno.env.get('COMFYUI_ENDPOINT_URL');
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-const UPLOAD_BUCKET = 'mira-agent-user-uploads';
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS"
-};
+const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 
 // --- CONFIGURABLE PROMPTS ---
 const EDITING_TASK_WITH_IMAGE_REFERENCE = "change their pose to match my reference, keep everything else the same";
 const EDITING_TASK_WITH_TEXT_REFERENCE = "change their pose to match my reference, IGNORE EVERYTHING ELSE OUTSIDE OF THE POSE, keep everything else the same";
 
-const GEMINI_SYSTEM_PROMPT = `You are an expert prompt engineer for a powerful image-to-image editing model called "Kontext". Your sole purpose is to receive a user's editing request and image(s), and translate that request into a single, optimized, and highly effective prompt for the Kontext model. The final prompt must be in English and must not exceed 512 tokens.
+// --- NEW: Triage System Prompt ---
+const TRIAGE_SYSTEM_PROMPT = `You are a task classification AI. Analyze the user's prompt and determine if their primary intent is to change the model's pose, change their garment, or both. Your response MUST be a single JSON object with one key, 'task_type', set to one of three possible string values: 'pose', 'garment', or 'both'.
+
+Example 1:
+User says "make her walk towards the camera."
+Your Output: { "task_type": "pose" }
+
+Example 2:
+User says "change her shirt to a red t-shirt."
+Your Output: { "task_type": "garment" }
+
+Example 3:
+User says "show him running, wearing a black hoodie."
+Your Output: { "task_type": "both" }`;
+
+// --- RENAMED: The original prompt, now specialized for POSE changes ---
+const POSE_CHANGE_SYSTEM_PROMPT = `You are an expert prompt engineer for a powerful image-to-image editing model called "Kontext". Your sole purpose is to receive a user's editing request and image(s), and translate that request into a single, optimized, and highly effective prompt for the Kontext model. The final prompt must be in English and must not exceed 512 tokens.
 Your process is to first apply the General Principles, then the crucial Reference Image Handling rule, and finally review the Advanced Examples to guide your prompt construction.
 
 Part 1: General Principles for All Edits
@@ -77,418 +87,62 @@ IF YOU SEE THE SAME IDENTICAL IMAGE TWO TIMES, IGNORE THE REPETITION, FOCUS ON T
 
 Your output is NOT a conversation; it is ONLY the final, optimized prompt. Analyze the request and the single image canvas. Apply all relevant principles, especially the Hyper-Detailed Identity Lockdown and the Golden Rule of Reference Handling, to construct a single, precise, and explicit instruction. Describe what to change, but describe what to keep in even greater detail.`;
 
+// --- NEW: System prompt specialized for GARMENT changes ---
+const GARMENT_SWAP_SYSTEM_PROMPT = `You are an expert prompt engineer for a powerful image-to-image editing model called "Kontext". Your sole purpose is to receive a user's editing request and image(s), and translate that request into a single, optimized, and highly effective prompt for the Kontext model to **swap a model's clothing while preserving their pose and identity**. The final prompt must be in English and must not exceed 512 tokens.
+
+### Core Operating Principles & Methodologies
+
+**I. Pose Preservation Mandate (HIGHEST PRIORITY):**
+Your most critical task is to ensure the model's pose does not change.
+1.  **Analyze the Pose:** You MUST visually analyze the pose in the SOURCE IMAGE.
+2.  **Describe the Pose:** In your final prompt, you MUST include a detailed, explicit description of the model's pose (e.g., "standing with hands on hips," "walking towards the camera," "sitting with legs crossed").
+3.  **Lock the Pose:** Your prompt MUST contain a clause like "It is absolutely critical to preserve the model's exact pose, including their arm, leg, and head position."
+
+**II. Hyper-Detailed Character & Identity LOCKDOWN:**
+This is your second most critical task. A simple "preserve face" clause is a failure. You must actively describe the person's specific features from the image and embed these descriptions directly into the preservation command. This locks down their identity.
+- **Analyze & Describe:** Look at the person in the image and identify their specific, observable features (e.g., 'square jaw', 'light olive skin', 'short black fade', 'blue eyes', 'freckles on cheeks').
+- **Embed in Prompt:** Weave these exact descriptions into your preservation clause to leave no room for interpretation.
+
+**III. Background & Lighting Preservation:**
+You MUST describe the background and lighting from the source image and include a command to preserve them perfectly.
+
+**IV. The Creative Task: Garment Swapping**
+- Your primary creative task is to describe the new garment requested by the user.
+- Replace the description of the model's current clothing with a hyper-detailed description of the new garment.
+- If the user provides a reference image for the garment, you must follow the "Golden Rule of Reference Image Handling": visually analyze the reference, extract its key attributes (color, pattern, texture, fit), and verbally describe those attributes in your prompt. DO NOT say "make it look like the reference."
+
+### Your Output:
+Your output is NOT a conversation; it is ONLY the final, optimized prompt. Analyze the request and the single image canvas. Apply all relevant principles to construct a single, precise, and explicit instruction. Describe what to change (the garment), but describe what to keep (pose, identity, background, lighting) in even greater detail.`;
+
 const unifiedWorkflowTemplate = `{
-  "6": {
-    "inputs": {
-      "text": [
-        "192",
-        0
-      ],
-      "clip": [
-        "212",
-        1
-      ]
-    },
-    "class_type": "CLIPTextEncode",
-    "_meta": {
-      "title": "CLIP Text Encode (Positive Prompt)"
-    }
-  },
-  "8": {
-    "inputs": {
-      "samples": [
-        "197",
-        0
-      ],
-      "vae": [
-        "39",
-        0
-      ]
-    },
-    "class_type": "VAEDecode",
-    "_meta": {
-      "title": "VAE Decode"
-    }
-  },
-  "35": {
-    "inputs": {
-      "guidance": 3.5,
-      "conditioning": [
-        "177",
-        0
-      ]
-    },
-    "class_type": "FluxGuidance",
-    "_meta": {
-      "title": "FluxGuidance"
-    }
-  },
-  "37": {
-    "inputs": {
-      "unet_name": "flux1-kontext-dev.safetensors",
-      "weight_dtype": "default"
-    },
-    "class_type": "UNETLoader",
-    "_meta": {
-      "title": "Load Diffusion Model"
-    }
-  },
-  "38": {
-    "inputs": {
-      "clip_name1": "clip_l.safetensors",
-      "clip_name2": "t5xxl_fp16.safetensors",
-      "type": "flux",
-      "device": "default"
-    },
-    "class_type": "DualCLIPLoader",
-    "_meta": {
-      "title": "DualCLIPLoader"
-    }
-  },
-  "39": {
-    "inputs": {
-      "vae_name": "ae.safetensors"
-    },
-    "class_type": "VAELoader",
-    "_meta": {
-      "title": "Load VAE"
-    }
-  },
-  "124": {
-    "inputs": {
-      "pixels": [
-        "214",
-        0
-      ],
-      "vae": [
-        "39",
-        0
-      ]
-    },
-    "class_type": "VAEEncode",
-    "_meta": {
-      "title": "VAE Encode"
-    }
-  },
-  "135": {
-    "inputs": {
-      "conditioning": [
-        "6",
-        0
-      ]
-    },
-    "class_type": "ConditioningZeroOut",
-    "_meta": {
-      "title": "ConditioningZeroOut"
-    }
-  },
-  "177": {
-    "inputs": {
-      "conditioning": [
-        "6",
-        0
-      ],
-      "latent": [
-        "124",
-        0
-      ]
-    },
-    "class_type": "ReferenceLatent",
-    "_meta": {
-      "title": "ReferenceLatent"
-    }
-  },
-  "190": {
-    "inputs": {
-      "prompt": [
-        "232",
-        0
-      ],
-      "safety_settings": "BLOCK_NONE",
-      "response_type": "text",
-      "model": "gemini-2.5-pro",
-      "api_key": "AIzaSyByuyPAPHMnftan3cvqaZRTTwlGATYinnA",
-      "proxy": "",
-      "system_instruction": [
-        "195",
-        0
-      ],
-      "error_fallback_value": "",
-      "seed": 1522985431,
-      "temperature": 0.7500000000000001,
-      "num_predict": 0,
-      "image_1": [
-        "214",
-        0
-      ],
-      "image_2": [
-        "229",
-        0
-      ]
-    },
-    "class_type": "Ask_Gemini",
-    "_meta": {
-      "title": "Ask Gemini"
-    }
-  },
-  "192": {
-    "inputs": {
-      "value": [
-        "190",
-        0
-      ]
-    },
-    "class_type": "PrimitiveString",
-    "_meta": {
-      "title": "String"
-    }
-  },
-  "193": {
-    "inputs": {
-      "String": "placeholder_for_image_ref_task"
-    },
-    "class_type": "String",
-    "_meta": {
-      "title": "editing task"
-    }
-  },
-  "194": {
-    "inputs": {
-      "text_0": "For the woman with long, wavy platinum blonde hair, tanned skin, and a bright smile, change her pose to one where she is standing confidently with both hands on her hips. It is absolutely critical to preserve her exact identity, maintaining her specific facial structure, unique smile, brown eyes, and tanned skin tone. Her long, wavy platinum blonde hairstyle must remain identical. The two-piece, taupe-colored lingerie she is wearing must be preserved perfectly in style, color, and fit. The entire seamless gray studio background and the soft, diffused lighting must remain completely unchanged.",
-      "text": [
-        "192",
-        0
-      ]
-    },
-    "class_type": "ShowText|pysssss",
-    "_meta": {
-      "title": "Show Text 🐍"
-    }
-  },
-  "195": {
-    "inputs": {
-      "String": "placeholder_for_system_prompt"
-    },
-    "class_type": "String",
-    "_meta": {
-      "title": "roleprompt for editing task"
-    }
-  },
-  "196": {
-    "inputs": {
-      "cfg": 1,
-      "nag_scale": 7.5,
-      "nag_tau": 2.5,
-      "nag_alpha": 0.25,
-      "nag_sigma_end": 0.75,
-      "model": [
-        "212",
-        0
-      ],
-      "positive": [
-        "35",
-        0
-      ],
-      "negative": [
-        "135",
-        0
-      ],
-      "nag_negative": [
-        "198",
-        0
-      ],
-      "latent_image": [
-        "124",
-        0
-      ]
-    },
-    "class_type": "NAGCFGGuider",
-    "_meta": {
-      "title": "NAGCFGGuider"
-    }
-  },
-  "197": {
-    "inputs": {
-      "noise": [
-        "200",
-        0
-      ],
-      "guider": [
-        "196",
-        0
-      ],
-      "sampler": [
-        "202",
-        0
-      ],
-      "sigmas": [
-        "204",
-        0
-      ],
-      "latent_image": [
-        "124",
-        0
-      ]
-    },
-    "class_type": "SamplerCustomAdvanced",
-    "_meta": {
-      "title": "SamplerCustomAdvanced"
-    }
-  },
-  "198": {
-    "inputs": {
-      "conditioning": [
-        "6",
-        0
-      ]
-    },
-    "class_type": "ConditioningZeroOut",
-    "_meta": {
-      "title": "ConditioningZeroOut"
-    }
-  },
-  "200": {
-    "inputs": {
-      "noise_seed": 897192953094267
-    },
-    "class_type": "RandomNoise",
-    "_meta": {
-      "title": "RandomNoise"
-    }
-  },
-  "202": {
-    "inputs": {
-      "sampler_name": "euler"
-    },
-    "class_type": "KSamplerSelect",
-    "_meta": {
-      "title": "KSamplerSelect"
-    }
-  },
-  "204": {
-    "inputs": {
-      "scheduler": "simple",
-      "steps": 20,
-      "denoise": 0.9200000000000002,
-      "model": [
-        "37",
-        0
-      ]
-    },
-    "class_type": "BasicScheduler",
-    "_meta": {
-      "title": "BasicScheduler"
-    }
-  },
-  "212": {
-    "inputs": {
-      "lora_name": "42lux-UltimateAtHome-flux-highresfix%20(1).safetensors",
-      "strength_model": 0.12000000000000002,
-      "strength_clip": 0.12000000000000002,
-      "model": [
-        "37",
-        0
-      ],
-      "clip": [
-        "38",
-        0
-      ]
-    },
-    "class_type": "LoraLoader",
-    "_meta": {
-      "title": "Load LoRA"
-    }
-  },
-  "213": {
-    "inputs": {
-      "filename_prefix": "ComfyUI",
-      "images": [
-        "8",
-        0
-      ]
-    },
-    "class_type": "SaveImage",
-    "_meta": {
-      "title": "Output_BackUP-version"
-    }
-  },
-  "214": {
-    "inputs": {
-      "image": "ComfyUI_00110_.png"
-    },
-    "class_type": "LoadImage",
-    "_meta": {
-      "title": "Original_Image"
-    }
-  },
-  "215": {
-    "inputs": {
-      "image": "ComfyUI_00111_.png"
-    },
-    "class_type": "LoadImage",
-    "_meta": {
-      "title": "Pose_image"
-    }
-  },
-  "217": {
-    "inputs": {
-      "String": "placeholder_for_text_ref_task"
-    },
-    "class_type": "String",
-    "_meta": {
-      "title": "editing task"
-    }
-  },
-  "229": {
-    "inputs": {
-      "select": [
-        "230",
-        0
-      ],
-      "images1": [
-        "214",
-        0
-      ],
-      "images2_opt": [
-        "215",
-        0
-      ]
-    },
-    "class_type": "ImageMaskSwitch",
-    "_meta": {
-      "title": "Switch (images, mask)"
-    }
-  },
-  "230": {
-    "inputs": {
-      "Number": "1"
-    },
-    "class_type": "Int",
-    "_meta": {
-      "title": "Switch with reference (2) or not (1) PROMPT"
-    }
-  },
-  "232": {
-    "inputs": {
-      "select": [
-        "230",
-        0
-      ],
-      "sel_mode": false,
-      "input1": [
-        "217",
-        0
-      ],
-      "input2": [
-        "193",
-        0
-      ]
-    },
-    "class_type": "ImpactSwitch",
-    "_meta": {
-      "title": "Switch (Any)"
-    }
-  }
+  "6": { "inputs": { "text": ["192", 0], "clip": ["212", 1] }, "class_type": "CLIPTextEncode", "_meta": { "title": "CLIP Text Encode (Positive Prompt)" } },
+  "8": { "inputs": { "samples": ["197", 0], "vae": ["39", 0] }, "class_type": "VAEDecode", "_meta": { "title": "VAE Decode" } },
+  "35": { "inputs": { "guidance": 3.5, "conditioning": ["177", 0] }, "class_type": "FluxGuidance", "_meta": { "title": "FluxGuidance" } },
+  "37": { "inputs": { "unet_name": "flux1-kontext-dev.safetensors", "weight_dtype": "default" }, "class_type": "UNETLoader", "_meta": { "title": "Load Diffusion Model" } },
+  "38": { "inputs": { "clip_name1": "clip_l.safetensors", "clip_name2": "t5xxl_fp16.safetensors", "type": "flux", "device": "default" }, "class_type": "DualCLIPLoader", "_meta": { "title": "DualCLIPLoader" } },
+  "39": { "inputs": { "vae_name": "ae.safetensors" }, "class_type": "VAELoader", "_meta": { "title": "Load VAE" } },
+  "124": { "inputs": { "pixels": ["214", 0], "vae": ["39", 0] }, "class_type": "VAEEncode", "_meta": { "title": "VAE Encode" } },
+  "135": { "inputs": { "conditioning": ["6", 0] }, "class_type": "ConditioningZeroOut", "_meta": { "title": "ConditioningZeroOut" } },
+  "177": { "inputs": { "conditioning": ["6", 0], "latent": ["124", 0] }, "class_type": "ReferenceLatent", "_meta": { "title": "ReferenceLatent" } },
+  "190": { "inputs": { "prompt": ["232", 0], "safety_settings": "BLOCK_NONE", "response_type": "text", "model": "gemini-2.5-pro", "api_key": "AIzaSyByuyPAPHMnftan3cvqaZRTTwlGATYinnA", "proxy": "", "system_instruction": ["195", 0], "error_fallback_value": "", "seed": 1522985431, "temperature": 0.7500000000000001, "num_predict": 0, "image_1": ["214", 0], "image_2": ["229", 0] }, "class_type": "Ask_Gemini", "_meta": { "title": "Ask Gemini" } },
+  "192": { "inputs": { "value": ["190", 0] }, "class_type": "PrimitiveString", "_meta": { "title": "String" } },
+  "193": { "inputs": { "String": "placeholder_for_image_ref_task" }, "class_type": "String", "_meta": { "title": "editing task" } },
+  "194": { "inputs": { "text_0": "For the woman with long, wavy platinum blonde hair, tanned skin, and a bright smile, change her pose to one where she is standing confidently with both hands on her hips. It is absolutely critical to preserve her exact identity, maintaining her specific facial structure, unique smile, brown eyes, and tanned skin tone. Her long, wavy platinum blonde hairstyle must remain identical. The two-piece, taupe-colored lingerie she is wearing must be preserved perfectly in style, color, and fit. The entire seamless gray studio background and the soft, diffused lighting must remain completely unchanged.", "text": ["192", 0] }, "class_type": "ShowText|pysssss", "_meta": { "title": "Show Text 🐍" } },
+  "195": { "inputs": { "String": "placeholder_for_system_prompt" }, "class_type": "String", "_meta": { "title": "roleprompt for editing task" } },
+  "196": { "inputs": { "cfg": 1, "nag_scale": 7.5, "nag_tau": 2.5, "nag_alpha": 0.25, "nag_sigma_end": 0.75, "model": ["212", 0], "positive": ["35", 0], "negative": ["135", 0], "nag_negative": ["198", 0], "latent_image": ["124", 0] }, "class_type": "NAGCFGGuider", "_meta": { "title": "NAGCFGGuider" } },
+  "197": { "inputs": { "noise": ["200", 0], "guider": ["196", 0], "sampler": ["202", 0], "sigmas": ["204", 0], "latent_image": ["124", 0] }, "class_type": "SamplerCustomAdvanced", "_meta": { "title": "SamplerCustomAdvanced" } },
+  "198": { "inputs": { "conditioning": ["6", 0] }, "class_type": "ConditioningZeroOut", "_meta": { "title": "ConditioningZeroOut" } },
+  "200": { "inputs": { "noise_seed": 897192953094267 }, "class_type": "RandomNoise", "_meta": { "title": "RandomNoise" } },
+  "202": { "inputs": { "sampler_name": "euler" }, "class_type": "KSamplerSelect", "_meta": { "title": "KSamplerSelect" } },
+  "204": { "inputs": { "scheduler": "simple", "steps": 20, "denoise": 0.9200000000000002, "model": ["37", 0] }, "class_type": "BasicScheduler", "_meta": { "title": "BasicScheduler" } },
+  "212": { "inputs": { "lora_name": "42lux-UltimateAtHome-flux-highresfix%20(1).safetensors", "strength_model": 0.12000000000000002, "strength_clip": 0.12000000000000002, "model": ["37", 0], "clip": ["38", 0] }, "class_type": "LoraLoader", "_meta": { "title": "Load LoRA" } },
+  "213": { "inputs": { "filename_prefix": "ComfyUI", "images": ["8", 0] }, "class_type": "SaveImage", "_meta": { "title": "Output_BackUP-version" } },
+  "214": { "inputs": { "image": "ComfyUI_00110_.png" }, "class_type": "LoadImage", "_meta": { "title": "Original_Image" } },
+  "215": { "inputs": { "image": "ComfyUI_00111_.png" }, "class_type": "LoadImage", "_meta": { "title": "Pose_image" } },
+  "217": { "inputs": { "String": "placeholder_for_text_ref_task" }, "class_type": "String", "_meta": { "title": "editing task" } },
+  "229": { "inputs": { "select": ["230", 0], "images1": ["214", 0], "images2_opt": ["215", 0] }, "class_type": "ImageMaskSwitch", "_meta": { "title": "Switch (images, mask)" } },
+  "230": { "inputs": { "Number": "1" }, "class_type": "Int", "_meta": { "title": "Switch with reference (2) or not (1) PROMPT" } },
+  "232": { "inputs": { "select": ["230", 0], "sel_mode": false, "input1": ["217", 0], "input2": ["193", 0] }, "class_type": "ImpactSwitch", "_meta": { "title": "Switch (Any)" } }
 }`;
 
 async function downloadFromSupabase(supabase: any, publicUrl: string): Promise<Blob> {
@@ -512,6 +166,14 @@ async function uploadToComfyUI(comfyUiUrl: string, imageBlob: Blob, filename: st
   return data.name;
 }
 
+function extractJson(text: string): any {
+    const match = text.match(/```json\s*([\s\S]*?)\s*```/);
+    if (match && match[1]) return JSON.parse(match[1]);
+    try { return JSON.parse(text); } catch (e) {
+        throw new Error("The model returned a response that could not be parsed as JSON.");
+    }
+}
+
 serve(async (req) => {
   const requestId = `pose-generator-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
@@ -526,17 +188,42 @@ serve(async (req) => {
       throw new Error("base_model_url and pose_prompt are required.");
     }
 
-    console.log(`[PoseGenerator][${requestId}] Downloading base model from: ${base_model_url}`);
+    const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
+
+    // --- Step 1: Triage the user's request ---
+    console.log(`[PoseGenerator][${requestId}] Step 1: Classifying user intent...`);
+    const triageResult = await ai.models.generateContent({
+        model: "gemini-2.5-flash-lite-preview-06-17",
+        contents: [{ role: 'user', parts: [{ text: pose_prompt }] }],
+        generationConfig: { responseMimeType: "application/json" },
+        config: { systemInstruction: { role: "system", parts: [{ text: TRIAGE_SYSTEM_PROMPT }] } }
+    });
+    const { task_type } = extractJson(triageResult.text);
+    console.log(`[PoseGenerator][${requestId}] Intent classified as: '${task_type}'`);
+
+    // --- Step 2: Select the appropriate system prompt ---
+    let selectedSystemPrompt: string;
+    switch (task_type) {
+        case 'garment':
+            selectedSystemPrompt = GARMENT_SWAP_SYSTEM_PROMPT;
+            break;
+        case 'pose':
+        case 'both': // Defaulting 'both' to 'pose' as per plan
+        default:
+            selectedSystemPrompt = POSE_CHANGE_SYSTEM_PROMPT;
+            break;
+    }
+
+    // --- Step 3: Proceed with the original logic, but using the selected prompt ---
+    console.log(`[PoseGenerator][${requestId}] Step 2: Downloading base model from: ${base_model_url}`);
     const baseModelBlob = await downloadFromSupabase(supabase, base_model_url);
     const uniqueBaseModelFilename = `base_model_${requestId}.png`;
     const baseModelFilename = await uploadToComfyUI(sanitizedAddress, baseModelBlob, uniqueBaseModelFilename);
     console.log(`[PoseGenerator][${requestId}] Base model uploaded to ComfyUI as: ${baseModelFilename}`);
 
     const finalWorkflow = JSON.parse(unifiedWorkflowTemplate);
-
-    // Set the base image and the main system prompt for Gemini
     finalWorkflow['214'].inputs.image = baseModelFilename;
-    finalWorkflow['195'].inputs.String = GEMINI_SYSTEM_PROMPT;
+    finalWorkflow['195'].inputs.String = selectedSystemPrompt; // Use the dynamically selected prompt
     
     if (pose_image_url) {
       console.log(`[PoseGenerator][${requestId}] Pose reference image provided. Downloading from: ${pose_image_url}`);
@@ -544,30 +231,23 @@ serve(async (req) => {
       const uniquePoseRefFilename = `pose_ref_${requestId}.png`;
       const poseImageFilename = await uploadToComfyUI(sanitizedAddress, poseImageBlob, uniquePoseRefFilename);
       
-      // Set up the workflow for image reference
       finalWorkflow['215'].inputs.image = poseImageFilename;
-      finalWorkflow['230'].inputs.Number = "2"; // Switch to use image reference path
-
+      finalWorkflow['230'].inputs.Number = "2";
       finalWorkflow['193'].inputs.String = EDITING_TASK_WITH_IMAGE_REFERENCE;
       finalWorkflow['217'].inputs.String = ""; 
-
-      console.log(`[PoseGenerator][${requestId}] Pose reference uploaded as: ${poseImageFilename}. Switch set to 2.`);
+      console.log(`[PoseGenerator][${requestId}] Pose reference uploaded as: ${poseImageFilename}.`);
     } else {
-      console.log(`[PoseGenerator][${requestId}] No pose reference image provided. Using text prompt. Switch set to 1.`);
-      
-      finalWorkflow['230'].inputs.Number = "1"; // Switch to use text-only path
-
+      console.log(`[PoseGenerator][${requestId}] No pose reference image provided. Using text prompt.`);
+      finalWorkflow['230'].inputs.Number = "1";
       const textRefTask = `${EDITING_TASK_WITH_TEXT_REFERENCE}. The user's specific instruction is: '${pose_prompt}'`;
       finalWorkflow['217'].inputs.String = textRefTask;
-
       finalWorkflow['193'].inputs.String = "";
     }
 
     const queueUrl = `${sanitizedAddress}/prompt`;
     const payload = { prompt: finalWorkflow };
     
-    console.log(`[PoseGenerator][${requestId}] Sending final payload to ComfyUI...`);
-
+    console.log(`[PoseGenerator][${requestId}] Step 3: Sending final payload to ComfyUI...`);
     const response = await fetch(queueUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
