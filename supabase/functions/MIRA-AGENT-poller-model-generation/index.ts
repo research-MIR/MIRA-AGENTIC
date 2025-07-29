@@ -269,50 +269,34 @@ async function handleGeneratingPosesState(supabase: any, job: any) {
         }
     }).catch(err => console.error(`[ModelGenPoller][${job.id}] ERROR: Failed to invoke analyzer for base pose:`, err));
 
-    const poseGenerationPromises = job.pose_prompts.map((pose: any) => {
+    const initialPoseJobs = [basePose, ...job.pose_prompts.map((pose: any) => ({
+        pose_prompt: pose.value,
+        comfyui_prompt_id: null,
+        status: 'pending',
+        final_url: null,
+        is_upscaled: false,
+    }))];
+
+    await supabase.from('mira-agent-model-generation-jobs').update({ 
+        status: 'polling_poses', 
+        final_posed_images: initialPoseJobs 
+    }).eq('id', job.id);
+
+    job.pose_prompts.forEach((pose: any) => {
         const payload = {
+            job_id: job.id,
             base_model_url: job.base_model_image_url,
             pose_prompt: pose.value,
             pose_image_url: pose.type === 'image' ? pose.value : null,
         };
-        return supabase.functions.invoke('MIRA-AGENT-tool-comfyui-pose-generator', { body: payload });
+        supabase.functions.invoke('MIRA-AGENT-tool-comfyui-pose-generator', { body: payload })
+            .catch(err => console.error(`[ModelGenPoller][${job.id}] ERROR: Failed to dispatch pose generator for "${pose.value}":`, err));
     });
-
-    const results = await Promise.allSettled(poseGenerationPromises);
-
-    const newPoseJobs = results.map((result, index) => {
-        const originalPose = job.pose_prompts[index];
-        if (result.status === 'fulfilled' && result.value.data?.comfyui_prompt_id) {
-            return {
-                pose_prompt: originalPose.value,
-                comfyui_prompt_id: result.value.data.comfyui_prompt_id,
-                status: 'processing',
-                final_url: null,
-                is_upscaled: false,
-            };
-        } else {
-            const errorMessage = result.status === 'rejected' ? result.reason.message : 'Failed to get prompt_id';
-            console.error(`[ModelGenPoller][${job.id}] Failed to dispatch pose job for prompt "${originalPose.value}": ${errorMessage}`);
-            return {
-                pose_prompt: originalPose.value,
-                comfyui_prompt_id: null,
-                status: 'failed',
-                error_message: errorMessage,
-                final_url: null,
-                is_upscaled: false,
-            };
-        }
-    });
-
-    const finalPoseArray = [basePose, ...newPoseJobs];
-
-    await supabase.from('mira-agent-model-generation-jobs').update({ 
-        status: 'polling_poses', 
-        final_posed_images: finalPoseArray 
-    }).eq('id', job.id);
     
     console.log(`[ModelGenPoller][${job.id}] All pose jobs dispatched. Re-invoking poller to start polling.`);
-    supabase.functions.invoke('MIRA-AGENT-poller-model-generation', { body: { job_id: job.id } }).catch(console.error);
+    setTimeout(() => {
+        supabase.functions.invoke('MIRA-AGENT-poller-model-generation', { body: { job_id: job.id } }).catch(console.error);
+    }, POLLING_INTERVAL_MS);
 }
 
 async function handlePollingPosesState(supabase: any, job: any) {
@@ -394,14 +378,12 @@ async function handlePollingPosesState(supabase: any, job: any) {
                         hasChanged = true;
                         continue;
                     }
-                    const { data: result, error } = await supabase.functions.invoke('MIRA-AGENT-tool-comfyui-pose-generator', { body: { base_model_url: job.base_model_image_url, pose_prompt: pose.value, pose_image_url: pose.type === 'image' ? pose.value : null } });
+                    const { data: result, error } = await supabase.functions.invoke('MIRA-AGENT-tool-comfyui-pose-generator', { body: { job_id: job.id, base_model_url: job.base_model_image_url, pose_prompt: pose.value, pose_image_url: pose.type === 'image' ? pose.value : null } });
                     if (error) {
                         updatedPoseJobs[index].status = 'failed';
                         updatedPoseJobs[index].error_message = `Retry failed: ${error.message}`;
                     } else {
-                        updatedPoseJobs[index].comfyui_prompt_id = result.comfyui_prompt_id;
-                        updatedPoseJobs[index].status = 'processing';
-                        updatedPoseJobs[index].retry_count = currentRetries + 1;
+                        // The generator tool now handles its own DB update
                     }
                 } else {
                     updatedPoseJobs[index].status = 'failed';
