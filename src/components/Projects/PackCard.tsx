@@ -11,16 +11,23 @@ interface Pack {
 
 interface PackCardProps {
   pack: Pack;
-  packType: 'model' | 'garment';
+  packType: 'model' | 'garment' | 'vto';
   onRemove: (packId: string) => void;
 }
 
 export const PackCard = ({ pack, packType, onRemove }: PackCardProps) => {
-  const linkPath = packType === 'model' ? `/model-packs/${pack.pack_id}` : `/wardrobe-packs/${pack.pack_id}`;
+  const getLinkPath = () => {
+    switch (packType) {
+      case 'model': return `/model-packs/${pack.pack_id}`;
+      case 'garment': return `/wardrobe-packs/${pack.pack_id}`;
+      case 'vto': return `/vto-reports/${pack.pack_id}`;
+      default: return '#';
+    }
+  };
 
   return (
     <Card className="group relative">
-      <Link to={linkPath}>
+      <Link to={getLinkPath()}>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <Package className="h-5 w-5 text-primary" />

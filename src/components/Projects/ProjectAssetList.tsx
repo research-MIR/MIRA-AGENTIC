@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSession } from '@/components/Auth/SessionContextProvider';
 import { Button } from '@/components/ui/button';
-import { Plus, Loader2 } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { showError, showSuccess } from '@/utils/toast';
 import { PackCard } from './PackCard';
 import { AddPackModal } from './AddPackModal';
@@ -16,17 +16,32 @@ interface Pack {
 
 interface ProjectAssetListProps {
   projectId: string;
-  packType: 'model' | 'garment';
+  packType: 'model' | 'garment' | 'vto';
 }
 
 export const ProjectAssetList = ({ projectId, packType }: ProjectAssetListProps) => {
-  const { supabase, session } = useSession();
+  const { supabase } = useSession();
   const queryClient = useQueryClient();
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
 
-  const rpcName = packType === 'model' ? 'get_model_packs_for_project' : 'get_garment_packs_for_project';
-  const linkTableName = packType === 'model' ? 'project_model_packs' : 'project_garment_packs';
-  const linkColumnName = packType === 'model' ? 'model_pack_id' : 'garment_pack_id';
+  const rpcName = {
+    model: 'get_model_packs_for_project',
+    garment: 'get_garment_packs_for_project',
+    vto: 'get_vto_packs_for_project',
+  }[packType];
+
+  const linkTableName = {
+    model: 'project_model_packs',
+    garment: 'project_garment_packs',
+    vto: 'project_vto_packs',
+  }[packType];
+
+  const linkColumnName = {
+    model: 'model_pack_id',
+    garment: 'garment_pack_id',
+    vto: 'vto_pack_job_id',
+  }[packType];
+
   const queryKey = `project${packType}Packs`;
 
   const { data: packs, isLoading } = useQuery<Pack[]>({
@@ -56,7 +71,7 @@ export const ProjectAssetList = ({ projectId, packType }: ProjectAssetListProps)
         <div className="flex justify-end">
           <Button onClick={() => setIsAddModalOpen(true)}>
             <Plus className="mr-2 h-4 w-4" />
-            Add {packType === 'model' ? 'Model' : 'Garment'} Pack
+            Add {packType === 'model' ? 'Model' : packType === 'garment' ? 'Garment' : 'VTO'} Pack
           </Button>
         </div>
         {isLoading ? (

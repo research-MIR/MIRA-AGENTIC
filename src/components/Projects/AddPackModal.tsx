@@ -12,13 +12,14 @@ import { cn } from '@/lib/utils';
 interface Pack {
   id: string;
   name: string;
+  metadata?: { name?: string };
 }
 
 interface AddPackModalProps {
   isOpen: boolean;
   onClose: () => void;
   projectId: string;
-  packType: 'model' | 'garment';
+  packType: 'model' | 'garment' | 'vto';
   existingPackIds: string[];
 }
 
@@ -28,15 +29,32 @@ export const AddPackModal = ({ isOpen, onClose, projectId, packType, existingPac
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isAdding, setIsAdding] = useState(false);
 
-  const tableName = packType === 'model' ? 'mira-agent-model-packs' : 'mira-agent-garment-packs';
-  const linkTableName = packType === 'model' ? 'project_model_packs' : 'project_garment_packs';
-  const linkColumnName = packType === 'model' ? 'model_pack_id' : 'garment_pack_id';
+  const tableName = {
+    model: 'mira-agent-model-packs',
+    garment: 'mira-agent-garment-packs',
+    vto: 'mira-agent-vto-packs-jobs',
+  }[packType];
+
+  const linkTableName = {
+    model: 'project_model_packs',
+    garment: 'project_garment_packs',
+    vto: 'project_vto_packs',
+  }[packType];
+
+  const linkColumnName = {
+    model: 'model_pack_id',
+    garment: 'garment_pack_id',
+    vto: 'vto_pack_job_id',
+  }[packType];
+
+  const queryKey = `project${packType}Packs`;
 
   const { data: availablePacks, isLoading } = useQuery<Pack[]>({
     queryKey: ['availablePacks', packType, session?.user?.id],
     queryFn: async () => {
       if (!session?.user) return [];
-      const { data, error } = await supabase.from(tableName).select('id, name').eq('user_id', session.user.id);
+      const selectString = packType === 'vto' ? 'id, metadata' : 'id, name';
+      const { data, error } = await supabase.from(tableName).select(selectString).eq('user_id', session.user.id);
       if (error) throw error;
       return data.filter(p => !existingPackIds.includes(p.id));
     },
@@ -65,7 +83,7 @@ export const AddPackModal = ({ isOpen, onClose, projectId, packType, existingPac
       if (error) throw error;
       dismissToast(toastId);
       showSuccess(`${selectedIds.size} pack(s) added to project.`);
-      queryClient.invalidateQueries({ queryKey: [`project${packType}Packs`, projectId] });
+      queryClient.invalidateQueries({ queryKey: [queryKey, projectId] });
       onClose();
     } catch (err: any) {
       dismissToast(toastId);
@@ -79,7 +97,7 @@ export const AddPackModal = ({ isOpen, onClose, projectId, packType, existingPac
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Add {packType === 'model' ? 'Model' : 'Garment'} Packs</DialogTitle>
+          <DialogTitle>Add {packType === 'model' ? 'Model' : packType === 'garment' ? 'Garment' : 'VTO'} Packs</DialogTitle>
           <DialogDescription>Select from your existing packs to link them to this project.</DialogDescription>
         </DialogHeader>
         <ScrollArea className="h-96 my-4">
@@ -89,9 +107,10 @@ export const AddPackModal = ({ isOpen, onClose, projectId, packType, existingPac
             ) : availablePacks && availablePacks.length > 0 ? (
               availablePacks.map(pack => {
                 const isSelected = selectedIds.has(pack.id);
+                const packName = pack.name || pack.metadata?.name || `Pack ${pack.id.substring(0, 8)}`;
                 return (
                   <div key={pack.id} onClick={() => toggleSelection(pack.id)} className={cn("p-4 border rounded-md cursor-pointer relative", isSelected && "border-primary")}>
-                    <p className="font-semibold">{pack.name}</p>
+                    <p className="font-semibold">{packName}</p>
                     {isSelected && <CheckCircle className="h-5 w-5 text-primary absolute top-2 right-2" />}
                   </div>
                 );

@@ -15,12 +15,12 @@ import { showError, showSuccess, showLoading, dismissToast } from "@/utils/toast
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Breadcrumbs } from "@/components/Clients/Breadcrumbs";
 import { StatCard } from "@/components/Clients/StatCard";
-import { RecentProjectItem } from "@/components/Clients/RecentProjectItem";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Link } from "react-router-dom";
 import { ClientModelCard } from "@/components/Clients/ClientModelCard";
 import { ClientGarmentCard } from "@/components/Clients/ClientGarmentCard";
 import { ClientVtoCard } from "@/components/Clients/ClientVtoCard";
+import { ClientVtoGarmentCard } from "@/components/Clients/ClientVtoGarmentCard";
 
 interface ProjectPreview {
   project_id: string;
@@ -128,6 +128,17 @@ const ClientDetail = () => {
     enabled: !!clientId && !!session?.user,
   });
 
+  const { data: clientVtoGarments, isLoading: isLoadingVtoGarments } = useQuery({
+    queryKey: ['clientVtoGarments', clientId, session?.user?.id],
+    queryFn: async () => {
+      if (!clientId || !session?.user) return [];
+      const { data, error } = await supabase.rpc('get_vto_garments_for_client', { p_user_id: session.user.id, p_client_id: clientId });
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!clientId && !!session?.user,
+  });
+
   const { data: clientVtoJobs, isLoading: isLoadingVtoJobs } = useQuery({
     queryKey: ['clientVtoJobs', clientId, session?.user?.id],
     queryFn: async () => {
@@ -208,6 +219,7 @@ const ClientDetail = () => {
             <TabsTrigger value="projects">Projects</TabsTrigger>
             <TabsTrigger value="models">Models</TabsTrigger>
             <TabsTrigger value="garments">Garments</TabsTrigger>
+            <TabsTrigger value="vto-garments">VTO Garments</TabsTrigger>
             <TabsTrigger value="vto">VTO Results</TabsTrigger>
           </TabsList>
           <TabsContent value="projects" className="mt-6">
@@ -230,6 +242,13 @@ const ClientDetail = () => {
             {isLoadingGarments ? <Skeleton className="h-64 w-full" /> : (
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
                 {clientGarments?.map((garment: any) => <ClientGarmentCard key={garment.garment_id} garment={garment} />)}
+              </div>
+            )}
+          </TabsContent>
+          <TabsContent value="vto-garments" className="mt-6">
+            {isLoadingVtoGarments ? <Skeleton className="h-64 w-full" /> : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                {clientVtoGarments?.map((garment: any) => <ClientVtoGarmentCard key={garment.garment_id} garment={garment} />)}
               </div>
             )}
           </TabsContent>

@@ -37,6 +37,7 @@ const ProjectDetail = () => {
   const [isImageManagerOpen, setIsImageManagerOpen] = useState(false);
   const [isAddModelPackOpen, setIsAddModelPackOpen] = useState(false);
   const [isAddGarmentPackOpen, setIsAddGarmentPackOpen] = useState(false);
+  const [isAddVtoPackOpen, setIsAddVtoPackOpen] = useState(false);
 
   const { data: project, isLoading: isLoadingProject } = useQuery<Project>({
     queryKey: ['project', projectId],
@@ -76,6 +77,17 @@ const ProjectDetail = () => {
     queryFn: async () => {
       if (!projectId) return [];
       const { data, error } = await supabase.rpc('get_garment_packs_for_project', { p_project_id: projectId });
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!projectId,
+  });
+
+  const { data: vtoPacks, isLoading: isLoadingVtoPacks } = useQuery<Pack[]>({
+    queryKey: ['projectvtoPacks', projectId],
+    queryFn: async () => {
+      if (!projectId) return [];
+      const { data, error } = await supabase.rpc('get_vto_packs_for_project', { p_project_id: projectId });
       if (error) throw error;
       return data;
     },
@@ -137,6 +149,7 @@ const ProjectDetail = () => {
             <TabsTrigger value="chats">Chats</TabsTrigger>
             <TabsTrigger value="models">Model Packs</TabsTrigger>
             <TabsTrigger value="garments">Garment Packs</TabsTrigger>
+            <TabsTrigger value="vto">VTO Packs</TabsTrigger>
           </TabsList>
           <TabsContent value="gallery" className="flex-1 overflow-y-auto mt-4">
               {galleryImages.length > 0 ? (
@@ -201,11 +214,25 @@ const ProjectDetail = () => {
               />
             )}
           </TabsContent>
+          <TabsContent value="vto" className="flex-1 overflow-y-auto mt-4">
+            {isLoadingVtoPacks ? <Skeleton className="h-64 w-full" /> : vtoPacks && vtoPacks.length > 0 ? (
+              <ProjectAssetList projectId={projectId} packType="vto" />
+            ) : (
+              <EmptyState 
+                icon={<Shirt size={48} />}
+                title="No VTO Packs"
+                description="Link VTO packs to this project to organize your virtual try-on jobs."
+                buttonText="Add VTO Pack"
+                onButtonClick={() => setIsAddVtoPackOpen(true)}
+              />
+            )}
+          </TabsContent>
         </Tabs>
       </div>
       <ProjectImageManagerModal isOpen={isImageManagerOpen} onClose={() => setIsImageManagerOpen(false)} project={project} />
       <AddPackModal isOpen={isAddModelPackOpen} onClose={() => setIsAddModelPackOpen(false)} projectId={projectId} packType="model" existingPackIds={modelPacks?.map(p => p.pack_id) || []} />
       <AddPackModal isOpen={isAddGarmentPackOpen} onClose={() => setIsAddGarmentPackOpen(false)} projectId={projectId} packType="garment" existingPackIds={garmentPacks?.map(p => p.pack_id) || []} />
+      <AddPackModal isOpen={isAddVtoPackOpen} onClose={() => setIsAddVtoPackOpen(false)} projectId={projectId} packType="vto" existingPackIds={vtoPacks?.map(p => p.pack_id) || []} />
     </>
   );
 };
