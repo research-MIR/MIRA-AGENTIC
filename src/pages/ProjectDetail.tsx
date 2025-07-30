@@ -1,28 +1,22 @@
-import { useState, useMemo } from "react";
+import { useMemo } from "react";
 import { Link, useParams } from "react-router-dom";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { ArrowLeft, Folder, MessageSquare, Image as ImageIcon, Plus, Bot, Package, Users, Trash2, Pencil } from "lucide-react";
+import { ArrowLeft, Folder, MessageSquare, Image as ImageIcon } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
-import { useSecureImage } from "@/hooks/useSecureImage";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Breadcrumbs } from "@/components/Clients/Breadcrumbs";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { showError, showSuccess } from "@/utils/toast";
-import { AddToProjectDialog } from "@/components/Jobs/AddToProjectDialog";
-import { useModalStore } from "@/store/modalStore";
-
-// TODO: Create dedicated components for these sections
+import { ProjectAssetList } from "@/components/Projects/ProjectAssetList";
 
 const ProjectDetail = () => {
   const { projectId } = useParams();
-  const { supabase, session } = useSession();
+  const { supabase } = useSession();
   const { t } = useLanguage();
   const queryClient = useQueryClient();
-  const { openMoveToProjectModal } = useModalStore();
 
   const { data: project, isLoading: isLoadingProject } = useQuery({
     queryKey: ['project', projectId],
@@ -125,13 +119,12 @@ const ProjectDetail = () => {
             </div>
         </TabsContent>
         <TabsContent value="models" className="flex-1 overflow-y-auto mt-4">
-            <p>Model pack management coming soon.</p>
+            <ProjectAssetList projectId={projectId} packType="model" />
         </TabsContent>
         <TabsContent value="garments" className="flex-1 overflow-y-auto mt-4">
-            <p>Garment pack management coming soon.</p>
+            <ProjectAssetList projectId={projectId} packType="garment" />
         </TabsContent>
       </Tabs>
-      <AddToProjectDialog projects={[]} />
     </div>
   );
 };
