@@ -51,6 +51,7 @@ export const projectTranslations = {
     addNote: "Aggiungi le tue note qui...",
     saveNote: "Salva Nota",
     noteSaved: "Nota salvata.",
+    liveJobStatus: "Stato Job in Tempo Reale",
   },
   en: {
     dashboard: "Dashboard",
@@ -104,5 +105,6 @@ export const projectTranslations = {
     addNote: "Add your notes here...",
     saveNote: "Save Note",
     noteSaved: "Note saved.",
+    liveJobStatus: "Live Job Status",
   },
 };
