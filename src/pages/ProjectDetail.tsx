@@ -19,8 +19,8 @@ import { cn } from "@/lib/utils";
 import { ManageChatsModal } from "@/components/Projects/ManageChatsModal";
 
 interface Project {
-  project_id: string;
-  project_name: string;
+  id: string;
+  name: string;
   sharing_mode: 'private' | 'public_link' | 'restricted';
   client: { id: string; name: string };
 }
@@ -299,7 +299,7 @@ const ProjectDetail = () => {
       <ManageChatsModal
         isOpen={isManageChatsOpen}
         onClose={() => setIsManageChatsOpen(false)}
-        projectName={project.project_name}
+        projectName={project.name}
         jobs={jobs || []}
         onRemoveChat={handleRemoveChat}
         isRemoving={isRemovingChat}

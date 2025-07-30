@@ -13,8 +13,8 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from './ui/skeleton';
 
 interface Project {
-  project_id: string;
-  project_name: string;
+  id: string;
+  name: string;
 }
 
 interface ImageResult {
@@ -40,7 +40,7 @@ export const ProjectImageManagerModal = ({ project, isOpen, onClose }: ProjectIm
     queryFn: async () => {
       if (!session?.user) return [];
       
-      const agentJobsPromise = supabase.from('mira-agent-jobs').select('id, final_result, context').eq('user_id', session.user.id).order('created_at', { ascending: false });
+      const agentJobsPromise = supabase.from('mira-agent-jobs').select('id, final_result, context, created_at').eq('user_id', session.user.id).order('created_at', { ascending: false });
       const vtoJobsPromise = supabase.from('mira-agent-bitstudio-jobs').select('id, final_image_url, created_at').eq('user_id', session.user.id).eq('status', 'complete').not('final_image_url', 'is', null).order('created_at', { ascending: false });
 
       const [agentJobsResult, vtoJobsResult] = await Promise.all([agentJobsPromise, vtoJobsPromise]);
@@ -50,17 +50,30 @@ export const ProjectImageManagerModal = ({ project, isOpen, onClose }: ProjectIm
 
       const imagesMap = new Map<string, ImageResult>();
 
-      // Process agent jobs
       for (const job of agentJobsResult.data) {
-        const jobImages = (job.final_result?.images || job.final_result?.final_generation_result?.response?.images || []);
-        for (const img of jobImages) {
-          if (img.publicUrl && !imagesMap.has(img.publicUrl)) {
-            imagesMap.set(img.publicUrl, { publicUrl: img.publicUrl, storagePath: img.storagePath, jobId: job.id });
+        const processImageArray = (images: any[]) => {
+          if (!Array.isArray(images)) return;
+          for (const img of images) {
+            if (img && typeof img.publicUrl === 'string' && !imagesMap.has(img.publicUrl)) {
+              imagesMap.set(img.publicUrl, { publicUrl: img.publicUrl, storagePath: img.storagePath || '', jobId: job.id });
+            }
+          }
+        };
+
+        processImageArray(job.final_result?.images);
+        processImageArray(job.final_result?.final_generation_result?.response?.images);
+
+        if (job.context?.history) {
+          for (const turn of job.context.history) {
+            if (turn.role === 'function' && turn.parts) {
+              for (const part of turn.parts) {
+                processImageArray(part.functionResponse?.response?.images);
+              }
+            }
           }
         }
       }
 
-      // Process VTO jobs
       for (const job of vtoJobsResult.data) {
         if (job.final_image_url && !imagesMap.has(job.final_image_url)) {
           imagesMap.set(job.final_image_url, { publicUrl: job.final_image_url, storagePath: '', jobId: job.id });
@@ -90,7 +103,7 @@ export const ProjectImageManagerModal = ({ project, isOpen, onClose }: ProjectIm
         
         const { error: jobError } = await supabase.from('mira-agent-jobs').insert({
           user_id: session.user.id,
-          project_id: project.project_id,
+          project_id: project.id,
           status: 'complete',
           original_prompt: `Uploaded Image: ${file.name}`,
           final_result: { isImageGeneration: true, images: [{ publicUrl, storagePath: filePath }] },
@@ -103,7 +116,7 @@ export const ProjectImageManagerModal = ({ project, isOpen, onClose }: ProjectIm
       dismissToast(toastId);
       showSuccess(`${imageFiles.length} image(s) added to project.`);
       queryClient.invalidateQueries({ queryKey: ['projectPreviews'] });
-      queryClient.invalidateQueries({ queryKey: ['projectJobs', project.project_id] });
+      queryClient.invalidateQueries({ queryKey: ['projectJobs', project.id] });
       onClose();
     } catch (err: any) {
       dismissToast(toastId);
@@ -123,7 +136,7 @@ export const ProjectImageManagerModal = ({ project, isOpen, onClose }: ProjectIm
       const addPromises = imagesToAdd.map(async image => {
         const { error: jobError } = await supabase.from('mira-agent-jobs').insert({
           user_id: session.user.id,
-          project_id: project.project_id,
+          project_id: project.id,
           status: 'complete',
           original_prompt: `Added from Gallery`,
           final_result: { isImageGeneration: true, images: [{ publicUrl: image.publicUrl, storagePath: image.storagePath }] },
@@ -137,7 +150,7 @@ export const ProjectImageManagerModal = ({ project, isOpen, onClose }: ProjectIm
       showSuccess(`${imagesToAdd.length} image(s) added to project.`);
       setSelectedImages(new Set());
       queryClient.invalidateQueries({ queryKey: ['projectPreviews'] });
-      queryClient.invalidateQueries({ queryKey: ['projectJobs', project.project_id] });
+      queryClient.invalidateQueries({ queryKey: ['projectJobs', project.id] });
       onClose();
     } catch (err: any) {
       dismissToast(toastId);
@@ -165,7 +178,7 @@ export const ProjectImageManagerModal = ({ project, isOpen, onClose }: ProjectIm
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Manage Images for "{project.project_name}"</DialogTitle>
+          <DialogTitle>Manage Images for "{project.name}"</DialogTitle>
           <DialogDescription>Upload new images or add existing ones from your gallery to this project.</DialogDescription>
         </DialogHeader>
         <Tabs defaultValue="upload">
