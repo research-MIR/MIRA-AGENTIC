@@ -60,7 +60,7 @@ const ActivityItem = ({ activity }: { activity: Activity }) => {
       case 'grouped_model_generation_started':
         return <p>Started {count} model generations in pack <Link to={`/model-packs/${first_pack_id}`} className="font-semibold text-primary hover:underline">details</Link>.</p>;
       case 'grouped_model_upscale_started':
-        return <p>Upscaling {count} models in pack <Link to={`/model-packs/${first_pack_id}`} className="font-semibold text-primary hover:underline">details</Link>.</p>;
+        return <p>Upscaling poses for {count} models in pack <Link to={`/model-packs/${first_pack_id}`} className="font-semibold text-primary hover:underline">details</Link>.</p>;
       case 'grouped_vto_job_started':
         return <p>Started {count} VTO jobs.</p>;
       case 'chat_added':
@@ -81,7 +81,7 @@ const ActivityItem = ({ activity }: { activity: Activity }) => {
         return <p>Started model generation "{singleItemDetails.title}" in pack <Link to={`/model-packs/${singleItemDetails.pack_id}`} className="font-semibold text-primary hover:underline">details</Link>.</p>;
       case 'model_upscale_started':
         if (!singleItemDetails) return null;
-        return <p>Started upscaling model "{singleItemDetails.title}" in pack <Link to={`/model-packs/${singleItemDetails.pack_id}`} className="font-semibold text-primary hover:underline">details</Link>.</p>;
+        return <p>Started upscaling poses for model "{singleItemDetails.title}" in pack <Link to={`/model-packs/${singleItemDetails.pack_id}`} className="font-semibold text-primary hover:underline">details</Link>.</p>;
       case 'vto_job_started':
         if (!singleItemDetails) return null;
         return <p>Started VTO job "{singleItemDetails.title}".</p>;
