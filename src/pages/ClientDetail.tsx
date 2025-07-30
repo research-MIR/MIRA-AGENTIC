@@ -250,6 +250,7 @@ const ClientDetail = () => {
                 <StatCard title="Client Garments" value={stats?.client_total_garments ?? 0} icon={<Shirt className="h-6 w-6 text-muted-foreground" />} />
                 <StatCard title="VTO Jobs" value={stats?.client_vto_job_count ?? 0} icon={<FolderGit2 className="h-6 w-6 text-muted-foreground" />} />
               </div>
+              <ClientDeadlines clientId={clientId!} />
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div className="lg:col-span-2 space-y-6">
                   <Card>
@@ -293,7 +294,6 @@ const ClientDetail = () => {
                       </div>
                     </CardContent>
                   </Card>
-                  <ClientDeadlines clientId={clientId!} />
                 </div>
               </div>
             </div>
