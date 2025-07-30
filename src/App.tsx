@@ -12,7 +12,8 @@ import VirtualTryOn from "./pages/VirtualTryOn";
 import Upscale from "./pages/Upscale";
 import Inpainting from "./pages/Inpainting";
 import Editor from "./pages/Editor";
-import Projects from "./pages/Projects";
+import Clients from "./pages/Clients";
+import ClientDetail from "./pages/ClientDetail";
 import ProjectDetail from "./pages/ProjectDetail";
 import Settings from "./pages/Settings";
 import { useSession } from "@/components/Auth/SessionContextProvider";
@@ -108,7 +109,9 @@ const App = () => {
             <Route path="/product-recontext" element={<ProductRecontext />} />
             <Route path="/reframe" element={<Reframe />} />
             <Route path="/editor" element={<Editor />} />
-            <Route path="/projects" element={<Projects />} />
+            <Route path="/projects" element={<Navigate to="/clients" replace />} />
+            <Route path="/clients" element={<Clients />} />
+            <Route path="/clients/:clientId" element={<ClientDetail />} />
             <Route path="/projects/:projectId" element={<ProjectDetail />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/virtual-try-on" element={<VirtualTryOn />} />

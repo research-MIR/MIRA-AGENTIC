@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, ReactNode, useCallback } from 'react';
 import { commonTranslations } from '@/lib/translations/common';
 import { chatTranslations } from '@/lib/translations/chat';
-import { projectsTranslations } from '@/lib/translations/projects';
+import { clientsTranslations } from '@/lib/translations/clients';
 import { generatorTranslations } from '@/lib/translations/generator';
 import { galleryTranslations } from '@/lib/translations/gallery';
 import { refineTranslations } from '@/lib/translations/refine';
@@ -21,7 +21,7 @@ import { wardrobeTranslations } from '@/lib/translations/wardrobe';
 const modules = [
   commonTranslations,
   chatTranslations,
-  projectsTranslations,
+  clientsTranslations,
   generatorTranslations,
   galleryTranslations,
   refineTranslations,

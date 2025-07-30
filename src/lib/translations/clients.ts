@@ -1,5 +1,12 @@
-export const projectsTranslations = {
+export const clientsTranslations = {
   it: {
+    clientsTitle: "Clienti",
+    clientsDescription: "Seleziona un cliente esistente o creane uno nuovo per iniziare un progetto.",
+    newClient: "Nuovo Cliente",
+    createNewClient: "Crea Nuovo Cliente",
+    createNewClientDescription: "Inserisci il nome del nuovo cliente.",
+    clientName: "Nome Cliente",
+    createClient: "Crea Cliente",
     newProject: "Nuovo Progetto",
     createNewProject: "Crea Nuovo Progetto",
     createProject: "Crea Progetto",
@@ -30,6 +37,13 @@ export const projectsTranslations = {
     removeChatFromProjectDescription: "Questo rimuoverà la chat da \"{projectName}\". Non verrà eliminata.",
   },
   en: {
+    clientsTitle: "Clients",
+    clientsDescription: "Select an existing client or create a new one to start a project.",
+    newClient: "New Client",
+    createNewClient: "Create New Client",
+    createNewClientDescription: "Enter the name for the new client.",
+    clientName: "Client Name",
+    createClient: "Create Client",
     newProject: "New Project",
     createNewProject: "Create New Project",
     createProject: "Create Project",

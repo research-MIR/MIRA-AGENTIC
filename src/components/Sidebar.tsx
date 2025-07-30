@@ -6,7 +6,7 @@ import { useSession } from "./Auth/SessionContextProvider";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Skeleton } from "./ui/skeleton";
-import { useLanguage } from "@/context/LanguageContext";
+import { useLanguage } from "./context/LanguageContext";
 import { useOnboardingTour } from "@/context/OnboardingTourContext";
 import { ActiveJobsTracker } from "@/components/Jobs/ActiveJobsTracker";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
@@ -136,9 +136,9 @@ export const Sidebar = () => {
             <MessageSquare size={20} />
             {t('agentChat')}
           </NavLink>
-          <NavLink id="projects-nav-link" to="/projects" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-            <LayoutGrid size={20} />
-            {t('projectsTitle')}
+          <NavLink id="clients-nav-link" to="/clients" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
+            <Users size={20} />
+            {t('clientsTitle')}
           </NavLink>
           <NavLink id="generator-nav-link" to="/generator" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
             <Image size={20} />
@@ -321,6 +321,3 @@ export const Sidebar = () => {
       </Dialog>
     </>
   );
-};
-
-export default Sidebar;
