@@ -133,39 +133,39 @@ const Sidebar = () => {
         </div>
         <nav className="p-4 space-y-2">
           <NavLink id="chat-nav-link" to="/chat" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-            <MessageSquare size={20} />
+            <MessageSquare size={20} className="text-icon" />
             {t('agentChat')}
           </NavLink>
           <NavLink id="clients-nav-link" to="/clients" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-            <Users size={20} />
+            <Users size={20} className="text-icon" />
             {t('clientsTitle')}
           </NavLink>
           <NavLink id="generator-nav-link" to="/generator" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-            <Image size={20} />
+            <Image size={20} className="text-icon" />
             {t('generator')}
           </NavLink>
           <NavLink id="upscale-nav-link" to="/upscale" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-            <Wand2 size={20} />
+            <Wand2 size={20} className="text-icon" />
             {t('upscale')}
           </NavLink>
           <NavLink id="inpainting-nav-link" to="/inpainting" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-            <Brush size={20} />
+            <Brush size={20} className="text-icon" />
             {t('inpainting')}
           </NavLink>
           <NavLink id="virtual-try-on-nav-link" to="/virtual-try-on" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-            <Shirt size={20} />
+            <Shirt size={20} className="text-icon" />
             {t('virtualTryOn')}
           </NavLink>
           <NavLink id="gallery-nav-link" to="/gallery" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-            <GalleryHorizontal size={20} />
+            <GalleryHorizontal size={20} className="text-icon" />
             {t('gallery')}
           </NavLink>
           <NavLink id="wardrobe-nav-link" to="/wardrobe" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-            <ClipboardCheck size={20} />
+            <ClipboardCheck size={20} className="text-icon" />
             {t('wardrobe')}
           </NavLink>
           <NavLink id="wardrobe-packs-nav-link" to="/wardrobe-packs" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-            <Package size={20} />
+            <Package size={20} className="text-icon" />
             {t('wardrobePacks')}
           </NavLink>
           
@@ -173,7 +173,7 @@ const Sidebar = () => {
             <CollapsibleTrigger asChild>
               <Button variant="ghost" className="w-full justify-between p-2">
                 <div className="flex items-center gap-2">
-                  <Wand2 size={20} />
+                  <Wand2 size={20} className="text-icon" />
                   {t('advancedTools')}
                 </div>
                 <ChevronRight className={`h-4 w-4 transition-transform duration-200 ${isAdvancedOpen ? 'rotate-90' : ''}`} />
@@ -181,35 +181,35 @@ const Sidebar = () => {
             </CollapsibleTrigger>
             <CollapsibleContent className="pl-4 space-y-1 pt-1">
               <NavLink id="edit-with-words-nav-link" to="/edit-with-words" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-                <MessageSquareQuote size={20} />
+                <MessageSquareQuote size={20} className="text-icon" />
                 {t('editWithWords')}
               </NavLink>
               <NavLink id="recontext-nav-link" to="/product-recontext" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-                <Shapes size={20} />
+                <Shapes size={20} className="text-icon" />
                 {t('productRecontextualization')}
               </NavLink>
               <NavLink id="reframe-nav-link" to="/reframe" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-                <BoxSelect size={20} />
+                <BoxSelect size={20} className="text-icon" />
                 {t('reframe')}
               </NavLink>
               <NavLink id="editor-nav-link" to="/editor" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-                <PencilRuler size={20} />
+                <PencilRuler size={20} className="text-icon" />
                 {t('imageEditor')}
               </NavLink>
               <NavLink id="virtual-try-on-packs-nav-link" to="/virtual-try-on-packs" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-                <Shirt size={20} />
+                <Shirt size={20} className="text-icon" />
                 {t('virtualTryOnPacks')}
               </NavLink>
               <NavLink id="model-packs-nav-link" to="/model-packs" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-                <Users size={20} />
+                <Users size={20} className="text-icon" />
                 {t('modelPacks')}
               </NavLink>
               <NavLink id="vto-reports-nav-link" to="/vto-reports" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-                <ClipboardCheck size={20} />
+                <ClipboardCheck size={20} className="text-icon" />
                 {t('vtoAnalysisReports')}
               </NavLink>
               <NavLink id="developer-nav-link" to="/developer" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-                <Code size={20} />
+                <Code size={20} className="text-icon" />
                 {t('developer')}
               </NavLink>
             </CollapsibleContent>
@@ -257,21 +257,21 @@ const Sidebar = () => {
         <div className="p-4 border-t space-y-2">
           <ActiveJobsTracker />
           <NavLink id="settings-nav-link" to="/settings" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-            <Cog size={20} />
+            <Cog size={20} className="text-icon" />
             {t('settings')}
           </NavLink>
           <Button variant="ghost" className="w-full justify-start gap-2" onClick={handleRestartTour}>
-            <HelpCircle size={20} />
+            <HelpCircle size={20} className="text-icon" />
             {t('restartOnboarding')}
           </Button>
           {session ? (
             <Button variant="ghost" className="w-full justify-start gap-2" onClick={handleLogout}>
-              <LogOut size={20} />
+              <LogOut size={20} className="text-icon" />
               {t('logout')}
             </Button>
           ) : (
             <Button variant="ghost" className="w-full justify-start gap-2" onClick={() => navigate("/login")}>
-              <LogIn size={20} />
+              <LogIn size={20} className="text-icon" />
               {t('login')}
             </Button>
           )}
@@ -321,6 +321,3 @@ const Sidebar = () => {
       </Dialog>
     </>
   );
-};
-
-export default Sidebar;
