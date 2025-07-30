@@ -26,6 +26,7 @@ import { ProjectDashboard } from "@/components/Projects/ProjectDashboard";
 import { ProjectDeadlines } from "@/components/Projects/ProjectDeadlines";
 import { ProjectNotes } from "@/components/Projects/ProjectNotes";
 import { ActiveJobsMonitor } from "@/components/Projects/ActiveJobsMonitor";
+import { ProjectHistoryFeed } from "@/components/Projects/ProjectHistoryFeed";
 
 interface Project {
   id: string;
@@ -304,9 +305,10 @@ const ProjectDetail = () => {
             <div className="space-y-6">
               <ProjectDashboard projectId={projectId!} />
               <ActiveJobsMonitor projectId={projectId!} />
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <ProjectDeadlines projectId={projectId!} />
                 <ProjectNotes projectId={projectId!} />
+                <ProjectHistoryFeed projectId={projectId!} />
               </div>
             </div>
           </TabsContent>

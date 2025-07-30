@@ -60,6 +60,8 @@ export const projectTranslations = {
     selectCategory: "Seleziona una categoria...",
     orSetDaysFromToday: "Oppure imposta giorni da oggi",
     days: "Giorni",
+    recentActivity: "Attività Recente",
+    showOlder: "Mostra più vecchi",
   },
   en: {
     dashboard: "Dashboard",
@@ -122,5 +124,7 @@ export const projectTranslations = {
     selectCategory: "Select a category...",
     orSetDaysFromToday: "Or set days from today",
     days: "Days",
+    recentActivity: "Recent Activity",
+    showOlder: "Show Older",
   },
 };
