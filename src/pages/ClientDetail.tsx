@@ -25,6 +25,7 @@ import { Loader2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useSecureImage } from "@/hooks/useSecureImage";
 import { useImagePreview } from "@/context/ImagePreviewContext";
+import { ClientDeadlines } from "@/components/Clients/ClientDeadlines";
 
 interface ProjectPreview {
   project_id: string;
@@ -292,6 +293,7 @@ const ClientDetail = () => {
                       </div>
                     </CardContent>
                   </Card>
+                  <ClientDeadlines clientId={clientId!} />
                 </div>
               </div>
             </div>
