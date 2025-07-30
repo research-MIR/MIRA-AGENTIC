@@ -23,6 +23,8 @@ import { VtoJobCard } from "@/components/Projects/VtoJobCard";
 import { BitStudioJob } from "@/types/vto";
 import { ClientVtoGarmentCard } from "@/components/Clients/ClientVtoGarmentCard";
 import { ProjectDashboard } from "@/components/Projects/ProjectDashboard";
+import { ProjectDeadlines } from "@/components/Projects/ProjectDeadlines";
+import { ProjectNotes } from "@/components/Projects/ProjectNotes";
 
 interface Project {
   id: string;
@@ -298,7 +300,13 @@ const ProjectDetail = () => {
             <TabsTrigger value="vto_garments">{t('vtoGarments')}</TabsTrigger>
           </TabsList>
           <TabsContent value="dashboard" className="flex-1 overflow-y-auto mt-4">
-            <ProjectDashboard projectId={projectId!} />
+            <div className="space-y-6">
+              <ProjectDashboard projectId={projectId!} />
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <ProjectDeadlines projectId={projectId!} />
+                <ProjectNotes projectId={projectId!} />
+              </div>
+            </div>
           </TabsContent>
           <TabsContent value="gallery" className="flex-1 overflow-y-auto mt-4">
               {galleryImages.length > 0 ? (
