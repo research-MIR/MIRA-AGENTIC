@@ -9,17 +9,25 @@ import { useLanguage } from "@/context/LanguageContext";
 
 interface Activity {
   id: string;
-  activity_type: 'chat_added' | 'note_created' | 'deadline_created';
+  activity_type: string; // e.g., 'chat_added', 'grouped_chat_added'
   details: {
-    title: string;
-    job_id?: string;
-    due_date?: string;
+    count: number;
+    start_time: string;
+    end_time: string;
+    first_title: string;
+    first_job_id?: string;
+    details_array: {
+        title: string;
+        job_id?: string;
+        due_date?: string;
+    }[];
   };
   created_at: string;
 }
 
-const ActivityIcon = ({ type }: { type: Activity['activity_type'] }) => {
-  switch (type) {
+const ActivityIcon = ({ type }: { type: string }) => {
+  const cleanType = type.replace('grouped_', '');
+  switch (cleanType) {
     case 'chat_added': return <MessageSquare className="h-4 w-4 text-muted-foreground" />;
     case 'note_created': return <FileText className="h-4 w-4 text-muted-foreground" />;
     case 'deadline_created': return <CalendarCheck className="h-4 w-4 text-muted-foreground" />;
@@ -28,21 +36,41 @@ const ActivityIcon = ({ type }: { type: Activity['activity_type'] }) => {
 };
 
 const ActivityItem = ({ activity }: { activity: Activity }) => {
+  const { count, start_time, end_time, first_title, first_job_id, details_array } = activity.details;
+  const singleItemDetails = details_array[0];
+
   const renderContent = () => {
     switch (activity.activity_type) {
+      case 'grouped_chat_added':
+        return (
+          <p>
+            Added {count} chats to the project, starting with <Link to={`/chat/${first_job_id}`} className="font-semibold text-primary hover:underline">"{first_title}"</Link>.
+          </p>
+        );
+      case 'grouped_note_created':
+        return <p>Created {count} notes, starting with <span className="font-semibold">"{first_title}"</span>.</p>;
+      case 'grouped_deadline_created':
+        return <p>Set {count} deadlines, starting with <span className="font-semibold">"{first_title}"</span>.</p>;
       case 'chat_added':
         return (
           <p>
-            New chat <Link to={`/chat/${activity.details.job_id}`} className="font-semibold text-primary hover:underline">"{activity.details.title}"</Link> was added.
+            New chat <Link to={`/chat/${singleItemDetails.job_id}`} className="font-semibold text-primary hover:underline">"{singleItemDetails.title}"</Link> was added.
           </p>
         );
       case 'note_created':
-        return <p>Note <span className="font-semibold">"{activity.details.title}"</span> was created.</p>;
+        return <p>Note <span className="font-semibold">"{singleItemDetails.title}"</span> was created.</p>;
       case 'deadline_created':
-        return <p>Deadline <span className="font-semibold">"{activity.details.title}"</span> was set.</p>;
+        return <p>Deadline <span className="font-semibold">"{singleItemDetails.title}"</span> was set.</p>;
       default:
         return <p>An unknown activity occurred.</p>;
     }
+  };
+
+  const renderTimestamp = () => {
+      if (count > 1) {
+          return `Started ${formatDistanceToNow(new Date(start_time), { addSuffix: true })} | Last update ${formatDistanceToNow(new Date(end_time), { addSuffix: true })}`;
+      }
+      return formatDistanceToNow(new Date(activity.created_at), { addSuffix: true });
   };
 
   return (
@@ -52,7 +80,7 @@ const ActivityItem = ({ activity }: { activity: Activity }) => {
       </div>
       <div className="flex-1">
         <div className="text-sm">{renderContent()}</div>
-        <p className="text-xs text-muted-foreground">{formatDistanceToNow(new Date(activity.created_at), { addSuffix: true })}</p>
+        <p className="text-xs text-muted-foreground">{renderTimestamp()}</p>
       </div>
     </div>
   );
