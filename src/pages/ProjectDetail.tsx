@@ -14,6 +14,8 @@ import { ProjectAssetList } from "@/components/Projects/ProjectAssetList";
 import { EmptyState } from "@/components/Projects/EmptyState";
 import { ProjectImageManagerModal } from "@/components/ProjectImageManagerModal";
 import { AddPackModal } from "@/components/Projects/AddPackModal";
+import { useDropzone } from "@/hooks/useDropzone";
+import { cn } from "@/lib/utils";
 
 interface Project {
   project_id: string;
@@ -119,6 +121,23 @@ const ProjectDetail = () => {
     }
   };
 
+  const handleDropChat = async (e: React.DragEvent<HTMLElement>) => {
+    try {
+      const jobData = JSON.parse(e.dataTransfer.getData('application/json'));
+      if (jobData && jobData.id && projectId) {
+        const { error } = await supabase.rpc('update_job_project', { p_job_id: jobData.id, p_project_id: projectId });
+        if (error) throw error;
+        showSuccess(`Chat "${jobData.original_prompt}" added to project.`);
+        queryClient.invalidateQueries({ queryKey: ['projectJobs', projectId] });
+        queryClient.invalidateQueries({ queryKey: ['jobHistory'] });
+      }
+    } catch (err: any) {
+      showError(`Failed to add chat: ${err.message}`);
+    }
+  };
+
+  const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: handleDropChat });
+
   const isLoading = isLoadingProject || isLoadingJobs;
 
   if (isLoading) {
@@ -131,7 +150,7 @@ const ProjectDetail = () => {
 
   return (
     <>
-      <div className="p-4 md:p-8 h-screen flex flex-col">
+      <div className={cn("p-4 md:p-8 h-screen flex flex-col transition-colors", isDraggingOver && "bg-primary/10")} {...dropzoneProps}>
         <header className="pb-4 mb-4 border-b shrink-0">
           <Breadcrumbs items={[
             { label: "Clients", href: "/clients" },
