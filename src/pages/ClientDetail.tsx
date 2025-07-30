@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Folder, MessageSquare, Image as ImageIcon, Plus, Loader2, Folder as FolderIcon, Bot, Package, Users } from "lucide-react";
+import { Folder, MessageSquare, Image as ImageIcon, Plus, Loader2, Folder as FolderIcon, Bot, Package, Users, Shirt } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
 import { useSecureImage } from "@/hooks/useSecureImage";
 import { Button } from "@/components/ui/button";
@@ -18,19 +18,15 @@ import { StatCard } from "@/components/Clients/StatCard";
 import { RecentProjectItem } from "@/components/Clients/RecentProjectItem";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Link } from "react-router-dom";
+import { ClientModelCard } from "@/components/Clients/ClientModelCard";
+import { ClientGarmentCard } from "@/components/Clients/ClientGarmentCard";
+import { ClientVtoCard } from "@/components/Clients/ClientVtoCard";
 
 interface ProjectPreview {
   project_id: string;
   project_name: string;
   chat_count: number;
   latest_image_url: string | null;
-}
-
-interface RecentProject {
-  project_id: string;
-  project_name: string;
-  project_updated_at: string;
-  chat_count: number;
 }
 
 const ProjectCard = ({ project }: { project: ProjectPreview }) => {
@@ -99,17 +95,6 @@ const ClientDetail = () => {
     enabled: !!clientId && !!session?.user,
   });
 
-  const { data: recentProjects, isLoading: isLoadingRecent } = useQuery<RecentProject[]>({
-    queryKey: ['clientRecentProjects', clientId],
-    queryFn: async () => {
-      if (!clientId) return [];
-      const { data, error } = await supabase.rpc('get_client_recent_projects', { p_client_id: clientId });
-      if (error) throw error;
-      return data;
-    },
-    enabled: !!clientId,
-  });
-
   const { data: allProjects, isLoading: isLoadingProjects, error } = useQuery<ProjectPreview[]>({
     queryKey: ["clientProjects", clientId, session?.user?.id],
     queryFn: async () => {
@@ -119,6 +104,39 @@ const ClientDetail = () => {
       return data;
     },
     enabled: !!session?.user && !!clientId,
+  });
+
+  const { data: clientModels, isLoading: isLoadingModels } = useQuery({
+    queryKey: ['clientModels', clientId, session?.user?.id],
+    queryFn: async () => {
+      if (!clientId || !session?.user) return [];
+      const { data, error } = await supabase.rpc('get_models_for_client', { p_user_id: session.user.id, p_client_id: clientId });
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!clientId && !!session?.user,
+  });
+
+  const { data: clientGarments, isLoading: isLoadingGarments } = useQuery({
+    queryKey: ['clientGarments', clientId, session?.user?.id],
+    queryFn: async () => {
+      if (!clientId || !session?.user) return [];
+      const { data, error } = await supabase.rpc('get_garments_for_client', { p_user_id: session.user.id, p_client_id: clientId });
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!clientId && !!session?.user,
+  });
+
+  const { data: clientVtoJobs, isLoading: isLoadingVtoJobs } = useQuery({
+    queryKey: ['clientVtoJobs', clientId, session?.user?.id],
+    queryFn: async () => {
+      if (!clientId || !session?.user) return [];
+      const { data, error } = await supabase.rpc('get_vto_jobs_for_client', { p_user_id: session.user.id, p_client_id: clientId });
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!clientId && !!session?.user,
   });
 
   const handleCreateProject = async () => {
@@ -134,7 +152,6 @@ const ClientDetail = () => {
       queryClient.invalidateQueries({ queryKey: ['clientProjects', clientId] });
       queryClient.invalidateQueries({ queryKey: ['clientPreviews'] });
       queryClient.invalidateQueries({ queryKey: ['clientDashboardStats', clientId] });
-      queryClient.invalidateQueries({ queryKey: ['clientRecentProjects', clientId] });
       setIsModalOpen(false);
     } catch (err: any) {
       dismissToast(toastId);
@@ -149,8 +166,8 @@ const ClientDetail = () => {
     { label: client?.name || "..." },
   ];
 
-  if (isLoadingClient || isLoadingProjects) {
-    return <div className="p-8"><Skeleton className="h-12 w-1/3" /><div className="mt-8 grid grid-cols-3 gap-4"><Skeleton className="h-24" /><Skeleton className="h-24" /><Skeleton className="h-24" /></div></div>;
+  if (isLoadingClient) {
+    return <div className="p-8"><Skeleton className="h-12 w-1/3" /></div>;
   }
 
   if (error) {
@@ -169,12 +186,10 @@ const ClientDetail = () => {
             </div>
             <div>
               <h1 className="text-3xl font-bold">{client?.name}</h1>
-              <p className="text-muted-foreground">Dashboard Cliente</p>
+              <p className="text-muted-foreground">Client Dashboard</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="outline">Carica Prodotti</Button>
-            <Button variant="outline">Genera Modelli</Button>
             <Button onClick={() => setIsModalOpen(true)}>
               <Plus className="h-4 w-4 mr-2" />
               {t('newProject')}
@@ -183,48 +198,48 @@ const ClientDetail = () => {
         </header>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-4">
-          <StatCard title="Progetti Totali" value={stats?.project_count ?? 0} icon={<FolderIcon className="h-6 w-6 text-muted-foreground" />} />
-          <StatCard title="Modelli Attivi (Utente)" value={stats?.user_total_models ?? 0} icon={<Bot className="h-6 w-6 text-muted-foreground" />} />
-          <StatCard title="Prodotti Caricati (Utente)" value={stats?.user_total_garments ?? 0} icon={<Package className="h-6 w-6 text-muted-foreground" />} />
+          <StatCard title="Total Projects" value={stats?.project_count ?? 0} icon={<FolderIcon className="h-6 w-6 text-muted-foreground" />} />
+          <StatCard title="Client Models" value={stats?.client_total_models ?? 0} icon={<Bot className="h-6 w-6 text-muted-foreground" />} />
+          <StatCard title="Client Garments" value={stats?.client_total_garments ?? 0} icon={<Package className="h-6 w-6 text-muted-foreground" />} />
         </div>
 
-        <Tabs defaultValue="panoramica" className="mt-6">
+        <Tabs defaultValue="projects" className="mt-6">
           <TabsList>
-            <TabsTrigger value="panoramica">Panoramica</TabsTrigger>
-            <TabsTrigger value="progetti">Progetti</TabsTrigger>
-            <TabsTrigger value="prodotti">Prodotti</TabsTrigger>
-            <TabsTrigger value="modelli">Modelli</TabsTrigger>
+            <TabsTrigger value="projects">Projects</TabsTrigger>
+            <TabsTrigger value="models">Models</TabsTrigger>
+            <TabsTrigger value="garments">Garments</TabsTrigger>
+            <TabsTrigger value="vto">VTO Results</TabsTrigger>
           </TabsList>
-          <TabsContent value="panoramica" className="mt-6">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <Card className="lg:col-span-2">
-                <CardHeader><CardTitle>Progetti Recenti</CardTitle></CardHeader>
-                <CardContent>
-                  {isLoadingRecent ? <Skeleton className="h-40 w-full" /> : (
-                    <div className="space-y-2">
-                      {recentProjects && recentProjects.length > 0 ? (
-                        recentProjects.map(p => <RecentProjectItem key={p.project_id} project={p} />)
-                      ) : (
-                        <p className="text-sm text-muted-foreground text-center py-8">Nessuna attività di progetto recente per questo cliente.</p>
-                      )}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-              <div className="space-y-6">
-                {/* Future components can go here */}
+          <TabsContent value="projects" className="mt-6">
+            {isLoadingProjects ? <Skeleton className="h-64 w-full" /> : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {allProjects?.map(project => (
+                  <ProjectCard key={project.project_id} project={project} />
+                ))}
               </div>
-            </div>
+            )}
           </TabsContent>
-          <TabsContent value="progetti" className="mt-6">
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-              {allProjects?.map(project => (
-                <ProjectCard key={project.project_id} project={project} />
-              ))}
-            </div>
+          <TabsContent value="models" className="mt-6">
+            {isLoadingModels ? <Skeleton className="h-64 w-full" /> : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                {clientModels?.map((model: any) => <ClientModelCard key={model.model_id} model={model} />)}
+              </div>
+            )}
           </TabsContent>
-          <TabsContent value="prodotti" className="mt-6"><p>Sezione Prodotti in costruzione.</p></TabsContent>
-          <TabsContent value="modelli" className="mt-6"><p>Sezione Modelli in costruzione.</p></TabsContent>
+          <TabsContent value="garments" className="mt-6">
+            {isLoadingGarments ? <Skeleton className="h-64 w-full" /> : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                {clientGarments?.map((garment: any) => <ClientGarmentCard key={garment.garment_id} garment={garment} />)}
+              </div>
+            )}
+          </TabsContent>
+          <TabsContent value="vto" className="mt-6">
+            {isLoadingVtoJobs ? <Skeleton className="h-64 w-full" /> : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                {clientVtoJobs?.map((job: any) => <ClientVtoCard key={job.job_id} job={job} />)}
+              </div>
+            )}
+          </TabsContent>
         </Tabs>
       </div>
 
