@@ -1,24 +1,20 @@
-import { useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useSession } from "@/components/Auth/SessionContextProvider";
-import { Button } from "@/components/ui/button";
-import { Plus } from "lucide-react";
-import { showError, showSuccess } from "@/utils/toast";
-import { PackCard } from "./PackCard";
-import { AddPackModal } from "./AddPackModal";
-import { Skeleton } from "@/components/ui/skeleton";
+import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSession } from '@/components/Auth/SessionContextProvider';
+import { Button } from '@/components/ui/button';
+import { Plus } from 'lucide-react';
+import { showError, showSuccess } from '@/utils/toast';
+import { PackCard } from './PackCard';
+import { AddPackModal } from './AddPackModal';
+import { Skeleton } from '@/components/ui/skeleton';
 
 interface Pack {
   pack_id: string;
   pack_name: string;
   pack_description: string | null;
-  total_jobs?: number;
-  unique_garment_count?: number;
+  total_jobs: number;
+  unique_garment_count: number;
   created_at: string;
-  total_models?: number;
-  female_models?: number;
-  male_models?: number;
-  upscaled_poses?: number;
 }
 
 interface ProjectAssetListProps {
