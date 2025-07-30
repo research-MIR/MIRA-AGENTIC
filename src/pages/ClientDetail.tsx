@@ -2,10 +2,10 @@ import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Folder, MessageSquare, Image as ImageIcon, Plus, ArrowLeft, Loader2, Folder as FolderIcon, Bot, Package } from "lucide-react";
+import { Folder, MessageSquare, Image as ImageIcon, Plus, ArrowLeft, Loader2, Folder as FolderIcon, Bot, Package, Users } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
 import { useSecureImage } from "@/hooks/useSecureImage";
 import { Button } from "@/components/ui/button";
@@ -217,7 +217,7 @@ const ClientDetail = () => {
           <DialogFooter>
             <Button variant="ghost" onClick={() => setIsModalOpen(false)}>{t('cancel')}</Button>
             <Button onClick={handleCreateProject} disabled={isCreating || !newProjectName.trim()}>
-              {isCreating && <Loader2 className="mr-2 h-4 w-4" />}
+              {isCreating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {t('createProject')}
             </Button>
           </DialogFooter>
