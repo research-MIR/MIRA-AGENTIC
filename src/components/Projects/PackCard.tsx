@@ -1,15 +1,19 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Package, Trash2, ImageIcon, Shirt } from "lucide-react";
+import { Package, Trash2, ImageIcon, Shirt, Users, Bot } from "lucide-react";
 import { Link } from "react-router-dom";
 
 interface Pack {
   pack_id: string;
   pack_name: string;
   pack_description: string | null;
-  total_jobs: number;
-  unique_garment_count: number;
+  total_jobs?: number;
+  unique_garment_count?: number;
   created_at: string;
+  total_models?: number;
+  female_models?: number;
+  male_models?: number;
+  upscaled_poses?: number;
 }
 
 interface PackCardProps {
@@ -51,6 +55,14 @@ export const PackCard = ({ pack, packType, onRemove }: PackCardProps) => {
                 <Shirt className="h-3 w-3" />
                 <span>{pack.unique_garment_count} garments</span>
               </div>
+            </div>
+          )}
+          {packType === 'model' && (
+            <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground border-t pt-2">
+              <div className="flex items-center gap-1" title="Total Models"><Users className="h-3 w-3" /><span>{pack.total_models}</span></div>
+              <div className="flex items-center gap-1" title="Female Models"><span>♀</span><span>{pack.female_models}</span></div>
+              <div className="flex items-center gap-1" title="Male Models"><span>♂</span><span>{pack.male_models}</span></div>
+              <div className="flex items-center gap-1" title="Upscaled Poses"><Bot className="h-3 w-3" /><span>{pack.upscaled_poses}</span></div>
             </div>
           )}
         </CardContent>
