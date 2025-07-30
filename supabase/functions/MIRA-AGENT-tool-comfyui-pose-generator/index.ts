@@ -302,7 +302,7 @@ serve(async (req) => {
         finalWorkflowString = singlePassWorkflowTemplate;
         if (task_type === 'garment') {
             selectedSystemPrompt = GARMENT_SWAP_SYSTEM_PROMPT;
-            editingTask = `change their garment to match my reference (it being a prompt or a textual prompt), keep everything else the same - do nto add unrequested additions otuside the only excplicit garment requested - ex. frontale veste una giacca - still just asks for a jacket so no pants or shoes are being asked for so you'll need to specify in the istruction to NOT change the underware as it is, DO NOT TRY TO FINISH OUTFITS OR CLOTHING SETS, DO NOT - JUST DESCRIBE THE SWAP TO ADD ESCLUSIVELY THE REQUESTED GARMENT AND LEAVIN THE REST UNTOUCHED - AND REMEMBER TO CLARIFY THAT COLOR CORRECTION, COLOR OF THE SKIN, COLOR OF THE scene HAVE TO CONTINUE BEING THE SMAE AS THE ORIGINAL - here the reference requested that has to be completely inserted realsitically in the scene (if you ask to change the bra for another upper body garment remeber it must be closed not opened (the garment) and you have to explain instead of the bra and telling it what body area would it cover (a jacket would not just cover the area a bra would), just request the addition:: ${garment_description}`;
+            editingTask = `change their garment to match my reference (it being a prompt or a textual prompt), keep everything else the same - do not add unrequested additions otuside the only excplicit garment requested - ex. frontale veste una giacca - still just asks for a jacket so no pants or shoes are being asked for so you'll need to specify in the istruction to NOT change the underware as it is, DO NOT TRY TO FINISH OUTFITS OR CLOTHING SETS, DO NOT - JUST DESCRIBE THE SWAP TO ADD ESCLUSIVELY THE REQUESTED GARMENT AND LEAVIN THE REST UNTOUCHED - AND REMEMBER TO CLARIFY THAT COLOR CORRECTION, COLOR OF THE SKIN, COLOR OF THE scene HAVE TO CONTINUE BEING THE SMAE AS THE ORIGINAL - here the reference requested that has to be completely inserted realsitically in the scene (if you ask to change the bra for another upper body garment remeber it must be closed not opened (the garment) and you have to explain instead of the bra and telling it what body area would it cover (a jacket would not just cover the area a bra would), just request the addition:: ${garment_description}`;
         } else { // 'pose'
             selectedSystemPrompt = POSE_CHANGE_SYSTEM_PROMPT;
             editingTask = pose_prompt;
@@ -321,7 +321,7 @@ serve(async (req) => {
         }
         if (finalWorkflow['204']) {
             finalWorkflow['204'].inputs.steps = 25;
-            finalWorkflow['204'].inputs.denoise = 0.9000000000000002;
+            finalWorkflow['204'].inputs.denoise = 0.6500000000000002;
             console.log(`[PoseGenerator][${requestId}] INFO: Node 204 'steps' updated to 25 and 'denoise' updated to 0.9...`);
         }
     }

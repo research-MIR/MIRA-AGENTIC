@@ -22,15 +22,16 @@ Analyze the framing of the "GENERATED POSE" image to determine the shoot focus.
 - **Rule:** If the shot is from the hips down and the face is not visible, the focus is **'lower_body'**.
 - **Edge Case:** A sitting pose where legs are visible is considered **'full_body'**.
 
-#### Task 2: Garment Analysis
-This is a two-step process.
-1.  **Identify Primary Garment:** First, identify the main clothing item the model is wearing.
-2.  **The Accessory/Shoe Exclusion Rule (CRITICAL):** If the most prominent item is an accessory (hat, bag, scarf) or shoes, you MUST ignore it for the \`coverage\` calculation. Instead, analyze the main clothing worn by the model (shirt, pants, dress) to determine the \`coverage\`. If the model is only wearing base underwear besides the accessory/shoes, the coverage is determined by the underwear.
-3.  **Determine \`coverage\`:** Based on the primary garment (excluding accessories/shoes), classify the body part it covers. The value MUST be one of: **'upper_body'**, **'lower_body'**, or **'full_body'**.
-    - A dress or jumpsuit is 'full_body'.
-    - A shirt or jacket is 'upper_body'.
-    - Pants or a skirt are 'lower_body'.
-    - Base underwear is considered 'full_body' as it covers both regions.
+#### Task 2: Garment Analysis (Revised Logic)
+This is a hierarchical process. You MUST follow these steps in order.
+1.  **Identify All Garments:** First, identify every clothing item the model is wearing in the "GENERATED POSE" image.
+2.  **Prioritize New Fashion Items:** Check if the model is wearing any garment that is NOT the base underwear (i.e., a garment where \`is_identical_to_base_garment\` would be \`false\`).
+    -   **If YES:** The \`coverage\` for the entire pose MUST be determined by this new fashion item.
+        -   **The Fundamental Type Rule:** You must classify the garment by its fundamental type, not its styling. A very long t-shirt is still an 'upper_body' garment, not a 'full_body' dress. A long jacket is still 'upper_body'.
+        -   If there are multiple new fashion items (e.g., a new shirt and new pants), you MUST classify the coverage as 'full_body'.
+    -   **If NO:** The model is only wearing the base underwear (and possibly accessories/shoes). In this case, and ONLY in this case, the \`coverage\` is 'full_body'.
+3.  **Accessory/Shoe Exclusion:** As before, accessories (hats, bags, scarves) and shoes do not influence the \`coverage\` calculation. The coverage is determined by the main clothing items (shirt, pants, dress, underwear).
+4.  **Final \`coverage\` Value:** The final value for \`coverage\` MUST be one of: **'upper_body'**, **'lower_body'**, or **'full_body'**.
 
 #### Task 3: Visual Comparison (CRITICAL)
 Is the garment worn in the "GENERATED POSE" image functionally and stylistically the same as the base underwear in the "BASE MODEL" image?
@@ -40,17 +41,36 @@ Is the garment worn in the "GENERATED POSE" image functionally and stylistically
 ### Output Format
 Your entire response MUST be a single, valid JSON object with the following structure. Do not include any other text or explanations.
 
-**Example Output (Model in a hat and base underwear):**
-\`\`\`json
-{
-  "shoot_focus": "full_body",
-  "garment": {
-    "description": "A black fedora hat and simple grey underwear.",
-    "coverage": "full_body",
-    "is_identical_to_base_garment": true
+### Few-Shot Examples
+
+**Example 1: Long T-shirt (Fundamental Type Rule)**
+- **Context:** The "GENERATED POSE" image shows a model wearing a very long t-shirt that covers their thighs, but no pants.
+- **Correct Logic:** A t-shirt is fundamentally an 'upper_body' garment, regardless of its length.
+- **Correct Output Snippet:**
+  \`\`\`json
+  {
+    "garment": {
+      "description": "A long, oversized white t-shirt.",
+      "coverage": "upper_body",
+      "is_identical_to_base_garment": false
+    }
   }
-}
-\`\`\``;
+  \`\`\`
+
+**Example 2: Jacket over Base Underwear (Prioritization Hierarchy)**
+- **Context:** The "GENERATED POSE" image shows a model wearing a leather jacket over their base underwear.
+- **Correct Logic:** A new fashion item (the jacket) is present. Its coverage (\`upper_body\`) takes priority over the base underwear's coverage.
+- **Correct Output Snippet:**
+  \`\`\`json
+  {
+    "garment": {
+      "description": "A black leather jacket and simple grey underwear.",
+      "coverage": "upper_body",
+      "is_identical_to_base_garment": false
+    }
+  }
+  \`\`\`
+`;
 function extractJson(text: any) {
   const match = text.match(/```json\s*([\s\S]*?)\s*```/);
   if (match && match[1]) return JSON.parse(match[1]);
