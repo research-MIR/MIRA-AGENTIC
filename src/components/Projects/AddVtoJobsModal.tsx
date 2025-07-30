@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -11,11 +11,7 @@ import { cn } from '@/lib/utils';
 import { SecureImageDisplay } from '@/components/VTO/SecureImageDisplay';
 import { BitStudioJob } from '@/types/vto';
 
-interface AddVtoJobsModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  projectId: string;
-}
+const PAGE_SIZE = 32;
 
 export const AddVtoJobsModal = ({ isOpen, onClose, projectId }: AddVtoJobsModalProps) => {
   const { supabase, session } = useSession();
@@ -23,16 +19,33 @@ export const AddVtoJobsModal = ({ isOpen, onClose, projectId }: AddVtoJobsModalP
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isAdding, setIsAdding] = useState(false);
 
-  const { data: unassignedJobs, isLoading } = useQuery<BitStudioJob[]>({
+  const {
+    data,
+    error,
+    fetchNextPage,
+    hasNextPage,
+    isFetching,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
     queryKey: ['unassignedVtoJobs', session?.user?.id],
-    queryFn: async () => {
+    queryFn: async ({ pageParam = 0 }) => {
       if (!session?.user) return [];
-      const { data, error } = await supabase.rpc('get_unassigned_vto_jobs', { p_user_id: session.user.id });
+      const { data, error } = await supabase.rpc('get_unassigned_vto_jobs', {
+        p_user_id: session.user.id,
+        p_limit: PAGE_SIZE,
+        p_offset: pageParam * PAGE_SIZE,
+      });
       if (error) throw error;
-      return data;
+      return data as BitStudioJob[];
+    },
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) => {
+      return lastPage.length === PAGE_SIZE ? allPages.length : undefined;
     },
     enabled: isOpen && !!session?.user,
   });
+
+  const unassignedJobs = data?.pages.flatMap(page => page) ?? [];
 
   const toggleSelection = (id: string) => {
     setSelectedIds(prev => {
@@ -76,7 +89,7 @@ export const AddVtoJobsModal = ({ isOpen, onClose, projectId }: AddVtoJobsModalP
         </DialogHeader>
         <ScrollArea className="h-96 my-4">
           <div className="grid grid-cols-4 gap-4 pr-4">
-            {isLoading ? (
+            {isFetching && !isFetchingNextPage ? (
               [...Array(8)].map((_, i) => <Skeleton key={i} className="aspect-square w-full" />)
             ) : unassignedJobs && unassignedJobs.length > 0 ? (
               unassignedJobs.map(job => {
@@ -96,6 +109,18 @@ export const AddVtoJobsModal = ({ isOpen, onClose, projectId }: AddVtoJobsModalP
               <p className="col-span-4 text-center text-muted-foreground">No unassigned VTO jobs found.</p>
             )}
           </div>
+          {hasNextPage && (
+            <div className="flex justify-center mt-4 pr-4">
+              <Button
+                variant="outline"
+                onClick={() => fetchNextPage()}
+                disabled={isFetchingNextPage}
+              >
+                {isFetchingNextPage && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Load More
+              </Button>
+            </div>
+          )}
         </ScrollArea>
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
