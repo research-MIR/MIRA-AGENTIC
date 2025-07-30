@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
 import { useLanguage } from "@/context/LanguageContext";
-import { BarChart2, CheckCircle, XCircle, Loader2, AlertTriangle, UserCheck2, BadgeAlert, FileText, RefreshCw, Wand2, Download, HardDriveDownload } from "lucide-react";
+import { BarChart2, CheckCircle, XCircle, Loader2, AlertTriangle, UserCheck2, BadgeAlert, FileText, RefreshCw, Wand2, Download, HardDriveDownload, Shirt, ArrowLeft } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -258,7 +258,7 @@ const VtoReports = () => {
                         <span>Shape Mismatches</span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <User className="h-5 w-5" />
+                        <UserCheck2 className="h-5 w-5" />
                         <span className="text-2xl font-bold">{report.avg_body_preservation_score?.toFixed(1) || 'N/A'}</span>
                         <span>Avg. Body Preservation</span>
                       </div>

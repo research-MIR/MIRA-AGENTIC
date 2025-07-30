@@ -72,7 +72,7 @@ export const RecentVtoPacks = () => {
   const [packToAnalyze, setPackToAnalyze] = useState<PackSummary | null>(null);
   const [isStartingRefinement, setIsStartingRefinement] = useState<string | null>(null);
 
-  const { data: queryData, isLoading, error } = useQuery<any>({
+  const { data: queryData, isLoading, error } = useQuery<any>({ // Using any for now to accommodate packs table
     queryKey: ['vtoQaReportsAndPacks', session?.user?.id],
     queryFn: async () => {
       if (!session?.user) return [];
@@ -245,8 +245,8 @@ export const RecentVtoPacks = () => {
 
           return (
             <AccordionItem key={pack.pack_id} value={pack.pack_id} className="border rounded-md">
-              <AccordionTrigger className="p-4 hover:no-underline">
-                <div className="flex justify-between items-center w-full">
+              <div className="flex items-center p-4">
+                <AccordionTrigger className="flex-1 text-left p-0 hover:no-underline">
                   <div className="text-left">
                     <p className="font-semibold flex items-center gap-2">
                       {isRefinementPack && <Wand2 className="h-5 w-5 text-purple-500" />}
@@ -259,48 +259,48 @@ export const RecentVtoPacks = () => {
                       </p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    {!isRefinementPack && (
-                        hasRefinementPass ? (
-                          <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                              <Button variant="secondary" size="sm" disabled={isStartingRefinement === pack.pack_id} onClick={(e) => e.stopPropagation()}>
-                                {isStartingRefinement === pack.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
-                                Re-run Refinement Pass
-                              </Button>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                              <AlertDialogHeader>
-                                <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-                                <AlertDialogDescription>
-                                  This will permanently delete the existing refinement pass and all its associated images and jobs. A new refinement pass will then be created. This action cannot be undone.
-                                </AlertDialogDescription>
-                              </AlertDialogHeader>
-                              <AlertDialogFooter>
-                                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                <AlertDialogAction onClick={() => handleStartRefinementPass(pack.pack_id)}>
-                                  Yes, Reset and Re-run
-                                </AlertDialogAction>
-                              </AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
-                        ) : (
-                          <Button variant="secondary" size="sm" onClick={(e) => { e.stopPropagation(); handleStartRefinementPass(pack.pack_id); }} disabled={isStartingRefinement === pack.pack_id}>
-                            {isStartingRefinement === pack.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Wand2 className="h-4 w-4 mr-2" />}
-                            Start Refinement Pass
-                          </Button>
-                        )
-                      )}
-                    <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); setPackToAnalyze(pack); }}>
-                      {isAnalyzing === pack.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <BarChart2 className="h-4 w-4 mr-2" />}
-                      Analyze
-                    </Button>
-                    <Link to={`/vto-reports/${pack.pack_id}`} onClick={(e) => e.stopPropagation()}>
-                      <Button variant="outline" size="sm">View Report</Button>
-                    </Link>
-                  </div>
+                </AccordionTrigger>
+                <div className="flex items-center gap-2 pl-4">
+                  {!isRefinementPack && (
+                      hasRefinementPass ? (
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button variant="secondary" size="sm" disabled={isStartingRefinement === pack.pack_id} onClick={(e) => e.stopPropagation()}>
+                              {isStartingRefinement === pack.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+                              Re-run Refinement Pass
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                This will permanently delete the existing refinement pass and all its associated images and jobs. A new refinement pass will then be created. This action cannot be undone.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogAction onClick={() => handleStartRefinementPass(pack.pack_id)}>
+                                Yes, Reset and Re-run
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      ) : (
+                        <Button variant="secondary" size="sm" onClick={(e) => { e.stopPropagation(); handleStartRefinementPass(pack.pack_id); }} disabled={isStartingRefinement === pack.pack_id}>
+                          {isStartingRefinement === pack.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Wand2 className="h-4 w-4 mr-2" />}
+                          Start Refinement Pass
+                        </Button>
+                      )
+                    )}
+                  <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); setPackToAnalyze(pack); }}>
+                    {isAnalyzing === pack.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <BarChart2 className="h-4 w-4 mr-2" />}
+                    Analyze
+                  </Button>
+                  <Link to={`/vto-reports/${pack.pack_id}`} onClick={(e) => e.stopPropagation()}>
+                    <Button variant="outline" size="sm">View Report</Button>
+                  </Link>
                 </div>
-              </AccordionTrigger>
+              </div>
               <AccordionContent className="p-4 pt-0">
                 <VtoPackDetailView packId={pack.pack_id} isOpen={openPackId === pack.pack_id} />
               </AccordionContent>
