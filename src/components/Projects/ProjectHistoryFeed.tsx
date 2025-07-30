@@ -37,9 +37,10 @@ const ActivityIcon = ({ type }: { type: string }) => {
 
 const ActivityItem = ({ activity }: { activity: Activity }) => {
   const { count, start_time, end_time, first_title, first_job_id, details_array } = activity.details;
-  const singleItemDetails = details_array[0];
 
   const renderContent = () => {
+    const singleItemDetails = details_array?.[0];
+
     switch (activity.activity_type) {
       case 'grouped_chat_added':
         return (
@@ -52,14 +53,17 @@ const ActivityItem = ({ activity }: { activity: Activity }) => {
       case 'grouped_deadline_created':
         return <p>Set {count} deadlines, starting with <span className="font-semibold">"{first_title}"</span>.</p>;
       case 'chat_added':
+        if (!singleItemDetails) return null;
         return (
           <p>
             New chat <Link to={`/chat/${singleItemDetails.job_id}`} className="font-semibold text-primary hover:underline">"{singleItemDetails.title}"</Link> was added.
           </p>
         );
       case 'note_created':
+        if (!singleItemDetails) return null;
         return <p>Note <span className="font-semibold">"{singleItemDetails.title}"</span> was created.</p>;
       case 'deadline_created':
+        if (!singleItemDetails) return null;
         return <p>Deadline <span className="font-semibold">"{singleItemDetails.title}"</span> was set.</p>;
       default:
         return <p>An unknown activity occurred.</p>;
