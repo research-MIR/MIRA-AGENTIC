@@ -2,12 +2,13 @@ import { useState, useMemo } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { CheckCircle, Loader2, Wand2 } from 'lucide-react';
+import { CheckCircle, Loader2, Wand2, AlertTriangle } from 'lucide-react';
 import { useSession } from '@/components/Auth/SessionContextProvider';
 import { showError, showSuccess, showLoading, dismissToast } from '@/utils/toast';
 import { useQueryClient } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
 import { useLanguage } from '@/context/LanguageContext';
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 interface Pose {
   final_url: string;
@@ -25,9 +26,20 @@ interface UpscalePosesModalProps {
   onClose: () => void;
   jobs: Job[];
   packId: string;
+  totalPoses: number;
+  completedPoses: number;
+  isReadyForUpscale: boolean;
 }
 
-export const UpscalePosesModal = ({ isOpen, onClose, jobs, packId }: UpscalePosesModalProps) => {
+export const UpscalePosesModal = ({ 
+  isOpen, 
+  onClose, 
+  jobs, 
+  packId,
+  totalPoses,
+  completedPoses,
+  isReadyForUpscale
+}: UpscalePosesModalProps) => {
   const { supabase } = useSession();
   const queryClient = useQueryClient();
   const { t } = useLanguage();
@@ -118,6 +130,17 @@ export const UpscalePosesModal = ({ isOpen, onClose, jobs, packId }: UpscalePose
           <DialogTitle>Upscale & Prepare Poses for VTO</DialogTitle>
           <DialogDescription>Select the poses you want to upscale to high resolution. This prepares them for use in the Virtual Try-On tool.</DialogDescription>
         </DialogHeader>
+        
+        {!isReadyForUpscale && (
+          <Alert variant="destructive">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>Generation Incomplete</AlertTitle>
+            <AlertDescription>
+              Warning: Only {completedPoses} out of {totalPoses} poses have been successfully generated. You can proceed with upscaling the available images, but the final set will be incomplete. It is recommended to wait for all jobs to finish.
+            </AlertDescription>
+          </Alert>
+        )}
+
         <ScrollArea className="max-h-[60vh] my-4">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pr-4">
             {posesReadyForUpscale.map((pose) => {
@@ -145,7 +168,7 @@ export const UpscalePosesModal = ({ isOpen, onClose, jobs, packId }: UpscalePose
             onClick={() => handleUpscale(posesReadyForUpscale.map(p => p.final_url), 2.0)}
           >
             {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
-            Upscale All ({posesReadyForUpscale.length})
+            {isReadyForUpscale ? `Upscale All (${posesReadyForUpscale.length})` : `Upscale ${posesReadyForUpscale.length} Available`}
           </Button>
           <Button
             disabled={isLoading || selectedPoseUrls.size === 0}

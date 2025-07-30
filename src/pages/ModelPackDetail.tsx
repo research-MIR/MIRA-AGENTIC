@@ -272,7 +272,7 @@ const ModelPackDetail = () => {
 
     // Ready for upscale
     return (
-        <Button onClick={() => setIsUpscaleModalOpen(true)} disabled={posesReadyForUpscaleCount === 0}>
+        <Button onClick={() => setIsUpscaleModalOpen(true)}>
             <Wand2 className="mr-2 h-4 w-4" />
             Upscale & Prepare for VTO ({posesReadyForUpscaleCount})
         </Button>
@@ -389,7 +389,15 @@ const ModelPackDetail = () => {
           </div>
         </div>
       </div>
-      <UpscalePosesModal isOpen={isUpscaleModalOpen} onClose={() => setIsUpscaleModalOpen(false)} jobs={jobs || []} packId={packId!} />
+      <UpscalePosesModal 
+        isOpen={isUpscaleModalOpen} 
+        onClose={() => setIsUpscaleModalOpen(false)} 
+        jobs={jobs || []} 
+        packId={packId!}
+        totalPoses={packStatus.totalPoses}
+        completedPoses={packStatus.completedPoses}
+        isReadyForUpscale={packStatus.isReadyForUpscale}
+      />
       <AlertDialog open={!!jobToRemove} onOpenChange={(open) => !open && setJobToRemove(null)}>
         <AlertDialogContent>
           <AlertDialogHeader><AlertDialogTitle>Remove Model from Pack?</AlertDialogTitle><AlertDialogDescription>This will only remove the model from this pack. The original generation job will not be deleted.</AlertDialogDescription></AlertDialogHeader>
