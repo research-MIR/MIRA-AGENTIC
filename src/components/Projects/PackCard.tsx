@@ -1,15 +1,18 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Package, Trash2, ImageIcon, Shirt } from "lucide-react";
+import { Package, Trash2, ImageIcon, Shirt, Users } from "lucide-react";
 import { Link } from "react-router-dom";
 
 interface Pack {
   pack_id: string;
   pack_name: string;
   pack_description: string | null;
-  total_jobs: number;
-  unique_garment_count: number;
+  total_jobs?: number;
+  unique_garment_count?: number;
   created_at: string;
+  total_models?: number;
+  upscaled_poses?: number;
+  total_poses?: number;
 }
 
 interface PackCardProps {
@@ -50,6 +53,18 @@ export const PackCard = ({ pack, packType, onRemove }: PackCardProps) => {
               <div className="flex items-center gap-1">
                 <Shirt className="h-3 w-3" />
                 <span>{pack.unique_garment_count} garments</span>
+              </div>
+            </div>
+          )}
+          {packType === 'model' && (
+            <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground border-t pt-2">
+              <div className="flex items-center gap-1">
+                <Users className="h-3 w-3" />
+                <span>{pack.total_models} models</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <ImageIcon className="h-3 w-3" />
+                <span>{pack.upscaled_poses} / {pack.total_poses} upscaled</span>
               </div>
             </div>
           )}

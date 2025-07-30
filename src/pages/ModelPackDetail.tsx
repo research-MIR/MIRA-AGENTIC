@@ -8,7 +8,6 @@ import { ModelGenerator } from "@/components/GenerateModels/ModelGenerator";
 import { useLanguage } from "@/context/LanguageContext";
 import { Loader2, Wand2, Users, ArrowLeft, Trash2, AlertTriangle } from "lucide-react";
 import { RealtimeChannel } from "@supabase/supabase-js";
-import { PackStatusIndicator } from "@/components/GenerateModels/PackStatusIndicator";
 import { JobProgressBar } from "@/components/GenerateModels/JobProgressBar";
 import { Button } from "@/components/ui/button";
 import { UpscalePosesModal } from "@/components/GenerateModels/UpscalePosesModal";
@@ -22,7 +21,6 @@ import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { showError, showSuccess } from "@/utils/toast";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { PackDashboard } from "@/components/GenerateModels/PackDashboard";
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel";
 
@@ -144,35 +142,24 @@ const ModelPackDetail = () => {
     setJobToRemove(null);
   };
 
-  const packStatus = useMemo(() => {
-    if (!jobs || jobs.length === 0) {
+  const packStats = useMemo(() => {
+    if (!jobs) {
         return { 
-            status: 'idle' as const, 
-            completedPoses: 0, 
-            totalPoses: 0, 
-            upscaledPoses: 0,
-            isReadyForUpscale: false,
-            hasFailedJobs: false,
-            hasInProgressJobs: false,
-            processingBaseModels: 0,
-            processingPoses: 0,
-            processingUpscales: 0,
-            failedJobsCount: 0,
+            totalJobs: 0, processingBaseModels: 0, processingPoses: 0, processingUpscales: 0,
+            failedJobsCount: 0, totalPoses: 0, upscaledPoses: 0, completedPoses: 0, isReadyForUpscale: false
         };
     }
 
-    let completedPoses = 0;
     let totalPoses = 0;
     let upscaledPoses = 0;
-    let hasFailedJobs = false;
-    let hasInProgressJobs = false;
+    let completedPoses = 0;
     let processingBaseModels = 0;
     let processingPoses = 0;
     let processingUpscales = 0;
     let failedJobsCount = 0;
 
     for (const job of jobs) {
-        const jobTotalPoses = job.pose_prompts?.length || 0;
+        const jobTotalPoses = job.pose_prompts?.length ? job.pose_prompts.length + 1 : (job.final_posed_images?.length || 0);
         totalPoses += jobTotalPoses;
         
         const jobCompletedPoses = job.final_posed_images?.filter((p: any) => p.status === 'complete' || p.status === 'failed').length || 0;
@@ -181,48 +168,18 @@ const ModelPackDetail = () => {
         const jobUpscaledPoses = job.final_posed_images?.filter((p: any) => p.is_upscaled).length || 0;
         upscaledPoses += jobUpscaledPoses;
 
-        if (job.status === 'failed') {
-            hasFailedJobs = true;
-            failedJobsCount++;
-        }
-        if (job.status !== 'complete' && job.status !== 'failed') {
-            hasInProgressJobs = true;
-        }
-
-        if (['pending', 'base_generation_complete', 'awaiting_approval'].includes(job.status)) {
-            processingBaseModels++;
-        }
-        if (['generating_poses', 'polling_poses'].includes(job.status)) {
-            processingPoses++;
-        }
-        if (job.status === 'upscaling_poses') {
-            processingUpscales++;
-        }
+        if (job.status === 'failed') failedJobsCount++;
+        if (['pending', 'base_generation_complete', 'awaiting_approval'].includes(job.status)) processingBaseModels++;
+        if (['generating_poses', 'polling_poses'].includes(job.status)) processingPoses++;
+        if (job.status === 'upscaling_poses') processingUpscales++;
     }
-
-    let aggregateStatus: 'idle' | 'in_progress' | 'failed' | 'complete' = 'idle';
-    if (hasFailedJobs) {
-        aggregateStatus = 'failed';
-    } else if (hasInProgressJobs) {
-        aggregateStatus = 'in_progress';
-    } else if (jobs.every(j => j.status === 'complete' || j.status === 'failed') && jobs.length > 0) {
-        aggregateStatus = 'complete';
-    }
-
+    
+    const hasInProgressJobs = processingBaseModels > 0 || processingPoses > 0 || processingUpscales > 0;
     const isReadyForUpscale = !hasInProgressJobs && totalPoses > 0;
 
     return { 
-        status: aggregateStatus, 
-        completedPoses, 
-        totalPoses, 
-        upscaledPoses,
-        isReadyForUpscale,
-        hasFailedJobs,
-        hasInProgressJobs,
-        processingBaseModels,
-        processingPoses,
-        processingUpscales,
-        failedJobsCount,
+        totalJobs: jobs.length, processingBaseModels, processingPoses, processingUpscales,
+        failedJobsCount, totalPoses, upscaledPoses, completedPoses, isReadyForUpscale
     };
   }, [jobs]);
 
@@ -245,9 +202,7 @@ const ModelPackDetail = () => {
   }, [packId, session?.user?.id, supabase, queryClient]);
 
   const renderUpscaleButton = () => {
-    const { status, completedPoses, totalPoses, isReadyForUpscale } = packStatus;
-
-    if (totalPoses === 0) {
+    if (packStats.totalPoses === 0 && packStats.totalJobs > 0 && !packStats.hasInProgressJobs) {
         return (
             <TooltipProvider>
                 <Tooltip>
@@ -267,16 +222,16 @@ const ModelPackDetail = () => {
         );
     }
 
-    if (status === 'in_progress') {
+    if (packStats.hasInProgressJobs) {
         return (
-            <Button variant="secondary" onClick={() => setIsUpscaleModalOpen(true)}>
+            <Button variant="secondary" disabled>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Generating Poses ({completedPoses}/{totalPoses})...
+                Processing... ({packStats.completedPoses}/{packStats.totalPoses})
             </Button>
         );
     }
 
-    if (!isReadyForUpscale && status !== 'in_progress') { // Failed jobs exist
+    if (packStats.hasFailedJobs && !packStats.hasInProgressJobs) {
         return (
             <TooltipProvider>
                 <Tooltip>
@@ -294,7 +249,6 @@ const ModelPackDetail = () => {
         );
     }
 
-    // Ready for upscale
     return (
         <Button onClick={() => setIsUpscaleModalOpen(true)} disabled={posesReadyForUpscaleCount === 0}>
             <Wand2 className="mr-2 h-4 w-4" />
@@ -318,25 +272,13 @@ const ModelPackDetail = () => {
           <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
                   <h1 className="text-3xl font-bold">{pack.name}</h1>
-                  <PackStatusIndicator status={packStatus.status} totalPoses={packStatus.totalPoses} upscaledPoses={packStatus.upscaledPoses} />
               </div>
               {renderUpscaleButton()}
-          </div>
-          <div className="mt-2">
-              <JobProgressBar completedPoses={packStatus.completedPoses} totalPoses={packStatus.totalPoses} />
           </div>
           <p className="text-muted-foreground mt-1">{pack.description || "No description provided."}</p>
         </header>
         <div className="mb-4">
-          <PackDashboard stats={{
-            totalJobs: jobs?.length || 0,
-            processingBaseModels: packStatus.processingBaseModels,
-            processingPoses: packStatus.processingPoses,
-            processingUpscales: packStatus.processingUpscales,
-            failedJobsCount: packStatus.failedJobsCount,
-            totalPoses: packStatus.totalPoses,
-            upscaledPoses: packStatus.upscaledPoses,
-          }} />
+          <PackDashboard stats={packStats} />
         </div>
         <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-8 overflow-hidden">
           <div className="lg:col-span-2 overflow-y-auto no-scrollbar pr-4">
@@ -359,14 +301,10 @@ const ModelPackDetail = () => {
                                   <RecentJobThumbnail job={job} onClick={() => setSelectedJobId(job.id)} isSelected={selectedJobId === job.id} />
                                   <AlertDialog>
                                     <AlertDialogTrigger asChild>
-                                      <Button variant="destructive" size="icon" className="absolute top-0 right-0 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity">
+                                      <Button variant="destructive" size="icon" className="absolute top-0 right-0 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => { e.stopPropagation(); setJobToRemove(job.id); }}>
                                         <Trash2 className="h-3 w-3" />
                                       </Button>
                                     </AlertDialogTrigger>
-                                    <AlertDialogContent>
-                                      <AlertDialogHeader><AlertDialogTitle>Remove Model from Pack?</AlertDialogTitle><AlertDialogDescription>This will only remove the model from this pack. The original generation job will not be deleted.</AlertDialogDescription></AlertDialogHeader>
-                                      <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={() => handleRemoveModelFromPack()}>Remove</AlertDialogAction></AlertDialogFooter>
-                                    </AlertDialogContent>
                                   </AlertDialog>
                                 </div>
                               </CarouselItem>
@@ -433,9 +371,9 @@ const ModelPackDetail = () => {
         onClose={() => setIsUpscaleModalOpen(false)} 
         jobs={jobs || []} 
         packId={packId!}
-        totalPoses={packStatus.totalPoses}
-        completedPoses={packStatus.completedPoses}
-        isReadyForUpscale={packStatus.isReadyForUpscale}
+        totalPoses={packStats.totalPoses}
+        completedPoses={packStats.completedPoses}
+        isReadyForUpscale={packStats.isReadyForUpscale}
       />
       <AlertDialog open={!!jobToRemove} onOpenChange={(open) => !open && setJobToRemove(null)}>
         <AlertDialogContent>
