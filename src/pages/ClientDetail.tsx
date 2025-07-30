@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Folder, Plus, Users, Bot, Shirt, FolderGit2 } from "lucide-react";
+import { Folder, Plus, Users, Bot, Shirt, FolderGit2, ImageIcon, MessageSquare } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -14,7 +14,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ClientModelCard } from "@/components/Clients/ClientModelCard";
 import { ClientGarmentCard } from "@/components/Clients/ClientGarmentCard";
 import { ClientVtoCard } from "@/components/Clients/ClientVtoCard";
-import { ClientVtoGarmentCard } from "@/components/Clients/ClientVtoGarmentCard";
 import { RecentProjectItem } from "@/components/Clients/RecentProjectItem";
 import { ClientActivityFeed } from "@/components/Clients/ClientActivityFeed";
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel";
@@ -25,7 +24,7 @@ import { showError, showSuccess, showLoading, dismissToast } from "@/utils/toast
 import { Loader2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useSecureImage } from "@/hooks/useSecureImage";
-import { ImageIcon, MessageSquare } from "lucide-react";
+import { useImagePreview } from "@/context/ImagePreviewContext";
 
 interface ProjectPreview {
   project_id: string;
@@ -67,6 +66,7 @@ const ClientDetail = () => {
   const { supabase, session } = useSession();
   const { t } = useLanguage();
   const queryClient = useQueryClient();
+  const { showImage } = useImagePreview();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
@@ -149,6 +149,28 @@ const ClientDetail = () => {
     enabled: !!clientId && !!session?.user,
   });
 
+  const { data: clientGalleryImages, isLoading: isLoadingGallery } = useQuery({
+    queryKey: ['clientGalleryImages', clientId, session?.user?.id],
+    queryFn: async () => {
+        if (!clientId || !session?.user) return [];
+        const { data, error } = await supabase.rpc('get_client_gallery_images', { p_user_id: session.user.id, p_client_id: clientId });
+        if (error) throw error;
+        return data;
+    },
+    enabled: !!clientId && !!session?.user,
+  });
+
+  const { data: clientChats, isLoading: isLoadingChats } = useQuery({
+    queryKey: ['clientChats', clientId, session?.user?.id],
+    queryFn: async () => {
+        if (!clientId || !session?.user) return [];
+        const { data, error } = await supabase.rpc('get_client_chats', { p_user_id: session.user.id, p_client_id: clientId });
+        if (error) throw error;
+        return data;
+    },
+    enabled: !!clientId && !!session?.user,
+  });
+
   const handleCreateProject = async () => {
     if (!newProjectName.trim() || !session?.user || !clientId) return;
     setIsCreating(true);
@@ -212,6 +234,8 @@ const ClientDetail = () => {
           <TabsList>
             <TabsTrigger value="overview">{t('overview')}</TabsTrigger>
             <TabsTrigger value="projects">{t('projectsTitle')}</TabsTrigger>
+            <TabsTrigger value="gallery">{t('gallery')}</TabsTrigger>
+            <TabsTrigger value="chats">{t('chats')}</TabsTrigger>
             <TabsTrigger value="models">{t('models')}</TabsTrigger>
             <TabsTrigger value="garments">{t('garments')}</TabsTrigger>
             <TabsTrigger value="vto">{t('vtoResults')}</TabsTrigger>
@@ -251,19 +275,19 @@ const ClientDetail = () => {
                       <div>
                         <h3 className="text-sm font-semibold mb-2">{t('models')}</h3>
                         {isLoadingModels ? <Skeleton className="h-32 w-full" /> : clientModels && clientModels.length > 0 ? (
-                          <Carousel opts={{ align: "start" }}><CarouselContent className="-ml-2">{clientModels.map((model: any) => <CarouselItem key={model.model_id} className="pl-2 basis-1/2"><ClientModelCard model={model} /></CarouselItem>)}</CarouselContent><CarouselPrevious /><CarouselNext /></Carousel>
+                          <Carousel opts={{ align: "start" }} className="relative"><CarouselContent className="-ml-2">{clientModels.map((model: any) => <CarouselItem key={model.model_id} className="pl-2 basis-1/2"><ClientModelCard model={model} /></CarouselItem>)}</CarouselContent><CarouselPrevious className="absolute -left-4 top-1/2 -translate-y-1/2" /><CarouselNext className="absolute -right-4 top-1/2 -translate-y-1/2" /></Carousel>
                         ) : <p className="text-xs text-muted-foreground">{t('noAssets')}</p>}
                       </div>
                       <div>
                         <h3 className="text-sm font-semibold mb-2">{t('garments')}</h3>
                         {isLoadingGarments ? <Skeleton className="h-32 w-full" /> : clientGarments && clientGarments.length > 0 ? (
-                          <Carousel opts={{ align: "start" }}><CarouselContent className="-ml-2">{clientGarments.map((garment: any) => <CarouselItem key={garment.garment_id} className="pl-2 basis-1/2"><ClientGarmentCard garment={garment} /></CarouselItem>)}</CarouselContent><CarouselPrevious /><CarouselNext /></Carousel>
+                          <Carousel opts={{ align: "start" }} className="relative"><CarouselContent className="-ml-2">{clientGarments.map((garment: any) => <CarouselItem key={garment.garment_id} className="pl-2 basis-1/2"><ClientGarmentCard garment={garment} /></CarouselItem>)}</CarouselContent><CarouselPrevious className="absolute -left-4 top-1/2 -translate-y-1/2" /><CarouselNext className="absolute -right-4 top-1/2 -translate-y-1/2" /></Carousel>
                         ) : <p className="text-xs text-muted-foreground">{t('noAssets')}</p>}
                       </div>
                       <div>
                         <h3 className="text-sm font-semibold mb-2">{t('vtoResults')}</h3>
                         {isLoadingVtoJobs ? <Skeleton className="h-32 w-full" /> : clientVtoJobs && clientVtoJobs.length > 0 ? (
-                          <Carousel opts={{ align: "start" }}><CarouselContent className="-ml-2">{clientVtoJobs.map((job: any) => <CarouselItem key={job.job_id} className="pl-2 basis-1/2"><ClientVtoCard job={job} /></CarouselItem>)}</CarouselContent><CarouselPrevious /><CarouselNext /></Carousel>
+                          <Carousel opts={{ align: "start" }} className="relative"><CarouselContent className="-ml-2">{clientVtoJobs.map((job: any) => <CarouselItem key={job.job_id} className="pl-2 basis-1/2"><ClientVtoCard job={job} /></CarouselItem>)}</CarouselContent><CarouselPrevious className="absolute -left-4 top-1/2 -translate-y-1/2" /><CarouselNext className="absolute -right-4 top-1/2 -translate-y-1/2" /></Carousel>
                         ) : <p className="text-xs text-muted-foreground">{t('noAssets')}</p>}
                       </div>
                     </CardContent>
@@ -278,6 +302,29 @@ const ClientDetail = () => {
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                 {allProjects?.map(project => (
                   <ProjectCard key={project.project_id} project={project} />
+                ))}
+              </div>
+            )}
+          </TabsContent>
+          <TabsContent value="gallery" className="flex-1 overflow-y-auto mt-4">
+            {isLoadingGallery ? <Skeleton className="h-64 w-full" /> : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                {clientGalleryImages?.map((image: any, index: number) => (
+                  <button key={image.public_url} onClick={() => showImage({ images: clientGalleryImages.map((img: any) => ({ url: img.public_url, jobId: img.job_id })), currentIndex: index })} className="aspect-square block">
+                    <img src={image.public_url} alt="Gallery image" className="w-full h-full object-cover rounded-md" />
+                  </button>
+                ))}
+              </div>
+            )}
+          </TabsContent>
+          <TabsContent value="chats" className="flex-1 overflow-y-auto mt-4">
+            {isLoadingChats ? <Skeleton className="h-64 w-full" /> : (
+              <div className="space-y-2">
+                {clientChats?.map((job: any) => (
+                  <Link to={`/chat/${job.id}`} key={job.id} className="block p-2 rounded-md hover:bg-muted border">
+                    <p className="font-medium text-sm truncate">{job.original_prompt || "Untitled Chat"}</p>
+                    <p className="text-xs text-muted-foreground mt-1">Last updated: {new Date(job.updated_at).toLocaleString()}</p>
+                  </Link>
                 ))}
               </div>
             )}
