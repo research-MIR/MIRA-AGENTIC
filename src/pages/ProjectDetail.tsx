@@ -22,6 +22,7 @@ import { AddVtoJobsModal } from "@/components/Projects/AddVtoJobsModal";
 import { VtoJobCard } from "@/components/Projects/VtoJobCard";
 import { BitStudioJob } from "@/types/vto";
 import { ClientVtoGarmentCard } from "@/components/Clients/ClientVtoGarmentCard";
+import { ProjectDashboard } from "@/components/Projects/ProjectDashboard";
 
 interface Project {
   id: string;
@@ -37,6 +38,47 @@ interface Pack {
   total_jobs: number;
   unique_garment_count: number;
   created_at: string;
+}
+
+const ProjectCard = ({ project }: { project: ProjectPreview }) => {
+  const { displayUrl, isLoading } = useSecureImage(project.latest_image_url);
+
+  return (
+    <Link to={`/projects/${project.project_id}`}>
+      <Card className="hover:border-primary transition-colors h-full flex flex-col">
+        <CardHeader className="p-4">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Folder className="h-5 w-5 text-primary" />
+            <span className="truncate">{project.project_name}</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-4 pt-0 flex-1">
+          <div className="aspect-[4/3] bg-muted rounded-md flex items-center justify-center overflow-hidden">
+            {isLoading ? (
+              <Skeleton className="w-full h-full" />
+            ) : displayUrl ? (
+              <img src={displayUrl} alt={project.project_name} className="w-full h-full object-cover" />
+            ) : (
+              <ImageIcon className="h-10 w-10 text-muted-foreground" />
+            )}
+          </div>
+        </CardContent>
+        <CardFooter className="p-4 pt-0">
+          <div className="text-xs text-muted-foreground flex items-center gap-2">
+            <MessageSquare className="h-3 w-3" />
+            <span>{project.chat_count} {project.chat_count === 1 ? 'chat' : 'chats'}</span>
+          </div>
+        </CardFooter>
+      </Card>
+    </Link>
+  );
+};
+
+interface ProjectPreview {
+  project_id: string;
+  project_name: string;
+  chat_count: number;
+  latest_image_url: string | null;
 }
 
 const ProjectDetail = () => {
@@ -244,16 +286,20 @@ const ProjectDetail = () => {
           </div>
         </header>
         
-        <Tabs defaultValue="gallery" className="flex-1 flex flex-col overflow-hidden">
+        <Tabs defaultValue="dashboard" className="flex-1 flex flex-col overflow-hidden">
           <TabsList>
-            <TabsTrigger value="gallery">Gallery</TabsTrigger>
-            <TabsTrigger value="chats">Chats</TabsTrigger>
-            <TabsTrigger value="models">Model Packs</TabsTrigger>
-            <TabsTrigger value="garments">Garment Packs</TabsTrigger>
-            <TabsTrigger value="vto">VTO Packs</TabsTrigger>
-            <TabsTrigger value="vto_jobs">VTO Jobs</TabsTrigger>
+            <TabsTrigger value="dashboard">{t('dashboard')}</TabsTrigger>
+            <TabsTrigger value="gallery">{t('gallery')}</TabsTrigger>
+            <TabsTrigger value="chats">{t('chats')}</TabsTrigger>
+            <TabsTrigger value="models">{t('modelPacks')}</TabsTrigger>
+            <TabsTrigger value="garments">{t('garmentPacks')}</TabsTrigger>
+            <TabsTrigger value="vto">{t('vtoPacks')}</TabsTrigger>
+            <TabsTrigger value="vto_jobs">{t('vtoJobs')}</TabsTrigger>
             <TabsTrigger value="vto_garments">{t('vtoGarments')}</TabsTrigger>
           </TabsList>
+          <TabsContent value="dashboard" className="flex-1 overflow-y-auto mt-4">
+            <ProjectDashboard projectId={projectId!} />
+          </TabsContent>
           <TabsContent value="gallery" className="flex-1 overflow-y-auto mt-4">
               {galleryImages.length > 0 ? (
                 <>
