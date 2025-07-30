@@ -40,6 +40,7 @@ export interface Pose {
   is_upscaled?: boolean;
   status: string;
   pose_prompt: string;
+  jobId: string;
   analysis?: PoseAnalysis;
 }
 

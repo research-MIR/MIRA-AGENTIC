@@ -19,9 +19,13 @@ export const isPoseCompatible = (garment: AnalyzedGarment, pose: Pose, isStrict:
     return { compatible: false, reason: "Missing analysis data for garment or pose." };
   }
 
-  const garmentFit = garment.analysis.type_of_fit;
-  const shootFocus = pose.analysis.shoot_focus;
-  const poseGarment = pose.analysis.garment;
+  // Normalize values to be safe against spaces vs underscores
+  const garmentFit = garment.analysis.type_of_fit.replace(/ /g, '_');
+  const shootFocus = pose.analysis.shoot_focus.replace(/ /g, '_');
+  const poseGarment = {
+      ...pose.analysis.garment,
+      coverage: pose.analysis.garment.coverage.replace(/ /g, '_'),
+  };
 
   // Rule 1: Primary Framing Check
   if (garmentFit === 'upper_body' && !['upper_body', 'full_body'].includes(shootFocus)) {
