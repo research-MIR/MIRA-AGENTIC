@@ -39,6 +39,9 @@ export const clientsTranslations = {
     addVtoJobs: "Aggiungi Job VTO",
     noVtoJobsTitle: "Nessun Job VTO",
     noVtoJobsDescription: "Collega i job di Prova Virtuale singoli a questo progetto per vederli qui.",
+    vtoGarments: "Capi VTO",
+    noVtoGarmentsTitle: "Nessun Capo VTO",
+    noVtoGarmentsDescription: "I capi unici usati nei job VTO di questo progetto appariranno qui.",
   },
   en: {
     clientsTitle: "Clients",
@@ -80,5 +83,8 @@ export const clientsTranslations = {
     addVtoJobs: "Add VTO Jobs",
     noVtoJobsTitle: "No VTO Jobs",
     noVtoJobsDescription: "Link single Virtual Try-On jobs to this project to see them here.",
+    vtoGarments: "VTO Garments",
+    noVtoGarmentsTitle: "No VTO Garments",
+    noVtoGarmentsDescription: "The unique garments used in this project's VTO jobs will appear here.",
   },
 };

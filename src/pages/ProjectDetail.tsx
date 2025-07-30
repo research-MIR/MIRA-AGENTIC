@@ -21,6 +21,7 @@ import { ManageChatsModal } from "@/components/Projects/ManageChatsModal";
 import { AddVtoJobsModal } from "@/components/Projects/AddVtoJobsModal";
 import { VtoJobCard } from "@/components/Projects/VtoJobCard";
 import { BitStudioJob } from "@/types/vto";
+import { ClientVtoGarmentCard } from "@/components/Clients/ClientVtoGarmentCard";
 
 interface Project {
   id: string;
@@ -114,6 +115,17 @@ const ProjectDetail = () => {
         const { data, error } = await supabase.rpc('get_vto_jobs_for_project', { p_project_id: projectId });
         if (error) throw error;
         return data;
+    },
+    enabled: !!projectId,
+  });
+
+  const { data: vtoGarments, isLoading: isLoadingVtoGarments } = useQuery({
+    queryKey: ['projectVtoGarments', projectId],
+    queryFn: async () => {
+      if (!projectId) return [];
+      const { data, error } = await supabase.rpc('get_vto_garments_for_project', { p_project_id: projectId });
+      if (error) throw error;
+      return data;
     },
     enabled: !!projectId,
   });
@@ -240,6 +252,7 @@ const ProjectDetail = () => {
             <TabsTrigger value="garments">Garment Packs</TabsTrigger>
             <TabsTrigger value="vto">VTO Packs</TabsTrigger>
             <TabsTrigger value="vto_jobs">VTO Jobs</TabsTrigger>
+            <TabsTrigger value="vto_garments">{t('vtoGarments')}</TabsTrigger>
           </TabsList>
           <TabsContent value="gallery" className="flex-1 overflow-y-auto mt-4">
               {galleryImages.length > 0 ? (
@@ -339,6 +352,21 @@ const ProjectDetail = () => {
                     icon={<Shirt size={48} />}
                     title={t('noVtoJobsTitle')}
                     description={t('noVtoJobsDescription')}
+                    buttonText={t('addVtoJobs')}
+                    onButtonClick={() => setIsAddVtoJobsOpen(true)}
+                />
+            )}
+          </TabsContent>
+          <TabsContent value="vto_garments" className="flex-1 overflow-y-auto mt-4">
+            {isLoadingVtoGarments ? <Skeleton className="h-64 w-full" /> : vtoGarments && vtoGarments.length > 0 ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                  {vtoGarments.map((garment: any) => <ClientVtoGarmentCard key={garment.storage_path} garment={garment} />)}
+                </div>
+            ) : (
+                <EmptyState 
+                    icon={<Shirt size={48} />}
+                    title={t('noVtoGarmentsTitle')}
+                    description={t('noVtoGarmentsDescription')}
                     buttonText={t('addVtoJobs')}
                     onButtonClick={() => setIsAddVtoJobsOpen(true)}
                 />
