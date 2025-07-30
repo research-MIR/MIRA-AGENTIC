@@ -13,7 +13,6 @@ import { JobProgressBar } from "@/components/GenerateModels/JobProgressBar";
 import { Button } from "@/components/ui/button";
 import { UpscalePosesModal } from "@/components/GenerateModels/UpscalePosesModal";
 import { RecentJobThumbnail } from "@/components/GenerateModels/RecentJobThumbnail";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { JobPoseDisplay } from "@/components/GenerateModels/JobPoseDisplay";
 import { UpscaledPosesGallery } from "@/components/GenerateModels/UpscaledPosesGallery";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -25,6 +24,7 @@ import { showError, showSuccess } from "@/utils/toast";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { PackDashboard } from "@/components/GenerateModels/PackDashboard";
+import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel";
 
 interface PoseAnalysis {
   shoot_focus: 'upper_body' | 'lower_body' | 'full_body';
@@ -351,26 +351,30 @@ const ModelPackDetail = () => {
                     <CardHeader><CardTitle>Generation Jobs</CardTitle></CardHeader>
                     <CardContent>
                       {isLoadingJobs ? <Skeleton className="h-24 w-full" /> : jobsError ? <Alert variant="destructive"><AlertTitle>Error</AlertTitle><AlertDescription>{jobsError.message}</AlertDescription></Alert> : (
-                        <ScrollArea className="h-32">
-                          <div className="flex gap-4 pb-2">
+                        <Carousel opts={{ align: "start" }} className="w-full">
+                          <CarouselContent className="-ml-4">
                             {jobs?.map(job => (
-                              <div key={job.id} className="relative group">
-                                <RecentJobThumbnail job={job} onClick={() => setSelectedJobId(job.id)} isSelected={selectedJobId === job.id} />
-                                <AlertDialog>
-                                  <AlertDialogTrigger asChild>
-                                    <Button variant="destructive" size="icon" className="absolute top-0 right-0 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity">
-                                      <Trash2 className="h-3 w-3" />
-                                    </Button>
-                                  </AlertDialogTrigger>
-                                  <AlertDialogContent>
-                                    <AlertDialogHeader><AlertDialogTitle>Remove Model from Pack?</AlertDialogTitle><AlertDialogDescription>This will only remove the model from this pack. The original generation job will not be deleted.</AlertDialogDescription></AlertDialogHeader>
-                                    <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={() => handleRemoveModelFromPack()}>Remove</AlertDialogAction></AlertDialogFooter>
-                                  </AlertDialogContent>
-                                </AlertDialog>
-                              </div>
+                              <CarouselItem key={job.id} className="pl-4 basis-auto">
+                                <div className="relative group">
+                                  <RecentJobThumbnail job={job} onClick={() => setSelectedJobId(job.id)} isSelected={selectedJobId === job.id} />
+                                  <AlertDialog>
+                                    <AlertDialogTrigger asChild>
+                                      <Button variant="destructive" size="icon" className="absolute top-0 right-0 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <Trash2 className="h-3 w-3" />
+                                      </Button>
+                                    </AlertDialogTrigger>
+                                    <AlertDialogContent>
+                                      <AlertDialogHeader><AlertDialogTitle>Remove Model from Pack?</AlertDialogTitle><AlertDialogDescription>This will only remove the model from this pack. The original generation job will not be deleted.</AlertDialogDescription></AlertDialogHeader>
+                                      <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={() => handleRemoveModelFromPack()}>Remove</AlertDialogAction></AlertDialogFooter>
+                                    </AlertDialogContent>
+                                  </AlertDialog>
+                                </div>
+                              </CarouselItem>
                             ))}
-                          </div>
-                        </ScrollArea>
+                          </CarouselContent>
+                          <CarouselPrevious />
+                          <CarouselNext />
+                        </Carousel>
                       )}
                     </CardContent>
                   </Card>

@@ -16,9 +16,9 @@ import { useImagePreview } from "@/context/ImagePreviewContext";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useGeneratorStore } from "@/store/generatorStore";
 import { GeneratorJobThumbnail } from "@/components/Jobs/GeneratorJobThumbnail";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { RealtimeChannel } from "@supabase/supabase-js";
+import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel";
 
 const FileUploader = ({ onFileSelect, children, multiple = false }: { onFileSelect: (files: FileList | null) => void, children: React.ReactNode, multiple?: boolean }) => {
   const inputRef = React.useRef<HTMLInputElement>(null);
@@ -266,18 +266,21 @@ const Generator = () => {
               <CardHeader><CardTitle>{t('recentGenerations')}</CardTitle></CardHeader>
               <CardContent>
                 {state.isFetchingJobs ? <Skeleton className="h-24 w-full" /> : state.recentJobs.length > 0 ? (
-                  <ScrollArea className="h-32">
-                    <div className="flex gap-4 pb-2">
+                  <Carousel opts={{ align: "start" }} className="w-full">
+                    <CarouselContent className="-ml-4">
                       {state.recentJobs.map(job => (
-                        <GeneratorJobThumbnail
-                          key={job.id}
-                          job={job}
-                          onClick={() => state.selectJob(job)}
-                          isSelected={state.selectedJobId === job.id}
-                        />
+                        <CarouselItem key={job.id} className="pl-4 basis-auto">
+                          <GeneratorJobThumbnail
+                            job={job}
+                            onClick={() => state.selectJob(job)}
+                            isSelected={state.selectedJobId === job.id}
+                          />
+                        </CarouselItem>
                       ))}
-                    </div>
-                  </ScrollArea>
+                    </CarouselContent>
+                    <CarouselPrevious />
+                    <CarouselNext />
+                  </Carousel>
                 ) : (
                   <p className="text-sm text-muted-foreground">{t('noRecentJobs')}</p>
                 )}

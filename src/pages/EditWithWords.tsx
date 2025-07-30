@@ -12,10 +12,10 @@ import { useLanguage } from "@/context/LanguageContext";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { ImageCompareModal } from "@/components/ImageCompareModal";
 import { RecentJobThumbnail } from "@/components/Jobs/RecentJobThumbnail";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { useSecureImage } from "@/hooks/useSecureImage";
 import { useDropzone } from "@/hooks/useDropzone";
-import { cn, optimizeImage, sanitizeFilename } from "@/lib/utils";
+import { cn } from "@/lib/utils";
+import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel";
 
 interface EditJob {
   id: string;
@@ -116,14 +116,10 @@ const EditWithWords = () => {
 
     try {
         const uploadFile = async (file: File, type: 'source' | 'reference') => {
-            const optimizedFile = await optimizeImage(file);
-            const filePath = `${session?.user?.id}/edit-${type}/${Date.now()}.png`;
+            const filePath = `${session?.user?.id}/edit-${type}/${Date.now()}-${file.name}`;
             const { data, error } = await supabase.storage
                 .from('mira-agent-user-uploads')
-                .upload(filePath, optimizedFile, {
-                    contentType: 'image/png',
-                    upsert: true,
-                });
+                .upload(filePath, file);
             if (error) throw error;
             return supabase.storage.from('mira-agent-user-uploads').getPublicUrl(data.path).data.publicUrl;
         };
@@ -246,18 +242,21 @@ const EditWithWords = () => {
               <CardHeader><CardTitle>{t('recentEdits')}</CardTitle></CardHeader>
               <CardContent>
                 {isLoadingRecent ? <Skeleton className="h-24 w-full" /> : recentJobs && recentJobs.length > 0 ? (
-                  <ScrollArea className="h-32">
-                    <div className="flex gap-4 pb-2">
+                  <Carousel opts={{ align: "start" }} className="w-full">
+                    <CarouselContent className="-ml-4">
                       {recentJobs.map(job => (
-                        <RecentJobThumbnail
-                          key={job.id}
-                          job={job}
-                          onClick={() => setSelectedJobId(job.id)}
-                          isSelected={selectedJobId === job.id}
-                        />
+                        <CarouselItem key={job.id} className="pl-4 basis-auto">
+                          <RecentJobThumbnail
+                            job={job}
+                            onClick={() => setSelectedJobId(job.id)}
+                            isSelected={selectedJobId === job.id}
+                          />
+                        </CarouselItem>
                       ))}
-                    </div>
-                  </ScrollArea>
+                    </CarouselContent>
+                    <CarouselPrevious />
+                    <CarouselNext />
+                  </Carousel>
                 ) : (
                   <p className="text-sm text-muted-foreground">{t('noRecentEdits')}</p>
                 )}

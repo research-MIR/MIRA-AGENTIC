@@ -14,10 +14,10 @@ import { ImageCompareModal } from "@/components/ImageCompareModal";
 import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/utils";
 import { RecentJobThumbnail } from "@/components/Jobs/RecentJobThumbnail";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { useSecureImage } from "@/hooks/useSecureImage";
 import { useDropzone } from "@/hooks/useDropzone";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel";
 
 interface VtoPipelineJob {
   id: string;
@@ -250,18 +250,21 @@ const Refine = () => {
               <CardHeader><CardTitle>{t('recentRefinements')}</CardTitle></CardHeader>
               <CardContent>
                 {isLoadingRecent ? <Skeleton className="h-24 w-full" /> : recentJobs && recentJobs.length > 0 ? (
-                  <ScrollArea className="h-32">
-                    <div className="flex gap-4 pb-2">
+                  <Carousel opts={{ align: "start" }} className="w-full">
+                    <CarouselContent className="-ml-4">
                       {recentJobs.map(job => (
-                        <RecentJobThumbnail
-                          key={job.id}
-                          job={job}
-                          onClick={() => setSelectedJobId(job.id)}
-                          isSelected={selectedJobId === job.id}
-                        />
+                        <CarouselItem key={job.id} className="pl-4 basis-auto">
+                          <RecentJobThumbnail
+                            job={job}
+                            onClick={() => setSelectedJobId(job.id)}
+                            isSelected={selectedJobId === job.id}
+                          />
+                        </CarouselItem>
                       ))}
-                    </div>
-                  </ScrollArea>
+                    </CarouselContent>
+                    <CarouselPrevious />
+                    <CarouselNext />
+                  </Carousel>
                 ) : (
                   <p className="text-sm text-muted-foreground">{t('noRecentJobs')}</p>
                 )}
