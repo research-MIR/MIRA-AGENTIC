@@ -16,7 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Breadcrumbs } from "@/components/Clients/Breadcrumbs";
 import { StatCard } from "@/components/Clients/StatCard";
 import { RecentProjectItem } from "@/components/Clients/RecentProjectItem";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Link } from "react-router-dom";
 
 interface ProjectPreview {
@@ -212,7 +212,7 @@ const ClientDetail = () => {
                 </CardContent>
               </Card>
               <div className="space-y-6">
-                {/* Future components like ActivityFeed and SuggestionsCard can go here */}
+                {/* Future components can go here */}
               </div>
             </div>
           </TabsContent>
