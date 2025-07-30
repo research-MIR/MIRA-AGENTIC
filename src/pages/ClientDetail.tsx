@@ -16,9 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Breadcrumbs } from "@/components/Clients/Breadcrumbs";
 import { StatCard } from "@/components/Clients/StatCard";
 import { RecentProjectItem } from "@/components/Clients/RecentProjectItem";
-import { ActivityFeed } from "@/components/Clients/ActivityFeed";
-import { SuggestionsCard } from "@/components/Clients/SuggestionsCard";
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Link } from "react-router-dom";
 
 interface ProjectPreview {
@@ -204,14 +202,17 @@ const ClientDetail = () => {
                 <CardContent>
                   {isLoadingRecent ? <Skeleton className="h-40 w-full" /> : (
                     <div className="space-y-2">
-                      {recentProjects?.map(p => <RecentProjectItem key={p.project_id} project={p} />)}
+                      {recentProjects && recentProjects.length > 0 ? (
+                        recentProjects.map(p => <RecentProjectItem key={p.project_id} project={p} />)
+                      ) : (
+                        <p className="text-sm text-muted-foreground text-center py-8">Nessuna attività di progetto recente per questo cliente.</p>
+                      )}
                     </div>
                   )}
                 </CardContent>
               </Card>
               <div className="space-y-6">
-                <ActivityFeed />
-                <SuggestionsCard />
+                {/* Future components like ActivityFeed and SuggestionsCard can go here */}
               </div>
             </div>
           </TabsContent>
