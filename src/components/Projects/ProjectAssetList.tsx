@@ -12,6 +12,9 @@ interface Pack {
   pack_id: string;
   pack_name: string;
   pack_description: string | null;
+  total_jobs: number;
+  unique_garment_count: number;
+  created_at: string;
 }
 
 interface ProjectAssetListProps {
