@@ -13,6 +13,12 @@ import { BitStudioJob } from '@/types/vto';
 
 const PAGE_SIZE = 32;
 
+interface AddVtoJobsModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  projectId: string;
+}
+
 export const AddVtoJobsModal = ({ isOpen, onClose, projectId }: AddVtoJobsModalProps) => {
   const { supabase, session } = useSession();
   const queryClient = useQueryClient();
@@ -36,7 +42,7 @@ export const AddVtoJobsModal = ({ isOpen, onClose, projectId }: AddVtoJobsModalP
         p_offset: pageParam * PAGE_SIZE,
       });
       if (error) throw error;
-      return data as BitStudioJob[];
+      return (data as BitStudioJob[]) || [];
     },
     initialPageParam: 0,
     getNextPageParam: (lastPage, allPages) => {
