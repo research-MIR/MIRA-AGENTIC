@@ -6,16 +6,22 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { useSession } from '@/components/Auth/SessionContextProvider';
 import { showError, showSuccess, showLoading, dismissToast } from '@/utils/toast';
 import { Skeleton } from '@/components/ui/skeleton';
-import { CheckCircle, Loader2 } from 'lucide-react';
+import { CheckCircle, Loader2, Users, Bot } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface Pack {
   id: string;
   name?: string;
+  pack_id?: string; // From RPC
+  pack_name?: string; // From RPC
   metadata?: { name?: string };
   created_at?: string;
   total_jobs?: number;
   unique_garment_count?: number;
+  total_models?: number;
+  female_models?: number;
+  male_models?: number;
+  upscaled_poses?: number;
 }
 
 interface AddPackModalProps {
@@ -31,12 +37,6 @@ export const AddPackModal = ({ isOpen, onClose, projectId, packType, existingPac
   const queryClient = useQueryClient();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isAdding, setIsAdding] = useState(false);
-
-  const tableName = {
-    model: 'mira-agent-model-packs',
-    garment: 'mira-agent-garment-packs',
-    vto: 'mira-agent-vto-packs-jobs',
-  }[packType];
 
   const linkTableName = {
     model: 'project_model_packs',
@@ -69,7 +69,17 @@ export const AddPackModal = ({ isOpen, onClose, projectId, packType, existingPac
         }));
         return mappedData.filter((p: Pack) => !existingPackIds.includes(p.id));
       }
+      
+      if (packType === 'model') {
+        const { data, error } = await supabase.rpc('get_user_model_pack_summaries', { p_user_id: session.user.id });
+        if (error) throw error;
+        // The RPC returns pack_id, pack_name, etc. We need to map them to a consistent 'id' and 'name'
+        const mappedData = data.map((p: any) => ({ ...p, id: p.pack_id, name: p.pack_name }));
+        return mappedData.filter((p: Pack) => !existingPackIds.includes(p.id));
+      }
 
+      // Fallback for garment packs
+      const tableName = 'mira-agent-garment-packs';
       const selectString = 'id, name';
       const { data, error } = await supabase.from(tableName).select(selectString).eq('user_id', session.user.id);
       if (error) throw error;
@@ -136,6 +146,14 @@ export const AddPackModal = ({ isOpen, onClose, projectId, packType, existingPac
                                 <span>{pack.unique_garment_count} garments</span>
                             </div>
                         </div>
+                    )}
+                    {packType === 'model' && (
+                      <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground border-t pt-2">
+                        <div className="flex items-center gap-1" title="Total Models"><Users className="h-3 w-3" /><span>{pack.total_models}</span></div>
+                        <div className="flex items-center gap-1" title="Female Models"><span>♀</span><span>{pack.female_models}</span></div>
+                        <div className="flex items-center gap-1" title="Male Models"><span>♂</span><span>{pack.male_models}</span></div>
+                        <div className="flex items-center gap-1" title="Upscaled Poses"><Bot className="h-3 w-3" /><span>{pack.upscaled_poses}</span></div>
+                      </div>
                     )}
                     {isSelected && <CheckCircle className="h-5 w-5 text-primary absolute top-2 right-2" />}
                   </div>

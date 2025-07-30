@@ -2,6 +2,7 @@ import { createContext, useContext, useState, ReactNode, useCallback } from 'rea
 import { commonTranslations } from '@/lib/translations/common';
 import { chatTranslations } from '@/lib/translations/chat';
 import { clientsTranslations } from '@/lib/translations/clients';
+import { projectTranslations } from '@/lib/translations/projects';
 import { generatorTranslations } from '@/lib/translations/generator';
 import { galleryTranslations } from '@/lib/translations/gallery';
 import { refineTranslations } from '@/lib/translations/refine';
@@ -22,6 +23,7 @@ const modules = [
   commonTranslations,
   chatTranslations,
   clientsTranslations,
+  projectTranslations,
   generatorTranslations,
   galleryTranslations,
   refineTranslations,

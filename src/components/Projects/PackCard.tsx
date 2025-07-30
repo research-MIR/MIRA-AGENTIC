@@ -1,7 +1,8 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Package, Trash2, ImageIcon, Shirt, Users } from "lucide-react";
+import { Package, Trash2, ImageIcon, Shirt, Users, Bot, Loader2 } from "lucide-react";
 import { Link } from "react-router-dom";
+import { Badge } from "@/components/ui/badge";
 
 interface Pack {
   pack_id: string;
@@ -11,8 +12,10 @@ interface Pack {
   unique_garment_count?: number;
   created_at: string;
   total_models?: number;
+  female_models?: number;
+  male_models?: number;
   upscaled_poses?: number;
-  total_poses?: number;
+  upscaling_jobs_count?: number;
 }
 
 interface PackCardProps {
@@ -57,15 +60,21 @@ export const PackCard = ({ pack, packType, onRemove }: PackCardProps) => {
             </div>
           )}
           {packType === 'model' && (
-            <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground border-t pt-2">
-              <div className="flex items-center gap-1">
-                <Users className="h-3 w-3" />
-                <span>{pack.total_models} models</span>
+            <div className="flex flex-col gap-2 mt-2 text-xs text-muted-foreground border-t pt-2">
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-1" title="Total Models"><Users className="h-3 w-3" /><span>{pack.total_models}</span></div>
+                <div className="flex items-center gap-1" title="Female Models"><span>♀</span><span>{pack.female_models}</span></div>
+                <div className="flex items-center gap-1" title="Male Models"><span>♂</span><span>{pack.male_models}</span></div>
+                <div className="flex items-center gap-1" title="Upscaled Poses"><Bot className="h-3 w-3" /><span>{pack.upscaled_poses}</span></div>
               </div>
-              <div className="flex items-center gap-1">
-                <ImageIcon className="h-3 w-3" />
-                <span>{pack.upscaled_poses} / {pack.total_poses} upscaled</span>
-              </div>
+              {pack.upscaling_jobs_count && pack.upscaling_jobs_count > 0 && (
+                <div>
+                  <Badge variant="secondary">
+                    <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+                    Upscaling {pack.upscaling_jobs_count} model(s)
+                  </Badge>
+                </div>
+              )}
             </div>
           )}
         </CardContent>
