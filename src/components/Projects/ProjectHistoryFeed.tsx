@@ -1,7 +1,7 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Button } from "@/components/ui/button";
-import { Loader2, MessageSquare, FileText, CalendarCheck } from "lucide-react";
+import { Loader2, MessageSquare, FileText, CalendarCheck, Bot, Shirt } from "lucide-react";
 import { formatDistanceToNow } from 'date-fns';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Link } from "react-router-dom";
@@ -9,16 +9,18 @@ import { useLanguage } from "@/context/LanguageContext";
 
 interface Activity {
   id: string;
-  activity_type: string; // e.g., 'chat_added', 'grouped_chat_added'
+  activity_type: string;
   details: {
     count: number;
     start_time: string;
     end_time: string;
     first_title: string;
     first_job_id?: string;
+    first_pack_id?: string;
     details_array: {
         title: string;
         job_id?: string;
+        pack_id?: string;
         due_date?: string;
     }[];
   };
@@ -31,12 +33,14 @@ const ActivityIcon = ({ type }: { type: string }) => {
     case 'chat_added': return <MessageSquare className="h-4 w-4 text-muted-foreground" />;
     case 'note_created': return <FileText className="h-4 w-4 text-muted-foreground" />;
     case 'deadline_created': return <CalendarCheck className="h-4 w-4 text-muted-foreground" />;
+    case 'model_generation_started': return <Bot className="h-4 w-4 text-muted-foreground" />;
+    case 'vto_job_started': return <Shirt className="h-4 w-4 text-muted-foreground" />;
     default: return null;
   }
 };
 
 const ActivityItem = ({ activity }: { activity: Activity }) => {
-  const { count, start_time, end_time, first_title, first_job_id, details_array } = activity.details;
+  const { count, start_time, end_time, first_title, first_job_id, first_pack_id, details_array } = activity.details;
 
   const renderContent = () => {
     const singleItemDetails = details_array?.[0];
@@ -52,6 +56,10 @@ const ActivityItem = ({ activity }: { activity: Activity }) => {
         return <p>Created {count} notes, starting with <span className="font-semibold">"{first_title}"</span>.</p>;
       case 'grouped_deadline_created':
         return <p>Set {count} deadlines, starting with <span className="font-semibold">"{first_title}"</span>.</p>;
+      case 'grouped_model_generation_started':
+        return <p>Started {count} model generations in pack <Link to={`/model-packs/${first_pack_id}`} className="font-semibold text-primary hover:underline">details</Link>.</p>;
+      case 'grouped_vto_job_started':
+        return <p>Started {count} VTO jobs.</p>;
       case 'chat_added':
         if (!singleItemDetails) return null;
         return (
@@ -65,6 +73,12 @@ const ActivityItem = ({ activity }: { activity: Activity }) => {
       case 'deadline_created':
         if (!singleItemDetails) return null;
         return <p>Deadline <span className="font-semibold">"{singleItemDetails.title}"</span> was set.</p>;
+      case 'model_generation_started':
+        if (!singleItemDetails) return null;
+        return <p>Started model generation "{singleItemDetails.title}" in pack <Link to={`/model-packs/${singleItemDetails.pack_id}`} className="font-semibold text-primary hover:underline">details</Link>.</p>;
+      case 'vto_job_started':
+        if (!singleItemDetails) return null;
+        return <p>Started VTO job "{singleItemDetails.title}".</p>;
       default:
         return <p>An unknown activity occurred.</p>;
     }
