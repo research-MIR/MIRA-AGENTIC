@@ -2,10 +2,10 @@ import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Folder, MessageSquare, Image as ImageIcon, Plus, ArrowLeft, Loader2 } from "lucide-react";
+import { Folder, MessageSquare, Image as ImageIcon, Plus, ArrowLeft, Loader2, Folder as FolderIcon, Bot, Package } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
 import { useSecureImage } from "@/hooks/useSecureImage";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { showError, showSuccess, showLoading, dismissToast } from "@/utils/toast";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Breadcrumbs } from "@/components/Clients/Breadcrumbs";
+import { StatCard } from "@/components/Clients/StatCard";
+import { RecentProjectItem } from "@/components/Clients/RecentProjectItem";
+import { ActivityFeed } from "@/components/Clients/ActivityFeed";
+import { SuggestionsCard } from "@/components/Clients/SuggestionsCard";
 
 interface ProjectPreview {
   project_id: string;
@@ -108,16 +114,48 @@ const ClientDetail = () => {
     }
   };
 
+  const breadcrumbs = [
+    { label: "Dashboard", href: "/clients" },
+    { label: "Client", href: "/clients" },
+    { label: client?.name || "..." },
+  ];
+
+  // Placeholder data for recent projects
+  const recentProjects = projects?.slice(0, 3).map((p, i) => ({
+    id: p.project_id,
+    name: p.project_name,
+    code: `PRJ-00${i + 1}`,
+    status: (['completato', 'in elaborazione', 'attivo'] as const)[i % 3],
+    productCount: (p.chat_count || 0) * 5, // Placeholder logic
+    progress: (p.chat_count || 0) * 10 % 101, // Placeholder logic
+  })) || [];
+
+  if (isLoadingClient || isLoadingProjects) {
+    return <div className="p-8"><Skeleton className="h-12 w-1/3" /><div className="mt-8 grid grid-cols-3 gap-4"><Skeleton className="h-24" /><Skeleton className="h-24" /><Skeleton className="h-24" /></div></div>;
+  }
+
+  if (error) {
+    return <div className="p-8"><Alert variant="destructive"><AlertTitle>Error</AlertTitle><AlertDescription>{error.message}</AlertDescription></Alert></div>;
+  }
+
   return (
     <>
-      <div className="p-4 md:p-8 h-screen overflow-y-auto">
-        <header className="pb-4 mb-8 border-b">
-          <Link to="/clients" className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground mb-2">
-            <ArrowLeft className="h-4 w-4" />
-            Back to All Clients
-          </Link>
-          <div className="flex justify-between items-center">
-            <h1 className="text-3xl font-bold">{isLoadingClient ? <Skeleton className="h-8 w-48" /> : client?.name || "Client"}</h1>
+      <div className="p-4 md:p-8 h-screen overflow-y-auto bg-gray-50/50 dark:bg-background">
+        <Breadcrumbs items={breadcrumbs} />
+        
+        <header className="mt-4 py-4 flex justify-between items-center">
+          <div className="flex items-center gap-4">
+            <div className="p-3 bg-muted rounded-lg">
+              <Users className="h-8 w-8 text-muted-foreground" />
+            </div>
+            <div>
+              <h1 className="text-3xl font-bold">{client?.name}</h1>
+              <p className="text-muted-foreground">Dashboard Cliente</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline">Carica Prodotti</Button>
+            <Button variant="outline">Genera Modelli</Button>
             <Button onClick={() => setIsModalOpen(true)}>
               <Plus className="h-4 w-4 mr-2" />
               {t('newProject')}
@@ -125,28 +163,45 @@ const ClientDetail = () => {
           </div>
         </header>
 
-        {isLoadingProjects ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-56 w-full" />)}
-          </div>
-        ) : error ? (
-          <Alert variant="destructive">
-            <AlertTitle>Error</AlertTitle>
-            <AlertDescription>{error.message}</AlertDescription>
-          </Alert>
-        ) : projects && projects.length > 0 ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {projects.map(project => (
-              <ProjectCard key={project.project_id} project={project} />
-            ))}
-          </div>
-        ) : (
-          <div className="text-center py-16">
-            <Folder className="mx-auto h-16 w-16 text-muted-foreground" />
-            <h2 className="mt-4 text-xl font-semibold">No projects for this client yet</h2>
-            <p className="mt-2 text-muted-foreground">Click the 'New Project' button to create one.</p>
-          </div>
-        )}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-4">
+          <StatCard title="Progetti Totali" value={projects?.length || 0} icon={<FolderIcon className="h-6 w-6 text-muted-foreground" />} />
+          <StatCard title="Modelli Attivi" value={24} icon={<Bot className="h-6 w-6 text-muted-foreground" />} />
+          <StatCard title="Prodotti Caricati" value={156} icon={<Package className="h-6 w-6 text-muted-foreground" />} />
+        </div>
+
+        <Tabs defaultValue="panoramica" className="mt-6">
+          <TabsList>
+            <TabsTrigger value="panoramica">Panoramica</TabsTrigger>
+            <TabsTrigger value="progetti">Progetti</TabsTrigger>
+            <TabsTrigger value="prodotti">Prodotti</TabsTrigger>
+            <TabsTrigger value="modelli">Modelli</TabsTrigger>
+          </TabsList>
+          <TabsContent value="panoramica" className="mt-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <Card className="lg:col-span-2">
+                <CardHeader><CardTitle>Progetti Recenti</CardTitle></CardHeader>
+                <CardContent>
+                  <div className="space-y-2">
+                    {recentProjects.map(p => <RecentProjectItem key={p.id} project={p} />)}
+                  </div>
+                </CardContent>
+              </Card>
+              <div className="space-y-6">
+                <ActivityFeed />
+                <SuggestionsCard />
+              </div>
+            </div>
+          </TabsContent>
+          <TabsContent value="progetti" className="mt-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              {projects?.map(project => (
+                <ProjectCard key={project.project_id} project={project} />
+              ))}
+            </div>
+          </TabsContent>
+          <TabsContent value="prodotti" className="mt-6"><p>Sezione Prodotti in costruzione.</p></TabsContent>
+          <TabsContent value="modelli" className="mt-6"><p>Sezione Modelli in costruzione.</p></TabsContent>
+        </Tabs>
       </div>
 
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
@@ -162,7 +217,7 @@ const ClientDetail = () => {
           <DialogFooter>
             <Button variant="ghost" onClick={() => setIsModalOpen(false)}>{t('cancel')}</Button>
             <Button onClick={handleCreateProject} disabled={isCreating || !newProjectName.trim()}>
-              {isCreating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {isCreating && <Loader2 className="mr-2 h-4 w-4" />}
               {t('createProject')}
             </Button>
           </DialogFooter>
