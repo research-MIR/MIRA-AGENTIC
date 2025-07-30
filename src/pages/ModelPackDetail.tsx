@@ -144,47 +144,61 @@ const ModelPackDetail = () => {
 
   const packStatus = useMemo(() => {
     if (!jobs || jobs.length === 0) {
-        return { status: 'idle' as const, completedPoses: 0, totalPoses: 0, upscaledPoses: 0 };
+        return { 
+            status: 'idle' as const, 
+            completedPoses: 0, 
+            totalPoses: 0, 
+            upscaledPoses: 0,
+            isReadyForUpscale: false,
+            hasFailedJobs: false,
+            hasInProgressJobs: false,
+        };
     }
 
     let completedPoses = 0;
     let totalPoses = 0;
     let upscaledPoses = 0;
-    let hasFailed = false;
-    let hasInProgress = false;
-    let allJobsAreComplete = true;
+    let hasFailedJobs = false;
+    let hasInProgressJobs = false;
 
     for (const job of jobs) {
         const jobTotalPoses = job.pose_prompts?.length || 0;
         totalPoses += jobTotalPoses;
         
-        const jobCompletedPoses = job.final_posed_images?.filter((p: any) => p.status === 'complete').length || 0;
+        const jobCompletedPoses = job.final_posed_images?.filter((p: any) => p.status === 'complete' || p.status === 'failed').length || 0;
         completedPoses += jobCompletedPoses;
 
         const jobUpscaledPoses = job.final_posed_images?.filter((p: any) => p.is_upscaled).length || 0;
         upscaledPoses += jobUpscaledPoses;
 
         if (job.status === 'failed') {
-            hasFailed = true;
+            hasFailedJobs = true;
         }
         if (job.status !== 'complete' && job.status !== 'failed') {
-            hasInProgress = true;
-        }
-        if (job.status !== 'complete') {
-            allJobsAreComplete = false;
+            hasInProgressJobs = true;
         }
     }
 
     let aggregateStatus: 'idle' | 'in_progress' | 'failed' | 'complete' = 'idle';
-    if (hasFailed) {
+    if (hasFailedJobs) {
         aggregateStatus = 'failed';
-    } else if (hasInProgress) {
+    } else if (hasInProgressJobs) {
         aggregateStatus = 'in_progress';
-    } else if (allJobsAreComplete && jobs.length > 0) {
+    } else if (jobs.every(j => j.status === 'complete' || j.status === 'failed') && jobs.length > 0) {
         aggregateStatus = 'complete';
     }
 
-    return { status: aggregateStatus, completedPoses, totalPoses, upscaledPoses };
+    const isReadyForUpscale = !hasInProgressJobs && totalPoses > 0;
+
+    return { 
+        status: aggregateStatus, 
+        completedPoses, 
+        totalPoses, 
+        upscaledPoses,
+        isReadyForUpscale,
+        hasFailedJobs,
+        hasInProgressJobs,
+    };
   }, [jobs]);
 
   const posesReadyForUpscaleCount = useMemo(() => {
