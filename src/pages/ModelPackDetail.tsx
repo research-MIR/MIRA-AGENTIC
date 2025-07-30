@@ -6,7 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { ModelGenerator } from "@/components/GenerateModels/ModelGenerator";
 import { useLanguage } from "@/context/LanguageContext";
-import { Loader2, Wand2, Users, ArrowLeft, Trash2 } from "lucide-react";
+import { Loader2, Wand2, Users, ArrowLeft, Trash2, AlertTriangle } from "lucide-react";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { PackStatusIndicator } from "@/components/GenerateModels/PackStatusIndicator";
 import { JobProgressBar } from "@/components/GenerateModels/JobProgressBar";
@@ -23,6 +23,7 @@ import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { showError, showSuccess } from "@/utils/toast";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface PoseAnalysis {
   shoot_focus: 'upper_body' | 'lower_body' | 'full_body';
@@ -219,6 +220,65 @@ const ModelPackDetail = () => {
     return () => { if (channelRef.current) supabase.removeChannel(channelRef.current); };
   }, [packId, session?.user?.id, supabase, queryClient]);
 
+  const renderUpscaleButton = () => {
+    const { status, completedPoses, totalPoses, isReadyForUpscale } = packStatus;
+
+    if (totalPoses === 0) {
+        return (
+            <TooltipProvider>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <div className="inline-block">
+                            <Button disabled>
+                                <Wand2 className="mr-2 h-4 w-4" />
+                                Upscale & Prepare for VTO
+                            </Button>
+                        </div>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                        <p>Generate at least one model with poses to enable upscaling.</p>
+                    </TooltipContent>
+                </Tooltip>
+            </TooltipProvider>
+        );
+    }
+
+    if (status === 'in_progress') {
+        return (
+            <Button variant="secondary" onClick={() => setIsUpscaleModalOpen(true)}>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Generating Poses ({completedPoses}/{totalPoses})...
+            </Button>
+        );
+    }
+
+    if (!isReadyForUpscale && status !== 'in_progress') { // Failed jobs exist
+        return (
+            <TooltipProvider>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button variant="outline" onClick={() => setIsUpscaleModalOpen(true)}>
+                            <AlertTriangle className="mr-2 h-4 w-4 text-destructive" />
+                            Upscale Incomplete Set ({posesReadyForUpscaleCount})
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                        <p>Some poses failed to generate. You can upscale the ones that succeeded.</p>
+                    </TooltipContent>
+                </Tooltip>
+            </TooltipProvider>
+        );
+    }
+
+    // Ready for upscale
+    return (
+        <Button onClick={() => setIsUpscaleModalOpen(true)} disabled={posesReadyForUpscaleCount === 0}>
+            <Wand2 className="mr-2 h-4 w-4" />
+            Upscale & Prepare for VTO ({posesReadyForUpscaleCount})
+        </Button>
+    );
+  };
+
   if (isLoadingPack) return <div className="p-8"><Skeleton className="h-12 w-1/3" /><Skeleton className="mt-4 h-64 w-full" /></div>;
   if (packError) return <div className="p-8"><Alert variant="destructive"><AlertTitle>Error</AlertTitle><AlertDescription>{packError.message}</AlertDescription></Alert></div>;
   if (!pack) return <div className="p-8"><Alert><AlertTitle>Not Found</AlertTitle><AlertDescription>This model pack could not be found.</AlertDescription></Alert></div>;
@@ -236,10 +296,7 @@ const ModelPackDetail = () => {
                   <h1 className="text-3xl font-bold">{pack.name}</h1>
                   <PackStatusIndicator status={packStatus.status} totalPoses={packStatus.totalPoses} upscaledPoses={packStatus.upscaledPoses} />
               </div>
-              <Button onClick={() => setIsUpscaleModalOpen(true)} disabled={posesReadyForUpscaleCount === 0}>
-                <Wand2 className="mr-2 h-4 w-4" />
-                Upscale & Prepare for VTO ({posesReadyForUpscaleCount})
-              </Button>
+              {renderUpscaleButton()}
           </div>
           <div className="mt-2">
               <JobProgressBar completedPoses={packStatus.completedPoses} totalPoses={packStatus.totalPoses} />
