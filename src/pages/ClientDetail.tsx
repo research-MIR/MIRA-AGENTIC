@@ -12,7 +12,6 @@ import { Breadcrumbs } from "@/components/Clients/Breadcrumbs";
 import { StatCard } from "@/components/Clients/StatCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ClientModelCard } from "@/components/Clients/ClientModelCard";
-import { ClientGarmentCard } from "@/components/Clients/ClientGarmentCard";
 import { ClientVtoCard } from "@/components/Clients/ClientVtoCard";
 import { ClientVtoGarmentCard } from "@/components/Clients/ClientVtoGarmentCard";
 import { RecentProjectItem } from "@/components/Clients/RecentProjectItem";
@@ -25,7 +24,7 @@ import { showError, showSuccess, showLoading, dismissToast } from "@/utils/toast
 import { Loader2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useSecureImage } from "@/hooks/useSecureImage";
-import { ImageIcon, MessageSquare } from "lucide-react";
+import { ImageIcon } from "lucide-react";
 
 interface ProjectPreview {
   project_id: string;
@@ -127,11 +126,11 @@ const ClientDetail = () => {
     enabled: !!clientId && !!session?.user,
   });
 
-  const { data: clientGarments, isLoading: isLoadingGarments } = useQuery({
-    queryKey: ['clientGarments', clientId, session?.user?.id],
+  const { data: clientVtoGarments, isLoading: isLoadingVtoGarments } = useQuery({
+    queryKey: ['clientVtoGarments', clientId, session?.user?.id],
     queryFn: async () => {
       if (!clientId || !session?.user) return [];
-      const { data, error } = await supabase.rpc('get_garments_for_client', { p_user_id: session.user.id, p_client_id: clientId });
+      const { data, error } = await supabase.rpc('get_vto_garments_for_client', { p_user_id: session.user.id, p_client_id: clientId });
       if (error) throw error;
       return data;
     },
@@ -213,7 +212,7 @@ const ClientDetail = () => {
             <TabsTrigger value="overview">{t('overview')}</TabsTrigger>
             <TabsTrigger value="projects">{t('projectsTitle')}</TabsTrigger>
             <TabsTrigger value="models">{t('models')}</TabsTrigger>
-            <TabsTrigger value="garments">{t('garments')}</TabsTrigger>
+            <TabsTrigger value="garments">{t('vtoGarments')}</TabsTrigger>
             <TabsTrigger value="vto">{t('vtoResults')}</TabsTrigger>
           </TabsList>
 
@@ -255,9 +254,9 @@ const ClientDetail = () => {
                         ) : <p className="text-xs text-muted-foreground">{t('noAssets')}</p>}
                       </div>
                       <div>
-                        <h3 className="text-sm font-semibold mb-2">{t('garments')}</h3>
-                        {isLoadingGarments ? <Skeleton className="h-32 w-full" /> : clientGarments && clientGarments.length > 0 ? (
-                          <Carousel opts={{ align: "start" }}><CarouselContent className="-ml-2">{clientGarments.map((garment: any) => <CarouselItem key={garment.garment_id} className="pl-2 basis-1/2"><ClientGarmentCard garment={garment} /></CarouselItem>)}</CarouselContent><CarouselPrevious /><CarouselNext /></Carousel>
+                        <h3 className="text-sm font-semibold mb-2">{t('vtoGarments')}</h3>
+                        {isLoadingVtoGarments ? <Skeleton className="h-32 w-full" /> : clientVtoGarments && clientVtoGarments.length > 0 ? (
+                          <Carousel opts={{ align: "start" }}><CarouselContent className="-ml-2">{clientVtoGarments.map((garment: any) => <CarouselItem key={garment.garment_id} className="pl-2 basis-1/2"><ClientVtoGarmentCard garment={garment} /></CarouselItem>)}</CarouselContent><CarouselPrevious /><CarouselNext /></Carousel>
                         ) : <p className="text-xs text-muted-foreground">{t('noAssets')}</p>}
                       </div>
                       <div>
@@ -290,9 +289,9 @@ const ClientDetail = () => {
             )}
           </TabsContent>
           <TabsContent value="garments" className="flex-1 overflow-y-auto mt-4">
-            {isLoadingGarments ? <Skeleton className="h-64 w-full" /> : (
+            {isLoadingVtoGarments ? <Skeleton className="h-64 w-full" /> : (
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                {clientGarments?.map((garment: any) => <ClientGarmentCard key={garment.garment_id} garment={garment} />)}
+                {clientVtoGarments?.map((garment: any) => <ClientVtoGarmentCard key={garment.garment_id} garment={garment} />)}
               </div>
             )}
           </TabsContent>

@@ -36,7 +36,7 @@ export const clientsTranslations = {
     garments: "Garments",
     vtoResults: "VTO Results",
     noRecentProjects: "No recent projects for this client.",
-    noRecentActivity: "No recent activity for this client.",
+    noRecentActivity: "No recent activity for this client yet.",
     noAssets: "No assets generated for this client yet.",
     newProject: "New Project",
     projectsTitle: "Projects",
