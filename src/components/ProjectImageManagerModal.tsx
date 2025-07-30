@@ -20,12 +20,7 @@ interface Project {
 interface ImageResult {
   publicUrl: string;
   storagePath: string;
-}
-
-interface Job {
-  id: string;
-  final_result: any;
-  context: any;
+  jobId: string;
 }
 
 interface ProjectImageManagerModalProps {
@@ -41,20 +36,38 @@ export const ProjectImageManagerModal = ({ project, isOpen, onClose }: ProjectIm
   const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
 
   const { data: allImages, isLoading: isLoadingImages } = useQuery<ImageResult[]>({
-    queryKey: ['allUserImages', session?.user?.id],
+    queryKey: ['allUserImagesForProjectManager', session?.user?.id],
     queryFn: async () => {
       if (!session?.user) return [];
-      const { data: jobs, error } = await supabase.from('mira-agent-jobs').select('id, final_result, context').eq('user_id', session.user.id).order('created_at', { ascending: false });
-      if (error) throw error;
       
-      const images: ImageResult[] = [];
-      for (const job of jobs) {
+      const agentJobsPromise = supabase.from('mira-agent-jobs').select('id, final_result, context').eq('user_id', session.user.id).order('created_at', { ascending: false });
+      const vtoJobsPromise = supabase.from('mira-agent-bitstudio-jobs').select('id, final_image_url, created_at').eq('user_id', session.user.id).eq('status', 'complete').not('final_image_url', 'is', null).order('created_at', { ascending: false });
+
+      const [agentJobsResult, vtoJobsResult] = await Promise.all([agentJobsPromise, vtoJobsPromise]);
+
+      if (agentJobsResult.error) throw agentJobsResult.error;
+      if (vtoJobsResult.error) throw vtoJobsResult.error;
+
+      const imagesMap = new Map<string, ImageResult>();
+
+      // Process agent jobs
+      for (const job of agentJobsResult.data) {
         const jobImages = (job.final_result?.images || job.final_result?.final_generation_result?.response?.images || []);
         for (const img of jobImages) {
-          if (img.publicUrl) images.push({ publicUrl: img.publicUrl, storagePath: img.storagePath });
+          if (img.publicUrl && !imagesMap.has(img.publicUrl)) {
+            imagesMap.set(img.publicUrl, { publicUrl: img.publicUrl, storagePath: img.storagePath, jobId: job.id });
+          }
         }
       }
-      return Array.from(new Map(images.map(item => [item.publicUrl, item])).values());
+
+      // Process VTO jobs
+      for (const job of vtoJobsResult.data) {
+        if (job.final_image_url && !imagesMap.has(job.final_image_url)) {
+          imagesMap.set(job.final_image_url, { publicUrl: job.final_image_url, storagePath: '', jobId: job.id });
+        }
+      }
+      
+      return Array.from(imagesMap.values());
     },
     enabled: isOpen && !!session?.user,
   });
@@ -90,6 +103,8 @@ export const ProjectImageManagerModal = ({ project, isOpen, onClose }: ProjectIm
       dismissToast(toastId);
       showSuccess(`${imageFiles.length} image(s) added to project.`);
       queryClient.invalidateQueries({ queryKey: ['projectPreviews'] });
+      queryClient.invalidateQueries({ queryKey: ['projectJobs', project.project_id] });
+      onClose();
     } catch (err: any) {
       dismissToast(toastId);
       showError(`Upload failed: ${err.message}`);
@@ -111,8 +126,8 @@ export const ProjectImageManagerModal = ({ project, isOpen, onClose }: ProjectIm
           project_id: project.project_id,
           status: 'complete',
           original_prompt: `Added from Gallery`,
-          final_result: { isImageGeneration: true, images: [image] },
-          context: { source: 'project_gallery_add' }
+          final_result: { isImageGeneration: true, images: [{ publicUrl: image.publicUrl, storagePath: image.storagePath }] },
+          context: { source: 'project_gallery_add', original_job_id: image.jobId }
         });
         if (jobError) throw jobError;
       });
@@ -122,6 +137,8 @@ export const ProjectImageManagerModal = ({ project, isOpen, onClose }: ProjectIm
       showSuccess(`${imagesToAdd.length} image(s) added to project.`);
       setSelectedImages(new Set());
       queryClient.invalidateQueries({ queryKey: ['projectPreviews'] });
+      queryClient.invalidateQueries({ queryKey: ['projectJobs', project.project_id] });
+      onClose();
     } catch (err: any) {
       dismissToast(toastId);
       showError(`Failed to add images: ${err.message}`);
@@ -142,7 +159,7 @@ export const ProjectImageManagerModal = ({ project, isOpen, onClose }: ProjectIm
     });
   };
 
-  const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: handleFileUpload });
+  const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: (e) => handleFileUpload(e.dataTransfer.files) });
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -195,10 +212,13 @@ export const ProjectImageManagerModal = ({ project, isOpen, onClose }: ProjectIm
                   )}
                 </div>
               </ScrollArea>
-              <Button onClick={handleAddFromGallery} disabled={isUploading || selectedImages.size === 0} className="w-full mt-4">
-                {isUploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                Add {selectedImages.size} Selected Image(s)
-              </Button>
+              <DialogFooter className="mt-4">
+                <Button variant="ghost" onClick={onClose}>Cancel</Button>
+                <Button onClick={handleAddFromGallery} disabled={isUploading || selectedImages.size === 0}>
+                  {isUploading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Add {selectedImages.size} Selected Image(s)
+                </Button>
+              </DialogFooter>
             </div>
           </TabsContent>
         </Tabs>
