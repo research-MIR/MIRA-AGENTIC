@@ -1,7 +1,7 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Button } from "@/components/ui/button";
-import { Loader2, MessageSquare, FileText, CalendarCheck, Bot, Shirt, Wand2 } from "lucide-react";
+import { Loader2, MessageSquare, FileText, CalendarCheck, Bot, Shirt, Wand2, Package } from "lucide-react";
 import { formatDistanceToNow } from 'date-fns';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Link } from "react-router-dom";
@@ -36,6 +36,8 @@ const ActivityIcon = ({ type }: { type: string }) => {
     case 'model_generation_started': return <Bot className="h-4 w-4 text-muted-foreground" />;
     case 'model_upscale_started': return <Wand2 className="h-4 w-4 text-muted-foreground" />;
     case 'vto_job_started': return <Shirt className="h-4 w-4 text-muted-foreground" />;
+    case 'vto_pack_linked': return <Shirt className="h-4 w-4 text-muted-foreground" />;
+    case 'garment_pack_linked': return <Package className="h-4 w-4 text-muted-foreground" />;
     default: return null;
   }
 };
@@ -62,7 +64,12 @@ const ActivityItem = ({ activity }: { activity: Activity }) => {
       case 'grouped_model_upscale_started':
         return <p>Upscaling poses for {count} models in pack <Link to={`/model-packs/${first_pack_id}`} className="font-semibold text-primary hover:underline">details</Link>.</p>;
       case 'grouped_vto_job_started':
-        return <p>Started {count} VTO jobs.</p>;
+        return <p>Started {count} VTO jobs, starting with garment <span className="font-semibold">"{first_title}"</span>.</p>;
+      case 'grouped_vto_pack_linked':
+        return <p>Linked {count} VTO packs to the project, starting with <Link to={`/vto-reports/${first_pack_id}`} className="font-semibold text-primary hover:underline">"{first_title}"</Link>.</p>;
+      case 'grouped_garment_pack_linked':
+        return <p>Linked {count} garment packs to the project, starting with <Link to={`/wardrobe-packs/${first_pack_id}`} className="font-semibold text-primary hover:underline">"{first_title}"</Link>.</p>;
+      
       case 'chat_added':
         if (!singleItemDetails) return null;
         return (
@@ -84,7 +91,13 @@ const ActivityItem = ({ activity }: { activity: Activity }) => {
         return <p>Started upscaling poses for model "{singleItemDetails.title}" in pack <Link to={`/model-packs/${singleItemDetails.pack_id}`} className="font-semibold text-primary hover:underline">details</Link>.</p>;
       case 'vto_job_started':
         if (!singleItemDetails) return null;
-        return <p>Started VTO job "{singleItemDetails.title}".</p>;
+        return <p>Started VTO job using garment <span className="font-semibold">"{singleItemDetails.title}"</span>.</p>;
+      case 'vto_pack_linked':
+        if (!singleItemDetails) return null;
+        return <p>Linked VTO pack <Link to={`/vto-reports/${singleItemDetails.pack_id}`} className="font-semibold text-primary hover:underline">"{singleItemDetails.title}"</Link> to the project.</p>;
+      case 'garment_pack_linked':
+        if (!singleItemDetails) return null;
+        return <p>Linked garment pack <Link to={`/wardrobe-packs/${singleItemDetails.pack_id}`} className="font-semibold text-primary hover:underline">"{singleItemDetails.title}"</Link> to the project.</p>;
       default:
         return <p>An unknown activity occurred.</p>;
     }
