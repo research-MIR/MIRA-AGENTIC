@@ -321,3 +321,6 @@ const Sidebar = () => {
       </Dialog>
     </>
   );
+};
+
+export default Sidebar;
