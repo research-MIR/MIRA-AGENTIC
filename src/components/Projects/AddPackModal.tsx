@@ -11,8 +11,11 @@ import { cn } from '@/lib/utils';
 
 interface Pack {
   id: string;
-  name: string;
+  name?: string;
   metadata?: { name?: string };
+  created_at?: string;
+  total_jobs?: number;
+  unique_garment_count?: number;
 }
 
 interface AddPackModalProps {
@@ -53,7 +56,21 @@ export const AddPackModal = ({ isOpen, onClose, projectId, packType, existingPac
     queryKey: ['availablePacks', packType, session?.user?.id],
     queryFn: async () => {
       if (!session?.user) return [];
-      const selectString = packType === 'vto' ? 'id, metadata' : 'id, name';
+
+      if (packType === 'vto') {
+        const { data, error } = await supabase.rpc('get_vto_pack_summaries', { p_user_id: session.user.id });
+        if (error) throw error;
+        const mappedData = data.map((p: any) => ({
+          id: p.pack_id,
+          name: p.metadata?.name,
+          created_at: p.created_at,
+          total_jobs: p.total_jobs,
+          unique_garment_count: p.unique_garment_count,
+        }));
+        return mappedData.filter((p: Pack) => !existingPackIds.includes(p.id));
+      }
+
+      const selectString = 'id, name';
       const { data, error } = await supabase.from(tableName).select(selectString).eq('user_id', session.user.id);
       if (error) throw error;
       return data.filter(p => !existingPackIds.includes(p.id));
@@ -110,7 +127,16 @@ export const AddPackModal = ({ isOpen, onClose, projectId, packType, existingPac
                 const packName = pack.name || pack.metadata?.name || `Pack ${pack.id.substring(0, 8)}`;
                 return (
                   <div key={pack.id} onClick={() => toggleSelection(pack.id)} className={cn("p-4 border rounded-md cursor-pointer relative", isSelected && "border-primary")}>
-                    <p className="font-semibold">{packName}</p>
+                    <p className="font-semibold truncate">{packName}</p>
+                    {packType === 'vto' && pack.created_at && (
+                        <div className="text-xs text-muted-foreground mt-2 space-y-1">
+                            <p>Created: {new Date(pack.created_at).toLocaleDateString()}</p>
+                            <div className="flex items-center gap-4">
+                                <span>{pack.total_jobs} images</span>
+                                <span>{pack.unique_garment_count} garments</span>
+                            </div>
+                        </div>
+                    )}
                     {isSelected && <CheckCircle className="h-5 w-5 text-primary absolute top-2 right-2" />}
                   </div>
                 );
