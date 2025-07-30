@@ -24,6 +24,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { showError, showSuccess } from "@/utils/toast";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { PackDashboard } from "@/components/GenerateModels/PackDashboard";
 
 interface PoseAnalysis {
   shoot_focus: 'upper_body' | 'lower_body' | 'full_body';
@@ -153,6 +154,10 @@ const ModelPackDetail = () => {
             isReadyForUpscale: false,
             hasFailedJobs: false,
             hasInProgressJobs: false,
+            processingBaseModels: 0,
+            processingPoses: 0,
+            processingUpscales: 0,
+            failedJobsCount: 0,
         };
     }
 
@@ -161,6 +166,10 @@ const ModelPackDetail = () => {
     let upscaledPoses = 0;
     let hasFailedJobs = false;
     let hasInProgressJobs = false;
+    let processingBaseModels = 0;
+    let processingPoses = 0;
+    let processingUpscales = 0;
+    let failedJobsCount = 0;
 
     for (const job of jobs) {
         const jobTotalPoses = job.pose_prompts?.length || 0;
@@ -174,9 +183,20 @@ const ModelPackDetail = () => {
 
         if (job.status === 'failed') {
             hasFailedJobs = true;
+            failedJobsCount++;
         }
         if (job.status !== 'complete' && job.status !== 'failed') {
             hasInProgressJobs = true;
+        }
+
+        if (['pending', 'base_generation_complete', 'awaiting_approval'].includes(job.status)) {
+            processingBaseModels++;
+        }
+        if (['generating_poses', 'polling_poses'].includes(job.status)) {
+            processingPoses++;
+        }
+        if (job.status === 'upscaling_poses') {
+            processingUpscales++;
         }
     }
 
@@ -199,6 +219,10 @@ const ModelPackDetail = () => {
         isReadyForUpscale,
         hasFailedJobs,
         hasInProgressJobs,
+        processingBaseModels,
+        processingPoses,
+        processingUpscales,
+        failedJobsCount,
     };
   }, [jobs]);
 
@@ -272,7 +296,7 @@ const ModelPackDetail = () => {
 
     // Ready for upscale
     return (
-        <Button onClick={() => setIsUpscaleModalOpen(true)}>
+        <Button onClick={() => setIsUpscaleModalOpen(true)} disabled={posesReadyForUpscaleCount === 0}>
             <Wand2 className="mr-2 h-4 w-4" />
             Upscale & Prepare for VTO ({posesReadyForUpscaleCount})
         </Button>
@@ -303,6 +327,17 @@ const ModelPackDetail = () => {
           </div>
           <p className="text-muted-foreground mt-1">{pack.description || "No description provided."}</p>
         </header>
+        <div className="mb-4">
+          <PackDashboard stats={{
+            totalJobs: jobs?.length || 0,
+            processingBaseModels: packStatus.processingBaseModels,
+            processingPoses: packStatus.processingPoses,
+            processingUpscales: packStatus.processingUpscales,
+            failedJobsCount: packStatus.failedJobsCount,
+            totalPoses: packStatus.totalPoses,
+            upscaledPoses: packStatus.upscaledPoses,
+          }} />
+        </div>
         <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-8 overflow-hidden">
           <div className="lg:col-span-2 overflow-y-auto no-scrollbar pr-4">
             <Tabs defaultValue="jobs" className="w-full">

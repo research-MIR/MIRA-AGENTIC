@@ -3,6 +3,7 @@ import { cn } from '@/lib/utils';
 import { AlertTriangle, Loader2, CheckCircle, XCircle, Wand2 } from 'lucide-react';
 import { useSecureImage } from '@/hooks/useSecureImage';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Badge } from "@/components/ui/badge";
 
 interface Job {
   id: string;
@@ -89,9 +90,9 @@ export const RecentJobThumbnail = ({ job, onClick, isSelected }: Props) => {
         <img src={displayUrl} alt="Job source" className="w-full h-full object-cover rounded-md" />
       )}
       {job.gender && (
-        <div className="absolute top-1 left-1 h-6 w-6 rounded-full bg-black/60 flex items-center justify-center text-white text-xs font-bold border-2 border-background/50 backdrop-blur-sm">
+        <Badge variant="secondary" className="absolute top-1 left-1 z-10 h-6 w-6 flex items-center justify-center p-0 font-bold text-xs">
           {job.gender.charAt(0).toUpperCase()}
-        </div>
+        </Badge>
       )}
       {renderStatusIcon()}
     </button>
