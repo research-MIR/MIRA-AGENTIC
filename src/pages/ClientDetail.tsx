@@ -1,11 +1,10 @@
 import { useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Folder, MessageSquare, Image as ImageIcon, Plus, ArrowLeft, Loader2, Folder as FolderIcon, Bot, Package, Users } from "lucide-react";
+import { Folder, MessageSquare, Image as ImageIcon, Plus, Loader2, Folder as FolderIcon, Bot, Package, Users } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
 import { useSecureImage } from "@/hooks/useSecureImage";
 import { Button } from "@/components/ui/button";
@@ -19,12 +18,21 @@ import { StatCard } from "@/components/Clients/StatCard";
 import { RecentProjectItem } from "@/components/Clients/RecentProjectItem";
 import { ActivityFeed } from "@/components/Clients/ActivityFeed";
 import { SuggestionsCard } from "@/components/Clients/SuggestionsCard";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Link } from "react-router-dom";
 
 interface ProjectPreview {
   project_id: string;
   project_name: string;
   chat_count: number;
   latest_image_url: string | null;
+}
+
+interface RecentProject {
+  project_id: string;
+  project_name: string;
+  project_updated_at: string;
+  chat_count: number;
 }
 
 const ProjectCard = ({ project }: { project: ProjectPreview }) => {
@@ -82,7 +90,29 @@ const ClientDetail = () => {
     enabled: !!clientId,
   });
 
-  const { data: projects, isLoading: isLoadingProjects, error } = useQuery<ProjectPreview[]>({
+  const { data: stats, isLoading: isLoadingStats } = useQuery({
+    queryKey: ['clientDashboardStats', clientId, session?.user?.id],
+    queryFn: async () => {
+      if (!clientId || !session?.user) return null;
+      const { data, error } = await supabase.rpc('get_client_dashboard_stats', { p_user_id: session.user.id, p_client_id: clientId }).single();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!clientId && !!session?.user,
+  });
+
+  const { data: recentProjects, isLoading: isLoadingRecent } = useQuery<RecentProject[]>({
+    queryKey: ['clientRecentProjects', clientId],
+    queryFn: async () => {
+      if (!clientId) return [];
+      const { data, error } = await supabase.rpc('get_client_recent_projects', { p_client_id: clientId });
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!clientId,
+  });
+
+  const { data: allProjects, isLoading: isLoadingProjects, error } = useQuery<ProjectPreview[]>({
     queryKey: ["clientProjects", clientId, session?.user?.id],
     queryFn: async () => {
       if (!session?.user || !clientId) return [];
@@ -105,6 +135,8 @@ const ClientDetail = () => {
       setNewProjectName('');
       queryClient.invalidateQueries({ queryKey: ['clientProjects', clientId] });
       queryClient.invalidateQueries({ queryKey: ['clientPreviews'] });
+      queryClient.invalidateQueries({ queryKey: ['clientDashboardStats', clientId] });
+      queryClient.invalidateQueries({ queryKey: ['clientRecentProjects', clientId] });
       setIsModalOpen(false);
     } catch (err: any) {
       dismissToast(toastId);
@@ -115,20 +147,9 @@ const ClientDetail = () => {
   };
 
   const breadcrumbs = [
-    { label: "Dashboard", href: "/clients" },
-    { label: "Client", href: "/clients" },
+    { label: "Clients", href: "/clients" },
     { label: client?.name || "..." },
   ];
-
-  // Placeholder data for recent projects
-  const recentProjects = projects?.slice(0, 3).map((p, i) => ({
-    id: p.project_id,
-    name: p.project_name,
-    code: `PRJ-00${i + 1}`,
-    status: (['completato', 'in elaborazione', 'attivo'] as const)[i % 3],
-    productCount: (p.chat_count || 0) * 5, // Placeholder logic
-    progress: (p.chat_count || 0) * 10 % 101, // Placeholder logic
-  })) || [];
 
   if (isLoadingClient || isLoadingProjects) {
     return <div className="p-8"><Skeleton className="h-12 w-1/3" /><div className="mt-8 grid grid-cols-3 gap-4"><Skeleton className="h-24" /><Skeleton className="h-24" /><Skeleton className="h-24" /></div></div>;
@@ -164,9 +185,9 @@ const ClientDetail = () => {
         </header>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-4">
-          <StatCard title="Progetti Totali" value={projects?.length || 0} icon={<FolderIcon className="h-6 w-6 text-muted-foreground" />} />
-          <StatCard title="Modelli Attivi" value={24} icon={<Bot className="h-6 w-6 text-muted-foreground" />} />
-          <StatCard title="Prodotti Caricati" value={156} icon={<Package className="h-6 w-6 text-muted-foreground" />} />
+          <StatCard title="Progetti Totali" value={stats?.project_count ?? 0} icon={<FolderIcon className="h-6 w-6 text-muted-foreground" />} />
+          <StatCard title="Modelli Attivi (Utente)" value={stats?.user_total_models ?? 0} icon={<Bot className="h-6 w-6 text-muted-foreground" />} />
+          <StatCard title="Prodotti Caricati (Utente)" value={stats?.user_total_garments ?? 0} icon={<Package className="h-6 w-6 text-muted-foreground" />} />
         </div>
 
         <Tabs defaultValue="panoramica" className="mt-6">
@@ -181,9 +202,11 @@ const ClientDetail = () => {
               <Card className="lg:col-span-2">
                 <CardHeader><CardTitle>Progetti Recenti</CardTitle></CardHeader>
                 <CardContent>
-                  <div className="space-y-2">
-                    {recentProjects.map(p => <RecentProjectItem key={p.id} project={p} />)}
-                  </div>
+                  {isLoadingRecent ? <Skeleton className="h-40 w-full" /> : (
+                    <div className="space-y-2">
+                      {recentProjects?.map(p => <RecentProjectItem key={p.project_id} project={p} />)}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
               <div className="space-y-6">
@@ -194,7 +217,7 @@ const ClientDetail = () => {
           </TabsContent>
           <TabsContent value="progetti" className="mt-6">
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-              {projects?.map(project => (
+              {allProjects?.map(project => (
                 <ProjectCard key={project.project_id} project={project} />
               ))}
             </div>
