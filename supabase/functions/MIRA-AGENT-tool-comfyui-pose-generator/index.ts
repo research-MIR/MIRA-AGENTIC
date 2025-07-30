@@ -312,6 +312,21 @@ serve(async (req) => {
 
     const finalWorkflow = JSON.parse(finalWorkflowString);
 
+    // --- CONDITIONAL OVERRIDE FOR GARMENT TASKS ---
+    if (task_type === 'garment') {
+        console.log(`[PoseGenerator][${requestId}] INFO: Applying specific overrides for 'garment' task type.`);
+        if (finalWorkflow['196']) {
+            finalWorkflow['196'].inputs.nag_scale = 5.0;
+            console.log(`[PoseGenerator][${requestId}] INFO: Node 196 'nag_scale' updated to 5.0.`);
+        }
+        if (finalWorkflow['204']) {
+            finalWorkflow['204'].inputs.steps = 25;
+            finalWorkflow['204'].inputs.denoise = 0.9000000000000002;
+            console.log(`[PoseGenerator][${requestId}] INFO: Node 204 'steps' updated to 25 and 'denoise' updated to 0.9...`);
+        }
+    }
+    // --- END OF CONDITIONAL OVERRIDE ---
+
     // --- Step 3: Populate workflow with assets and prompts ---
     console.log(`[PoseGenerator][${requestId}] INFO: Step 3: Downloading base model from: ${base_model_url}`);
     const baseModelBlob = await downloadFromSupabase(supabase, base_model_url);
