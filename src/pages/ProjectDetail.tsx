@@ -99,13 +99,41 @@ const ProjectDetail = () => {
   const galleryImages = useMemo(() => {
     if (!jobs) return [];
     const images = new Map<string, { jobId: string, createdAt: string }>();
+    
     for (const job of jobs) {
-        const jobImages = (job.final_result?.images || job.final_result?.final_generation_result?.response?.images || []);
-        for (const img of jobImages) {
-            if (img.publicUrl && !images.has(img.publicUrl)) {
-                images.set(img.publicUrl, { jobId: job.id, createdAt: job.created_at });
-            }
+      // 1. Check final_result.images
+      const finalImages = job.final_result?.images || [];
+      for (const img of finalImages) {
+        if (img.publicUrl && !images.has(img.publicUrl)) {
+          images.set(img.publicUrl, { jobId: job.id, createdAt: job.created_at });
         }
+      }
+
+      // 2. Check final_result.final_generation_result.response.images
+      const genResultImages = job.final_result?.final_generation_result?.response?.images || [];
+      for (const img of genResultImages) {
+        if (img.publicUrl && !images.has(img.publicUrl)) {
+          images.set(img.publicUrl, { jobId: job.id, createdAt: job.created_at });
+        }
+      }
+
+      // 3. Check context.history for function calls
+      if (job.context?.history) {
+        for (const turn of job.context.history) {
+          if (turn.role === 'function' && turn.parts) {
+            for (const part of turn.parts) {
+              const responseImages = part.functionResponse?.response?.images;
+              if (Array.isArray(responseImages)) {
+                for (const image of responseImages) {
+                  if (image.publicUrl && !images.has(image.publicUrl)) {
+                    images.set(image.publicUrl, { jobId: job.id, createdAt: job.created_at });
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
     return Array.from(images.entries()).map(([url, data]) => ({ url, ...data }));
   }, [jobs]);
