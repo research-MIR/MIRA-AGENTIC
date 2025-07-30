@@ -35,6 +35,10 @@ export const clientsTranslations = {
     manageChatsDescription: "Rimuovi le chat da questo progetto. Non verranno eliminate, solo de-associate.",
     removeChatFromProjectTitle: "Rimuovere la Chat dal Progetto?",
     removeChatFromProjectDescription: "Questo rimuoverà la chat da \"{projectName}\". Non verrà eliminata.",
+    vtoJobs: "Job VTO",
+    addVtoJobs: "Aggiungi Job VTO",
+    noVtoJobsTitle: "Nessun Job VTO",
+    noVtoJobsDescription: "Collega i job di Prova Virtuale singoli a questo progetto per vederli qui.",
   },
   en: {
     clientsTitle: "Clients",
@@ -72,5 +76,9 @@ export const clientsTranslations = {
     manageChatsDescription: "Remove chats from this project. They will not be deleted, only unassigned.",
     removeChatFromProjectTitle: "Remove Chat from Project?",
     removeChatFromProjectDescription: "This will remove the chat from \"{projectName}\". It will not be deleted.",
+    vtoJobs: "VTO Jobs",
+    addVtoJobs: "Add VTO Jobs",
+    noVtoJobsTitle: "No VTO Jobs",
+    noVtoJobsDescription: "Link single Virtual Try-On jobs to this project to see them here.",
   },
 };

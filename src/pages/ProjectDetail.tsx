@@ -4,8 +4,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { ArrowLeft, Folder, MessageSquare, Image as ImageIcon, Plus, Users, Shirt } from "lucide-react";
+import { Folder, MessageSquare, Image as ImageIcon, Plus, Users, Shirt } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
+import { useSecureImage } from "@/hooks/useSecureImage";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Breadcrumbs } from "@/components/Clients/Breadcrumbs";
@@ -17,6 +18,9 @@ import { AddPackModal } from "@/components/Projects/AddPackModal";
 import { useDropzone } from "@/hooks/useDropzone";
 import { cn } from "@/lib/utils";
 import { ManageChatsModal } from "@/components/Projects/ManageChatsModal";
+import { AddVtoJobsModal } from "@/components/Projects/AddVtoJobsModal";
+import { VtoJobCard } from "@/components/Projects/VtoJobCard";
+import { BitStudioJob } from "@/types/vto";
 
 interface Project {
   id: string;
@@ -29,6 +33,9 @@ interface Pack {
   pack_id: string;
   pack_name: string;
   pack_description: string | null;
+  total_jobs: number;
+  unique_garment_count: number;
+  created_at: string;
 }
 
 const ProjectDetail = () => {
@@ -43,6 +50,7 @@ const ProjectDetail = () => {
   const [isAddVtoPackOpen, setIsAddVtoPackOpen] = useState(false);
   const [isManageChatsOpen, setIsManageChatsOpen] = useState(false);
   const [isRemovingChat, setIsRemovingChat] = useState<string | null>(null);
+  const [isAddVtoJobsOpen, setIsAddVtoJobsOpen] = useState(false);
 
   const { data: project, isLoading: isLoadingProject } = useQuery<Project>({
     queryKey: ['project', projectId],
@@ -95,6 +103,17 @@ const ProjectDetail = () => {
       const { data, error } = await supabase.rpc('get_vto_packs_for_project', { p_project_id: projectId });
       if (error) throw error;
       return data;
+    },
+    enabled: !!projectId,
+  });
+
+  const { data: vtoJobs, isLoading: isLoadingVtoJobs } = useQuery<BitStudioJob[]>({
+    queryKey: ['projectVtoJobs', projectId],
+    queryFn: async () => {
+        if (!projectId) return [];
+        const { data, error } = await supabase.rpc('get_vto_jobs_for_project', { p_project_id: projectId });
+        if (error) throw error;
+        return data;
     },
     enabled: !!projectId,
   });
@@ -175,6 +194,18 @@ const ProjectDetail = () => {
     }
   };
 
+  const handleRemoveVtoJob = async (jobId: string) => {
+    if (!session?.user) return;
+    try {
+        const { error } = await supabase.rpc('unassign_vto_job_from_project', { p_job_id: jobId, p_user_id: session.user.id });
+        if (error) throw error;
+        showSuccess("VTO job unlinked from project.");
+        queryClient.invalidateQueries({ queryKey: ['projectVtoJobs', projectId] });
+    } catch (err: any) {
+        showError(`Failed to remove job: ${err.message}`);
+    }
+  };
+
   const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: handleDropChat });
 
   const isLoading = isLoadingProject || isLoadingJobs;
@@ -208,6 +239,7 @@ const ProjectDetail = () => {
             <TabsTrigger value="models">Model Packs</TabsTrigger>
             <TabsTrigger value="garments">Garment Packs</TabsTrigger>
             <TabsTrigger value="vto">VTO Packs</TabsTrigger>
+            <TabsTrigger value="vto_jobs">VTO Jobs</TabsTrigger>
           </TabsList>
           <TabsContent value="gallery" className="flex-1 overflow-y-auto mt-4">
               {galleryImages.length > 0 ? (
@@ -290,6 +322,28 @@ const ProjectDetail = () => {
               />
             )}
           </TabsContent>
+          <TabsContent value="vto_jobs" className="flex-1 overflow-y-auto mt-4">
+            {isLoadingVtoJobs ? <Skeleton className="h-64 w-full" /> : vtoJobs && vtoJobs.length > 0 ? (
+                <>
+                    <div className="flex justify-end mb-4">
+                        <Button onClick={() => setIsAddVtoJobsOpen(true)}><Plus className="mr-2 h-4 w-4" /> {t('addVtoJobs')}</Button>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                        {vtoJobs.map(job => (
+                            <VtoJobCard key={job.id} job={job} onRemove={handleRemoveVtoJob} />
+                        ))}
+                    </div>
+                </>
+            ) : (
+                <EmptyState 
+                    icon={<Shirt size={48} />}
+                    title={t('noVtoJobsTitle')}
+                    description={t('noVtoJobsDescription')}
+                    buttonText={t('addVtoJobs')}
+                    onButtonClick={() => setIsAddVtoJobsOpen(true)}
+                />
+            )}
+          </TabsContent>
         </Tabs>
       </div>
       <ProjectImageManagerModal isOpen={isImageManagerOpen} onClose={() => setIsImageManagerOpen(false)} project={project} />
@@ -303,6 +357,11 @@ const ProjectDetail = () => {
         jobs={jobs || []}
         onRemoveChat={handleRemoveChat}
         isRemoving={isRemovingChat}
+      />
+      <AddVtoJobsModal
+        isOpen={isAddVtoJobsOpen}
+        onClose={() => setIsAddVtoJobsOpen(false)}
+        projectId={projectId!}
       />
     </>
   );
