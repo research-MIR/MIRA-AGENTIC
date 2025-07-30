@@ -4,7 +4,6 @@ import { differenceInDays } from 'date-fns';
 import { useSecureImage } from "@/hooks/useSecureImage";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ImageIcon, MessageSquare } from "lucide-react";
-import { ActiveJobsMonitor } from "@/components/Projects/ActiveJobsMonitor";
 
 interface RecentProjectItemProps {
   project: {

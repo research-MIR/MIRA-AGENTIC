@@ -1,11 +1,12 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Folder, MessageSquare, Image as ImageIcon, Plus } from "lucide-react";
+import { Folder, MessageSquare, Image as ImageIcon, Plus, Users, Shirt } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
+import { useSecureImage } from "@/hooks/useSecureImage";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Breadcrumbs } from "@/components/Clients/Breadcrumbs";
@@ -13,6 +14,7 @@ import { showError, showSuccess } from "@/utils/toast";
 import { ProjectAssetList } from "@/components/Projects/ProjectAssetList";
 import { EmptyState } from "@/components/Projects/EmptyState";
 import { ProjectImageManagerModal } from "@/components/ProjectImageManagerModal";
+import { AddPackModal } from "@/components/Projects/AddPackModal";
 import { useDropzone } from "@/hooks/useDropzone";
 import { cn } from "@/lib/utils";
 import { ManageChatsModal } from "@/components/Projects/ManageChatsModal";
@@ -33,6 +35,56 @@ interface Project {
   client: { id: string; name: string };
 }
 
+interface Pack {
+  pack_id: string;
+  pack_name: string;
+  pack_description: string | null;
+  total_jobs: number;
+  unique_garment_count: number;
+  created_at: string;
+}
+
+const ProjectCard = ({ project }: { project: ProjectPreview }) => {
+  const { displayUrl, isLoading } = useSecureImage(project.latest_image_url);
+
+  return (
+    <Link to={`/projects/${project.project_id}`}>
+      <Card className="hover:border-primary transition-colors h-full flex flex-col">
+        <CardHeader className="p-4">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Folder className="h-5 w-5 text-primary" />
+            <span className="truncate">{project.project_name}</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-4 pt-0 flex-1">
+          <div className="aspect-[4/3] bg-muted rounded-md flex items-center justify-center overflow-hidden">
+            {isLoading ? (
+              <Skeleton className="w-full h-full" />
+            ) : displayUrl ? (
+              <img src={displayUrl} alt={project.project_name} className="w-full h-full object-cover" />
+            ) : (
+              <ImageIcon className="h-10 w-10 text-muted-foreground" />
+            )}
+          </div>
+        </CardContent>
+        <CardFooter className="p-4 pt-0">
+          <div className="text-xs text-muted-foreground flex items-center gap-2">
+            <MessageSquare className="h-3 w-3" />
+            <span>{project.chat_count} {project.chat_count === 1 ? 'chat' : 'chats'}</span>
+          </div>
+        </CardFooter>
+      </Card>
+    </Link>
+  );
+};
+
+interface ProjectPreview {
+  project_id: string;
+  project_name: string;
+  chat_count: number;
+  latest_image_url: string | null;
+}
+
 const ProjectDetail = () => {
   const { projectId } = useParams();
   const { supabase, session } = useSession();
@@ -40,6 +92,9 @@ const ProjectDetail = () => {
   const queryClient = useQueryClient();
 
   const [isImageManagerOpen, setIsImageManagerOpen] = useState(false);
+  const [isAddModelPackOpen, setIsAddModelPackOpen] = useState(false);
+  const [isAddGarmentPackOpen, setIsAddGarmentPackOpen] = useState(false);
+  const [isAddVtoPackOpen, setIsAddVtoPackOpen] = useState(false);
   const [isManageChatsOpen, setIsManageChatsOpen] = useState(false);
   const [isRemovingChat, setIsRemovingChat] = useState<string | null>(null);
   const [isAddVtoJobsOpen, setIsAddVtoJobsOpen] = useState(false);
@@ -62,6 +117,39 @@ const ProjectDetail = () => {
         const { data, error } = await supabase.from('mira-agent-jobs').select('*').eq('project_id', projectId).order('updated_at', { ascending: false });
         if (error) throw error;
         return data;
+    },
+    enabled: !!projectId,
+  });
+
+  const { data: modelPacks, isLoading: isLoadingModelPacks } = useQuery<Pack[]>({
+    queryKey: ['projectmodelPacks', projectId],
+    queryFn: async () => {
+      if (!projectId) return [];
+      const { data, error } = await supabase.rpc('get_model_packs_for_project', { p_project_id: projectId });
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!projectId,
+  });
+
+  const { data: garmentPacks, isLoading: isLoadingGarmentPacks } = useQuery<Pack[]>({
+    queryKey: ['projectgarmentPacks', projectId],
+    queryFn: async () => {
+      if (!projectId) return [];
+      const { data, error } = await supabase.rpc('get_garment_packs_for_project', { p_project_id: projectId });
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!projectId,
+  });
+
+  const { data: vtoPacks, isLoading: isLoadingVtoPacks } = useQuery<Pack[]>({
+    queryKey: ['projectvtoPacks', projectId],
+    queryFn: async () => {
+      if (!projectId) return [];
+      const { data, error } = await supabase.rpc('get_vto_packs_for_project', { p_project_id: projectId });
+      if (error) throw error;
+      return data;
     },
     enabled: !!projectId,
   });
@@ -197,7 +285,7 @@ const ProjectDetail = () => {
             { label: project.client?.name || "...", href: `/clients/${project.client?.id}` },
             { label: project.name },
           ]} />
-          <div className="mt-4 flex justify-between items-center">
+          <div className="flex justify-between items-center mt-4">
             <h1 className="text-3xl font-bold">{project.name}</h1>
           </div>
         </header>
@@ -216,15 +304,11 @@ const ProjectDetail = () => {
           <TabsContent value="dashboard" className="flex-1 overflow-y-auto mt-4">
             <div className="space-y-6">
               <ProjectDashboard projectId={projectId!} />
+              <ActiveJobsMonitor projectId={projectId!} />
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div className="lg:col-span-2 space-y-6">
-                  <ActiveJobsMonitor projectId={projectId!} />
-                  <ProjectHistoryFeed projectId={projectId!} />
-                </div>
-                <div className="lg:col-span-1 space-y-6">
-                  <ProjectDeadlines projectId={projectId!} />
-                  <ProjectNotes projectId={projectId!} />
-                </div>
+                <ProjectDeadlines projectId={projectId!} />
+                <ProjectNotes projectId={projectId!} />
+                <ProjectHistoryFeed projectId={projectId!} />
               </div>
             </div>
           </TabsContent>
@@ -271,13 +355,43 @@ const ProjectDetail = () => {
               </div>
           </TabsContent>
           <TabsContent value="models" className="flex-1 overflow-y-auto mt-4">
-            <ProjectAssetList projectId={projectId} packType="model" />
+            {isLoadingModelPacks ? <Skeleton className="h-64 w-full" /> : modelPacks && modelPacks.length > 0 ? (
+              <ProjectAssetList projectId={projectId} packType="model" />
+            ) : (
+              <EmptyState 
+                icon={<Users size={48} />}
+                title="No Model Packs"
+                description="Link model packs to this project to organize your generated models."
+                buttonText="Add Model Pack"
+                onButtonClick={() => setIsAddModelPackOpen(true)}
+              />
+            )}
           </TabsContent>
           <TabsContent value="garments" className="flex-1 overflow-y-auto mt-4">
-            <ProjectAssetList projectId={projectId} packType="garment" />
+            {isLoadingGarmentPacks ? <Skeleton className="h-64 w-full" /> : garmentPacks && garmentPacks.length > 0 ? (
+              <ProjectAssetList projectId={projectId} packType="garment" />
+            ) : (
+              <EmptyState 
+                icon={<Shirt size={48} />}
+                title="No Garment Packs"
+                description="Link garment packs to this project to organize your wardrobe items."
+                buttonText="Add Garment Pack"
+                onButtonClick={() => setIsAddGarmentPackOpen(true)}
+              />
+            )}
           </TabsContent>
           <TabsContent value="vto" className="flex-1 overflow-y-auto mt-4">
-            <ProjectAssetList projectId={projectId} packType="vto" />
+            {isLoadingVtoPacks ? <Skeleton className="h-64 w-full" /> : vtoPacks && vtoPacks.length > 0 ? (
+              <ProjectAssetList projectId={projectId} packType="vto" />
+            ) : (
+              <EmptyState 
+                icon={<Shirt size={48} />}
+                title="No VTO Packs"
+                description="Link VTO packs to this project to organize your virtual try-on jobs."
+                buttonText="Add VTO Pack"
+                onButtonClick={() => setIsAddVtoPackOpen(true)}
+              />
+            )}
           </TabsContent>
           <TabsContent value="vto_jobs" className="flex-1 overflow-y-auto mt-4">
             {isLoadingVtoJobs ? <Skeleton className="h-64 w-full" /> : vtoJobs && vtoJobs.length > 0 ? (
@@ -319,6 +433,9 @@ const ProjectDetail = () => {
         </Tabs>
       </div>
       <ProjectImageManagerModal isOpen={isImageManagerOpen} onClose={() => setIsImageManagerOpen(false)} project={project} />
+      <AddPackModal isOpen={isAddModelPackOpen} onClose={() => setIsAddModelPackOpen(false)} projectId={projectId} packType="model" existingPackIds={modelPacks?.map(p => p.pack_id) || []} />
+      <AddPackModal isOpen={isAddGarmentPackOpen} onClose={() => setIsAddGarmentPackOpen(false)} projectId={projectId} packType="garment" existingPackIds={garmentPacks?.map(p => p.pack_id) || []} />
+      <AddPackModal isOpen={isAddVtoPackOpen} onClose={() => setIsAddVtoPackOpen(false)} projectId={projectId} packType="vto" existingPackIds={vtoPacks?.map(p => p.pack_id) || []} />
       <ManageChatsModal
         isOpen={isManageChatsOpen}
         onClose={() => setIsManageChatsOpen(false)}

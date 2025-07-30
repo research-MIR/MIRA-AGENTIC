@@ -7,8 +7,6 @@ import { showError, showSuccess } from "@/utils/toast";
 import { PackCard } from "./PackCard";
 import { AddPackModal } from "./AddPackModal";
 import { Skeleton } from "@/components/ui/skeleton";
-import { EmptyState } from "./EmptyState";
-import { Users, Shirt } from "lucide-react";
 
 interface Pack {
   pack_id: string;
@@ -74,12 +72,6 @@ export const ProjectAssetList = ({ projectId, packType }: ProjectAssetListProps)
     }
   };
 
-  const emptyStateConfig = {
-    model: { icon: <Users size={48} />, title: "No Model Packs", description: "Link model packs to this project to organize your generated models.", buttonText: "Add Model Pack" },
-    garment: { icon: <Shirt size={48} />, title: "No Garment Packs", description: "Link garment packs to this project to organize your wardrobe items.", buttonText: "Add Garment Pack" },
-    vto: { icon: <Shirt size={48} />, title: "No VTO Packs", description: "Link VTO packs to this project to organize your virtual try-on jobs.", buttonText: "Add VTO Pack" },
-  }[packType];
-
   return (
     <>
       <div className="space-y-4">
@@ -100,10 +92,7 @@ export const ProjectAssetList = ({ projectId, packType }: ProjectAssetListProps)
             ))}
           </div>
         ) : (
-          <EmptyState 
-            {...emptyStateConfig}
-            onButtonClick={() => setIsAddModalOpen(true)}
-          />
+          <p className="text-center text-muted-foreground py-8">No {packType} packs linked to this project yet.</p>
         )}
       </div>
       <AddPackModal
