@@ -1,7 +1,7 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Button } from "@/components/ui/button";
-import { Loader2, MessageSquare, FileText, CalendarCheck, Bot, Shirt } from "lucide-react";
+import { Loader2, MessageSquare, FileText, CalendarCheck, Bot, Shirt, Wand2 } from "lucide-react";
 import { formatDistanceToNow } from 'date-fns';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Link } from "react-router-dom";
@@ -34,6 +34,7 @@ const ActivityIcon = ({ type }: { type: string }) => {
     case 'note_created': return <FileText className="h-4 w-4 text-muted-foreground" />;
     case 'deadline_created': return <CalendarCheck className="h-4 w-4 text-muted-foreground" />;
     case 'model_generation_started': return <Bot className="h-4 w-4 text-muted-foreground" />;
+    case 'model_upscale_started': return <Wand2 className="h-4 w-4 text-muted-foreground" />;
     case 'vto_job_started': return <Shirt className="h-4 w-4 text-muted-foreground" />;
     default: return null;
   }
@@ -58,6 +59,8 @@ const ActivityItem = ({ activity }: { activity: Activity }) => {
         return <p>Set {count} deadlines, starting with <span className="font-semibold">"{first_title}"</span>.</p>;
       case 'grouped_model_generation_started':
         return <p>Started {count} model generations in pack <Link to={`/model-packs/${first_pack_id}`} className="font-semibold text-primary hover:underline">details</Link>.</p>;
+      case 'grouped_model_upscale_started':
+        return <p>Upscaling {count} models in pack <Link to={`/model-packs/${first_pack_id}`} className="font-semibold text-primary hover:underline">details</Link>.</p>;
       case 'grouped_vto_job_started':
         return <p>Started {count} VTO jobs.</p>;
       case 'chat_added':
@@ -76,6 +79,9 @@ const ActivityItem = ({ activity }: { activity: Activity }) => {
       case 'model_generation_started':
         if (!singleItemDetails) return null;
         return <p>Started model generation "{singleItemDetails.title}" in pack <Link to={`/model-packs/${singleItemDetails.pack_id}`} className="font-semibold text-primary hover:underline">details</Link>.</p>;
+      case 'model_upscale_started':
+        if (!singleItemDetails) return null;
+        return <p>Started upscaling model "{singleItemDetails.title}" in pack <Link to={`/model-packs/${singleItemDetails.pack_id}`} className="font-semibold text-primary hover:underline">details</Link>.</p>;
       case 'vto_job_started':
         if (!singleItemDetails) return null;
         return <p>Started VTO job "{singleItemDetails.title}".</p>;
