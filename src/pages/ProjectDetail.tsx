@@ -16,6 +16,7 @@ import { ProjectImageManagerModal } from "@/components/ProjectImageManagerModal"
 import { AddPackModal } from "@/components/Projects/AddPackModal";
 import { useDropzone } from "@/hooks/useDropzone";
 import { cn } from "@/lib/utils";
+import { ManageChatsModal } from "@/components/Projects/ManageChatsModal";
 
 interface Project {
   project_id: string;
@@ -32,7 +33,7 @@ interface Pack {
 
 const ProjectDetail = () => {
   const { projectId } = useParams();
-  const { supabase } = useSession();
+  const { supabase, session } = useSession();
   const { t } = useLanguage();
   const queryClient = useQueryClient();
 
@@ -40,6 +41,8 @@ const ProjectDetail = () => {
   const [isAddModelPackOpen, setIsAddModelPackOpen] = useState(false);
   const [isAddGarmentPackOpen, setIsAddGarmentPackOpen] = useState(false);
   const [isAddVtoPackOpen, setIsAddVtoPackOpen] = useState(false);
+  const [isManageChatsOpen, setIsManageChatsOpen] = useState(false);
+  const [isRemovingChat, setIsRemovingChat] = useState<string | null>(null);
 
   const { data: project, isLoading: isLoadingProject } = useQuery<Project>({
     queryKey: ['project', projectId],
@@ -98,44 +101,36 @@ const ProjectDetail = () => {
 
   const galleryImages = useMemo(() => {
     if (!jobs) return [];
-    const images = new Map<string, { jobId: string, createdAt: string }>();
-    
+    const imagesMap = new Map<string, { jobId: string, createdAt: string }>();
+
     for (const job of jobs) {
-      // 1. Check final_result.images
-      const finalImages = job.final_result?.images || [];
-      for (const img of finalImages) {
-        if (img.publicUrl && !images.has(img.publicUrl)) {
-          images.set(img.publicUrl, { jobId: job.id, createdAt: job.created_at });
+      const processImageArray = (images: any[]) => {
+        if (!Array.isArray(images)) return;
+        for (const img of images) {
+          if (img && typeof img.publicUrl === 'string' && !imagesMap.has(img.publicUrl)) {
+            imagesMap.set(img.publicUrl, { jobId: job.id, createdAt: job.created_at });
+          }
         }
-      }
+      };
 
-      // 2. Check final_result.final_generation_result.response.images
-      const genResultImages = job.final_result?.final_generation_result?.response?.images || [];
-      for (const img of genResultImages) {
-        if (img.publicUrl && !images.has(img.publicUrl)) {
-          images.set(img.publicUrl, { jobId: job.id, createdAt: job.created_at });
-        }
-      }
+      processImageArray(job.final_result?.images);
+      processImageArray(job.final_result?.final_generation_result?.response?.images);
 
-      // 3. Check context.history for function calls
       if (job.context?.history) {
         for (const turn of job.context.history) {
           if (turn.role === 'function' && turn.parts) {
             for (const part of turn.parts) {
-              const responseImages = part.functionResponse?.response?.images;
-              if (Array.isArray(responseImages)) {
-                for (const image of responseImages) {
-                  if (image.publicUrl && !images.has(image.publicUrl)) {
-                    images.set(image.publicUrl, { jobId: job.id, createdAt: job.created_at });
-                  }
-                }
-              }
+              processImageArray(part.functionResponse?.response?.images);
             }
           }
         }
       }
     }
-    return Array.from(images.entries()).map(([url, data]) => ({ url, ...data }));
+    
+    const sortedImages = Array.from(imagesMap.entries()).map(([url, data]) => ({ url, ...data }));
+    sortedImages.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    
+    return sortedImages;
   }, [jobs]);
 
   const handleSetKeyVisual = async (imageUrl: string) => {
@@ -161,6 +156,22 @@ const ProjectDetail = () => {
       }
     } catch (err: any) {
       showError(`Failed to add chat: ${err.message}`);
+    }
+  };
+
+  const handleRemoveChat = async (jobId: string) => {
+    if (!session?.user) return;
+    setIsRemovingChat(jobId);
+    try {
+        const { error } = await supabase.rpc('unassign_job_from_project', { p_job_id: jobId, p_user_id: session.user.id });
+        if (error) throw error;
+        showSuccess("Chat removed from project.");
+        queryClient.invalidateQueries({ queryKey: ['projectJobs', projectId] });
+        queryClient.invalidateQueries({ queryKey: ['jobHistory'] });
+    } catch (err: any) {
+        showError(`Failed to remove chat: ${err.message}`);
+    } finally {
+        setIsRemovingChat(null);
     }
   };
 
@@ -226,6 +237,11 @@ const ProjectDetail = () => {
               )}
           </TabsContent>
           <TabsContent value="chats" className="flex-1 overflow-y-auto mt-4">
+              <div className="flex justify-end mb-4">
+                <Button variant="outline" onClick={() => setIsManageChatsOpen(true)}>
+                  {t('manageChats')}
+                </Button>
+              </div>
               <div className="space-y-2">
                   {jobs?.map(job => (
                       <Link to={`/chat/${job.id}`} key={job.id} className="block p-2 rounded-md hover:bg-muted border">
@@ -280,6 +296,14 @@ const ProjectDetail = () => {
       <AddPackModal isOpen={isAddModelPackOpen} onClose={() => setIsAddModelPackOpen(false)} projectId={projectId} packType="model" existingPackIds={modelPacks?.map(p => p.pack_id) || []} />
       <AddPackModal isOpen={isAddGarmentPackOpen} onClose={() => setIsAddGarmentPackOpen(false)} projectId={projectId} packType="garment" existingPackIds={garmentPacks?.map(p => p.pack_id) || []} />
       <AddPackModal isOpen={isAddVtoPackOpen} onClose={() => setIsAddVtoPackOpen(false)} projectId={projectId} packType="vto" existingPackIds={vtoPacks?.map(p => p.pack_id) || []} />
+      <ManageChatsModal
+        isOpen={isManageChatsOpen}
+        onClose={() => setIsManageChatsOpen(false)}
+        projectName={project.project_name}
+        jobs={jobs || []}
+        onRemoveChat={handleRemoveChat}
+        isRemoving={isRemovingChat}
+      />
     </>
   );
 };
