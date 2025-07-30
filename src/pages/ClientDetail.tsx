@@ -18,7 +18,7 @@ import { StatCard } from "@/components/Clients/StatCard";
 import { RecentProjectItem } from "@/components/Clients/RecentProjectItem";
 import { ActivityFeed } from "@/components/Clients/ActivityFeed";
 import { SuggestionsCard } from "@/components/Clients/SuggestionsCard";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Link } from "react-router-dom";
 
 interface ProjectPreview {
