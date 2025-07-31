@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { GoogleGenAI, Content, Part, HarmCategory, HarmBlockThreshold } from 'https://esm.sh/@google/genai@0.15.0';
+import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
@@ -67,21 +67,36 @@ function extractJson(text: string): any {
 serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
 
+  const { pair_job_id } = await req.json();
+  if (!pair_job_id) {
+    throw new Error("pair_job_id is required.");
+  }
+
+  const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
+  const logPrefix = `[StylistChooser][Job ${pair_job_id.substring(0, 8)}]`;
+
   try {
-    const { vto_image_base64, missing_item_type, pack_id, user_id } = await req.json();
-    if (!vto_image_base64 || !missing_item_type || !pack_id || !user_id) {
-      throw new Error("vto_image_base64, missing_item_type, pack_id, and user_id are required.");
+    const { data: job, error: fetchError } = await supabase
+      .from('mira-agent-bitstudio-jobs')
+      .select('user_id, metadata')
+      .eq('id', pair_job_id)
+      .single();
+
+    if (fetchError) throw new Error(`Failed to fetch job ${pair_job_id}: ${fetchError.message}`);
+    
+    const { user_id, metadata } = job;
+    const { vto_image_base64, missing_item_type, auto_complete_pack_id } = metadata || {};
+
+    if (!vto_image_base64 || !missing_item_type || !auto_complete_pack_id || !user_id) {
+      throw new Error("Job metadata is missing required fields: vto_image_base64, missing_item_type, auto_complete_pack_id, or user_id.");
     }
     
-    const logPrefix = `[StylistChooser][Pack ${pack_id.substring(0, 8)}]`;
     console.log(`${logPrefix} Invoked. Missing item: '${missing_item_type}'.`);
-
-    const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
     
     const { data: packItems, error: packItemsError } = await supabase
       .from('mira-agent-garment-pack-items')
       .select('garment_id')
-      .eq('pack_id', pack_id);
+      .eq('pack_id', auto_complete_pack_id);
     if (packItemsError) throw packItemsError;
     if (!packItems || packItems.length === 0) throw new Error("The selected garment pack is empty.");
 
@@ -95,7 +110,6 @@ serve(async (req) => {
     const candidateGarments = allGarments.filter(g => {
         const fitType = g.attributes?.type_of_fit;
         if (!fitType) return false;
-        // Handle both 'upper body' and 'upper_body' by normalizing them
         return fitType.replace(/\s+/g, '_') === missing_item_type;
     });
 
@@ -104,51 +118,79 @@ serve(async (req) => {
     }
     console.log(`${logPrefix} Found ${candidateGarments.length} candidate garments of type '${missing_item_type}'.`);
 
+    let chosenGarment;
+
     if (candidateGarments.length === 1) {
         console.log(`${logPrefix} Only one candidate found. Selecting it automatically.`);
-        return new Response(JSON.stringify(candidateGarments[0]), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        chosenGarment = candidateGarments[0];
+    } else {
+        const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
+        const parts: Part[] = [
+            { text: `--- MAIN IMAGE ---` },
+            { inlineData: { mimeType: 'image/png', data: vto_image_base64 } },
+            { text: `--- MISSING ITEM TYPE --- \n${missing_item_type}` }
+        ];
+
+        console.log(`${logPrefix} Downloading candidate images for analysis...`);
+        const candidateImagePromises = candidateGarments.map((garment, index) => 
+            downloadImageAsPart(supabase, garment.storage_path, `CANDIDATE IMAGE ${index}`)
+        );
+        const candidateImagePartsArrays = await Promise.all(candidateImagePromises);
+        parts.push(...candidateImagePartsArrays.flat());
+
+        console.log(`${logPrefix} Calling Gemini for stylistic choice...`);
+        const result = await ai.models.generateContent({
+            model: MODEL_NAME,
+            contents: [{ role: 'user', parts }],
+            generationConfig: { responseMimeType: "application/json" },
+            safetySettings,
+            config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
+        });
+
+        const choice = extractJson(result.text);
+        const chosenIndex = choice.best_garment_index;
+        console.log(`${logPrefix} AI Reasoning: "${choice.reasoning}"`);
+
+        if (typeof chosenIndex !== 'number' || chosenIndex < 0 || chosenIndex >= candidateGarments.length) {
+            console.warn(`${logPrefix} AI returned an invalid index (${chosenIndex}). Selecting the first candidate as a fallback.`);
+            chosenGarment = candidateGarments[0];
+        } else {
+            console.log(`${logPrefix} AI selected candidate index: ${chosenIndex}.`);
+            chosenGarment = candidateGarments[chosenIndex];
+        }
     }
 
-    const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
-    const parts: Part[] = [
-        { text: `--- MAIN IMAGE ---` },
-        { inlineData: { mimeType: 'image/png', data: vto_image_base64 } },
-        { text: `--- MISSING ITEM TYPE --- \n${missing_item_type}` }
-    ];
+    // Update the job with the chosen garment and set status to awaiting_auto_complete
+    console.log(`${logPrefix} Updating job with chosen garment and setting status to 'awaiting_auto_complete'.`);
+    const { error: updateError } = await supabase
+      .from('mira-agent-bitstudio-jobs')
+      .update({
+        status: 'awaiting_auto_complete',
+        metadata: {
+          ...metadata,
+          chosen_completion_garment: chosenGarment
+        }
+      })
+      .eq('id', pair_job_id);
 
-    console.log(`${logPrefix} Downloading candidate images for analysis...`);
-    const candidateImagePromises = candidateGarments.map((garment, index) => 
-        downloadImageAsPart(supabase, garment.storage_path, `CANDIDATE IMAGE ${index}`)
-    );
-    const candidateImagePartsArrays = await Promise.all(candidateImagePromises);
-    parts.push(...candidateImagePartsArrays.flat());
-
-    console.log(`${logPrefix} Calling Gemini for stylistic choice...`);
-    const result = await ai.models.generateContent({
-        model: MODEL_NAME,
-        contents: [{ role: 'user', parts }],
-        generationConfig: { responseMimeType: "application/json" },
-        safetySettings,
-        config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
-    });
-
-    const choice = extractJson(result.text);
-    const chosenIndex = choice.best_garment_index;
-    console.log(`${logPrefix} AI Reasoning: "${choice.reasoning}"`);
-
-    if (typeof chosenIndex !== 'number' || chosenIndex < 0 || chosenIndex >= candidateGarments.length) {
-        console.warn(`${logPrefix} AI returned an invalid index (${chosenIndex}). Selecting the first candidate as a fallback.`);
-        return new Response(JSON.stringify(candidateGarments[0]), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    if (updateError) {
+      throw new Error(`Failed to update job ${pair_job_id}: ${updateError.message}`);
     }
 
-    console.log(`${logPrefix} AI selected candidate index: ${chosenIndex}.`);
-    return new Response(JSON.stringify(candidateGarments[chosenIndex]), {
+    return new Response(JSON.stringify({ success: true, message: "Stylist choice has been saved to the job." }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });
 
   } catch (error) {
-    console.error("[StylistChooser] Error:", error);
+    console.error(`[StylistChooser][Job ${pair_job_id || 'unknown'}] Error:`, error);
+    // If something fails, we should probably mark the job as failed to prevent it from being stuck.
+    if (pair_job_id) {
+        await supabase.from('mira-agent-bitstudio-jobs').update({
+            status: 'failed',
+            error_message: `Stylist Chooser failed: ${error.message}`
+        }).eq('id', pair_job_id);
+    }
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,
