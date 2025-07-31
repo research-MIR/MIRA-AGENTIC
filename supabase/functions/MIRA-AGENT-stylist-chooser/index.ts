@@ -196,7 +196,6 @@ serve(async (req) => {
 
   } catch (error) {
     console.error(`[StylistChooser][Job ${pair_job_id || 'unknown'}] Error:`, error);
-    // If something fails, we should probably mark the job as failed to prevent it from being stuck.
     if (pair_job_id) {
         await supabase.from('mira-agent-bitstudio-jobs').update({
             status: 'failed',
