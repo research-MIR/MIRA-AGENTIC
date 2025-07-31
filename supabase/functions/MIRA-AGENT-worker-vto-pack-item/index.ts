@@ -58,11 +58,14 @@ function parseStorageURL(url: string) {
     return { bucket, path };
 }
 
-async function safeDownload(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
+async function safeDownload(supabase: SupabaseClient, publicUrl: string, logPrefix: string): Promise<Blob> {
+    console.log(`${logPrefix} [safeDownload] Starting download for: ${publicUrl}`);
     const { bucket, path } = parseStorageURL(publicUrl);
+    console.log(`${logPrefix} [safeDownload] Parsed URL. Bucket: ${bucket}, Path: ${path}`);
     const { data, error } = await supabase.storage.from(bucket).download(path).catch(e => { throw e ?? new Error(`[safeDownload:${path}] rejected with null`) });
     if (error) throw error ?? new Error(`[safeDownload:${path}] error was null`);
     if (!data) throw new Error(`[safeDownload:${path}] data missing`);
+    console.log(`${logPrefix} [safeDownload] Download successful. Blob size: ${data.size}`);
     return data;
 }
 
@@ -443,7 +446,7 @@ async function handleOutfitCompletenessCheck(supabase: SupabaseClient, job: any,
         console.log(`${logPrefix} Outfit incomplete. Missing: ${analysisData.missing_items[0]}. Setting status to 'awaiting_stylist_choice' and invoking stylist.`);
         await supabase.from('mira-agent-bitstudio-jobs').update({
             status: 'awaiting_stylist_choice',
-            metadata: { ...metadata, outfit_completeness_analysis: fullAnalysisLog }
+            metadata: { ...metadata, google_vto_step: 'awaiting_stylist_choice', outfit_completeness_analysis: fullAnalysisLog }
         }).eq('id', job.id);
         invokeNextStep(supabase, 'MIRA-AGENT-stylist-chooser', { pair_job_id: job.id });
         console.log(`${logPrefix} Stylist invoked. Worker is now paused for this job.`);
