@@ -95,12 +95,14 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
               <RadioGroupItem value="passed_only" id="passed_only" />
               <Label htmlFor="passed_only" className="font-normal w-full cursor-pointer">
                 <span className="font-semibold block">{t('downloadPassedQa')}</span>
+                <span className="text-sm text-muted-foreground">{t('downloadPassedQaDesc')}</span>
               </Label>
             </div>
             <div className="flex items-start space-x-3 p-4 border rounded-md has-[:checked]:border-primary">
               <RadioGroupItem value="all_completed" id="all_completed" />
               <Label htmlFor="all_completed" className="font-normal w-full cursor-pointer">
-                <span className="font-semibold">{t('downloadSuccessfulOnly')}</span>
+                <span className="font-semibold block">{t('downloadSuccessfulOnly')}</span>
+                <span className="text-sm text-muted-foreground">{t('downloadSuccessfulOnlyDesc')}</span>
               </Label>
             </div>
           </RadioGroup>
