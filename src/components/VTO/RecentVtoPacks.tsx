@@ -81,6 +81,9 @@ export const RecentVtoPacks = () => {
   const packSummaries = useMemo((): PackSummary[] => {
     if (!queryData?.packs) return [];
     const { packs, jobs: bitstudioJobs = [], batchPairJobs = [], reports = [] } = queryData;
+    
+    console.log(`[VTO PACKS DEBUG] Initial data fetched. bitstudioJobs: ${bitstudioJobs.length}, batchPairJobs: ${batchPairJobs.length}`);
+
     const packsMap = new Map<string, PackSummary>();
 
     for (const pack of packs) {
@@ -96,6 +99,8 @@ export const RecentVtoPacks = () => {
     }
 
     const processedPairJobIds = new Set(bitstudioJobs.map((j: any) => j.batch_pair_job_id).filter(Boolean));
+    console.log(`[VTO PACKS DEBUG] Created processedPairJobIds set. Size: ${processedPairJobIds.size}`);
+    
     const allJobsForPack = new Map<string, any[]>();
 
     bitstudioJobs.forEach((job: any) => {
@@ -108,8 +113,15 @@ export const RecentVtoPacks = () => {
     batchPairJobs.forEach((job: any) => {
         const packId = job.metadata?.vto_pack_job_id;
         if (packId && !processedPairJobIds.has(job.id)) {
-            if (!allJobsForPack.has(packId)) allJobsForPack.set(packId, []);
+            if (!allJobsForPack.has(packId)) {
+                console.log(`[VTO PACKS DEBUG] Initializing job array for new pack from batchPairJobs: ${packId}`);
+                allJobsForPack.set(packId, []);
+            }
             allJobsForPack.get(packId)!.push(job);
+        } else {
+            // Log why it was skipped
+            if (!packId) console.log(`[VTO PACKS DEBUG] Skipping batch job ${job.id} because it has no packId.`);
+            if (processedPairJobIds.has(job.id)) console.log(`[VTO PACKS DEBUG] Skipping batch job ${job.id} because it's already processed.`);
         }
     });
 
