@@ -1,8 +1,10 @@
 import { useMemo, useEffect, useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
 import { useLanguage } from "@/context/LanguageContext";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { Progress } from "@/components/ui/progress";
 import { BarChart2, CheckCircle, XCircle, Loader2, AlertTriangle, UserCheck2, BadgeAlert, FileText, RefreshCw, Wand2, Download, HardDriveDownload, Shirt, ArrowLeft } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
@@ -11,11 +13,9 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
-import JSZip from 'jszip';
 import { VtoPackDetailView } from '@/components/VTO/VtoPackDetailView';
 import { AnalyzePackModal, AnalysisScope } from '@/components/VTO/AnalyzePackModal';
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { Progress } from "@/components/ui/progress";
+import { DownloadPackModal } from "@/components/VTO/DownloadPackModal";
 
 interface QaReport {
   id: string;
@@ -67,7 +67,11 @@ const VtoReports = () => {
   const { t } = useLanguage();
   const { supabase, session } = useSession();
   const queryClient = useQueryClient();
-  const [isRerunning, setIsRerunning] = useState<string | null>(null);
+  const [openPackId, setOpenPackId] = useState<string | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState<string | null>(null);
+  const [packToAnalyze, setPackToAnalyze] = useState<PackSummary | null>(null);
+  const [packToDownload, setPackToDownload] = useState<PackSummary | null>(null);
+  const [isStartingRefinement, setIsStartingRefinement] = useState<string | null>(null);
 
   const { data: queryData, isLoading, error } = useQuery<any>({ // Using any for now to accommodate packs table
     queryKey: ['vtoQaReportsAndPacks', session?.user?.id],
@@ -151,7 +155,6 @@ const VtoReports = () => {
         });
     }
 
-    const processedPairJobIds = new Set(bitstudioJobs.map((j: any) => j.batch_pair_job_id).filter(Boolean));
     const allJobsForPack = new Map<string, any[]>();
 
     bitstudioJobs.forEach((job: any) => {
@@ -161,6 +164,7 @@ const VtoReports = () => {
         }
     });
 
+    const processedPairJobIds = new Set(bitstudioJobs.map((j: any) => j.batch_pair_job_id).filter(Boolean));
     batchPairJobs.forEach((job: any) => {
         const packId = job.metadata?.vto_pack_job_id;
         if (packId && !processedPairJobIds.has(job.id)) {
@@ -215,12 +219,33 @@ const VtoReports = () => {
     return allPacks.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   }, [queryData]);
 
-  const handleRerunFailed = async (packId: string) => {
-    if (!session?.user) return;
-    setIsRerunning(packId);
-    const toastId = showLoading("Re-queuing failed analysis jobs...");
+  const handleAnalyze = async (scope: AnalysisScope) => {
+    if (!packToAnalyze || !session?.user) return;
+    setIsAnalyzing(packToAnalyze.pack_id);
+    const toastId = showLoading("Starting analysis...");
     try {
-        const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-rerun-failed-analyses', {
+      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-vto-reporter', {
+        body: { pack_id: packToAnalyze.pack_id, user_id: session.user.id, analysis_scope: scope }
+      });
+      if (error) throw error;
+      dismissToast(toastId);
+      showSuccess(data.message);
+      queryClient.invalidateQueries({ queryKey: ['vtoQaReportsAndPacks', session.user.id] });
+      setPackToAnalyze(null);
+    } catch (err: any) {
+      dismissToast(toastId);
+      showError(`Analysis failed: ${err.message}`);
+    } finally {
+      setIsAnalyzing(null);
+    }
+  };
+
+  const handleStartRefinement = async (packId: string) => {
+    if (!session?.user) return;
+    setIsStartingRefinement(packId);
+    const toastId = showLoading("Creating refinement pass...");
+    try {
+        const { data, error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-vto-refinement-pass', {
             body: { pack_id: packId, user_id: session.user.id }
         });
         if (error) throw error;
@@ -229,9 +254,9 @@ const VtoReports = () => {
         queryClient.invalidateQueries({ queryKey: ['vtoQaReportsAndPacks', session.user.id] });
     } catch (err: any) {
         dismissToast(toastId);
-        showError(`Operation failed: ${err.message}`);
+        showError(`Failed to start refinement: ${err.message}`);
     } finally {
-        setIsRerunning(null);
+        setIsStartingRefinement(null);
     }
   };
 
@@ -256,7 +281,8 @@ const VtoReports = () => {
         </header>
         <div className="space-y-4">
           {packSummaries.map(report => {
-            const unknownFailures = report.failure_summary['Unknown'] || 0;
+            const totalReports = report.passed_perfect + report.passed_pose_change + report.passed_logo_issue + report.passed_detail_issue + report.failed_jobs;
+            const isReportReady = totalReports > 0;
             const isRefinementPack = !!report.metadata?.refinement_of_pack_id;
 
             return (
@@ -268,30 +294,45 @@ const VtoReports = () => {
                       <span>{report.metadata?.name || `Pack from ${new Date(report.created_at).toLocaleString()}`}</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                          <Button variant="secondary" size="sm" disabled={unknownFailures === 0 || isRerunning === report.pack_id}>
-                            {isRerunning === report.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
-                            {t('rerunUnknownFailures', { count: unknownFailures })}
-                          </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>{t('rerunFailedAnalysesTitle')}</AlertDialogTitle>
-                            <AlertDialogDescription>
-                              {t('rerunFailedAnalysesDescription', { count: unknownFailures })}
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel>{t('cancel')}</AlertDialogCancel>
-                            <AlertDialogAction onClick={() => handleRerunFailed(report.pack_id)}>
-                              {t('rerunFailedAnalysesAction')}
-                            </AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
-                      <Link to={`/vto-reports/${report.pack_id}`}>
-                        <Button>{t('viewReport')}</Button>
+                      <Button variant="outline" size="sm" onClick={() => setPackToDownload(report)}>
+                        <HardDriveDownload className="h-4 w-4 mr-2" />
+                        {t('downloadPack')}
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => setPackToAnalyze(report)} disabled={isAnalyzing === report.pack_id}>
+                        {isAnalyzing === report.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <BarChart2 className="h-4 w-4 mr-2" />}
+                        {t('analyzePack')}
+                      </Button>
+                      {report.failed_jobs > 0 && !report.has_refinement_pass && (
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button variant="secondary" size="sm" disabled={isStartingRefinement === report.pack_id}>
+                              {isStartingRefinement === report.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Wand2 className="h-4 w-4 mr-2" />}
+                              {t('refineFailedJobs')} ({report.failed_jobs})
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>{t('refineFailedJobsTitle')}</AlertDialogTitle>
+                              <AlertDialogDescription>{t('refineFailedJobsDescription', { count: report.failed_jobs })}</AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>{t('cancel')}</AlertDialogCancel>
+                              <AlertDialogAction onClick={() => handleStartRefinement(report.pack_id)}>{t('refineFailedJobsAction')}</AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      )}
+                      <Link to={`/vto-reports/${report.pack_id}`} onClick={(e) => !isReportReady && e.preventDefault()}>
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <div className={!isReportReady ? 'cursor-not-allowed' : ''}>
+                                <Button disabled={!isReportReady}>{t('viewReport')}</Button>
+                              </div>
+                            </TooltipTrigger>
+                            {!isReportReady && <TooltipContent><p>No analysis has been run for this pack yet.</p></TooltipContent>}
+                          </Tooltip>
+                        </TooltipProvider>
                       </Link>
                     </div>
                   </CardTitle>
@@ -351,6 +392,8 @@ const VtoReports = () => {
           )}
         </div>
       </div>
+      <AnalyzePackModal isOpen={!!packToAnalyze} onClose={() => setPackToAnalyze(null)} onAnalyze={handleAnalyze} isLoading={!!isAnalyzing} packName={packToAnalyze?.metadata?.name || ''} />
+      <DownloadPackModal isOpen={!!packToDownload} onClose={() => setPackToDownload(null)} pack={packToDownload} />
     </>
   );
 };

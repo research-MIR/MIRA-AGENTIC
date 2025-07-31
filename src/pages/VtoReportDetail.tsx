@@ -3,13 +3,13 @@ import { useLanguage } from "@/context/LanguageContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, AlertTriangle, Loader2, BrainCircuit, BarChart2, CheckCircle, XCircle, ImageIcon } from "lucide-react";
+import { ArrowLeft, AlertTriangle, Loader2, BrainCircuit, BarChart2, CheckCircle, XCircle, ImageIcon, RefreshCw } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { SecureImageDisplay } from "@/components/VTO/SecureImageDisplay";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
@@ -20,6 +20,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Progress } from "@/components/ui/progress";
 import { useSecureImage } from "@/hooks/useSecureImage";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 
 interface ReportDetail {
   report_id: string;
@@ -171,6 +172,7 @@ const VtoReportDetail = () => {
   const queryClient = useQueryClient();
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [selectedReport, setSelectedReport] = useState<ReportDetail | null>(null);
+  const [isRerunning, setIsRerunning] = useState<string | null>(null);
 
   const { data: packData, isLoading: isLoadingPack } = useQuery<PackData | null>({
     queryKey: ['vtoPackData', packId],
@@ -218,6 +220,11 @@ const VtoReportDetail = () => {
     return () => { supabase.removeChannel(channel); };
   }, [packId, session?.user?.id, supabase, queryClient]);
 
+  const unknownFailures = useMemo(() => {
+    if (!reportDetails) return [];
+    return reportDetails.filter(j => j.comparative_report && !j.comparative_report.overall_pass && (j.comparative_report.failure_category === 'Unknown' || !j.comparative_report.failure_category));
+  }, [reportDetails]);
+
   const handleGenerateAnalysis = async () => {
     if (!packId || !session?.user) return;
     setIsAnalyzing(true);
@@ -234,6 +241,26 @@ const VtoReportDetail = () => {
       showError(`Analysis failed: ${err.message}`);
     } finally {
       setIsAnalyzing(false);
+    }
+  };
+
+  const handleRerunFailed = async (packId: string) => {
+    if (!session?.user) return;
+    setIsRerunning(packId);
+    const toastId = showLoading("Re-queuing failed analysis jobs...");
+    try {
+        const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-rerun-failed-analyses', {
+            body: { pack_id: packId, user_id: session.user.id }
+        });
+        if (error) throw error;
+        dismissToast(toastId);
+        showSuccess(data.message);
+        queryClient.invalidateQueries({ queryKey: ['vtoReportDetail', packId] });
+    } catch (err: any) {
+        dismissToast(toastId);
+        showError(`Operation failed: ${err.message}`);
+    } finally {
+        setIsRerunning(null);
     }
   };
 
@@ -281,10 +308,36 @@ const VtoReportDetail = () => {
               <h1 className="text-3xl font-bold">{t('vtoReportDetailTitle')}</h1>
               <p className="text-muted-foreground">Pack ID: {packId}</p>
             </div>
-            <Button onClick={handleGenerateAnalysis} disabled={isAnalyzing || analysisInProgress}>
-              {(isAnalyzing || analysisInProgress) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <BarChart2 className="mr-2 h-4 w-4" />}
-              {analysisInProgress ? "Analyzing..." : packData?.synthesis_report ? "Re-generate Analysis" : "Generate Strategic Analysis"}
-            </Button>
+            <div className="flex items-center gap-2">
+              {unknownFailures.length > 0 && (
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="secondary" size="sm" disabled={isRerunning === packId}>
+                      {isRerunning === packId ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+                      {t('rerunUnknownFailures', { count: unknownFailures.length })}
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>{t('rerunFailedAnalysesTitle')}</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        {t('rerunFailedAnalysesDescription', { count: unknownFailures.length })}
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>{t('cancel')}</AlertDialogCancel>
+                      <AlertDialogAction onClick={() => handleRerunFailed(packId!)}>
+                        {t('rerunFailedAnalysesAction')}
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              )}
+              <Button onClick={handleGenerateAnalysis} disabled={isAnalyzing || analysisInProgress}>
+                {(isAnalyzing || analysisInProgress) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <BarChart2 className="mr-2 h-4 w-4" />}
+                {analysisInProgress ? "Analyzing..." : packData?.synthesis_report ? "Re-generate Analysis" : "Generate Strategic Analysis"}
+              </Button>
+            </div>
           </div>
         </header>
 
