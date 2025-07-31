@@ -149,9 +149,12 @@ serve(async (req) => {
             case 'reframe':
                 await handleReframe(supabase, job, logPrefix);
                 break;
+            case 'awaiting_stylist_choice':
+                console.log(`${logPrefix} Job is awaiting stylist choice. Re-running completeness check to re-trigger stylist if needed.`);
+                await handleOutfitCompletenessCheck(supabase, job, logPrefix);
+                break;
             case 'done':
             case 'fallback_to_bitstudio':
-            case 'awaiting_stylist_choice':
             case 'awaiting_auto_complete':
                 console.log(`${logPrefix} Job is already in a terminal or waiting state ('${step}'). Exiting gracefully.`);
                 break;

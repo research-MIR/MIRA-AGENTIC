@@ -15,6 +15,8 @@ const STALLED_REFRAME_THRESHOLD_SECONDS = 30;
 const STALLED_FIXER_THRESHOLD_SECONDS = 5;
 const STALLED_QA_REPORT_THRESHOLD_SECONDS = 5;
 const STALLED_CHUNK_WORKER_THRESHOLD_SECONDS = 5;
+const STALLED_STYLIST_CHOICE_THRESHOLD_SECONDS = 60; // New threshold
+
 serve(async (req)=>{
   const requestId = `watchdog-bg-${Date.now()}`;
   console.log(`[Watchdog-BG][${requestId}] Invocation attempt.`);
@@ -569,6 +571,28 @@ serve(async (req)=>{
       actionsTaken.push(`Re-triggered ${readyForAutoComplete.length} workers for auto-complete.`);
     } else {
       console.log(`[Watchdog-BG][${requestId}] No jobs ready for auto-complete found.`);
+    }
+    // --- NEW Task 21: Handle Stalled Stylist Choice Jobs ---
+    const stylistThreshold = new Date(Date.now() - STALLED_STYLIST_CHOICE_THRESHOLD_SECONDS * 1000).toISOString();
+    const { data: stalledStylistJobs, error: stylistError } = await supabase
+      .from('mira-agent-bitstudio-jobs')
+      .select('id')
+      .eq('status', 'awaiting_stylist_choice')
+      .lt('updated_at', stylistThreshold);
+
+    if (stylistError) {
+      console.error(`[Watchdog-BG][${requestId}] Error querying for stalled stylist jobs:`, stylistError.message);
+    } else if (stalledStylistJobs && stalledStylistJobs.length > 0) {
+      console.log(`[Watchdog-BG][${requestId}] Found ${stalledStylistJobs.length} stalled stylist job(s). Re-triggering workers...`);
+      const stylistPromises = stalledStylistJobs.map(job => 
+        supabase.functions.invoke('MIRA-AGENT-worker-vto-pack-item', {
+          body: { pair_job_id: job.id }
+        })
+      );
+      await Promise.allSettled(stylistPromises);
+      actionsTaken.push(`Re-triggered ${stalledStylistJobs.length} stalled stylist jobs.`);
+    } else {
+      console.log(`[Watchdog-BG][${requestId}] No stalled stylist jobs found.`);
     }
 
     const finalMessage = actionsTaken.length > 0 ? actionsTaken.join(' ') : "No actions required. All jobs are running normally.";
