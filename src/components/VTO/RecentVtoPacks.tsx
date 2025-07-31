@@ -117,8 +117,22 @@ export const RecentVtoPacks = () => {
         const summary = packsMap.get(pack.id)!;
         const jobsForThisPack = allJobsForPack.get(pack.id) || [];
         
+        // --- DEBUG LOGGING ---
+        console.log(`--- DEBUG FOR PACK: ${pack.metadata?.name || pack.id} ---`);
+        console.log(`Metadata total_pairs: ${pack.metadata?.total_pairs}`);
+        console.log(`Calculated total jobs from DB: ${jobsForThisPack.length}`);
+        const statusCounts = jobsForThisPack.reduce((acc: Record<string, number>, job) => {
+            acc[job.status] = (acc[job.status] || 0) + 1;
+            return acc;
+        }, {});
+        console.log(`Status breakdown:`, statusCounts);
+        const calculatedCompleted = jobsForThisPack.filter((j: any) => ['complete', 'done', 'failed', 'permanently_failed'].includes(j.status)).length;
+        console.log(`Calculated completed jobs: ${calculatedCompleted}`);
+        console.log(`----------------------------------------------------`);
+        // --- END DEBUG LOGGING ---
+
         summary.total_jobs = jobsForThisPack.length;
-        summary.completed_jobs = jobsForThisPack.filter((j: any) => ['complete', 'done', 'failed', 'permanently_failed'].includes(j.status)).length;
+        summary.completed_jobs = calculatedCompleted;
     }
 
     for (const report of reports) {
