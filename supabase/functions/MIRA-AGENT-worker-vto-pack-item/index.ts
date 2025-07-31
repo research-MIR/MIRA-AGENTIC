@@ -153,9 +153,11 @@ serve(async (req) => {
                 console.log(`${logPrefix} Job is awaiting stylist choice. Re-running completeness check to re-trigger stylist if needed.`);
                 await handleOutfitCompletenessCheck(supabase, job, logPrefix);
                 break;
+            case 'awaiting_auto_complete':
+                await handleAutoComplete(supabase, job, logPrefix);
+                break;
             case 'done':
             case 'fallback_to_bitstudio':
-            case 'awaiting_auto_complete':
                 console.log(`${logPrefix} Job is already in a terminal or waiting state ('${step}'). Exiting gracefully.`);
                 break;
             default:
@@ -413,43 +415,9 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
 
 async function handleOutfitCompletenessCheck(supabase: SupabaseClient, job: any, logPrefix: string) {
   console.log(`${logPrefix} Performing outfit completeness check.`);
-  const { metadata, user_id, id: pair_job_id } = job;
-  const { qa_best_image_base64, garment_analysis, auto_complete_outfit, chosen_completion_garment } = metadata;
+  const { metadata, id: pair_job_id } = job;
+  const { qa_best_image_base64, garment_analysis, auto_complete_outfit } = metadata;
 
-  // If a garment has already been chosen by the stylist, we are in the second part of the flow.
-  if (chosen_completion_garment) {
-    console.log(`${logPrefix} Stylist has already chosen a garment. Proceeding with auto-complete VTO pass.`);
-    
-    const garmentBlob = await safeDownload(supabase, chosen_completion_garment.storage_path);
-    const garment_image_base64 = await blobToBase64(garmentBlob);
-
-    const { data: vtoData, error: vtoError } = await supabase.functions.invoke('MIRA-AGENT-tool-virtual-try-on', {
-        body: {
-            person_image_base64: qa_best_image_base64,
-            garment_image_base64: garment_image_base64,
-            sample_count: 1,
-        }
-    });
-    if (vtoError) throw new Error(`Auto-complete VTO pass failed: ${vtoError.message}`);
-
-    const finalImageBase64 = vtoData?.generatedImages?.[0]?.base64Image;
-    if (!finalImageBase64) throw new Error("Auto-complete VTO pass did not return a valid image.");
-
-    await supabase.from('mira-agent-bitstudio-jobs').update({
-        metadata: {
-            ...metadata,
-            google_vto_step: 'reframe',
-            qa_best_image_base64: finalImageBase64, // Overwrite with the new, completed outfit image
-            outfit_completed: true,
-        }
-    }).eq('id', job.id);
-
-    console.log(`${logPrefix} Auto-complete successful. New base image created. Re-invoking worker for reframe step.`);
-    invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
-    return;
-  }
-
-  // If no garment is chosen, this is the first part of the flow.
   if (!auto_complete_outfit || !garment_analysis?.type_of_fit) {
     console.log(`${logPrefix} Skipping outfit check. Auto-complete: ${auto_complete_outfit}, Garment Fit: ${garment_analysis?.type_of_fit}`);
     await supabase.from('mira-agent-bitstudio-jobs').update({
@@ -476,16 +444,52 @@ async function handleOutfitCompletenessCheck(supabase: SupabaseClient, job: any,
   } else {
     console.log(`${logPrefix} Outfit incomplete. Missing: ${analysisData.missing_items[0]}. Setting status to 'awaiting_stylist_choice' and invoking stylist.`);
     
-    // Update status and save analysis before invoking stylist
     await supabase.from('mira-agent-bitstudio-jobs').update({
-        status: 'awaiting_stylist_choice', // This is the key change
+        status: 'awaiting_stylist_choice',
         metadata: { ...metadata, outfit_completeness_analysis: fullAnalysisLog }
     }).eq('id', job.id);
 
-    // Asynchronously invoke the stylist. The watchdog will pick up the job once the stylist is done.
     invokeNextStep(supabase, 'MIRA-AGENT-stylist-chooser', { pair_job_id: job.id });
     console.log(`${logPrefix} Stylist invoked. Worker is now paused for this job.`);
   }
+}
+
+async function handleAutoComplete(supabase: SupabaseClient, job: any, logPrefix: string) {
+    console.log(`${logPrefix} Handling auto-complete step.`);
+    const { metadata, user_id } = job;
+    const { qa_best_image_base64, chosen_completion_garment } = metadata;
+
+    if (!chosen_completion_garment) {
+        throw new Error("Job is in auto-complete state but has no chosen garment.");
+    }
+
+    console.log(`${logPrefix} Creating new VTO job to add chosen garment: ${chosen_completion_garment.name}`);
+    const garmentBlob = await safeDownload(supabase, chosen_completion_garment.storage_path);
+    const garment_image_base64 = await blobToBase64(garmentBlob);
+
+    const { data: vtoData, error: vtoError } = await supabase.functions.invoke('MIRA-AGENT-tool-virtual-try-on', {
+        body: {
+            person_image_base64: qa_best_image_base64,
+            garment_image_base64: garment_image_base64,
+            sample_count: 1,
+        }
+    });
+    if (vtoError) throw new Error(`Auto-complete VTO pass failed: ${vtoError.message}`);
+
+    const finalImageBase64 = vtoData?.generatedImages?.[0]?.base64Image;
+    if (!finalImageBase64) throw new Error("Auto-complete VTO pass did not return a valid image.");
+
+    await supabase.from('mira-agent-bitstudio-jobs').update({
+        metadata: {
+            ...metadata,
+            google_vto_step: 'reframe',
+            qa_best_image_base64: finalImageBase64, // Overwrite with the new, completed outfit image
+            outfit_completed: true,
+        }
+    }).eq('id', job.id);
+
+    console.log(`${logPrefix} Auto-complete successful. New base image created. Re-invoking worker for reframe step.`);
+    invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
 }
 
 async function handleQualityCheckPass2(supabase: SupabaseClient, job: any, logPrefix: string) {
