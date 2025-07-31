@@ -116,7 +116,6 @@ serve(async (req) => {
         console.log(`${logPrefix} Received reframe result. Finalizing job.`);
         await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'complete', final_image_url: reframe_result_url }).eq('id', pair_job_id);
         console.log(`${logPrefix} Job successfully finalized.`);
-        await triggerWatchdog(supabase, logPrefix);
     } else if (bitstudio_result_url) {
         console.log(`${logPrefix} Received BitStudio fallback result. Running final quality check.`);
         await handleQualityCheck(supabase, job, logPrefix, bitstudio_result_url);
@@ -199,14 +198,12 @@ serve(async (req) => {
                 metadata: { ...job.metadata, delegated_bitstudio_job_id: proxyData.jobIds[0] }
             }).eq('id', pair_job_id);
             
-            await triggerWatchdog(supabase, logPrefix);
             return new Response(JSON.stringify({ success: true, message: "Escalated to BitStudio fallback." }), { headers: corsHeaders });
 
         } catch (fallbackError) {
             const fallbackErrorMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
             console.error(`${logPrefix} CRITICAL: BitStudio fallback attempt also failed:`, fallbackErrorMessage);
             await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'failed', error_message: `Google VTO failed and BitStudio fallback also failed: ${fallbackErrorMessage}` }).eq('id', pair_job_id);
-            await triggerWatchdog(supabase, logPrefix);
             return new Response(JSON.stringify({ error: fallbackErrorMessage }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
         }
     } else {
@@ -214,9 +211,11 @@ serve(async (req) => {
             console.warn(`[BITSTUDIO_FALLBACK][${job.id}] Fallback is disabled. Job will fail.`);
         }
         await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'failed', error_message: errorMessage }).eq('id', pair_job_id);
-        await triggerWatchdog(supabase, logPrefix);
         return new Response(JSON.stringify({ error: errorMessage }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
     }
+  } finally {
+    // This block is guaranteed to run, even if an error is thrown.
+    await triggerWatchdog(supabase, logPrefix);
   }
 });
 
@@ -500,7 +499,6 @@ async function handleAutoComplete(supabase: SupabaseClient, job: any, logPrefix:
         metadata: { ...metadata, delegated_auto_complete_job_id: childJobId }
     }).eq('id', parent_job_id);
     console.log(`${logPrefix} Parent job ${parent_job_id} updated to await child job ${childJobId}.`);
-    await triggerWatchdog(supabase, logPrefix);
 }
 
 async function handleQualityCheckPass2(supabase: SupabaseClient, job: any, logPrefix: string) {
@@ -585,7 +583,6 @@ async function handleReframe(supabase: SupabaseClient, job: any, logPrefix: stri
             metadata: { ...job.metadata, qa_best_image_base64: null, google_vto_step: 'done' }
         }).eq('id', job.id);
         console.log(`${logPrefix} Job finalized with 1:1 image.`);
-        await triggerWatchdog(supabase, logPrefix);
     } else {
         const { data: reframeJobData, error: reframeError } = await supabase.functions.invoke('MIRA-AGENT-proxy-reframe', {
             body: {
