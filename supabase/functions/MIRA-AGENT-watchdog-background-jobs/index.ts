@@ -66,29 +66,16 @@ serve(async (req)=>{
     } else {
       console.log(`[Watchdog-BG][${requestId}] No stalled BitStudio jobs found.`);
     }
-    // --- Task 2: Handle New Pending Batch Inpainting Jobs ---
-    console.log(`[Watchdog-BG][${requestId}] === Task 2: Managing Batch Inpaint Job Slot via RPC ===`);
-    const { data: claimedBatchJobId, error: batchRpcError } = await supabase.rpc('claim_next_batch_inpaint_job');
-    if (batchRpcError) {
-      console.error(`[Watchdog-BG][${requestId}] Task 2: RPC 'claim_next_batch_inpaint_job' failed:`, batchRpcError.message);
-    } else if (claimedBatchJobId) {
-      console.log(`[Watchdog-BG][${requestId}] Task 2: Successfully claimed batch inpaint job ${claimedBatchJobId} via RPC. Invoking worker.`);
-      const { error: invokeError } = await supabase.functions.invoke('MIRA-AGENT-worker-batch-inpaint', {
-        body: {
-          pair_job_id: claimedBatchJobId
-        }
-      });
-      if (invokeError) {
-        console.error(`[Watchdog-BG][${requestId}] Task 2: CRITICAL! Failed to invoke worker for claimed job ${claimedBatchJobId}:`, invokeError);
-        await supabase.from('mira-agent-batch-inpaint-pair-jobs').update({
-          status: 'pending',
-          error_message: 'Watchdog failed to invoke worker.'
-        }).eq('id', claimedBatchJobId);
-      } else {
-        actionsTaken.push(`Started new batch inpaint worker for job ${claimedBatchJobId}.`);
-      }
+    // --- Task 2: Trigger Batch Inpaint Worker ---
+    console.log(`[Watchdog-BG][${requestId}] === Task 2: Triggering Batch Inpaint Worker ===`);
+    const { error: invokeError } = await supabase.functions.invoke('MIRA-AGENT-worker-batch-inpaint', {
+        body: {} // No job ID passed, worker will claim its own job
+    });
+    if (invokeError) {
+        console.error(`[Watchdog-BG][${requestId}] Task 2: Failed to invoke MIRA-AGENT-worker-batch-inpaint:`, invokeError.message);
     } else {
-      console.log(`[Watchdog-BG][${requestId}] Task 2: No pending batch inpaint jobs found to claim.`);
+        console.log(`[Watchdog-BG][${requestId}] Task 2: Successfully invoked batch inpaint worker. The worker will attempt to claim a job.`);
+        actionsTaken.push(`Triggered batch inpaint worker.`);
     }
     // --- Task 3: Handle Stalled Segmentation Aggregation Jobs ---
     const segmentationThreshold = new Date(Date.now() - STALLED_AGGREGATION_THRESHOLD_SECONDS * 1000).toISOString();

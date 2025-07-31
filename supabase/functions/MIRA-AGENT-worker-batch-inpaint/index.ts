@@ -72,15 +72,30 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  const { pair_job_id } = await req.json();
-  if (!pair_job_id) {
-    return new Response(JSON.stringify({ error: "pair_job_id is required." }), { status: 400, headers: corsHeaders });
-  }
-
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-  console.log(`[BatchInpaintWorker][${pair_job_id}] Starting Step 1: Segmentation.`);
+  let pair_job_id: string | null = null;
 
   try {
+    console.log(`[BatchInpaintWorker] Attempting to claim a job...`);
+    
+    const { data: claimedJobId, error: rpcError } = await supabase.rpc('claim_next_batch_inpaint_job');
+
+    if (rpcError) {
+        console.error(`[BatchInpaintWorker] Error calling claim_next_batch_inpaint_job RPC:`, rpcError.message);
+        throw rpcError;
+    }
+
+    if (!claimedJobId) {
+        console.log('[BatchInpaintWorker] No pending jobs to claim. Exiting gracefully.');
+        return new Response(JSON.stringify({ success: true, message: "No pending jobs." }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            status: 200,
+        });
+    }
+
+    pair_job_id = claimedJobId;
+    console.log(`[BatchInpaintWorker][${pair_job_id}] Successfully claimed job. Starting Step 1: Segmentation.`);
+
     const { data: pairJob, error: fetchError } = await supabase
       .from('mira-agent-batch-inpaint-pair-jobs')
       .select('*')
@@ -148,10 +163,12 @@ serve(async (req) => {
     });
 
   } catch (error) {
-    console.error(`[BatchInpaintWorker][${pair_job_id}] Error:`, error);
-    await supabase.from('mira-agent-batch-inpaint-pair-jobs')
-      .update({ status: 'failed', error_message: error.message })
-      .eq('id', pair_job_id);
+    console.error(`[BatchInpaintWorker][${pair_job_id || 'unclaimed'}] Error:`, error);
+    if (pair_job_id) {
+        await supabase.from('mira-agent-batch-inpaint-pair-jobs')
+          .update({ status: 'failed', error_message: error.message })
+          .eq('id', pair_job_id);
+    }
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,
