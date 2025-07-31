@@ -13,7 +13,6 @@ const STALLED_POLLER_THRESHOLD_SECONDS = 5;
 const STALLED_AGGREGATION_THRESHOLD_SECONDS = 20;
 const STALLED_PAIR_JOB_THRESHOLD_SECONDS = 30;
 const STALLED_GOOGLE_VTO_THRESHOLD_SECONDS = 5;
-const STALLED_QUEUED_VTO_THRESHOLD_SECONDS = 5;
 const STALLED_REFRAME_THRESHOLD_SECONDS = 30;
 const STALLED_FIXER_THRESHOLD_SECONDS = 5;
 const STALLED_QA_REPORT_THRESHOLD_SECONDS = 5;
@@ -87,7 +86,7 @@ serve(async (req) => {
       }
     };
 
-    // --- Each task is now wrapped in its own try/catch block ---
+    // --- Each task is now wrapped in its own try/catch block for maximum resilience ---
 
     try {
       await recoverStalledJobs('mira-agent-bitstudio-jobs', ['queued', 'processing'], STALLED_POLLER_THRESHOLD_SECONDS, 'MIRA-AGENT-poller-bitstudio', 'id', 'job_id');
