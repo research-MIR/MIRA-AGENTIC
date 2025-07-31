@@ -61,19 +61,35 @@ export const RecentVtoPacks = () => {
     queryFn: async () => {
       if (!session?.user) return { packs: [], jobs: [], batchPairJobs: [], reports: [] };
       
+      const fetchAll = async (queryBuilder: any) => {
+        let allData: any[] = [];
+        let page = 0;
+        const pageSize = 1000; // Supabase default limit
+        while (true) {
+          const { data, error } = await queryBuilder.range(page * pageSize, (page + 1) * pageSize - 1);
+          if (error) throw error;
+          if (data) {
+            allData = allData.concat(data);
+          }
+          if (!data || data.length < pageSize) {
+            break;
+          }
+          page++;
+        }
+        return allData;
+      };
+
       const packsPromise = supabase.from('mira-agent-vto-packs-jobs').select('id, created_at, metadata').eq('user_id', session.user.id);
-      const jobsPromise = supabase.from('mira-agent-bitstudio-jobs').select('id, vto_pack_job_id, status, batch_pair_job_id').eq('user_id', session.user.id).not('vto_pack_job_id', 'is', null);
-      const batchPairJobsPromise = supabase.from('mira-agent-batch-inpaint-pair-jobs').select('id, metadata, status').eq('user_id', session.user.id).not('metadata->>vto_pack_job_id', 'is', null);
+      const jobsPromise = fetchAll(supabase.from('mira-agent-bitstudio-jobs').select('id, vto_pack_job_id, status, batch_pair_job_id').eq('user_id', session.user.id).not('vto_pack_job_id', 'is', null));
+      const batchPairJobsPromise = fetchAll(supabase.from('mira-agent-batch-inpaint-pair-jobs').select('id, metadata, status').eq('user_id', session.user.id).not('metadata->>vto_pack_job_id', 'is', null));
       const reportsPromise = supabase.rpc('get_vto_qa_reports_for_user', { p_user_id: session.user.id });
 
-      const [{ data: packs, error: packsError }, { data: jobs, error: jobsError }, { data: batchPairJobs, error: batchPairError }, { data: reports, error: reportsError }] = await Promise.all([packsPromise, jobsPromise, batchPairJobsPromise, reportsPromise]);
+      const [{ data: packs, error: packsError }, bitstudioJobs, batchPairJobs, { data: reports, error: reportsError }] = await Promise.all([packsPromise, jobsPromise, batchPairJobsPromise, reportsPromise]);
 
       if (packsError) throw packsError;
-      if (jobsError) throw jobsError;
-      if (batchPairError) throw batchPairError;
       if (reportsError) throw reportsError;
 
-      return { packs, jobs, batchPairJobs, reports };
+      return { packs, jobs: bitstudioJobs, batchPairJobs, reports };
     },
     enabled: !!session?.user,
   });
