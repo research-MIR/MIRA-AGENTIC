@@ -27,6 +27,7 @@ import { ProjectDeadlines } from "@/components/Projects/ProjectDeadlines";
 import { ProjectNotes } from "@/components/Projects/ProjectNotes";
 import { ActiveJobsMonitor } from "@/components/Projects/ActiveJobsMonitor";
 import { ProjectHistoryFeed } from "@/components/Projects/ProjectHistoryFeed";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 interface Project {
   id: string;
@@ -177,29 +178,39 @@ const ProjectDetail = () => {
   });
 
   const galleryImages = useMemo(() => {
-    if (!jobs) return [];
+    if (!jobs && !vtoJobs) return [];
     const imagesMap = new Map<string, { jobId: string, createdAt: string }>();
 
-    for (const job of jobs) {
-      const processImageArray = (images: any[]) => {
-        if (!Array.isArray(images)) return;
-        for (const img of images) {
-          if (img && typeof img.publicUrl === 'string' && !imagesMap.has(img.publicUrl)) {
-            imagesMap.set(img.publicUrl, { jobId: job.id, createdAt: job.created_at });
-          }
-        }
-      };
-
-      processImageArray(job.final_result?.images);
-      processImageArray(job.final_result?.final_generation_result?.response?.images);
-
-      if (job.context?.history) {
-        for (const turn of job.context.history) {
-          if (turn.role === 'function' && turn.parts) {
-            for (const part of turn.parts) {
-              processImageArray(part.functionResponse?.response?.images);
+    if (jobs) {
+      for (const job of jobs) {
+        const processImageArray = (images: any[]) => {
+          if (!Array.isArray(images)) return;
+          for (const img of images) {
+            if (img && typeof img.publicUrl === 'string' && !imagesMap.has(img.publicUrl)) {
+              imagesMap.set(img.publicUrl, { jobId: job.id, createdAt: job.created_at });
             }
           }
+        };
+
+        processImageArray(job.final_result?.images);
+        processImageArray(job.final_result?.final_generation_result?.response?.images);
+
+        if (job.context?.history) {
+          for (const turn of job.context.history) {
+            if (turn.role === 'function' && turn.parts) {
+              for (const part of turn.parts) {
+                processImageArray(part.functionResponse?.response?.images);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    if (vtoJobs) {
+      for (const job of vtoJobs) {
+        if (job.final_image_url && !imagesMap.has(job.final_image_url)) {
+          imagesMap.set(job.final_image_url, { jobId: job.id, createdAt: job.created_at });
         }
       }
     }
@@ -208,7 +219,7 @@ const ProjectDetail = () => {
     sortedImages.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     
     return sortedImages;
-  }, [jobs]);
+  }, [jobs, vtoJobs]);
 
   const handleSetKeyVisual = async (imageUrl: string) => {
     if (!projectId) return;
@@ -285,7 +296,7 @@ const ProjectDetail = () => {
             { label: project.client?.name || "...", href: `/clients/${project.client?.id}` },
             { label: project.name },
           ]} />
-          <div className="flex justify-between items-center mt-4">
+          <div className="mt-4 flex justify-between items-center">
             <h1 className="text-3xl font-bold">{project.name}</h1>
           </div>
         </header>
