@@ -42,26 +42,24 @@ const safetySettings = [
     { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
 ];
 
-function parseStorageURL(url: string) {
-    const u = new URL(url);
-    const pathSegments = u.pathname.split('/');
+async function getDimensionsFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<{width: number, height: number}> {
+    const url = new URL(publicUrl);
+    const pathSegments = url.pathname.split('/');
+    
     const objectSegmentIndex = pathSegments.indexOf('object');
     if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) {
-        throw new Error(`Invalid Supabase storage URL format: ${url}`);
+        throw new Error(`Could not parse bucket name from Supabase URL: ${publicUrl}`);
     }
-    const bucket = pathSegments[objectSegmentIndex + 2];
-    const path = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
-    if (!bucket || !path) {
-        throw new Error(`Could not parse bucket or path from Supabase URL: ${url}`);
-    }
-    return { bucket, path };
-}
+    
+    const bucketName = pathSegments[objectSegmentIndex + 2];
+    const filePath = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
 
-async function getDimensionsFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<{width: number, height: number}> {
-    const { bucket, path } = parseStorageURL(publicUrl);
+    if (!bucketName || !filePath) {
+        throw new Error(`Could not parse bucket or path from Supabase URL: ${publicUrl}`);
+    }
 
     // Download only the first 64KB, which is more than enough for image headers.
-    const { data: fileHead, error } = await supabase.storage.from(bucket).download(path, { range: '0-65535' });
+    const { data: fileHead, error } = await supabase.storage.from(bucketName).download(filePath, { range: '0-65535' });
     if (error) throw new Error(`Failed to download image header: ${error.message}`);
 
     const buffer = new Uint8Array(await fileHead.arrayBuffer());
