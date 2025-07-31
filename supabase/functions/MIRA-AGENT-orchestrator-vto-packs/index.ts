@@ -108,7 +108,7 @@ serve(async (req) => {
         if (garmentsToInsert.length > 0) {
             const { error: garmentInsertError } = await supabase
                 .from('mira-agent-garments')
-                .insert(garmentsToInsert, { onConflict: 'user_id, image_hash' });
+                .upsert(garmentsToInsert, { onConflict: 'user_id, image_hash' });
 
             if (garmentInsertError) {
                 console.error(`[VTO-Packs-Orchestrator] Non-critical error logging garments to Armadio:`, garmentInsertError.message);
