@@ -82,8 +82,6 @@ export const RecentVtoPacks = () => {
     if (!queryData?.packs) return [];
     const { packs, jobs: bitstudioJobs = [], batchPairJobs = [], reports = [] } = queryData;
     
-    console.log(`[VTO PACKS DEBUG] Initial data fetched. bitstudioJobs: ${bitstudioJobs.length}, batchPairJobs: ${batchPairJobs.length}`);
-
     const packsMap = new Map<string, PackSummary>();
 
     for (const pack of packs) {
@@ -93,58 +91,31 @@ export const RecentVtoPacks = () => {
             metadata: pack.metadata || {},
             total_jobs: 0,
             completed_jobs: 0,
-            passed_perfect: 0, passed_pose_change: 0, passed_logo_issue: 0, passed_detail_issue: 0,
-            failed_jobs: 0, failure_summary: {}, shape_mismatches: 0, avg_body_preservation_score: null, has_refinement_pass: false,
+            passed_perfect: 0,
+            failed_jobs: 0,
+            has_refinement_pass: false,
         });
     }
 
-    const processedPairJobIds = new Set(bitstudioJobs.map((j: any) => j.batch_pair_job_id).filter(Boolean));
-    console.log(`[VTO PACKS DEBUG] Created processedPairJobIds set. Size: ${processedPairJobIds.size}`);
-    
-    const allJobsForPack = new Map<string, any[]>();
-
-    bitstudioJobs.forEach((job: any) => {
-        if (job.vto_pack_job_id) {
-            if (!allJobsForPack.has(job.vto_pack_job_id)) allJobsForPack.set(job.vto_pack_job_id, []);
-            allJobsForPack.get(job.vto_pack_job_id)!.push(job);
-        }
-    });
-
-    batchPairJobs.forEach((job: any) => {
-        const packId = job.metadata?.vto_pack_job_id;
-        if (packId && !processedPairJobIds.has(job.id)) {
-            if (!allJobsForPack.has(packId)) {
-                console.log(`[VTO PACKS DEBUG] Initializing job array for new pack from batchPairJobs: ${packId}`);
-                allJobsForPack.set(packId, []);
-            }
-            allJobsForPack.get(packId)!.push(job);
-        } else {
-            // Log why it was skipped
-            if (!packId) console.log(`[VTO PACKS DEBUG] Skipping batch job ${job.id} because it has no packId.`);
-            if (processedPairJobIds.has(job.id)) console.log(`[VTO PACKS DEBUG] Skipping batch job ${job.id} because it's already processed.`);
-        }
-    });
-
     for (const pack of packs) {
         const summary = packsMap.get(pack.id)!;
-        const jobsForThisPack = allJobsForPack.get(pack.id) || [];
-        
-        // --- DEBUG LOGGING ---
-        console.log(`--- DEBUG FOR PACK: ${pack.metadata?.name || pack.id} ---`);
-        console.log(`Metadata total_pairs: ${pack.metadata?.total_pairs}`);
-        console.log(`Calculated total jobs from DB: ${jobsForThisPack.length}`);
-        const statusCounts = jobsForThisPack.reduce((acc: Record<string, number>, job) => {
-            acc[job.status] = (acc[job.status] || 0) + 1;
-            return acc;
-        }, {});
-        console.log(`Status breakdown:`, statusCounts);
-        const calculatedCompleted = jobsForThisPack.filter((j: any) => ['complete', 'done', 'failed', 'permanently_failed'].includes(j.status)).length;
-        console.log(`Calculated completed jobs: ${calculatedCompleted}`);
-        console.log(`----------------------------------------------------`);
-        // --- END DEBUG LOGGING ---
 
-        summary.total_jobs = jobsForThisPack.length;
-        summary.completed_jobs = calculatedCompleted;
+        // Filter jobs specifically for the current pack
+        const bitstudioJobsForPack = bitstudioJobs.filter((j: any) => j.vto_pack_job_id === pack.id);
+        const batchPairJobsForPack = batchPairJobs.filter((j: any) => j.metadata?.vto_pack_job_id === pack.id);
+
+        // Identify which pair jobs have already been processed into bitstudio jobs
+        const processedPairJobIdsForPack = new Set(bitstudioJobsForPack.map((j: any) => j.batch_pair_job_id).filter(Boolean));
+
+        // Find the precursor jobs that are still in the batch_inpaint_pair_jobs table
+        const precursorJobsForPack = batchPairJobsForPack
+            .filter((job: any) => !processedPairJobIdsForPack.has(job.id));
+
+        // Combine all jobs for this pack
+        const allJobsForThisPack = [...bitstudioJobsForPack, ...precursorJobsForPack];
+
+        summary.total_jobs = allJobsForThisPack.length;
+        summary.completed_jobs = allJobsForThisPack.filter((j: any) => ['complete', 'done', 'failed', 'permanently_failed'].includes(j.status)).length;
     }
 
     for (const report of reports) {
