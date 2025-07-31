@@ -172,12 +172,11 @@ serve(async (req) => {
         }
     }
 
-    // Update the job with the chosen garment and set status to awaiting_auto_complete
-    console.log(`${logPrefix} Updating job with chosen garment and setting status to 'awaiting_auto_complete'.`);
+    // Update the job with the chosen garment. DO NOT change the status.
+    console.log(`${logPrefix} Updating job with chosen garment. The status remains 'awaiting_stylist_choice'.`);
     const { error: updateError } = await supabase
       .from('mira-agent-bitstudio-jobs')
       .update({
-        status: 'awaiting_auto_complete',
         metadata: {
           ...metadata,
           chosen_completion_garment: chosenGarment
@@ -188,6 +187,12 @@ serve(async (req) => {
     if (updateError) {
       throw new Error(`Failed to update job ${pair_job_id}: ${updateError.message}`);
     }
+
+    // Re-invoke the worker to proceed to the next step.
+    console.log(`${logPrefix} Invoking the VTO worker to continue the process.`);
+    supabase.functions.invoke('MIRA-AGENT-worker-vto-pack-item', {
+        body: { pair_job_id: pair_job_id }
+    }).catch(console.error);
 
     return new Response(JSON.stringify({ success: true, message: "Stylist choice has been saved to the job." }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
