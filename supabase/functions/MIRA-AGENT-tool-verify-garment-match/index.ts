@@ -59,26 +59,27 @@ Your response MUST be a single, valid JSON object with the following structure:
 - **fix_suggestion:** If 'is_match' is false, provide a single, actionable suggestion for the user to improve the result (e.g., "Try adding 'natural cotton texture' to the prompt appendix," "Attempt the generation again with a lower denoise strength to preserve the original shape better."). If it's a match, this MUST be null.
 `;
 
+function parseStorageURL(url: string) {
+    const u = new URL(url);
+    const pathSegments = u.pathname.split('/');
+    const objectSegmentIndex = pathSegments.indexOf('object');
+    if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) {
+        throw new Error(`Invalid Supabase storage URL format: ${url}`);
+    }
+    const bucket = pathSegments[objectSegmentIndex + 2];
+    const path = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
+    if (!bucket || !path) {
+        throw new Error(`Could not parse bucket or path from Supabase URL: ${url}`);
+    }
+    return { bucket, path };
+}
+
 async function downloadAndEncodeImage(supabase: SupabaseClient, url: string): Promise<{ base64: string, mimeType: string }> {
     if (url.includes('supabase.co')) {
-        const urlObj = new URL(url);
-        const pathSegments = urlObj.pathname.split('/');
-        
-        const publicSegmentIndex = pathSegments.indexOf('public');
-        if (publicSegmentIndex === -1 || publicSegmentIndex + 1 >= pathSegments.length) {
-            throw new Error(`Could not parse bucket name from Supabase URL: ${url}`);
-        }
-        
-        const bucketName = pathSegments[publicSegmentIndex + 1];
-        const filePath = decodeURIComponent(pathSegments.slice(publicSegmentIndex + 2).join('/'));
-
-        if (!bucketName || !filePath) {
-            throw new Error(`Could not parse bucket or path from Supabase URL: ${url}`);
-        }
-
-        const { data: blob, error } = await supabase.storage.from(bucketName).download(filePath);
+        const { bucket, path } = parseStorageURL(url);
+        const { data: blob, error } = await supabase.storage.from(bucket).download(path);
         if (error) {
-            throw new Error(`Failed to download image from Supabase storage (${filePath}): ${error.message}`);
+            throw new Error(`Failed to download image from Supabase storage (${path}): ${error.message}`);
         }
         const buffer = await blob.arrayBuffer();
         const base64 = encodeBase64(buffer);
