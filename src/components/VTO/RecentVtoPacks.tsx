@@ -16,6 +16,7 @@ import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast
 import { VtoPackDetailView } from '@/components/VTO/VtoPackDetailView';
 import { AnalyzePackModal, AnalysisScope } from '@/components/VTO/AnalyzePackModal';
 import { DownloadPackModal } from "@/components/VTO/DownloadPackModal";
+import { RefinePackModal, RefineScope } from "./RefinePackModal";
 
 interface QaReport {
   id: string;
@@ -72,6 +73,7 @@ export const RecentVtoPacks = () => {
   const [packToAnalyze, setPackToAnalyze] = useState<PackSummary | null>(null);
   const [packToDownload, setPackToDownload] = useState<PackSummary | null>(null);
   const [isStartingRefinement, setIsStartingRefinement] = useState<string | null>(null);
+  const [packToRefine, setPackToRefine] = useState<PackSummary | null>(null);
 
   const { data: queryData, isLoading, error } = useQuery<any>({
     queryKey: ['vtoPackSummaries', session?.user?.id],
@@ -249,18 +251,56 @@ export const RecentVtoPacks = () => {
     }
   };
 
-  const handleStartRefinement = async (packId: string) => {
-    if (!session?.user) return;
-    setIsStartingRefinement(packId);
-    const toastId = showLoading("Creating refinement pass...");
+  const handleStartRefinement = async (scope: RefineScope) => {
+    if (!packToRefine || !session?.user) return;
+    setIsStartingRefinement(packToRefine.pack_id);
+    const toastId = showLoading("Preparing refinement pass...");
+
     try {
+        let jobIdsToRefine: string[] = [];
+        
+        if (scope === 'successful_only') {
+            const { data: reports, error: reportsError } = await supabase
+                .from('mira-agent-vto-qa-reports')
+                .select('source_vto_job_id')
+                .eq('vto_pack_job_id', packToRefine.pack_id)
+                .eq('comparative_report->>overall_pass', 'true');
+            if (reportsError) throw reportsError;
+            jobIdsToRefine = reports.map(r => r.source_vto_job_id);
+        } else { // 'all_completed'
+            const { data: jobs, error: jobsError } = await supabase
+                .from('mira-agent-bitstudio-jobs')
+                .select('id')
+                .eq('vto_pack_job_id', packToRefine.pack_id)
+                .in('status', ['complete', 'done']);
+            if (jobsError) throw jobsError;
+            jobIdsToRefine = jobs.map(j => j.id);
+        }
+
+        if (jobIdsToRefine.length === 0) {
+            dismissToast(toastId);
+            showSuccess("No jobs found for the selected scope to refine.");
+            setIsStartingRefinement(null);
+            setPackToRefine(null);
+            return;
+        }
+
+        dismissToast(toastId);
+        showLoading(`Found ${jobIdsToRefine.length} jobs. Starting refinement...`);
+
         const { data, error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-vto-refinement-pass', {
-            body: { pack_id: packId, user_id: session.user.id }
+            body: { 
+                source_pack_id: packToRefine.pack_id, 
+                user_id: session.user.id,
+                job_ids_to_refine: jobIdsToRefine
+            }
         });
         if (error) throw error;
+        
         dismissToast(toastId);
         showSuccess(data.message);
         queryClient.invalidateQueries({ queryKey: ['vtoPackSummaries', session.user.id] });
+        setPackToRefine(null);
     } catch (err: any) {
         dismissToast(toastId);
         showError(`Failed to start refinement: ${err.message}`);
@@ -315,25 +355,11 @@ export const RecentVtoPacks = () => {
                     {isAnalyzing === pack.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <BarChart2 className="h-4 w-4 mr-2" />}
                     {t('analyzePack')}
                   </Button>
-                  {pack.failed_jobs > 0 && !pack.has_refinement_pass && (
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button variant="secondary" size="sm" disabled={isStartingRefinement === pack.pack_id}>
-                          {isStartingRefinement === pack.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Wand2 className="h-4 w-4 mr-2" />}
-                          {t('refineFailedJobs')} ({pack.failed_jobs})
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>{t('refineFailedJobsTitle')}</AlertDialogTitle>
-                          <AlertDialogDescription>{t('refineFailedJobsDescription', { count: pack.failed_jobs })}</AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>{t('cancel')}</AlertDialogCancel>
-                          <AlertDialogAction onClick={() => handleStartRefinement(pack.pack_id)}>{t('refineFailedJobsAction')}</AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
+                  {!isRefinementPack && (
+                    <Button variant="secondary" size="sm" onClick={() => setPackToRefine(pack)} disabled={isStartingRefinement === pack.pack_id || pack.completed_jobs === 0}>
+                      {isStartingRefinement === pack.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Wand2 className="h-4 w-4 mr-2" />}
+                      {t('refinePack')}
+                    </Button>
                   )}
                   <Link to={`/vto-reports/${pack.pack_id}`} onClick={(e) => !isReportReady && e.preventDefault()}>
                     <Button disabled={!isReportReady}>{t('viewReport')}</Button>
@@ -349,6 +375,7 @@ export const RecentVtoPacks = () => {
       </Accordion>
       <AnalyzePackModal isOpen={!!packToAnalyze} onClose={() => setPackToAnalyze(null)} onAnalyze={handleAnalyze} isLoading={!!isAnalyzing} packName={packToAnalyze?.metadata?.name || ''} />
       <DownloadPackModal isOpen={!!packToDownload} onClose={() => setPackToDownload(null)} pack={packToDownload} />
+      <RefinePackModal isOpen={!!packToRefine} onClose={() => setPackToRefine(null)} onRefine={handleStartRefinement} isLoading={!!isStartingRefinement} packName={packToRefine?.metadata?.name || ''} />
     </>
   );
 };
