@@ -217,25 +217,10 @@ serve(async (req)=>{
       });
       if (invokeError) {
         console.error(`[Watchdog-BG][${requestId}] Task 7: CRITICAL! Failed to invoke worker for claimed job ${claimedVtoJobId}:`, invokeError);
-        const { data: job, error: fetchErr } = await supabase.from('mira-agent-bitstudio-jobs').select('metadata').eq('id', claimedVtoJobId).single();
-        if (fetchErr) {
-            console.error(`[Watchdog-BG][${requestId}] Could not fetch job to update retry count. Setting to failed.`, fetchErr);
-            await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'failed', error_message: 'Watchdog failed to invoke worker and could not fetch job for retry count.' }).eq('id', claimedVtoJobId);
-        } else {
-            const retryCount = (job?.metadata?.watchdog_retries || 0) + 1;
-            if (retryCount >= 3) {
-                await supabase.from('mira-agent-bitstudio-jobs').update({
-                  status: 'failed',
-                  error_message: `Watchdog failed to invoke worker after ${retryCount} attempts.`
-                }).eq('id', claimedVtoJobId);
-            } else {
-                await supabase.from('mira-agent-bitstudio-jobs').update({
-                  status: 'pending',
-                  error_message: 'Watchdog failed to invoke worker. Will retry.',
-                  metadata: { ...job?.metadata, watchdog_retries: retryCount }
-                }).eq('id', claimedVtoJobId);
-            }
-        }
+        await supabase.from('mira-agent-bitstudio-jobs').update({
+          status: 'pending',
+          error_message: 'Watchdog failed to invoke worker.'
+        }).eq('id', claimedVtoJobId);
       } else {
         console.log(`[Watchdog-BG][${requestId}] Task 7: Successfully invoked worker for job ${claimedVtoJobId}.`);
         actionsTaken.push(`Started new Google VTO worker for job ${claimedVtoJobId}.`);
