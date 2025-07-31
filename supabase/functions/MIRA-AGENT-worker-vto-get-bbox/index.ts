@@ -7,7 +7,7 @@ import imageSize from "https://esm.sh/image-size";
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-const MODEL_NAME = "gemini-2.5-flash";
+const MODEL_NAME = "gemini-2.5-pro";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -121,6 +121,8 @@ serve(async (req) => {
         safetySettings,
         config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
     });
+
+    console.log("[BBox-Worker] Full LLM response:", result.text);
 
     // 5. Parse the response and scale the coordinates
     const detectedBox = JSON.parse(result.text).person;
