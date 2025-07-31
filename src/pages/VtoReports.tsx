@@ -14,6 +14,8 @@ import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast
 import JSZip from 'jszip';
 import { VtoPackDetailView } from '@/components/VTO/VtoPackDetailView';
 import { AnalyzePackModal, AnalysisScope } from '@/components/VTO/AnalyzePackModal';
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { Progress } from "@/components/ui/progress";
 
 interface QaReport {
   id: string;
@@ -49,6 +51,7 @@ interface PackSummary {
     engine?: 'google' | 'bitstudio';
   };
   total_jobs: number;
+  completed_jobs: number;
   passed_perfect: number;
   passed_pose_change: number;
   passed_logo_issue: number;
@@ -66,7 +69,7 @@ const VtoReports = () => {
   const queryClient = useQueryClient();
   const [isRerunning, setIsRerunning] = useState<string | null>(null);
 
-  const { data: reports, isLoading, error } = useQuery<any>({ // Using any for now to accommodate packs table
+  const { data: queryData, isLoading, error } = useQuery<any>({ // Using any for now to accommodate packs table
     queryKey: ['vtoQaReportsAndPacks', session?.user?.id],
     queryFn: async () => {
       if (!session?.user) return [];
@@ -76,7 +79,21 @@ const VtoReports = () => {
       const { data: packs, error: packsError } = await supabase.from('mira-agent-vto-packs-jobs').select('id, created_at, metadata').eq('user_id', session.user.id);
       if (packsError) throw packsError;
 
-      return { reports, packs };
+      const { data: jobs, error: jobsError } = await supabase
+        .from('mira-agent-bitstudio-jobs')
+        .select('id, vto_pack_job_id, status, batch_pair_job_id')
+        .eq('user_id', session.user.id)
+        .not('vto_pack_job_id', 'is', null);
+      if (jobsError) throw jobsError;
+
+      const { data: batchPairJobs, error: batchPairError } = await supabase
+        .from('mira-agent-batch-inpaint-pair-jobs')
+        .select('id, metadata, status')
+        .eq('user_id', session.user.id)
+        .not('metadata->>vto_pack_job_id', 'is', null);
+      if (batchPairError) throw batchPairError;
+
+      return { reports, packs, jobs, batchPairJobs };
     },
     enabled: !!session?.user,
   });
@@ -99,32 +116,70 @@ const VtoReports = () => {
           queryClient.invalidateQueries({ queryKey: ['vtoQaReportsAndPacks', session.user.id] });
         }
       )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'mira-agent-bitstudio-jobs', filter: `user_id=eq.${session.user.id}` },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ['vtoQaReportsAndPacks', session.user.id] });
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'mira-agent-batch-inpaint-pair-jobs', filter: `user_id=eq.${session.user.id}` },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ['vtoQaReportsAndPacks', session.user.id] });
+        }
+      )
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [session?.user?.id, supabase, queryClient]);
 
   const packSummaries = useMemo((): PackSummary[] => {
-    if (!reports?.packs) return [];
+    if (!queryData?.packs) return [];
+    const { packs, jobs: bitstudioJobs = [], batchPairJobs = [], reports = [] } = queryData;
     const packsMap = new Map<string, PackSummary>();
 
-    // Initialize all packs from the packs table
-    for (const pack of reports.packs) {
+    for (const pack of packs) {
         packsMap.set(pack.id, {
             pack_id: pack.id,
             created_at: pack.created_at,
             metadata: pack.metadata || {},
-            total_jobs: 0, passed_perfect: 0, passed_pose_change: 0, passed_logo_issue: 0, passed_detail_issue: 0,
+            total_jobs: 0,
+            completed_jobs: 0,
+            passed_perfect: 0, passed_pose_change: 0, passed_logo_issue: 0, passed_detail_issue: 0,
             failed_jobs: 0, failure_summary: {}, shape_mismatches: 0, avg_body_preservation_score: null, has_refinement_pass: false,
         });
     }
 
-    // Populate with report data
-    for (const report of reports.reports) {
+    const processedPairJobIds = new Set(bitstudioJobs.map((j: any) => j.batch_pair_job_id).filter(Boolean));
+    const allJobsForPack = new Map<string, any[]>();
+
+    bitstudioJobs.forEach((job: any) => {
+        if (job.vto_pack_job_id) {
+            if (!allJobsForPack.has(job.vto_pack_job_id)) allJobsForPack.set(job.vto_pack_job_id, []);
+            allJobsForPack.get(job.vto_pack_job_id)!.push(job);
+        }
+    });
+
+    batchPairJobs.forEach((job: any) => {
+        const packId = job.metadata?.vto_pack_job_id;
+        if (packId && !processedPairJobIds.has(job.id)) {
+            if (!allJobsForPack.has(packId)) allJobsForPack.set(packId, []);
+            allJobsForPack.get(packId)!.push(job);
+        }
+    });
+
+    for (const pack of packs) {
+        const summary = packsMap.get(pack.id)!;
+        const jobsForThisPack = allJobsForPack.get(pack.id) || [];
+        
+        summary.total_jobs = jobsForThisPack.length;
+        summary.completed_jobs = jobsForThisPack.filter((j: any) => ['complete', 'done', 'failed', 'permanently_failed'].includes(j.status)).length;
+    }
+
+    for (const report of reports) {
       if (!packsMap.has(report.vto_pack_job_id)) continue;
-      
       const summary = packsMap.get(report.vto_pack_job_id)!;
-      summary.total_jobs++;
-      
       const reportData = report.comparative_report;
       if (reportData) {
         if (reportData.overall_pass) {
@@ -153,13 +208,12 @@ const VtoReports = () => {
     }
 
     const allPacks = Array.from(packsMap.values());
-    // Second pass to determine if a refinement pass exists for each pack
     allPacks.forEach(pack => {
         pack.has_refinement_pass = allPacks.some(p => p.metadata?.refinement_of_pack_id === pack.pack_id);
     });
 
     return allPacks.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-  }, [reports]);
+  }, [queryData]);
 
   const handleRerunFailed = async (packId: string) => {
     if (!session?.user) return;
@@ -187,6 +241,10 @@ const VtoReports = () => {
 
   if (error) {
     return <div className="p-8"><Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Error</AlertTitle><AlertDescription>{error.message}</AlertDescription></Alert></div>;
+  }
+
+  if (!queryData?.packs || queryData.packs.length === 0) {
+    return <p className="text-center text-muted-foreground py-8">No recent batch jobs found.</p>;
   }
 
   return (
