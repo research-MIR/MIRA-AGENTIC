@@ -133,14 +133,37 @@ serve(async (req) => {
     // --- Task 5 & 6: Stalled Google VTO Pack Jobs ---
     await recoverStalledJobs('mira-agent-bitstudio-jobs', ['processing', 'awaiting_reframe', 'awaiting_auto_complete', 'queued'], STALLED_GOOGLE_VTO_THRESHOLD_SECONDS, 'MIRA-AGENT-worker-vto-pack-item', 'id', 'pair_job_id');
 
-    // --- Task 7: Manage Single Google VTO Pack Job Slot ---
-    const { data: claimedVtoJobId, error: vtoRpcError } = await supabase.rpc('claim_next_google_vto_job');
-    if (vtoRpcError) {
-      console.error(`[Watchdog-BG][${requestId}] RPC 'claim_next_google_vto_job' failed:`, vtoRpcError.message);
-    } else if (claimedVtoJobId) {
-      console.log(`[Watchdog-BG][${requestId}] Claimed job ${claimedVtoJobId} via RPC. Invoking worker.`);
-      supabase.functions.invoke('MIRA-AGENT-worker-vto-pack-item', { body: { pair_job_id: claimedVtoJobId } }).catch(console.error);
-      actionsTaken.push(`Started new Google VTO worker for job ${claimedVtoJobId}.`);
+    // --- Task 7: Manage Concurrent Google VTO Pack Jobs ---
+    const { data: config, error: configError } = await supabase.from('mira-agent-config').select('value').eq('key', 'VTO_CONCURRENCY_LIMIT').single();
+    if (configError) {
+        console.error(`[Watchdog-BG][${requestId}] Could not fetch VTO_CONCURRENCY_LIMIT. Defaulting to 1. Error:`, configError.message);
+    }
+    const concurrencyLimit = config?.value?.limit || 1;
+
+    const { count: runningJobsCount, error: countError } = await supabase
+        .from('mira-agent-bitstudio-jobs')
+        .select('id', { count: 'exact' })
+        .in('status', ['queued', 'processing', 'awaiting_reframe', 'awaiting_auto_complete', 'fixing'])
+        .eq('metadata->>engine', 'google');
+    
+    if (countError) {
+        console.error(`[Watchdog-BG][${requestId}] Could not count running VTO jobs:`, countError.message);
+    } else {
+        const availableSlots = concurrencyLimit - (runningJobsCount || 0);
+        console.log(`[Watchdog-BG][${requestId}] VTO Concurrency: Limit=${concurrencyLimit}, Running=${runningJobsCount}, Available=${availableSlots}`);
+        if (availableSlots > 0) {
+            const { data: claimedJobs, error: claimError } = await supabase.rpc('claim_multiple_vto_jobs', { p_limit: availableSlots });
+            if (claimError) {
+                console.error(`[Watchdog-BG][${requestId}] RPC 'claim_multiple_vto_jobs' failed:`, claimError.message);
+            } else if (claimedJobs && claimedJobs.length > 0) {
+                console.log(`[Watchdog-BG][${requestId}] Claimed ${claimedJobs.length} new VTO jobs. Invoking workers...`);
+                const workerPromises = claimedJobs.map((job: { job_id: string }) => 
+                    supabase.functions.invoke('MIRA-AGENT-worker-vto-pack-item', { body: { pair_job_id: job.job_id } })
+                );
+                await Promise.allSettled(workerPromises);
+                actionsTaken.push(`Started ${claimedJobs.length} new Google VTO workers.`);
+            }
+        }
     }
 
     // --- Task 8: Handle VTO Jobs Awaiting Reframe ---
