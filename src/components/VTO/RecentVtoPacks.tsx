@@ -1,11 +1,11 @@
-import { useMemo, useEffect, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useLanguage } from "@/context/LanguageContext";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Progress } from "@/components/ui/progress";
-import { BarChart2, CheckCircle, XCircle, Loader2, AlertTriangle, UserCheck2, BadgeAlert, FileText, RefreshCw, Wand2, Download, HardDriveDownload } from "lucide-react";
+import { BarChart2, CheckCircle, XCircle, Loader2, AlertTriangle, UserCheck2, BadgeAlert, FileText, RefreshCw, Wand2, Shirt } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -13,7 +13,6 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
-import JSZip from 'jszip';
 import { VtoPackDetailView } from './VtoPackDetailView';
 import { AnalyzePackModal, AnalysisScope } from './AnalyzePackModal';
 
@@ -28,15 +27,6 @@ interface QaReport {
     failure_category: string | null;
     pose_and_body_analysis?: {
         pose_changed: boolean;
-        scores: {
-            body_type_preservation?: number;
-        }
-    },
-    garment_comparison?: {
-        generated_garment_type?: string;
-    },
-    garment_analysis?: {
-        garment_type?: string;
     }
   } | null;
 }
@@ -53,13 +43,7 @@ interface PackSummary {
   total_jobs: number;
   completed_jobs: number;
   passed_perfect: number;
-  passed_pose_change: number;
-  passed_logo_issue: number;
-  passed_detail_issue: number;
   failed_jobs: number;
-  failure_summary: Record<string, number>;
-  shape_mismatches: number;
-  avg_body_preservation_score: number | null;
   has_refinement_pass: boolean;
 }
 
@@ -72,62 +56,34 @@ export const RecentVtoPacks = () => {
   const [packToAnalyze, setPackToAnalyze] = useState<PackSummary | null>(null);
   const [isStartingRefinement, setIsStartingRefinement] = useState<string | null>(null);
 
-  const { data: queryData, isLoading, error } = useQuery<any>({ // Using any for now to accommodate packs table
-    queryKey: ['vtoQaReportsAndPacks', session?.user?.id],
+  const { data: queryData, isLoading, error } = useQuery<any>({
+    queryKey: ['vtoPackSummaries', session?.user?.id],
     queryFn: async () => {
-      if (!session?.user) return [];
-      const { data: reports, error: reportsError } = await supabase.rpc('get_vto_qa_reports_for_user', { p_user_id: session.user.id });
+      if (!session?.user) return { packs: [], jobs: [], batchPairJobs: [], reports: [] };
+      
+      const packsPromise = supabase.from('mira-agent-vto-packs-jobs').select('id, created_at, metadata').eq('user_id', session.user.id);
+      const jobsPromise = supabase.from('mira-agent-bitstudio-jobs').select('id, vto_pack_job_id, status, batch_pair_job_id').eq('user_id', session.user.id).not('vto_pack_job_id', 'is', null);
+      const batchPairJobsPromise = supabase.from('mira-agent-batch-inpaint-pair-jobs').select('id, metadata, status').eq('user_id', session.user.id).not('metadata->>vto_pack_job_id', 'is', null);
+      const reportsPromise = supabase.rpc('get_vto_qa_reports_for_user', { p_user_id: session.user.id });
+
+      const [{ data: packs, error: packsError }, { data: jobs, error: jobsError }, { data: batchPairJobs, error: batchPairError }, { data: reports, error: reportsError }] = await Promise.all([packsPromise, jobsPromise, batchPairJobsPromise, reportsPromise]);
+
+      if (packsError) throw packsError;
+      if (jobsError) throw jobsError;
+      if (batchPairError) throw batchPairError;
       if (reportsError) throw reportsError;
 
-      const { data: packs, error: packsError } = await supabase.from('mira-agent-vto-packs-jobs').select('id, created_at, metadata').eq('user_id', session.user.id);
-      if (packsError) throw packsError;
-
-      const { data: jobs, error: jobsError } = await supabase
-        .from('mira-agent-bitstudio-jobs')
-        .select('id, vto_pack_job_id, status')
-        .eq('user_id', session.user.id)
-        .not('vto_pack_job_id', 'is', null);
-      if (jobsError) throw jobsError;
-
-      return { reports, packs, jobs };
+      return { packs, jobs, batchPairJobs, reports };
     },
     enabled: !!session?.user,
   });
 
-  useEffect(() => {
-    if (!session?.user?.id) return;
-    const channel: RealtimeChannel = supabase
-      .channel(`vto-qa-reports-tracker-recent-packs-${session.user.id}`)
-      .on<QaReport>(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'mira-agent-vto-qa-reports', filter: `user_id=eq.${session.user.id}` },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ['vtoQaReportsAndPacks', session.user.id] });
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'mira-agent-vto-packs-jobs', filter: `user_id=eq.${session.user.id}` },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ['vtoQaReportsAndPacks', session.user.id] });
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'mira-agent-bitstudio-jobs', filter: `user_id=eq.${session.user.id}` },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ['vtoQaReportsAndPacks', session.user.id] });
-        }
-      )
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [session?.user?.id, supabase, queryClient]);
-
   const packSummaries = useMemo((): PackSummary[] => {
-    if (!queryData?.packs || !queryData?.jobs) return [];
+    if (!queryData?.packs) return [];
+    const { packs, jobs: bitstudioJobs = [], batchPairJobs = [], reports = [] } = queryData;
     const packsMap = new Map<string, PackSummary>();
 
-    for (const pack of queryData.packs) {
+    for (const pack of packs) {
         packsMap.set(pack.id, {
             pack_id: pack.id,
             created_at: pack.created_at,
@@ -139,34 +95,41 @@ export const RecentVtoPacks = () => {
         });
     }
 
-    for (const job of queryData.jobs) {
-        if (job.vto_pack_job_id && packsMap.has(job.vto_pack_job_id)) {
-            const summary = packsMap.get(job.vto_pack_job_id)!;
-            summary.total_jobs++;
-            if (job.status === 'complete' || job.status === 'done' || job.status === 'failed' || job.status === 'permanently_failed') {
-                summary.completed_jobs++;
-            }
+    const processedPairJobIds = new Set(bitstudioJobs.map((j: any) => j.batch_pair_job_id).filter(Boolean));
+    const allJobsForPack = new Map<string, any[]>();
+
+    bitstudioJobs.forEach((job: any) => {
+        if (job.vto_pack_job_id) {
+            if (!allJobsForPack.has(job.vto_pack_job_id)) allJobsForPack.set(job.vto_pack_job_id, []);
+            allJobsForPack.get(job.vto_pack_job_id)!.push(job);
         }
+    });
+
+    batchPairJobs.forEach((job: any) => {
+        const packId = job.metadata?.vto_pack_job_id;
+        if (packId && !processedPairJobIds.has(job.id)) {
+            if (!allJobsForPack.has(packId)) allJobsForPack.set(packId, []);
+            allJobsForPack.get(packId)!.push(job);
+        }
+    });
+
+    for (const pack of packs) {
+        const summary = packsMap.get(pack.id)!;
+        const jobsForThisPack = allJobsForPack.get(pack.id) || [];
+        
+        summary.total_jobs = jobsForThisPack.length;
+        summary.completed_jobs = jobsForThisPack.filter((j: any) => ['complete', 'done', 'failed', 'permanently_failed'].includes(j.status)).length;
     }
 
-    for (const report of queryData.reports || []) {
+    for (const report of reports) {
       if (!packsMap.has(report.vto_pack_job_id)) continue;
       const summary = packsMap.get(report.vto_pack_job_id)!;
       const reportData = report.comparative_report;
       if (reportData) {
         if (reportData.overall_pass) {
-          if (reportData.pass_with_notes) {
-              if (reportData.pass_notes_category === 'logo_fidelity') summary.passed_logo_issue++;
-              else if (reportData.pass_notes_category === 'detail_accuracy') summary.passed_detail_issue++;
-          } else if (reportData.pose_and_body_analysis?.pose_changed) {
-              summary.passed_pose_change++;
-          } else {
-              summary.passed_perfect++;
-          }
+          summary.passed_perfect++;
         } else {
           summary.failed_jobs++;
-          const reason = reportData.failure_category || "Unknown";
-          summary.failure_summary[reason] = (summary.failure_summary[reason] || 0) + 1;
         }
       }
     }
@@ -179,51 +142,6 @@ export const RecentVtoPacks = () => {
     return allPacks.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   }, [queryData]);
 
-  const handleAnalyzePack = async (scope: AnalysisScope) => {
-    if (!packToAnalyze || !session?.user) return;
-    setIsAnalyzing(packToAnalyze.pack_id);
-    const toastId = showLoading("Starting analysis...");
-    try {
-      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-vto-reporter', {
-        body: { 
-          pack_id: packToAnalyze.pack_id, 
-          user_id: session.user.id,
-          analysis_scope: scope
-        }
-      });
-      if (error) throw error;
-      dismissToast(toastId);
-      showSuccess(data.message);
-      queryClient.invalidateQueries({ queryKey: ['vtoQaReportsAndPacks', session.user.id] });
-    } catch (err: any) {
-      dismissToast(toastId);
-      showError(`Analysis failed: ${err.message}`);
-    } finally {
-      setIsAnalyzing(null);
-      setPackToAnalyze(null);
-    }
-  };
-
-  const handleStartRefinementPass = async (packId: string) => {
-    if (!session?.user) return;
-    setIsStartingRefinement(packId);
-    const toastId = showLoading("Starting refinement pass...");
-    try {
-      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-vto-refinement-pass', {
-        body: { pack_id: packId, user_id: session.user.id }
-      });
-      if (error) throw error;
-      dismissToast(toastId);
-      showSuccess(data.message);
-      queryClient.invalidateQueries({ queryKey: ['vtoQaReportsAndPacks', session.user.id] });
-    } catch (err: any) {
-      dismissToast(toastId);
-      showError(`Failed to start refinement pass: ${err.message}`);
-    } finally {
-      setIsStartingRefinement(null);
-    }
-  };
-
   if (isLoading) {
     return <div className="space-y-4"><Skeleton className="h-20 w-full" /><Skeleton className="h-20 w-full" /></div>;
   }
@@ -232,89 +150,40 @@ export const RecentVtoPacks = () => {
     return <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Error</AlertTitle><AlertDescription>{error.message}</AlertDescription></Alert>;
   }
 
-  if (!queryData?.packs || queryData.packs.length === 0) {
+  if (packSummaries.length === 0) {
     return <p className="text-center text-muted-foreground py-8">No recent batch jobs found.</p>;
   }
 
   return (
-    <>
-      <Accordion type="single" collapsible className="w-full space-y-4" onValueChange={setOpenPackId}>
-        {packSummaries.map(pack => {
-          const isRefinementPack = !!pack.metadata?.refinement_of_pack_id;
-          const hasRefinementPass = pack.has_refinement_pass;
-
-          return (
-            <AccordionItem key={pack.pack_id} value={pack.pack_id} className="border rounded-md">
-              <div className="flex items-center p-4">
-                <AccordionTrigger className="flex-1 text-left p-0 hover:no-underline">
-                  <div className="text-left">
-                    <p className="font-semibold flex items-center gap-2">
-                      {isRefinementPack && <Wand2 className="h-5 w-5 text-purple-500" />}
-                      <span>{pack.metadata?.name || `Pack from ${new Date(pack.created_at).toLocaleString()}`}</span>
-                    </p>
-                    <div className="flex items-center gap-2 mt-2">
-                      <Progress value={(pack.completed_jobs / (pack.metadata?.total_pairs || 1)) * 100} className="h-2 w-32" />
-                      <p className="text-sm text-muted-foreground">
-                        {pack.completed_jobs} / {pack.metadata?.total_pairs || pack.total_jobs} completed
-                      </p>
-                    </div>
-                  </div>
-                </AccordionTrigger>
-                <div className="flex items-center gap-2 pl-4">
-                  {!isRefinementPack && (
-                      hasRefinementPass ? (
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button variant="secondary" size="sm" disabled={isStartingRefinement === pack.pack_id} onClick={(e) => e.stopPropagation()}>
-                              {isStartingRefinement === pack.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
-                              Re-run Refinement Pass
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                This will permanently delete the existing refinement pass and all its associated images and jobs. A new refinement pass will then be created. This action cannot be undone.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Cancel</AlertDialogCancel>
-                              <AlertDialogAction onClick={() => handleStartRefinementPass(pack.pack_id)}>
-                                Yes, Reset and Re-run
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      ) : (
-                        <Button variant="secondary" size="sm" onClick={(e) => { e.stopPropagation(); handleStartRefinementPass(pack.pack_id); }} disabled={isStartingRefinement === pack.pack_id}>
-                          {isStartingRefinement === pack.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Wand2 className="h-4 w-4 mr-2" />}
-                          Start Refinement Pass
-                        </Button>
-                      )
-                    )}
-                  <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); setPackToAnalyze(pack); }}>
-                    {isAnalyzing === pack.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <BarChart2 className="h-4 w-4 mr-2" />}
-                    Analyze
-                  </Button>
-                  <Link to={`/vto-reports/${pack.pack_id}`} onClick={(e) => e.stopPropagation()}>
-                    <Button variant="outline" size="sm">View Report</Button>
-                  </Link>
+    <Accordion type="single" collapsible className="w-full space-y-4" onValueChange={setOpenPackId}>
+      {packSummaries.map(pack => (
+        <AccordionItem key={pack.pack_id} value={pack.pack_id} className="border rounded-md">
+          <div className="flex items-center p-4">
+            <AccordionTrigger className="flex-1 text-left p-0 hover:no-underline">
+              <div className="text-left">
+                <p className="font-semibold flex items-center gap-2">
+                  {pack.metadata?.refinement_of_pack_id && <Wand2 className="h-5 w-5 text-purple-500" />}
+                  <span>{pack.metadata?.name || `Pack from ${new Date(pack.created_at).toLocaleString()}`}</span>
+                </p>
+                <div className="flex items-center gap-2 mt-2">
+                  <Progress value={(pack.completed_jobs / (pack.metadata?.total_pairs || 1)) * 100} className="h-2 w-32" />
+                  <p className="text-sm text-muted-foreground">
+                    {pack.completed_jobs} / {pack.metadata?.total_pairs || pack.total_jobs} completed
+                  </p>
                 </div>
               </div>
-              <AccordionContent className="p-4 pt-0">
-                <VtoPackDetailView packId={pack.pack_id} isOpen={openPackId === pack.pack_id} />
-              </AccordionContent>
-            </AccordionItem>
-          )
-        })}
-      </Accordion>
-      <AnalyzePackModal
-        isOpen={!!packToAnalyze}
-        onClose={() => setPackToAnalyze(null)}
-        onAnalyze={handleAnalyzePack}
-        isLoading={isAnalyzing === packToAnalyze?.pack_id}
-        packName={packToAnalyze?.metadata?.name || `Pack from ${new Date(packToAnalyze?.created_at || '').toLocaleString()}`}
-      />
-    </>
+            </AccordionTrigger>
+            <div className="flex items-center gap-2 pl-4">
+              <Link to={`/vto-reports/${pack.pack_id}`} onClick={(e) => e.stopPropagation()}>
+                <Button variant="outline" size="sm">View Report</Button>
+              </Link>
+            </div>
+          </div>
+          <AccordionContent className="p-4 pt-0">
+            <VtoPackDetailView packId={pack.pack_id} isOpen={openPackId === pack.pack_id} />
+          </AccordionContent>
+        </AccordionItem>
+      ))}
+    </Accordion>
   );
 };
