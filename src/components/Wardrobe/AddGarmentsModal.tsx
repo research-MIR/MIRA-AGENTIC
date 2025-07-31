@@ -21,7 +21,7 @@ interface Garment {
   storage_path: string;
   attributes: {
     intended_gender: 'male' | 'female' | 'unisex';
-    type_of_fit: 'upper_body' | 'lower_body' | 'full_body' | 'shoes';
+    type_of_fit: 'upper body' | 'lower body' | 'full body' | 'shoes' | 'upper_body' | 'lower_body' | 'full_body';
     primary_color: string;
     style_tags?: string[];
   } | null;
@@ -114,7 +114,7 @@ export const AddGarmentsModal = ({ isOpen, onClose, packId, existingGarmentIds, 
           garmentId = newGarment.id;
         }
         
-        const zone = garmentAttributes?.type_of_fit;
+        const zone = garmentAttributes?.type_of_fit?.replace(/ /g, '_');
         if (zone && currentCounts[zone] < MAX_PER_ZONE) {
             if (garmentId && !existingGarmentIds.includes(garmentId)) {
                 itemsToInsert.push({ pack_id: packId, garment_id: garmentId });
@@ -152,16 +152,23 @@ export const AddGarmentsModal = ({ isOpen, onClose, packId, existingGarmentIds, 
   const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: (e) => handleFileUpload(e.dataTransfer.files) });
 
   const toggleSelection = (garment: Garment) => {
-    const zone = garment.attributes?.type_of_fit;
-    if (!zone) return;
+    const zoneWithSpaceOrUnderscore = garment.attributes?.type_of_fit;
+    if (!zoneWithSpaceOrUnderscore) return;
+
+    const zone = zoneWithSpaceOrUnderscore.replace(/ /g, '_'); // Standardize to underscore
 
     setSelectedIds(prev => {
       const newSet = new Set(prev);
       if (newSet.has(garment.id)) {
         newSet.delete(garment.id);
       } else {
-        const selectedInZone = Array.from(newSet).map(id => allGarments?.find(g => g.id === id)).filter(g => g?.attributes?.type_of_fit === zone).length;
-        if (existingCounts[zone] + selectedInZone < MAX_PER_ZONE) {
+        const selectedInZone = Array.from(newSet)
+          .map(id => allGarments?.find(g => g.id === id))
+          .filter(g => g?.attributes?.type_of_fit?.replace(/ /g, '_') === zone).length;
+        
+        const countInPack = existingCounts[zone] || 0;
+
+        if (countInPack + selectedInZone < MAX_PER_ZONE) {
           newSet.add(garment.id);
         } else {
           showError(`Cannot add more than ${MAX_PER_ZONE} items for the '${zone.replace(/_/g, ' ')}' category.`);
@@ -240,8 +247,8 @@ export const AddGarmentsModal = ({ isOpen, onClose, packId, existingGarmentIds, 
                 ) : allGarments && allGarments.length > 0 ? (
                   allGarments.map(garment => {
                     const isSelected = selectedIds.has(garment.id);
-                    const zone = garment.attributes?.type_of_fit;
-                    const isDisabled = zone ? existingCounts[zone] >= MAX_PER_ZONE : false;
+                    const zone = garment.attributes?.type_of_fit?.replace(/ /g, '_');
+                    const isDisabled = zone ? (existingCounts[zone] || 0) >= MAX_PER_ZONE : false;
                     return (
                       <div key={garment.id} className={cn("relative cursor-pointer", isDisabled && "opacity-50 cursor-not-allowed")} onClick={() => !isDisabled && toggleSelection(garment)}>
                         <SecureImageDisplay imageUrl={garment.storage_path} alt={garment.name} />
