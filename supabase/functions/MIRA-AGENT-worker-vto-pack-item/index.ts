@@ -32,20 +32,6 @@ function invokeNextStep(supabase: SupabaseClient, functionName: string, payload:
     });
 }
 
-async function triggerWatchdog(supabase: SupabaseClient, logPrefix: string) {
-  console.log(`${logPrefix} Job has terminated. Triggering watchdog to start next job.`);
-  for (let i = 0; i < 3; i++) {
-    const { error } = await supabase.functions.invoke('MIRA-AGENT-watchdog-background-jobs', { body: {} });
-    if (!error) {
-      console.log(`${logPrefix} Watchdog invoked successfully.`);
-      return;
-    }
-    console.error(`${logPrefix} Failed to invoke watchdog (attempt ${i + 1}/3):`, error.message);
-    if (i < 2) await new Promise(resolve => setTimeout(resolve, 1000));
-  }
-  console.error(`${logPrefix} CRITICAL: Failed to invoke watchdog after 3 attempts. Next job will start on the next cron schedule.`);
-}
-
 function parseStorageURL(url: string) {
     const u = new URL(url);
     const pathSegments = u.pathname.split('/');
@@ -213,9 +199,6 @@ serve(async (req) => {
         await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'failed', error_message: errorMessage }).eq('id', pair_job_id);
         return new Response(JSON.stringify({ error: errorMessage }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
     }
-  } finally {
-    // This block is guaranteed to run, even if an error is thrown.
-    await triggerWatchdog(supabase, logPrefix);
   }
 });
 
