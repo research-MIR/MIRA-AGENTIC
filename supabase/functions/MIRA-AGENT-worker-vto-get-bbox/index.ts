@@ -42,6 +42,19 @@ const safetySettings = [
     { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
 ];
 
+function extractJson(text: string): any {
+    const match = text.match(/```json\s*([\s\S]*?)\s*```/);
+    if (match && match[1]) {
+        return JSON.parse(match[1]);
+    }
+    try {
+        return JSON.parse(text);
+    } catch (e) {
+        console.error("Failed to parse JSON from model response:", text);
+        throw new Error("The model returned a response that could not be parsed as JSON.");
+    }
+}
+
 function parseStorageURL(url: string) {
     const u = new URL(url);
     const pathSegments = u.pathname.split('/');
@@ -125,7 +138,8 @@ serve(async (req) => {
     console.log("[BBox-Worker] Full LLM response:", result.text);
 
     // 5. Parse the response and scale the coordinates
-    const detectedBox = JSON.parse(result.text).person;
+    const responseJson = extractJson(result.text);
+    const detectedBox = responseJson.person;
     if (!detectedBox || detectedBox.y_min === undefined) {
       throw new Error("AI response did not contain a valid 'person' object with coordinates.");
     }
