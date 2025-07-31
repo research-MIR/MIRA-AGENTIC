@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { GoogleGenAI, Content, Part, HarmCategory, HarmBlockThreshold } from 'https://esm.sh/@google/genai@0.15.0';
+import { GoogleGenAI, Content, Part, HarmCategory, HarmBlockThreshold, GenerationResult } from 'https://esm.sh/@google/genai@0.15.0';
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
@@ -85,10 +85,22 @@ serve(async (req) => {
     if (fetchError) throw new Error(`Failed to fetch job ${pair_job_id}: ${fetchError.message}`);
     
     const { user_id, metadata } = job;
-    const { vto_image_base64, missing_item_type, auto_complete_pack_id } = metadata || {};
+    const { 
+        qa_best_image_base64: vto_image_base64,
+        outfit_completeness_analysis,
+        auto_complete_pack_id 
+    } = metadata || {};
+
+    const missing_item_type = outfit_completeness_analysis?.missing_items?.[0];
 
     if (!vto_image_base64 || !missing_item_type || !auto_complete_pack_id || !user_id) {
-      throw new Error("Job metadata is missing required fields: vto_image_base64, missing_item_type, auto_complete_pack_id, or user_id.");
+      const missingFields = [];
+      if (!vto_image_base64) missingFields.push('qa_best_image_base64');
+      if (!missing_item_type) missingFields.push('outfit_completeness_analysis.missing_items');
+      if (!auto_complete_pack_id) missingFields.push('auto_complete_pack_id');
+      if (!user_id) missingFields.push('user_id');
+      
+      throw new Error(`Job metadata is missing required fields: ${missingFields.join(', ')}.`);
     }
     
     console.log(`${logPrefix} Invoked. Missing item: '${missing_item_type}'.`);
