@@ -150,8 +150,7 @@ serve(async (req) => {
                 await handleReframe(supabase, job, logPrefix);
                 break;
             case 'awaiting_stylist_choice':
-                console.log(`${logPrefix} Job is awaiting stylist choice. Re-running completeness check to re-trigger stylist if needed.`);
-                await handleOutfitCompletenessCheck(supabase, job, logPrefix);
+                await handleStylistChoice(supabase, job, logPrefix);
                 break;
             case 'awaiting_auto_complete':
                 await handleAutoComplete(supabase, job, logPrefix);
@@ -454,6 +453,21 @@ async function handleOutfitCompletenessCheck(supabase: SupabaseClient, job: any,
   }
 }
 
+async function handleStylistChoice(supabase: SupabaseClient, job: any, logPrefix: string) {
+    console.log(`${logPrefix} Handling stylist choice.`);
+    const { metadata } = job;
+    const { chosen_completion_garment } = metadata;
+
+    if (!chosen_completion_garment) {
+        console.warn(`${logPrefix} Worker triggered in 'awaiting_stylist_choice' but no choice found. Re-invoking stylist.`);
+        invokeNextStep(supabase, 'MIRA-AGENT-stylist-chooser', { pair_job_id: job.id });
+        return;
+    }
+
+    console.log(`${logPrefix} Stylist has made a choice. Proceeding to auto-complete.`);
+    await handleAutoComplete(supabase, job, logPrefix);
+}
+
 async function handleAutoComplete(supabase: SupabaseClient, job: any, logPrefix: string) {
     console.log(`${logPrefix} Handling auto-complete step.`);
     const { metadata, user_id, id: parent_job_id } = job;
@@ -465,13 +479,12 @@ async function handleAutoComplete(supabase: SupabaseClient, job: any, logPrefix:
 
     console.log(`${logPrefix} Creating new VTO job to add chosen garment: ${chosen_completion_garment.name}`);
     
-    // Create a NEW job in the database for the auto-complete pass
     const { data: newJob, error: insertError } = await supabase.from('mira-agent-bitstudio-jobs').insert({
         user_id: user_id,
         vto_pack_job_id: job.vto_pack_job_id,
         mode: 'base',
-        status: 'pending', // Start as pending, watchdog will pick it up
-        source_person_image_url: job.metadata.qa_best_image_url, // The result of the first pass is the source for this pass
+        status: 'pending',
+        source_person_image_url: job.metadata.qa_best_image_url,
         source_garment_image_url: chosen_completion_garment.storage_path,
         metadata: {
             engine: 'google',
@@ -487,7 +500,6 @@ async function handleAutoComplete(supabase: SupabaseClient, job: any, logPrefix:
     const childJobId = newJob.id;
     console.log(`${logPrefix} Created new auto-complete job with ID: ${childJobId}`);
 
-    // Update the parent job to link to the new child job
     await supabase.from('mira-agent-bitstudio-jobs').update({
         status: 'awaiting_auto_complete',
         metadata: {
