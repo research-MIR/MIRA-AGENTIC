@@ -13,7 +13,6 @@ const STALLED_POLLER_THRESHOLD_SECONDS = 5;
 const STALLED_AGGREGATION_THRESHOLD_SECONDS = 20;
 const STALLED_PAIR_JOB_THRESHOLD_SECONDS = 30;
 const STALLED_GOOGLE_VTO_THRESHOLD_SECONDS = 5;
-const STALLED_QUEUED_VTO_THRESHOLD_SECONDS = 15; // Longer timeout for queued jobs to avoid race conditions
 const STALLED_REFRAME_THRESHOLD_SECONDS = 30;
 const STALLED_FIXER_THRESHOLD_SECONDS = 5;
 const STALLED_QA_REPORT_THRESHOLD_SECONDS = 5;
@@ -133,35 +132,31 @@ serve(async (req) => {
     } catch (e) { console.error(`[Watchdog-BG][${requestId}] Task 4 (Stalled Pair Jobs) failed:`, e.message); }
 
     try {
-      await recoverStalledJobs('mira-agent-bitstudio-jobs', ['processing', 'awaiting_reframe', 'awaiting_auto_complete'], STALLED_GOOGLE_VTO_THRESHOLD_SECONDS, 'MIRA-AGENT-worker-vto-pack-item', 'id', 'pair_job_id');
+      await recoverStalledJobs('mira-agent-bitstudio-jobs', ['processing', 'awaiting_reframe', 'awaiting_auto_complete', 'prepare_assets'], STALLED_GOOGLE_VTO_THRESHOLD_SECONDS, 'MIRA-AGENT-worker-vto-pack-item', 'id', 'pair_job_id', { 'metadata->>engine': 'google' });
     } catch (e) { console.error(`[Watchdog-BG][${requestId}] Task 5 (Stalled Google VTO) failed:`, e.message); }
-
-    try {
-      await recoverStalledJobs(
-        'mira-agent-bitstudio-jobs', 
-        ['queued'], 
-        STALLED_QUEUED_VTO_THRESHOLD_SECONDS, 
-        'MIRA-AGENT-worker-vto-pack-item', 
-        'id', 
-        'pair_job_id',
-        { 'metadata->>engine': 'google' }
-      );
-    } catch (e) { console.error(`[Watchdog-BG][${requestId}] Task 6 (Stalled Queued Google VTO) failed:`, e.message); }
 
     try {
       const { data: config } = await supabase.from('mira-agent-config').select('value').eq('key', 'VTO_CONCURRENCY_LIMIT').single();
       const concurrencyLimit = config?.value?.limit || 1;
-      const { count: runningJobsCount } = await supabase.from('mira-agent-bitstudio-jobs').select('id', { count: 'exact' }).in('status', ['queued', 'processing', 'awaiting_reframe', 'awaiting_auto_complete', 'fixing', 'prepare_assets']).eq('metadata->>engine', 'google');
+      const { count: runningJobsCount } = await supabase.from('mira-agent-bitstudio-jobs').select('id', { count: 'exact' }).in('status', ['processing', 'awaiting_reframe', 'awaiting_auto_complete', 'fixing', 'prepare_assets']).eq('metadata->>engine', 'google');
       const availableSlots = concurrencyLimit - (runningJobsCount || 0);
       if (availableSlots > 0) {
-        const { data: claimedJobs } = await supabase.rpc('claim_multiple_vto_jobs', { p_limit: availableSlots });
-        if (claimedJobs && claimedJobs.length > 0) {
-          const workerPromises = claimedJobs.map((job: { job_id: string }) => supabase.functions.invoke('MIRA-AGENT-worker-vto-pack-item', { body: { pair_job_id: job.job_id } }));
+        const { data: jobsToStart, error: claimError } = await supabase
+            .from('mira-agent-bitstudio-jobs')
+            .update({ status: 'processing', 'metadata.google_vto_step': 'start' })
+            .eq('status', 'pending')
+            .eq('metadata->>engine', 'google')
+            .limit(availableSlots)
+            .select('id');
+        if (claimError) throw claimError;
+
+        if (jobsToStart && jobsToStart.length > 0) {
+          const workerPromises = jobsToStart.map((job: { id: string }) => supabase.functions.invoke('MIRA-AGENT-worker-vto-pack-item', { body: { pair_job_id: job.id } }));
           await Promise.allSettled(workerPromises);
-          actionsTaken.push(`Started ${claimedJobs.length} new Google VTO workers.`);
+          actionsTaken.push(`Started ${jobsToStart.length} new Google VTO workers.`);
         }
       }
-    } catch (e) { console.error(`[Watchdog-BG][${requestId}] Task 7 (VTO Concurrency) failed:`, e.message); }
+    } catch (e) { console.error(`[Watchdog-BG][${requestId}] Task 7 (VTO Concurrency & Start) failed:`, e.message); }
 
     try {
       const { data: awaitingReframeJobs } = await supabase.from('mira-agent-bitstudio-jobs').select('id, metadata').eq('status', 'awaiting_reframe');
