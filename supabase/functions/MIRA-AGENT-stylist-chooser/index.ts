@@ -1,4 +1,4 @@
-import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
+import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { GoogleGenAI, Content, Part, HarmCategory, HarmBlockThreshold, GenerationResult } from 'https://esm.sh/@google/genai@0.15.0';
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
@@ -142,7 +142,7 @@ serve(async (req) => {
     });
 
     if (candidateGarments.length === 0) {
-      throw new Error(`The selected pack does not contain any garments of type '${missing_item_type}'.`);
+      throw new Error(`Auto-complete failed: The selected garment pack does not contain any items of the required type ('${missing_item_type.replace(/_/g, ' ')}').`);
     }
     console.log(`${logPrefix} Found ${candidateGarments.length} candidate garments of type '${missing_item_type}'.`);
 
