@@ -1,7 +1,7 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { AlertTriangle, Eye, History, Layers } from "lucide-react";
+import { AlertTriangle, Eye, History, Layers, Info } from "lucide-react";
 import { BitStudioJob } from "@/types/vto";
 import { SecureImageDisplay } from "./SecureImageDisplay";
 import { useState } from "react";
@@ -30,13 +30,16 @@ export const VtoJobDetailModal = ({ job, isOpen, onClose }: VtoJobDetailModalPro
 
   const isRefinementJob = !!job.metadata?.original_person_image_url_for_analysis;
   const isAutoCompleteJob = job.metadata?.pass_number === 2;
+  
+  const wasOutfitCheckSkipped = job.metadata?.outfit_analysis_skipped === true;
+  const outfitCheckError = job.metadata?.outfit_analysis_error;
 
   const getEngineName = (engine?: string) => {
     if (!engine) return 'Unknown';
     if (engine === 'google') return 'Google VTO';
     if (engine === 'bitstudio') return 'BitStudio VTO';
     if (engine === 'bitstudio_fallback') return 'BitStudio VTO (Fallback)';
-    return engine;
+    return engine.charAt(0).toUpperCase();
   };
 
   const beforeImageUrl = job.source_person_image_url;
@@ -107,6 +110,16 @@ export const VtoJobDetailModal = ({ job, isOpen, onClose }: VtoJobDetailModalPro
               </>
             )}
           </div>
+          {wasOutfitCheckSkipped && (
+            <Alert variant="default">
+              <Info className="h-4 w-4" />
+              <AlertTitle>Process Note</AlertTitle>
+              <AlertDescription>
+                The automated "Outfit Completeness" check was skipped.
+                {outfitCheckError && <p className="text-xs mt-1"><strong>Reason:</strong> {outfitCheckError}</p>}
+              </AlertDescription>
+            </Alert>
+          )}
           {isFailed && (
             <Alert variant="destructive">
               <AlertTriangle className="h-4 w-4" />

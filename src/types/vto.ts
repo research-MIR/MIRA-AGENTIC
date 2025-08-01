@@ -22,7 +22,9 @@ export interface BitStudioJob {
       mismatch_reason: string | null;
       fix_suggestion: string | null;
       error?: string;
-    }
+    };
+    outfit_analysis_skipped?: boolean;
+    outfit_analysis_error?: string;
   };
 }
 
