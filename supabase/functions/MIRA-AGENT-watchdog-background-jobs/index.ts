@@ -260,16 +260,7 @@ serve(async (req) => {
     } catch (e) { console.error(`[Watchdog-BG][${requestId}] Task 19 (Auto-Complete Check) failed:`, e.message); }
 
     try {
-      const { data: readyForAutoComplete } = await supabase.from('mira-agent-bitstudio-jobs').select('id').eq('status', 'awaiting_auto_complete');
-      if (readyForAutoComplete && readyForAutoComplete.length > 0) {
-        const autoCompletePromises = readyForAutoComplete.map(job => supabase.functions.invoke('MIRA-AGENT-worker-vto-pack-item', { body: { pair_job_id: job.id } }));
-        await Promise.allSettled(autoCompletePromises);
-        actionsTaken.push(`Re-triggered ${readyForAutoComplete.length} workers for auto-complete.`);
-      }
-    } catch (e) { console.error(`[Watchdog-BG][${requestId}] Task 20 (Auto-Complete Trigger) failed:`, e.message); }
-
-    try {
-      await recoverStalledJobs('mira-agent-bitstudio-jobs', ['awaiting_stylist_choice'], STALLED_STYLIST_CHOICE_THRESHOLD_SECONDS, 'MIRA-AGENT-worker-vto-pack-item', 'id', 'pair_job_id');
+      await recoverStalledJobs('mira-agent-bitstudio-jobs', ['awaiting_stylist_choice'], STALLED_STYLIST_CHOICE_THRESHOLD_SECONDS, 'MIRA-AGENT-stylist-chooser', 'id', 'pair_job_id');
     } catch (e) { console.error(`[Watchdog-BG][${requestId}] Task 21 (Stalled Stylist) failed:`, e.message); }
 
     const finalMessage = actionsTaken.length > 0 ? actionsTaken.join(' ') : "No actions required. All jobs are running normally.";

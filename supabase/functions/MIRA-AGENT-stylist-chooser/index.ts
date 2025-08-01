@@ -35,11 +35,27 @@ const systemPrompt = `You are an expert AI Fashion Stylist. You will be given an
 ### Your Output:
 Your entire response MUST be a single, valid JSON object with two keys: "best_garment_index" (the number of the best candidate image) and "reasoning" (a brief explanation for your choice).
 
-**Example Output:**
+**Example Output 1 (Incomplete):**
 \`\`\`json
 {
   "best_garment_index": 2,
   "reasoning": "Candidate 2, the dark wash denim jeans, provides a classic and complementary contrast to the white t-shirt in the main image, creating a timeless casual look."
+}
+\`\`\`
+
+**Example Output 2 (Incomplete):**
+\`\`\`json
+{
+  "best_garment_index": 0,
+  "reasoning": "The black leather boots in Candidate 0 are the most versatile and stylistically appropriate choice for the punk-rock aesthetic of the jacket."
+}
+\`\`\`
+
+**Example Output 3 (Complete):**
+\`\`\`json
+{
+  "best_garment_index": 1,
+  "reasoning": "The model is wearing the generated pants, a plausible t-shirt, and sneakers, forming a complete casual outfit."
 }
 \`\`\`
 `;
@@ -172,14 +188,16 @@ serve(async (req) => {
         }
     }
 
-    // Update the job with the chosen garment. DO NOT change the status.
-    console.log(`${logPrefix} Updating job with chosen garment. The status remains 'awaiting_stylist_choice'.`);
+    // Update the job with the chosen garment AND advance the state.
+    console.log(`${logPrefix} Updating job with chosen garment and advancing status to 'awaiting_auto_complete'.`);
     const { error: updateError } = await supabase
       .from('mira-agent-bitstudio-jobs')
       .update({
+        status: 'awaiting_auto_complete', // Advance the state
         metadata: {
           ...metadata,
-          chosen_completion_garment: chosenGarment
+          chosen_completion_garment: chosenGarment,
+          google_vto_step: 'awaiting_auto_complete' // Also update the step tracker
         }
       })
       .eq('id', pair_job_id);
@@ -189,12 +207,12 @@ serve(async (req) => {
     }
 
     // Re-invoke the worker to proceed to the next step.
-    console.log(`${logPrefix} Invoking the VTO worker to continue the process.`);
+    console.log(`${logPrefix} Invoking the VTO worker to continue the process from the new state.`);
     supabase.functions.invoke('MIRA-AGENT-worker-vto-pack-item', {
         body: { pair_job_id: pair_job_id }
     }).catch(console.error);
 
-    return new Response(JSON.stringify({ success: true, message: "Stylist choice has been saved to the job." }), {
+    return new Response(JSON.stringify({ success: true, message: "Stylist choice has been saved and the next step has been triggered." }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });

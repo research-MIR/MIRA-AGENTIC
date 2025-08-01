@@ -137,15 +137,13 @@ serve(async (req) => {
             case 'reframe':
                 await handleReframe(supabase, job, logPrefix);
                 break;
-            case 'awaiting_stylist_choice':
-                await handleAwaitingStylistChoice(supabase, job, logPrefix);
-                break;
             case 'awaiting_auto_complete':
                 await handleAutoComplete(supabase, job, logPrefix);
                 break;
             case 'done':
             case 'fallback_to_bitstudio':
-                console.log(`${logPrefix} Job is already in a terminal or waiting state ('${step}'). Exiting gracefully.`);
+            case 'awaiting_stylist_choice': // This state is now handled by the stylist-chooser
+                console.log(`${logPrefix} Job is in a waiting or terminal state ('${step}'). Exiting gracefully.`);
                 break;
             default:
                 throw new Error(`Unknown step: ${step}`);
@@ -433,46 +431,6 @@ async function handleOutfitCompletenessCheck(supabase: SupabaseClient, job: any,
         invokeNextStep(supabase, 'MIRA-AGENT-stylist-chooser', { pair_job_id: job.id });
         console.log(`${logPrefix} Stylist invoked. Worker is now paused for this job.`);
     }
-}
-
-async function handleAwaitingStylistChoice(supabase: SupabaseClient, job: any, logPrefix: string) {
-    console.log(`${logPrefix} Attempting to claim job for stylist choice processing.`);
-    const { data: claimedJob, error: claimError } = await supabase
-      .from('mira-agent-bitstudio-jobs')
-      .update({ 
-          status: 'processing',
-          metadata: { ...job.metadata, google_vto_step: 'processing_stylist_choice' } 
-      })
-      .eq('id', job.id)
-      .eq('status', 'awaiting_stylist_choice')
-      .select('*')
-      .single();
-
-    if (claimError) {
-        console.error(`${logPrefix} Error claiming job:`, claimError.message);
-        throw claimError;
-    }
-
-    if (!claimedJob) {
-        console.log(`${logPrefix} Job was already claimed by another worker instance. Exiting.`);
-        return;
-    }
-
-    console.log(`${logPrefix} Job claimed successfully. Proceeding with stylist choice logic.`);
-    await handleStylistChoice(supabase, claimedJob, logPrefix);
-}
-
-async function handleStylistChoice(supabase: SupabaseClient, job: any, logPrefix: string) {
-    console.log(`${logPrefix} Handling stylist choice.`);
-    const { metadata } = job;
-    const { chosen_completion_garment } = metadata;
-    if (!chosen_completion_garment) {
-        console.warn(`${logPrefix} Worker triggered in 'awaiting_stylist_choice' but no choice found. Re-invoking stylist.`);
-        invokeNextStep(supabase, 'MIRA-AGENT-stylist-chooser', { pair_job_id: job.id });
-        return;
-    }
-    console.log(`${logPrefix} Stylist has made a choice. Proceeding to auto-complete.`);
-    await handleAutoComplete(supabase, job, logPrefix);
 }
 
 async function handleAutoComplete(supabase: SupabaseClient, job: any, logPrefix: string) {
