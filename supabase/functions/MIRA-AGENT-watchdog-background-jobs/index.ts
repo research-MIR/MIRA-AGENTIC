@@ -13,7 +13,7 @@ const STALLED_POLLER_THRESHOLD_SECONDS = 5;
 const STALLED_AGGREGATION_THRESHOLD_SECONDS = 20;
 const STALLED_PAIR_JOB_THRESHOLD_SECONDS = 30;
 const STALLED_GOOGLE_VTO_THRESHOLD_SECONDS = 5;
-const STALLED_QUEUED_VTO_THRESHOLD_SECONDS = 15; // New threshold for jobs that fail to start
+const STALLED_QUEUED_VTO_THRESHOLD_SECONDS = 15; // Longer timeout for queued jobs to avoid race conditions
 const STALLED_REFRAME_THRESHOLD_SECONDS = 30;
 const STALLED_FIXER_THRESHOLD_SECONDS = 5;
 const STALLED_QA_REPORT_THRESHOLD_SECONDS = 5;
@@ -116,12 +116,14 @@ serve(async (req) => {
       const { data: stalledPairJobs, error: stalledPairError } = await supabase.from('mira-agent-batch-inpaint-pair-jobs').select('id, status, metadata').in('status', ['segmenting', 'delegated', 'processing_step_2']).lt('updated_at', pairJobThreshold);
       if (stalledPairError) throw stalledPairError;
       if (stalledPairJobs && stalledPairJobs.length > 0) {
-        console.log(`[Watchdog-BG][${requestId}] Found ${stalledPairJobs.length} stalled pair job(s). Re-triggering...`);
+        console.log(`[Watchdog-BG][${requestId}] Found ${stalledPairJobs.length} stalled pair job(s). Re-triggering appropriate workers...`);
         const retryPromises = stalledPairJobs.map(async (job) => {
           const { count, error: updateError } = await supabase.from('mira-agent-batch-inpaint-pair-jobs').update({ updated_at: new Date().toISOString() }).eq('id', job.id).lt('updated_at', pairJobThreshold);
-          if (updateError || !count) return;
-          if (job.status === 'segmenting') await supabase.functions.invoke('MIRA-AGENT-worker-batch-inpaint', { body: { pair_job_id: job.id } });
-          else if ((job.status === 'delegated' || job.status === 'processing_step_2') && job.metadata?.debug_assets?.expanded_mask_url) {
+          if (updateError || !count) return; // Skip if error or already handled
+
+          if (job.status === 'segmenting') {
+            await supabase.functions.invoke('MIRA-AGENT-worker-batch-inpaint', { body: { pair_job_id: job.id } });
+          } else if ((job.status === 'delegated' || job.status === 'processing_step_2') && job.metadata?.debug_assets?.expanded_mask_url) {
             await supabase.functions.invoke('MIRA-AGENT-worker-batch-inpaint-step2', { body: { pair_job_id: job.id, final_mask_url: job.metadata.debug_assets.expanded_mask_url } });
           }
         });
@@ -134,7 +136,6 @@ serve(async (req) => {
       await recoverStalledJobs('mira-agent-bitstudio-jobs', ['processing', 'awaiting_reframe', 'awaiting_auto_complete'], STALLED_GOOGLE_VTO_THRESHOLD_SECONDS, 'MIRA-AGENT-worker-vto-pack-item', 'id', 'pair_job_id');
     } catch (e) { console.error(`[Watchdog-BG][${requestId}] Task 5 (Stalled Google VTO) failed:`, e.message); }
 
-    // NEW RECOVERY TASK FOR STALLED 'QUEUED' GOOGLE VTO JOBS
     try {
       await recoverStalledJobs(
         'mira-agent-bitstudio-jobs', 
