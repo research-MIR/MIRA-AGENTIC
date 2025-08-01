@@ -142,17 +142,11 @@ serve(async (req) => {
       const availableSlots = concurrencyLimit - (runningJobsCount || 0);
       if (availableSlots > 0) {
         const { data: jobsToStart, error: claimError } = await supabase
-            .from('mira-agent-bitstudio-jobs')
-            .update({ status: 'processing', 'metadata.google_vto_step': 'start' })
-            .eq('status', 'pending')
-            .eq('metadata->>engine', 'google')
-            .order('created_at', { ascending: true })
-            .limit(availableSlots)
-            .select('id');
+            .rpc('claim_next_vto_google_jobs', { p_limit: availableSlots });
         if (claimError) throw claimError;
 
         if (jobsToStart && jobsToStart.length > 0) {
-          const workerPromises = jobsToStart.map((job: { id: string }) => supabase.functions.invoke('MIRA-AGENT-worker-vto-pack-item', { body: { pair_job_id: job.id } }));
+          const workerPromises = jobsToStart.map((job: { job_id: string }) => supabase.functions.invoke('MIRA-AGENT-worker-vto-pack-item', { body: { pair_job_id: job.job_id } }));
           await Promise.allSettled(workerPromises);
           actionsTaken.push(`Started ${jobsToStart.length} new Google VTO workers.`);
         }
