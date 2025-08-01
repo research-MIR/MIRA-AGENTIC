@@ -12,7 +12,7 @@ const corsHeaders = {
 const STALLED_POLLER_THRESHOLD_SECONDS = 5;
 const STALLED_AGGREGATION_THRESHOLD_SECONDS = 20;
 const STALLED_PAIR_JOB_THRESHOLD_SECONDS = 30;
-const STALLED_GOOGLE_VTO_THRESHOLD_SECONDS = 5;
+const STALLED_GOOGLE_VTO_THRESHOLD_SECONDS = 15; // Increased to handle longer asset prep
 const STALLED_REFRAME_THRESHOLD_SECONDS = 30;
 const STALLED_FIXER_THRESHOLD_SECONDS = 5;
 const STALLED_QA_REPORT_THRESHOLD_SECONDS = 5;
@@ -146,6 +146,7 @@ serve(async (req) => {
             .update({ status: 'processing', 'metadata.google_vto_step': 'start' })
             .eq('status', 'pending')
             .eq('metadata->>engine', 'google')
+            .order('created_at', { ascending: true })
             .limit(availableSlots)
             .select('id');
         if (claimError) throw claimError;
