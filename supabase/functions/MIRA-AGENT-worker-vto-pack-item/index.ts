@@ -394,8 +394,9 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
     if (qaData.action === 'select') {
         console.log(`${logPrefix} QA selected an image. Proceeding to finalize.`);
         const bestImageBase64 = variations[qaData.best_image_index].base64Image;
+        const bestImageUrl = await uploadBase64ToStorage(supabase, bestImageBase64, job.user_id, 'qa_best.png');
         await supabase.from('mira-agent-bitstudio-jobs').update({
-            metadata: { ...metadata, qa_history: qa_history, qa_best_image_base64: bestImageBase64, google_vto_step: 'outfit_completeness_check' }
+            metadata: { ...metadata, qa_history: qa_history, qa_best_image_base64: bestImageBase64, qa_best_image_url: bestImageUrl.publicUrl, google_vto_step: 'outfit_completeness_check' }
         }).eq('id', job.id);
         invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
     }
@@ -482,11 +483,14 @@ async function handleQualityCheckPass2(supabase: SupabaseClient, job: any, logPr
     const variations = metadata.generated_variations || [];
     if (!variations || variations.length === 0) throw new Error("No variations found for Pass 2 quality check.");
 
-    const garmentBlob = await safeDownload(supabase, job.source_garment_image_url, logPrefix);
+    const [personBlob, garmentBlob] = await Promise.all([
+        safeDownload(supabase, job.source_person_image_url, logPrefix),
+        safeDownload(supabase, job.source_garment_image_url, logPrefix)
+    ]);
 
     const { data: qaData, error } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-quality-checker', {
         body: {
-            original_person_image_base64: metadata.qa_best_image_base64,
+            original_person_image_base64: await blobToBase64(personBlob),
             reference_garment_image_base64: await blobToBase64(garmentBlob),
             generated_images_base64: variations.map(img => img.base64Image),
             is_escalation_check: true,
@@ -520,11 +524,14 @@ async function handleQualityCheckPass3(supabase: SupabaseClient, job: any, logPr
     const variations = metadata.generated_variations || [];
     if (!variations || variations.length === 0) throw new Error("No variations found for Pass 3 quality check.");
 
-    const garmentBlob = await safeDownload(supabase, job.source_garment_image_url, logPrefix);
+    const [personBlob, garmentBlob] = await Promise.all([
+        safeDownload(supabase, job.source_person_image_url, logPrefix),
+        safeDownload(supabase, job.source_garment_image_url, logPrefix)
+    ]);
 
     const { data: qaData, error } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-quality-checker', {
         body: {
-            original_person_image_base64: metadata.qa_best_image_base64,
+            original_person_image_base64: await blobToBase64(personBlob),
             reference_garment_image_base64: await blobToBase64(garmentBlob),
             generated_images_base64: variations.map(img => img.base64Image),
             is_escalation_check: true,
