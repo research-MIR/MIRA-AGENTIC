@@ -139,6 +139,9 @@ serve(async (req) => {
             case 'outfit_completeness_check':
                 await handleOutfitCompletenessCheck(supabase, job, logPrefix);
                 break;
+            case 'awaiting_auto_complete':
+                await handleAutoComplete(supabase, job, logPrefix);
+                break;
             case 'reframe':
                 await handleReframe(supabase, job, logPrefix);
                 break;
