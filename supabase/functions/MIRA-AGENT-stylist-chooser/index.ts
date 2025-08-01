@@ -20,42 +20,29 @@ const safetySettings = [
     { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
 ];
 
-const systemPrompt = `You are an expert AI Fashion Stylist. You will be given an image of a model wearing an incomplete outfit and a selection of candidate garments. Your task is to choose the single best garment from the candidates that stylistically completes the outfit.
+const systemPrompt = `You are an expert AI Fashion Stylist. You will be given an image of a model wearing an incomplete outfit, a selection of candidate garments, and a context for your choice. Your task is to choose the single best garment from the candidates that stylistically completes the outfit.
 
 ### Your Inputs:
 - **MAIN IMAGE:** The image of the model.
 - **MISSING ITEM TYPE:** The category of clothing that is missing (e.g., 'lower_body', 'shoes').
 - **CANDIDATE IMAGES:** A numbered list of available garments that fit the missing category.
+- **CONTEXT:** A string explaining the origin of the candidate garments. This is the most important piece of information to guide your decision.
 
 ### Your Logic:
 1.  **Analyze the Main Image:** Assess the style, color palette, and overall aesthetic of the garment(s) the model is already wearing.
-2.  **Evaluate Candidates:** For each candidate image, determine if it stylistically complements the main image.
-3.  **Make a Decision:** Choose the single best option. If multiple options are good, choose the one that creates the most cohesive and fashionable look.
+2.  **Evaluate Candidates based on Context:**
+    - If the context is **"choice from the model's preferred wardrobe"**, this means the candidates are items the model has worn before. Your primary goal is to maintain stylistic consistency with the model's established look. Choose the item that best fits their personal style.
+    - If the context is **"general stylistic choice"**, you have more creative freedom. Choose the item that creates the most cohesive and fashionable look, even if it introduces a new style.
+3.  **Make a Decision:** Choose the single best option.
 
 ### Your Output:
 Your entire response MUST be a single, valid JSON object with two keys: "best_garment_index" (the number of the best candidate image) and "reasoning" (a brief explanation for your choice).
 
-**Example Output 1 (Incomplete):**
+**Example Output:**
 \`\`\`json
 {
   "best_garment_index": 2,
   "reasoning": "Candidate 2, the dark wash denim jeans, provides a classic and complementary contrast to the white t-shirt in the main image, creating a timeless casual look."
-}
-\`\`\`
-
-**Example Output 2 (Incomplete):**
-\`\`\`json
-{
-  "best_garment_index": 0,
-  "reasoning": "The black leather boots in Candidate 0 are the most versatile and stylistically appropriate choice for the punk-rock aesthetic of the jacket."
-}
-\`\`\`
-
-**Example Output 3 (Complete):**
-\`\`\`json
-{
-  "best_garment_index": 1,
-  "reasoning": "The model is wearing the generated pants, a plausible t-shirt, and sneakers, forming a complete casual outfit."
 }
 \`\`\`
 `;
@@ -104,7 +91,8 @@ serve(async (req) => {
     const { 
         qa_best_image_base64: vto_image_base64,
         outfit_completeness_analysis,
-        auto_complete_pack_id 
+        auto_complete_pack_id,
+        model_generation_job_id
     } = metadata || {};
 
     const missing_item_type = outfit_completeness_analysis?.missing_items?.[0];
@@ -146,21 +134,56 @@ serve(async (req) => {
     }
     console.log(`${logPrefix} Found ${candidateGarments.length} candidate garments of type '${missing_item_type}'.`);
 
+    // --- NEW MODEL-BASED MATCHING LOGIC ---
+    let garmentsForStylist = candidateGarments;
+    let choiceContext = "general stylistic choice";
+
+    if (model_generation_job_id) {
+        console.log(`${logPrefix} Model ID found: ${model_generation_job_id}. Querying model's wardrobe...`);
+        const { data: wornHashesData, error: wornHashesError } = await supabase
+            .from('mira-agent-bitstudio-jobs')
+            .select('metadata->garment_analysis->>hash')
+            .eq('metadata->>model_generation_job_id', model_generation_job_id)
+            .in('status', ['complete', 'done'])
+            .not('metadata->garment_analysis->>hash', 'is', null);
+        
+        if (wornHashesError) {
+            console.warn(`${logPrefix} Could not query model's wardrobe. Falling back to general choice. Error: ${wornHashesError.message}`);
+        } else {
+            const wornGarmentHashes = new Set(wornHashesData.map((item: any) => item.hash).filter(Boolean));
+            console.log(`${logPrefix} Model has previously worn ${wornGarmentHashes.size} unique garments.`);
+
+            const preferredCandidates = candidateGarments.filter(g => g.image_hash && wornGarmentHashes.has(g.image_hash));
+            
+            if (preferredCandidates.length > 0) {
+                console.log(`${logPrefix} Found ${preferredCandidates.length} preferred candidates from the model's wardrobe.`);
+                garmentsForStylist = preferredCandidates;
+                choiceContext = "choice from the model's preferred wardrobe";
+            } else {
+                console.log(`${logPrefix} No preferred candidates found in the pack. Using general candidates.`);
+            }
+        }
+    } else {
+        console.log(`${logPrefix} No model ID found in job metadata. Using general candidates.`);
+    }
+    // --- END OF NEW LOGIC ---
+
     let chosenGarment;
 
-    if (candidateGarments.length === 1) {
+    if (garmentsForStylist.length === 1) {
         console.log(`${logPrefix} Only one candidate found. Selecting it automatically.`);
-        chosenGarment = candidateGarments[0];
+        chosenGarment = garmentsForStylist[0];
     } else {
         const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
         const parts: Part[] = [
             { text: `--- MAIN IMAGE ---` },
             { inlineData: { mimeType: 'image/png', data: vto_image_base64 } },
-            { text: `--- MISSING ITEM TYPE --- \n${missing_item_type}` }
+            { text: `--- MISSING ITEM TYPE --- \n${missing_item_type}` },
+            { text: `--- CONTEXT --- \n${choiceContext}` }
         ];
 
-        console.log(`${logPrefix} Downloading candidate images for analysis...`);
-        const candidateImagePromises = candidateGarments.map((garment, index) => 
+        console.log(`${logPrefix} Downloading ${garmentsForStylist.length} candidate images for analysis...`);
+        const candidateImagePromises = garmentsForStylist.map((garment, index) => 
             downloadImageAsPart(supabase, garment.storage_path, `CANDIDATE IMAGE ${index}`)
         );
         const candidateImagePartsArrays = await Promise.all(candidateImagePromises);
@@ -179,16 +202,15 @@ serve(async (req) => {
         const chosenIndex = choice.best_garment_index;
         console.log(`${logPrefix} AI Reasoning: "${choice.reasoning}"`);
 
-        if (typeof chosenIndex !== 'number' || chosenIndex < 0 || chosenIndex >= candidateGarments.length) {
+        if (typeof chosenIndex !== 'number' || chosenIndex < 0 || chosenIndex >= garmentsForStylist.length) {
             console.warn(`${logPrefix} AI returned an invalid index (${chosenIndex}). Selecting the first candidate as a fallback.`);
-            chosenGarment = candidateGarments[0];
+            chosenGarment = garmentsForStylist[0];
         } else {
             console.log(`${logPrefix} AI selected candidate index: ${chosenIndex}.`);
-            chosenGarment = candidateGarments[chosenIndex];
+            chosenGarment = garmentsForStylist[chosenIndex];
         }
     }
 
-    // Update the job with the chosen garment AND advance the state.
     console.log(`${logPrefix} Updating job with chosen garment and advancing status to 'awaiting_auto_complete'.`);
     const { error: updateError } = await supabase
       .from('mira-agent-bitstudio-jobs')
