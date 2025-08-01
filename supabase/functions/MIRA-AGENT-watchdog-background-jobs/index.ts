@@ -13,6 +13,7 @@ const STALLED_POLLER_THRESHOLD_SECONDS = 5;
 const STALLED_AGGREGATION_THRESHOLD_SECONDS = 20;
 const STALLED_PAIR_JOB_THRESHOLD_SECONDS = 30;
 const STALLED_GOOGLE_VTO_THRESHOLD_SECONDS = 5;
+const STALLED_QUEUED_VTO_THRESHOLD_SECONDS = 15; // New threshold for jobs that fail to start
 const STALLED_REFRAME_THRESHOLD_SECONDS = 30;
 const STALLED_FIXER_THRESHOLD_SECONDS = 5;
 const STALLED_QA_REPORT_THRESHOLD_SECONDS = 5;
@@ -44,13 +45,19 @@ serve(async (req) => {
     console.log(`[Watchdog-BG][${requestId}] Advisory lock acquired. Proceeding with checks.`);
     const actionsTaken: string[] = [];
 
-    const recoverStalledJobs = async (tableName: string, statuses: string[], thresholdSeconds: number, workerName: string, idColumnName = 'id', payloadKey = 'job_id') => {
+    const recoverStalledJobs = async (tableName: string, statuses: string[], thresholdSeconds: number, workerName: string, idColumnName = 'id', payloadKey = 'job_id', extraFilters: Record<string, any> = {}) => {
       const threshold = new Date(Date.now() - thresholdSeconds * 1000).toISOString();
-      const { data: stalledJobs, error } = await supabase
+      let query = supabase
         .from(tableName)
         .select(idColumnName)
         .in('status', statuses)
         .lt('updated_at', threshold);
+
+      for (const key in extraFilters) {
+        query = query.eq(key, extraFilters[key]);
+      }
+
+      const { data: stalledJobs, error } = await query;
 
       if (error) {
         console.error(`[Watchdog-BG][${requestId}] Error querying stalled jobs in ${tableName}:`, error.message);
@@ -126,6 +133,19 @@ serve(async (req) => {
     try {
       await recoverStalledJobs('mira-agent-bitstudio-jobs', ['processing', 'awaiting_reframe', 'awaiting_auto_complete'], STALLED_GOOGLE_VTO_THRESHOLD_SECONDS, 'MIRA-AGENT-worker-vto-pack-item', 'id', 'pair_job_id');
     } catch (e) { console.error(`[Watchdog-BG][${requestId}] Task 5 (Stalled Google VTO) failed:`, e.message); }
+
+    // NEW RECOVERY TASK FOR STALLED 'QUEUED' GOOGLE VTO JOBS
+    try {
+      await recoverStalledJobs(
+        'mira-agent-bitstudio-jobs', 
+        ['queued'], 
+        STALLED_QUEUED_VTO_THRESHOLD_SECONDS, 
+        'MIRA-AGENT-worker-vto-pack-item', 
+        'id', 
+        'pair_job_id',
+        { 'metadata->>engine': 'google' }
+      );
+    } catch (e) { console.error(`[Watchdog-BG][${requestId}] Task 6 (Stalled Queued Google VTO) failed:`, e.message); }
 
     try {
       const { data: config } = await supabase.from('mira-agent-config').select('value').eq('key', 'VTO_CONCURRENCY_LIMIT').single();
