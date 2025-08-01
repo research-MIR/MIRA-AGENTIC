@@ -384,7 +384,7 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
             console.log(`${logPrefix} QA requested a retry. Incrementing retry count and starting next generation pass.`);
             const nextStep = `generate_step_${qa_retry_count + 2}`;
             await supabase.from('mira-agent-bitstudio-jobs').update({
-                metadata: { ...metadata, qa_history: qa_history, qa_retry_count: qa_retry_count + 1, google_vto_step: nextStep, generated_variations: [] }
+                metadata: { ...metadata, qa_history: qa_history, qa_retry_count: qa_retry_count + 1, google_vto_step: nextStep, generated_variations: variations }
             }).eq('id', pair_job_id);
             invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
             return;
@@ -506,7 +506,7 @@ async function handleQualityCheckPass2(supabase: SupabaseClient, job: any, logPr
     if (qaData.action === 'retry') {
         console.log(`${logPrefix} QA requested a retry on Pass 2. Starting Pass 3.`);
         await supabase.from('mira-agent-bitstudio-jobs').update({
-            metadata: { ...metadata, qa_history: qa_history, qa_retry_count: 2, google_vto_step: 'generate_step_3', generated_variations: [] }
+            metadata: { ...metadata, qa_history: qa_history, qa_retry_count: 2, google_vto_step: 'generate_step_3', generated_variations: variations }
         }).eq('id', pair_job_id);
         invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
     } else {
