@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { GoogleGenAI, HarmCategory, HarmBlockThreshold } from 'https://esm.sh/@google/genai@0.15.0';
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-const MODEL_NAME = "gemini-2.5-flashgemini-2.5-flash-lite";
+const MODEL_NAME = "gemini-2.5-flash-lite-preview-06-17";
 const MAX_RETRIES = 9;
 const RETRY_DELAY_MS = 45000;
 const corsHeaders = {
