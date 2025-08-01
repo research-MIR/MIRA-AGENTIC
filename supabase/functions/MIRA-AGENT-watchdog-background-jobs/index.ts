@@ -143,7 +143,7 @@ serve(async (req) => {
 
     try {
       console.log(`[Watchdog-BG][${requestId}] === Task 5: Recovering Stalled Google VTO ===`);
-      await recoverStalledJobs('mira-agent-bitstudio-jobs', ['processing'], STALLED_GOOGLE_VTO_THRESHOLD_SECONDS, 'MIRA-AGENT-worker-vto-pack-item', 'id', 'pair_job_id', { 'metadata->>engine': 'google' });
+      await recoverStalledJobs('mira-agent-bitstudio-jobs', ['processing', 'fixing', 'prepare_assets', 'awaiting_auto_complete'], STALLED_GOOGLE_VTO_THRESHOLD_SECONDS, 'MIRA-AGENT-worker-vto-pack-item', 'id', 'pair_job_id', { 'metadata->>engine': 'google' });
     } catch (e) { console.error(`[Watchdog-BG][${requestId}] Task 5 (Stalled Google VTO) failed:`, e.message); }
 
     try {
