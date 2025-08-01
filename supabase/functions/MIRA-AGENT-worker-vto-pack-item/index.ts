@@ -369,7 +369,7 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
 
     if (error) throw new Error(error.message || 'QA tool invocation failed.');
     if (qaData.error) {
-        console.warn(`[VTO-Pack-Worker-QA][${job.id}] The quality checker tool reported an internal failure: ${qaData.error}. Treating this as a failed check and retrying.`);
+        console.log(`[VTO-Pack-Worker-QA][${job.id}] The quality checker tool reported an internal failure: ${qaData.error}. Treating this as a failed check and retrying.`);
         qaData.action = 'retry';
         qaData.reasoning = `QA tool failed with error: ${qaData.error}. Retrying generation pass.`;
     }
@@ -454,16 +454,25 @@ async function handleOutfitCompletenessCheck(supabase: SupabaseClient, job: any,
 async function handleAutoComplete(supabase: SupabaseClient, job: any, logPrefix: string) {
     console.log(`${logPrefix} Handling auto-complete step.`);
     const { metadata, user_id, id: parent_job_id } = job;
-    const { chosen_completion_garment, qa_best_image_url } = metadata;
-    if (!chosen_completion_garment || !qa_best_image_url) {
-        throw new Error("Job is in auto-complete state but is missing chosen garment or the base image URL.");
+    const { chosen_completion_garment, qa_best_image_base64, qa_best_image_url } = metadata;
+
+    if (!chosen_completion_garment || (!qa_best_image_base64 && !qa_best_image_url)) {
+        throw new Error("Job is in auto-complete state but is missing chosen garment or the base image data/URL.");
     }
+
+    let personImageUrl = qa_best_image_url;
+    if (!personImageUrl) {
+        console.log(`${logPrefix} qa_best_image_url not found, generating from base64.`);
+        const uploadedImage = await uploadBase64ToStorage(supabase, qa_best_image_base64, user_id, 'qa_best_re-uploaded.png');
+        personImageUrl = uploadedImage.publicUrl;
+    }
+    
     console.log(`${logPrefix} Creating new VTO generation pass to add chosen garment: ${chosen_completion_garment.name}`);
 
     // Directly invoke the VTO tool instead of creating a new job record
     const { data: vtoResult, error: vtoError } = await supabase.functions.invoke('MIRA-AGENT-tool-virtual-try-on', {
         body: {
-            person_image_url: qa_best_image_url,
+            person_image_url: personImageUrl,
             garment_image_url: chosen_completion_garment.storage_path,
             sample_count: 1,
         }
@@ -516,6 +525,11 @@ async function handleQualityCheckPass2(supabase: SupabaseClient, job: any, logPr
     const qa_history = metadata.qa_history || [];
     qa_history.push({ pass_number: 2, ...qaData });
 
+    if (qaData.action === 'retry' && !ENABLE_BITSTUDIO_FALLBACK) {
+        console.warn(`[VTO-Pack-Worker-QA][${job.id}] Fallback disabled. QA requested retry on pass 2, but overriding to 'select' the best available image (index ${qaData.best_image_index}).`);
+        qaData.action = 'select';
+    }
+
     if (qaData.action === 'retry') {
         console.log(`${logPrefix} QA requested a retry on Pass 2. Starting Pass 3.`);
         await supabase.from('mira-agent-bitstudio-jobs').update({
@@ -556,6 +570,11 @@ async function handleQualityCheckPass3(supabase: SupabaseClient, job: any, logPr
 
     const qa_history = metadata.qa_history || [];
     qa_history.push({ pass_number: 3, ...qaData });
+
+    if (qaData.action === 'retry') {
+        console.warn(`[VTO-Pack-Worker-QA][${job.id}] Final pass QA requested a retry, which is forbidden. Overriding to 'select' the best available image (index ${qaData.best_image_index}).`);
+        qaData.action = 'select';
+    }
 
     const bestImageBase64 = variations[qaData.best_image_index].base64Image;
     await supabase.from('mira-agent-bitstudio-jobs').update({
