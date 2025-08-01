@@ -15,14 +15,14 @@ serve(async (req) => {
   }
 
   try {
-    const { pack_id, user_id } = await req.json();
+    const { pack_id, user_id, scope = 'successful_only' } = await req.json();
     if (!pack_id || !user_id) {
       throw new Error("pack_id and user_id are required.");
     }
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
     const logPrefix = `[VTO-Refinement-Orchestrator][${pack_id}]`;
-    console.log(`${logPrefix} Starting refinement pass for user ${user_id}.`);
+    console.log(`${logPrefix} Starting refinement pass for user ${user_id} with scope: ${scope}.`);
 
     // --- RESET LOGIC ---
     console.log(`${logPrefix} Calling RPC to reset any existing refinement pass...`);
@@ -46,14 +46,34 @@ serve(async (req) => {
     if (sourcePackError) throw new Error(`Failed to fetch source pack details: ${sourcePackError.message}`);
     const sourcePackName = sourcePack.metadata?.name || `Pack ${pack_id.substring(0, 8)}`;
 
-    // 2. Fetch all completed, first-pass jobs for the pack
+    // 2. Fetch jobs based on the selected scope
+    let jobIdsToRefine: string[] = [];
+    if (scope === 'successful_only') {
+        const { data: reports, error: reportsError } = await supabase
+            .from('mira-agent-vto-qa-reports')
+            .select('source_vto_job_id')
+            .eq('vto_pack_job_id', pack_id)
+            .eq('comparative_report->>overall_pass', 'true');
+        if (reportsError) throw reportsError;
+        jobIdsToRefine = reports.map((r: any) => r.source_vto_job_id);
+    } else { // 'all_completed'
+        const { data: jobs, error: jobsError } = await supabase
+            .from('mira-agent-bitstudio-jobs')
+            .select('id')
+            .eq('vto_pack_job_id', pack_id)
+            .in('status', ['complete', 'done']);
+        if (jobsError) throw jobsError;
+        jobIdsToRefine = jobs.map((j: any) => j.id);
+    }
+
+    if (jobIdsToRefine.length === 0) {
+        return new Response(JSON.stringify({ success: true, message: "No jobs found for the selected scope to refine." }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
     const { data: firstPassJobs, error: fetchError } = await supabase
       .from('mira-agent-bitstudio-jobs')
       .select('id, source_person_image_url, source_garment_image_url, final_image_url, metadata')
-      .eq('vto_pack_job_id', pack_id)
-      .eq('status', 'complete')
-      .not('final_image_url', 'is', null)
-      .or('metadata->>pass_number.is.null, metadata->>pass_number.neq.2');
+      .in('id', jobIdsToRefine);
 
     if (fetchError) throw new Error(`Failed to fetch first-pass jobs: ${fetchError.message}`);
     if (!firstPassJobs || firstPassJobs.length === 0) {

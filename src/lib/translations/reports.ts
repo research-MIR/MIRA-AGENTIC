@@ -35,6 +35,10 @@ export const reportsTranslations = {
     refineFailedJobsDescription: "Questo creerà un nuovo VTO pack contenente solo i {count} job falliti di questo pack. Potrai quindi eseguire un secondo pass di inpainting su di essi. Continuare?",
     refineFailedJobsAction: "Sì, Crea Pass di Affinamento",
     refinePack: "Affina Pack",
+    refineSuccessfulOnly: "Affina solo i Job Approvati dalla QA",
+    refineSuccessfulOnlyDesc: "Crea un pass di affinamento usando solo le immagini che hanno superato il controllo qualità automatico. Ideale per migliorare i tuoi migliori risultati.",
+    refineAllCompleted: "Affina Tutti i Job Completati",
+    refineAllCompletedDesc: "Include tutti i job che hanno prodotto un'immagine, anche quelli falliti. Utile per tentare di correggere i fallimenti.",
   },
   en: {
     vtoAnalysisReports: "VTO Analysis Reports",
@@ -72,5 +76,9 @@ export const reportsTranslations = {
     refineFailedJobsDescription: "This will create a new VTO pack containing only the {count} failed jobs from this pack. You can then run a second inpainting pass on them. Continue?",
     refineFailedJobsAction: "Yes, Create Refinement Pass",
     refinePack: "Refine Pack",
+    refineSuccessfulOnly: "Refine QA-Passed Jobs Only",
+    refineSuccessfulOnlyDesc: "Create a refinement pass using only the images that passed the automated quality check. Best for improving your top results.",
+    refineAllCompleted: "Refine All Completed Jobs",
+    refineAllCompletedDesc: "Includes all jobs that produced an image, even those that failed QA. Useful for attempting to fix failures.",
   },
 };

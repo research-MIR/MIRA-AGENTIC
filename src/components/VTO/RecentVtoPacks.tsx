@@ -16,7 +16,7 @@ import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast
 import { VtoPackDetailView } from '@/components/VTO/VtoPackDetailView';
 import { AnalyzePackModal, AnalysisScope } from '@/components/VTO/AnalyzePackModal';
 import { DownloadPackModal } from "@/components/VTO/DownloadPackModal";
-import { RefinePackModal } from "./RefinePackModal";
+import { RefinePackModal, RefineScope } from "./RefinePackModal";
 
 interface QaReport {
   id: string;
@@ -251,7 +251,7 @@ export const RecentVtoPacks = () => {
     }
   };
 
-  const handleStartRefinement = async () => {
+  const handleStartRefinement = async (scope: RefineScope) => {
     if (!packToRefine || !session?.user) return;
     setIsStartingRefinement(packToRefine.pack_id);
     const toastId = showLoading("Preparing refinement pass...");
@@ -261,6 +261,7 @@ export const RecentVtoPacks = () => {
             body: { 
                 pack_id: packToRefine.pack_id, 
                 user_id: session.user.id,
+                scope: scope
             }
         });
         if (error) throw error;
