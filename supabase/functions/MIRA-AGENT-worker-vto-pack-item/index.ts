@@ -18,6 +18,9 @@ const TEMP_UPLOAD_BUCKET = 'mira-agent-user-uploads';
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
 
 const ENABLE_BITSTUDIO_FALLBACK = false; // FEATURE FLAG
+const FAIL_ON_OUTFIT_ANALYSIS_ERROR = true; // FEATURE FLAG: If true, job fails on analysis error. If false, it skips and proceeds.
+const OUTFIT_ANALYSIS_MAX_RETRIES = 3;
+const OUTFIT_ANALYSIS_RETRY_DELAY_MS = 1000;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -548,19 +551,41 @@ async function handleOutfitCompletenessCheck(supabase: SupabaseClient, job: any,
     }
 
     let analysisData;
-    try {
-        const { data, error: analysisError } = await supabase.functions.invoke('MIRA-AGENT-analyzer-outfit-completeness', {
-            body: { image_to_analyze_base64: qa_best_image_base64, vto_garment_type: garment_analysis.type_of_fit }
-        });
-        if (analysisError) throw new Error(`Outfit completeness analysis failed: ${analysisError.message}`);
-        analysisData = data;
-    } catch (err) {
-        console.warn(`${logPrefix} Outfit completeness analysis step failed: ${err.message}. Skipping auto-complete and proceeding to reframe.`);
-        await supabase.from('mira-agent-bitstudio-jobs').update({
-            metadata: { ...metadata, google_vto_step: 'reframe', outfit_analysis_skipped: true, outfit_analysis_error: err.message }
-        }).eq('id', job.id);
-        await invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
-        return; // Exit this function call as we've already invoked the next step
+    let lastAnalysisError: Error | null = null;
+
+    for (let attempt = 1; attempt <= OUTFIT_ANALYSIS_MAX_RETRIES; attempt++) {
+        try {
+            console.log(`${logPrefix} Attempt ${attempt}/${OUTFIT_ANALYSIS_MAX_RETRIES} to analyze outfit completeness...`);
+            const { data, error: analysisError } = await supabase.functions.invoke('MIRA-AGENT-analyzer-outfit-completeness', {
+                body: { image_to_analyze_base64: qa_best_image_base64, vto_garment_type: garment_analysis.type_of_fit }
+            });
+            if (analysisError) throw new Error(`Outfit completeness analysis failed: ${analysisError.message}`);
+            analysisData = data;
+            lastAnalysisError = null; // Clear error on success
+            break; // Success, exit loop
+        } catch (err) {
+            lastAnalysisError = err instanceof Error ? err : new Error(String(err));
+            console.warn(`${logPrefix} Outfit completeness analysis attempt ${attempt} failed: ${lastAnalysisError.message}`);
+            if (attempt < OUTFIT_ANALYSIS_MAX_RETRIES) {
+                await new Promise(resolve => setTimeout(resolve, OUTFIT_ANALYSIS_RETRY_DELAY_MS * attempt));
+            }
+        }
+    }
+
+    if (lastAnalysisError) {
+        console.error(`${logPrefix} Outfit completeness analysis failed after all retries. Final error: ${lastAnalysisError.message}`);
+        if (FAIL_ON_OUTFIT_ANALYSIS_ERROR) {
+            // Fail Loudly (Debug Mode)
+            throw lastAnalysisError; // This will be caught by the main try/catch and fail the job
+        } else {
+            // Skip Silently (Production Mode)
+            console.warn(`${logPrefix} FAIL_ON_OUTFIT_ANALYSIS_ERROR is false. Skipping auto-complete and proceeding to reframe.`);
+            await supabase.from('mira-agent-bitstudio-jobs').update({
+                metadata: { ...metadata, google_vto_step: 'reframe', outfit_analysis_skipped: true, outfit_analysis_error: lastAnalysisError.message }
+            }).eq('id', job.id);
+            await invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
+            return; // Exit this function call
+        }
     }
 
     const fullAnalysisLog = { ...analysisData, vto_garment_type: garment_analysis.type_of_fit };
