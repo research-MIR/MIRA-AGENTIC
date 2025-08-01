@@ -109,64 +109,55 @@ serve(async (req) => {
     
     console.log(`${logPrefix} Invoked. Missing item: '${missing_item_type}'.`);
     
-    const { data: packItems, error: packItemsError } = await supabase
-      .from('mira-agent-garment-pack-items')
-      .select('garment_id')
-      .eq('pack_id', auto_complete_pack_id);
-    if (packItemsError) throw packItemsError;
-    if (!packItems || packItems.length === 0) throw new Error("The selected garment pack is empty.");
-
-    const garmentIds = packItems.map(item => item.garment_id);
-    const { data: allGarments, error: garmentsError } = await supabase
-      .from('mira-agent-garments')
-      .select('id, storage_path, attributes, name, image_hash')
-      .in('id', garmentIds);
-    if (garmentsError) throw garmentsError;
-
-    const candidateGarments = allGarments.filter(g => {
-        const fitType = g.attributes?.type_of_fit;
-        if (!fitType) return false;
-        return fitType.replace(/\s+/g, '_') === missing_item_type;
-    });
-
-    if (candidateGarments.length === 0) {
-      throw new Error(`Auto-complete failed: The selected garment pack does not contain any items of the required type ('${missing_item_type.replace(/_/g, ' ')}').`);
-    }
-    console.log(`${logPrefix} Found ${candidateGarments.length} candidate garments of type '${missing_item_type}'.`);
-
-    // --- NEW MODEL-BASED MATCHING LOGIC ---
-    let garmentsForStylist = candidateGarments;
+    let garmentsForStylist: any[] = [];
     let choiceContext = "general stylistic choice";
 
     if (model_generation_job_id) {
-        console.log(`${logPrefix} Model ID found: ${model_generation_job_id}. Querying model's wardrobe...`);
-        const { data: wornHashesData, error: wornHashesError } = await supabase
-            .from('mira-agent-bitstudio-jobs')
-            .select('metadata->garment_analysis->>hash')
-            .eq('metadata->>model_generation_job_id', model_generation_job_id)
-            .in('status', ['complete', 'done'])
-            .not('metadata->garment_analysis->>hash', 'is', null);
-        
-        if (wornHashesError) {
-            console.warn(`${logPrefix} Could not query model's wardrobe. Falling back to general choice. Error: ${wornHashesError.message}`);
-        } else {
-            const wornGarmentHashes = new Set(wornHashesData.map((item: any) => item.hash).filter(Boolean));
-            console.log(`${logPrefix} Model has previously worn ${wornGarmentHashes.size} unique garments.`);
+        console.log(`${logPrefix} Model ID found: ${model_generation_job_id}. Querying model's preferred wardrobe...`);
+        const { data: preferredCandidates, error: rpcError } = await supabase.rpc('get_model_preferred_garments_for_pack', {
+            p_model_job_id: model_generation_job_id,
+            p_pack_id: auto_complete_pack_id,
+            p_fit_type: missing_item_type.replace(/_/g, ' ')
+        });
 
-            const preferredCandidates = candidateGarments.filter(g => g.image_hash && wornGarmentHashes.has(g.image_hash));
-            
-            if (preferredCandidates.length > 0) {
-                console.log(`${logPrefix} Found ${preferredCandidates.length} preferred candidates from the model's wardrobe.`);
-                garmentsForStylist = preferredCandidates;
-                choiceContext = "choice from the model's preferred wardrobe";
-            } else {
-                console.log(`${logPrefix} No preferred candidates found in the pack. Using general candidates.`);
-            }
+        if (rpcError) {
+            console.warn(`${logPrefix} Could not query model's wardrobe via RPC. Falling back to general choice. Error: ${rpcError.message}`);
+        } else if (preferredCandidates && preferredCandidates.length > 0) {
+            console.log(`${logPrefix} Found ${preferredCandidates.length} preferred candidates from the model's wardrobe.`);
+            garmentsForStylist = preferredCandidates;
+            choiceContext = "choice from the model's preferred wardrobe";
+        } else {
+            console.log(`${logPrefix} No preferred candidates found in the pack. Using general candidates.`);
         }
-    } else {
-        console.log(`${logPrefix} No model ID found in job metadata. Using general candidates.`);
     }
-    // --- END OF NEW LOGIC ---
+
+    if (garmentsForStylist.length === 0) {
+        console.log(`${logPrefix} Falling back to general garment selection for pack ${auto_complete_pack_id}.`);
+        const { data: packItems, error: packItemsError } = await supabase
+            .from('mira-agent-garment-pack-items')
+            .select('garment_id')
+            .eq('pack_id', auto_complete_pack_id);
+        if (packItemsError) throw packItemsError;
+        if (!packItems || packItems.length === 0) throw new Error("The selected garment pack is empty.");
+
+        const garmentIds = packItems.map(item => item.garment_id);
+        const { data: allGarments, error: garmentsError } = await supabase
+            .from('mira-agent-garments')
+            .select('id, storage_path, attributes, name, image_hash')
+            .in('id', garmentIds);
+        if (garmentsError) throw garmentsError;
+
+        garmentsForStylist = allGarments.filter(g => {
+            const fitType = g.attributes?.type_of_fit;
+            if (!fitType) return false;
+            return fitType.replace(/\s+/g, '_') === missing_item_type;
+        });
+    }
+
+    if (garmentsForStylist.length === 0) {
+      throw new Error(`Auto-complete failed: The selected garment pack does not contain any items of the required type ('${missing_item_type.replace(/_/g, ' ')}').`);
+    }
+    console.log(`${logPrefix} Found ${garmentsForStylist.length} total candidate garments of type '${missing_item_type}'.`);
 
     let chosenGarment;
 
