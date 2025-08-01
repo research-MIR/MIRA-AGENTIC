@@ -151,7 +151,7 @@ serve(async (req) => {
     try {
       const { data: config } = await supabase.from('mira-agent-config').select('value').eq('key', 'VTO_CONCURRENCY_LIMIT').single();
       const concurrencyLimit = config?.value?.limit || 1;
-      const { count: runningJobsCount } = await supabase.from('mira-agent-bitstudio-jobs').select('id', { count: 'exact' }).in('status', ['queued', 'processing', 'awaiting_reframe', 'awaiting_auto_complete', 'fixing']).eq('metadata->>engine', 'google');
+      const { count: runningJobsCount } = await supabase.from('mira-agent-bitstudio-jobs').select('id', { count: 'exact' }).in('status', ['queued', 'processing', 'awaiting_reframe', 'awaiting_auto_complete', 'fixing', 'prepare_assets']).eq('metadata->>engine', 'google');
       const availableSlots = concurrencyLimit - (runningJobsCount || 0);
       if (availableSlots > 0) {
         const { data: claimedJobs } = await supabase.rpc('claim_multiple_vto_jobs', { p_limit: availableSlots });

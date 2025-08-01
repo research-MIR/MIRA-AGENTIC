@@ -111,7 +111,10 @@ serve(async (req) => {
         console.log(`${logPrefix} Current step: ${step}`);
         switch (step) {
             case 'start':
-                await handleStart(supabase, job, logPrefix);
+                await handleStart_GetBbox(supabase, job, logPrefix);
+                break;
+            case 'prepare_assets':
+                await handleStart_PrepareAssets(supabase, job, logPrefix);
                 break;
             case 'generate_step_1':
                 await handleGenerateStep(supabase, job, 15, 'quality_check', logPrefix);
@@ -200,21 +203,36 @@ serve(async (req) => {
   }
 });
 
-async function handleStart(supabase: SupabaseClient, job: any, logPrefix: string) {
-    console.log(`${logPrefix} Step 1: Getting bounding box and optimizing images.`);
+async function handleStart_GetBbox(supabase: SupabaseClient, job: any, logPrefix: string) {
+    console.log(`${logPrefix} Step 1: Getting bounding box.`);
     const { data: bboxData, error: bboxError } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-bbox', {
         body: { image_url: job.source_person_image_url, job_id: job.id }
     });
     if (bboxError) throw new Error(bboxError.message || 'BBox orchestrator failed.');
     const personBox = bboxData?.person;
-    if (!personBox || !Array.isArray(personBox) || personBox.length !== 4 || personBox.some(v => typeof v !== 'number')) {
+    if (!personBox || !Array.isArray(personBox) || personBox.length !== 4 || personBox.some((v: any) => typeof v !== 'number')) {
         throw new Error("Orchestrator did not return a valid bounding box array.");
     }
     console.log(`${logPrefix} Bounding box received.`);
 
+    await supabase.from('mira-agent-bitstudio-jobs').update({
+        status: 'processing',
+        metadata: { ...job.metadata, bbox_person: personBox, google_vto_step: 'prepare_assets' }
+    }).eq('id', job.id);
+
+    console.log(`${logPrefix} Bounding box saved. Advancing to 'prepare_assets'.`);
+    invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
+}
+
+async function handleStart_PrepareAssets(supabase: SupabaseClient, job: any, logPrefix: string) {
+    console.log(`${logPrefix} Step 2: Preparing and optimizing image assets.`);
+    const { source_person_image_url, source_garment_image_url, metadata } = job;
+    const personBox = metadata?.bbox_person;
+    if (!personBox) throw new Error("Cannot prepare assets: bounding box data is missing from metadata.");
+
     let [personBlob, garmentBlob] = await Promise.all([
-        safeDownload(supabase, job.source_person_image_url, logPrefix),
-        safeDownload(supabase, job.source_garment_image_url, logPrefix)
+        safeDownload(supabase, source_person_image_url, logPrefix),
+        safeDownload(supabase, source_garment_image_url, logPrefix)
     ]);
     console.log(`${logPrefix} Original blob sizes - Person: ${personBlob.size} bytes, Garment: ${garmentBlob.size} bytes.`);
 
@@ -262,7 +280,7 @@ async function handleStart(supabase: SupabaseClient, job: any, logPrefix: string
 
     await supabase.from('mira-agent-bitstudio-jobs').update({
         status: 'processing',
-        metadata: { ...job.metadata, bbox, cropped_person_url: croppedPersonUrl, optimized_garment_url: optimizedGarmentUrl, google_vto_step: 'generate_step_1' }
+        metadata: { ...job.metadata, bbox: bbox, cropped_person_url: croppedPersonUrl, optimized_garment_url: optimizedGarmentUrl, google_vto_step: 'generate_step_1' }
     }).eq('id', job.id);
 
     invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
