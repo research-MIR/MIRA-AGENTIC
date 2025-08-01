@@ -12,7 +12,7 @@ const corsHeaders = {
 const STALLED_POLLER_THRESHOLD_SECONDS = 5;
 const STALLED_AGGREGATION_THRESHOLD_SECONDS = 20;
 const STALLED_PAIR_JOB_THRESHOLD_SECONDS = 30;
-const STALLED_GOOGLE_VTO_THRESHOLD_SECONDS = 15; // Increased to handle longer asset prep
+const STALLED_GOOGLE_VTO_THRESHOLD_SECONDS = 15;
 const STALLED_REFRAME_THRESHOLD_SECONDS = 30;
 const STALLED_FIXER_THRESHOLD_SECONDS = 5;
 const STALLED_QA_REPORT_THRESHOLD_SECONDS = 5;
@@ -53,7 +53,12 @@ serve(async (req) => {
         .lt('updated_at', threshold);
 
       for (const key in extraFilters) {
-        query = query.eq(key, extraFilters[key]);
+        const filterValue = extraFilters[key];
+        if (Array.isArray(filterValue)) {
+          query = query.in(key.replace('->>', '->'), filterValue);
+        } else {
+          query = query.eq(key, filterValue);
+        }
       }
 
       const { data: stalledJobs, error } = await query;
@@ -95,7 +100,7 @@ serve(async (req) => {
     // --- Each task is now wrapped in its own try/catch block for maximum resilience ---
 
     try {
-      await recoverStalledJobs('mira-agent-bitstudio-jobs', ['queued', 'processing'], STALLED_POLLER_THRESHOLD_SECONDS, 'MIRA-AGENT-poller-bitstudio', 'id', 'job_id');
+      await recoverStalledJobs('mira-agent-bitstudio-jobs', ['queued', 'processing'], STALLED_POLLER_THRESHOLD_SECONDS, 'MIRA-AGENT-poller-bitstudio', 'id', 'job_id', { 'metadata->engine': ['bitstudio', 'bitstudio_fallback'] });
     } catch (e) { console.error(`[Watchdog-BG][${requestId}] Task 1 (BitStudio Pollers) failed:`, e.message); }
 
     try {
@@ -132,7 +137,7 @@ serve(async (req) => {
     } catch (e) { console.error(`[Watchdog-BG][${requestId}] Task 4 (Stalled Pair Jobs) failed:`, e.message); }
 
     try {
-      await recoverStalledJobs('mira-agent-bitstudio-jobs', ['processing', 'awaiting_reframe', 'awaiting_auto_complete', 'prepare_assets'], STALLED_GOOGLE_VTO_THRESHOLD_SECONDS, 'MIRA-AGENT-worker-vto-pack-item', 'id', 'pair_job_id', { 'metadata->>engine': 'google' });
+      await recoverStalledJobs('mira-agent-bitstudio-jobs', ['processing', 'awaiting_reframe', 'awaiting_auto_complete'], STALLED_GOOGLE_VTO_THRESHOLD_SECONDS, 'MIRA-AGENT-worker-vto-pack-item', 'id', 'pair_job_id', { 'metadata->>engine': 'google' });
     } catch (e) { console.error(`[Watchdog-BG][${requestId}] Task 5 (Stalled Google VTO) failed:`, e.message); }
 
     try {
