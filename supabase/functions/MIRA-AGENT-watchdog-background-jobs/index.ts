@@ -1,3 +1,4 @@
+>' operator to filter jobs by engine type, ensuring the query is valid and jobs can be recovered.">
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 
@@ -55,7 +56,7 @@ serve(async (req) => {
       for (const key in extraFilters) {
         const filterValue = extraFilters[key];
         if (Array.isArray(filterValue)) {
-          query = query.in(key.replace('->>', '->'), filterValue);
+          query = query.in(key, filterValue);
         } else {
           query = query.eq(key, filterValue);
         }
@@ -100,7 +101,7 @@ serve(async (req) => {
     // --- Each task is now wrapped in its own try/catch block for maximum resilience ---
 
     try {
-      await recoverStalledJobs('mira-agent-bitstudio-jobs', ['queued', 'processing'], STALLED_POLLER_THRESHOLD_SECONDS, 'MIRA-AGENT-poller-bitstudio', 'id', 'job_id', { 'metadata->engine': ['bitstudio', 'bitstudio_fallback'] });
+      await recoverStalledJobs('mira-agent-bitstudio-jobs', ['queued', 'processing'], STALLED_POLLER_THRESHOLD_SECONDS, 'MIRA-AGENT-poller-bitstudio', 'id', 'job_id', { 'metadata->>engine': ['bitstudio', 'bitstudio_fallback'] });
     } catch (e) { console.error(`[Watchdog-BG][${requestId}] Task 1 (BitStudio Pollers) failed:`, e.message); }
 
     try {
