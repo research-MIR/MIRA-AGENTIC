@@ -626,7 +626,6 @@ async function handleAutoComplete(supabase: SupabaseClient, job: any, logPrefix:
     
     console.log(`${logPrefix} Creating new VTO generation pass to add chosen garment: ${chosen_completion_garment.name}`);
 
-    // Directly invoke the VTO tool instead of creating a new job record
     const { data: vtoResult, error: vtoError } = await supabase.functions.invoke('MIRA-AGENT-tool-virtual-try-on', {
         body: {
             person_image_url: personImageUrl,
@@ -643,12 +642,13 @@ async function handleAutoComplete(supabase: SupabaseClient, job: any, logPrefix:
     const finalImage = await uploadBase64ToStorage(supabase, finalImageBase64, user_id, 'auto_complete_final.png');
 
     await supabase.from('mira-agent-bitstudio-jobs').update({
+        status: 'processing', // Set back to processing for the next step
         metadata: { 
             ...metadata, 
             google_vto_step: 'reframe',
             auto_complete_result_url: finalImage.publicUrl,
-            // CRITICAL: Update the image URL for the next step
-            qa_best_image_url: finalImage.publicUrl 
+            qa_best_image_url: finalImage.publicUrl,
+            qa_best_image_base64: finalImageBase64
         }
     }).eq('id', parent_job_id);
 
