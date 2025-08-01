@@ -138,7 +138,7 @@ serve(async (req) => {
                 await handleReframe(supabase, job, logPrefix);
                 break;
             case 'awaiting_stylist_choice':
-                await handleStylistChoice(supabase, job, logPrefix);
+                await handleAwaitingStylistChoice(supabase, job, logPrefix);
                 break;
             case 'awaiting_auto_complete':
                 await handleAutoComplete(supabase, job, logPrefix);
@@ -433,6 +433,33 @@ async function handleOutfitCompletenessCheck(supabase: SupabaseClient, job: any,
         invokeNextStep(supabase, 'MIRA-AGENT-stylist-chooser', { pair_job_id: job.id });
         console.log(`${logPrefix} Stylist invoked. Worker is now paused for this job.`);
     }
+}
+
+async function handleAwaitingStylistChoice(supabase: SupabaseClient, job: any, logPrefix: string) {
+    console.log(`${logPrefix} Attempting to claim job for stylist choice processing.`);
+    const { data: claimedJob, error: claimError } = await supabase
+      .from('mira-agent-bitstudio-jobs')
+      .update({ 
+          status: 'processing',
+          metadata: { ...job.metadata, google_vto_step: 'processing_stylist_choice' } 
+      })
+      .eq('id', job.id)
+      .eq('status', 'awaiting_stylist_choice')
+      .select('*')
+      .single();
+
+    if (claimError) {
+        console.error(`${logPrefix} Error claiming job:`, claimError.message);
+        throw claimError;
+    }
+
+    if (!claimedJob) {
+        console.log(`${logPrefix} Job was already claimed by another worker instance. Exiting.`);
+        return;
+    }
+
+    console.log(`${logPrefix} Job claimed successfully. Proceeding with stylist choice logic.`);
+    await handleStylistChoice(supabase, claimedJob, logPrefix);
 }
 
 async function handleStylistChoice(supabase: SupabaseClient, job: any, logPrefix: string) {
