@@ -18,6 +18,8 @@ const STALLED_FIXER_THRESHOLD_SECONDS = 5;
 const STALLED_QA_REPORT_THRESHOLD_SECONDS = 5;
 const STALLED_CHUNK_WORKER_THRESHOLD_SECONDS = 5;
 const STALLED_STYLIST_CHOICE_THRESHOLD_SECONDS = 60;
+const STALLED_VTO_WORKER_CATCH_ALL_THRESHOLD_SECONDS = 120; // 2 minutes
+const MAX_WATCHDOG_RETRIES = 3;
 
 serve(async (req) => {
   const requestId = `watchdog-bg-${Date.now()}`;
@@ -145,6 +147,39 @@ serve(async (req) => {
       console.log(`[Watchdog-BG][${requestId}] === Task 5: Recovering Stalled Google VTO ===`);
       await recoverStalledJobs('mira-agent-bitstudio-jobs', ['processing', 'fixing', 'prepare_assets', 'awaiting_auto_complete'], STALLED_GOOGLE_VTO_THRESHOLD_SECONDS, 'MIRA-AGENT-worker-vto-pack-item', 'id', 'pair_job_id', { 'metadata->>engine': 'google' });
     } catch (e) { console.error(`[Watchdog-BG][${requestId}] Task 5 (Stalled Google VTO) failed:`, e.message); }
+
+    try {
+      console.log(`[Watchdog-BG][${requestId}] === Task 6: Generic VTO Worker Catch-All ===`);
+      const catchAllThreshold = new Date(Date.now() - STALLED_VTO_WORKER_CATCH_ALL_THRESHOLD_SECONDS * 1000).toISOString();
+      const inProgressStatuses = ['processing', 'fixing', 'prepare_assets', 'awaiting_auto_complete', 'awaiting_reframe', 'awaiting_stylist_choice'];
+      const { data: longStalledJobs, error: catchAllError } = await supabase
+        .from('mira-agent-bitstudio-jobs')
+        .select('id, metadata')
+        .in('status', inProgressStatuses)
+        .eq('metadata->>engine', 'google')
+        .lt('updated_at', catchAllThreshold);
+
+      if (catchAllError) throw catchAllError;
+
+      if (longStalledJobs && longStalledJobs.length > 0) {
+        console.log(`[Watchdog-BG][${requestId}] Found ${longStalledJobs.length} long-stalled job(s). Applying retry/fail logic...`);
+        const recoveryPromises = longStalledJobs.map(async (job) => {
+          const retries = (job.metadata?.watchdog_retries || 0) + 1;
+          if (retries > MAX_WATCHDOG_RETRIES) {
+            console.error(`[Watchdog-BG][${requestId}] Job ${job.id} has exceeded max watchdog retries. Marking as permanently failed.`);
+            await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'permanently_failed', error_message: `Job stalled and failed after ${MAX_WATCHDOG_RETRIES} watchdog recovery attempts.` }).eq('id', job.id);
+          } else {
+            console.log(`[Watchdog-BG][${requestId}] Re-triggering worker for long-stalled job ${job.id} (Attempt ${retries}/${MAX_WATCHDOG_RETRIES}).`);
+            await supabase.from('mira-agent-bitstudio-jobs').update({ metadata: { ...job.metadata, watchdog_retries: retries } }).eq('id', job.id);
+            await supabase.functions.invoke('MIRA-AGENT-worker-vto-pack-item', { body: { pair_job_id: job.id } });
+          }
+        });
+        await Promise.allSettled(recoveryPromises);
+        actionsTaken.push(`Processed ${longStalledJobs.length} long-stalled VTO jobs.`);
+      } else {
+        console.log(`[Watchdog-BG][${requestId}] No long-stalled VTO jobs found.`);
+      }
+    } catch (e) { console.error(`[Watchdog-BG][${requestId}] Task 6 (VTO Catch-All) failed:`, e.message); }
 
     try {
       console.log(`[Watchdog-BG][${requestId}] === Task 7: Starting New Google VTO Jobs ===`);
