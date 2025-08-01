@@ -37,7 +37,7 @@ const systemPrompt = `You are a meticulous fashion stylist AI. Your task is to a
 2.  **Upper Body Check:** If \`vto_garment_type\` is 'upper body' (e.g., a shirt, jacket), you MUST check if the model is wearing a corresponding lower body garment (pants, skirt, shorts, etc.). The outfit is incomplete if they are still in their base underwear or are topless on the bottom half.
 3.  **Lower Body Check:** If \`vto_garment_type\` is 'lower body' (e.g., pants, skirt), you MUST check if the model is wearing a corresponding upper body garment (shirt, blouse, etc.). The outfit is incomplete if they are topless or only wearing a base bra.
 4.  **Footwear Check (CRITICAL):** You MUST check if the model is wearing shoes. The ONLY exception is if the scene is clearly a beach, poolside, or an indoor, casual setting like a bedroom. In a studio or outdoor urban/natural setting, the absence of shoes makes the outfit incomplete - clearly if i s wearing ANY kind of footwear is not missing - it has to be barefoot to have this missing
-5.  **Identify Missing Items:** If the outfit is incomplete, create a list of the missing item categories. The possible values for this list are: "upper_body", "lower_body", "shoes".
+5.  **Identify Missing Items:** If the outfit is incomplete, create a list of the missing item categories. The possible values for this list are: "upper_body", "lower_body", "shoes". - a bra or underwear do not consitute lower or upper body coverage, do not consider them as such
 
 ### Your Output:
 Your entire response MUST be a single, valid JSON object. Do not include any other text or explanations.
@@ -69,14 +69,25 @@ Your entire response MUST be a single, valid JSON object. Do not include any oth
 }
 \`\`\`
 `;
-function extractJson(text) {
-  const match = text.match(/```json\s*([\s\S]*?)\s*```/);
-  if (match && match[1]) return JSON.parse(match[1]);
-  try {
-    return JSON.parse(text);
-  } catch (e) {
-    throw new Error("The model returned a response that could not be parsed as JSON.");
-  }
+function extractJson(text: string): any {
+    if (!text) { // Guard clause for null, undefined, or empty string
+        throw new Error("The model returned an empty response.");
+    }
+    const match = text.match(/```json\s*([\s\S]*?)\s*```/);
+    if (match && match[1]) {
+        try {
+            return JSON.parse(match[1]);
+        } catch (e) {
+            console.error("Failed to parse extracted JSON block:", e);
+            throw new Error("The model returned a malformed JSON block.");
+        }
+    }
+    try {
+        return JSON.parse(text);
+    } catch (e) {
+        console.error("Failed to parse raw text as JSON:", e);
+        throw new Error("The model returned a response that could not be parsed as JSON.");
+    }
 }
 serve(async (req)=>{
   if (req.method === 'OPTIONS') {

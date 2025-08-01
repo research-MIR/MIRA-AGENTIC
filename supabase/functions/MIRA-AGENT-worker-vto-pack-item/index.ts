@@ -547,10 +547,21 @@ async function handleOutfitCompletenessCheck(supabase: SupabaseClient, job: any,
         return;
     }
 
-    const { data: analysisData, error: analysisError } = await supabase.functions.invoke('MIRA-AGENT-analyzer-outfit-completeness', {
-        body: { image_to_analyze_base64: qa_best_image_base64, vto_garment_type: garment_analysis.type_of_fit }
-    });
-    if (analysisError) throw new Error(`Outfit completeness analysis failed: ${analysisError.message}`);
+    let analysisData;
+    try {
+        const { data, error: analysisError } = await supabase.functions.invoke('MIRA-AGENT-analyzer-outfit-completeness', {
+            body: { image_to_analyze_base64: qa_best_image_base64, vto_garment_type: garment_analysis.type_of_fit }
+        });
+        if (analysisError) throw new Error(`Outfit completeness analysis failed: ${analysisError.message}`);
+        analysisData = data;
+    } catch (err) {
+        console.warn(`${logPrefix} Outfit completeness analysis step failed: ${err.message}. Skipping auto-complete and proceeding to reframe.`);
+        await supabase.from('mira-agent-bitstudio-jobs').update({
+            metadata: { ...metadata, google_vto_step: 'reframe', outfit_analysis_skipped: true, outfit_analysis_error: err.message }
+        }).eq('id', job.id);
+        await invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
+        return; // Exit this function call as we've already invoked the next step
+    }
 
     const fullAnalysisLog = { ...analysisData, vto_garment_type: garment_analysis.type_of_fit };
     console.log(`[VTO_OUTFIT_COMPLETENESS_ANALYSIS][${pair_job_id}] Full Analysis: ${JSON.stringify(fullAnalysisLog)}`);
