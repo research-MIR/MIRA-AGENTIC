@@ -25,6 +25,12 @@ export interface BitStudioJob {
     };
     outfit_analysis_skipped?: boolean;
     outfit_analysis_error?: string;
+    outfit_completeness_analysis?: {
+      is_outfit_complete: boolean;
+      missing_items: string[];
+      reasoning: string;
+      vto_garment_type: string;
+    };
   };
 }
 

@@ -1,7 +1,7 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { AlertTriangle, Eye, History, Layers, Info } from "lucide-react";
+import { AlertTriangle, Eye, History, Layers, Info, CheckCircle, XCircle } from "lucide-react";
 import { BitStudioJob } from "@/types/vto";
 import { SecureImageDisplay } from "./SecureImageDisplay";
 import { useState } from "react";
@@ -10,6 +10,7 @@ import { FixHistoryModal } from "./FixHistoryModal";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { ImageCompareModal } from "@/components/ImageCompareModal";
+import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 
 interface VtoJobDetailModalProps {
   job: BitStudioJob | null;
@@ -33,6 +34,7 @@ export const VtoJobDetailModal = ({ job, isOpen, onClose }: VtoJobDetailModalPro
   
   const wasOutfitCheckSkipped = job.metadata?.outfit_analysis_skipped === true;
   const outfitCheckError = job.metadata?.outfit_analysis_error;
+  const outfitAnalysis = job.metadata?.outfit_completeness_analysis;
 
   const getEngineName = (engine?: string) => {
     if (!engine) return 'Unknown';
@@ -110,6 +112,37 @@ export const VtoJobDetailModal = ({ job, isOpen, onClose }: VtoJobDetailModalPro
               </>
             )}
           </div>
+          {outfitAnalysis && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  Outfit Completeness Analysis
+                  {outfitAnalysis.is_outfit_complete ? (
+                    <Badge variant="default" className="bg-green-600 hover:bg-green-700">
+                      <CheckCircle className="h-4 w-4 mr-1" /> Complete
+                    </Badge>
+                  ) : (
+                    <Badge variant="destructive">
+                      <XCircle className="h-4 w-4 mr-1" /> Incomplete
+                    </Badge>
+                  )}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="text-sm space-y-2">
+                <p className="italic text-muted-foreground">"{outfitAnalysis.reasoning}"</p>
+                {!outfitAnalysis.is_outfit_complete && outfitAnalysis.missing_items.length > 0 && (
+                  <div>
+                    <strong className="font-medium">Missing Items:</strong>
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {outfitAnalysis.missing_items.map(item => (
+                        <Badge key={item} variant="secondary">{item.replace(/_/g, ' ')}</Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
           {wasOutfitCheckSkipped && (
             <Alert variant="default">
               <Info className="h-4 w-4" />
