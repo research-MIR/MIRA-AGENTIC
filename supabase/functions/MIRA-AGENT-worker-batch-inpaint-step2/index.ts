@@ -162,7 +162,7 @@ serve(async (req) => {
     const finalPrompt = promptData.final_prompt;
     console.log(`${logPrefix} Prompt generated.`);
 
-    const { error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
+    const { data: proxyData, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
         body: { 
             mode: 'inpaint',
             user_id: user_id,
@@ -185,7 +185,7 @@ serve(async (req) => {
     });
     if (proxyError) throw proxyError;
     
-    const inpaintingJobId = proxyError?.jobIds?.[0];
+    const inpaintingJobId = proxyData?.jobIds?.[0];
     if (!inpaintingJobId) throw new Error('Delegation failed: Proxy did not return a valid job ID.');
 
     await supabase.from('mira-agent-batch-inpaint-pair-jobs')
