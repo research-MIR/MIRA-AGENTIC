@@ -308,7 +308,7 @@ export const RecentVtoPacks = () => {
                       <span>{pack.metadata?.name || `Pack from ${new Date(pack.created_at).toLocaleString()}`}</span>
                     </p>
                     <div className="flex items-center gap-2 mt-2">
-                      <Progress value={(pack.completed_jobs / (pack.metadata?.total_pairs || 1)) * 100} className="h-2 w-32" />
+                      <Progress value={(pack.completed_jobs / (pack.metadata?.total_pairs || pack.total_jobs || 1)) * 100} className="h-2 w-32" />
                       <p className="text-sm text-muted-foreground">
                         {pack.completed_jobs} / {pack.metadata?.total_pairs || pack.total_jobs} completed
                       </p>
