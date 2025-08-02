@@ -186,7 +186,7 @@ serve(async (req) => {
                 .from('mira-agent-bitstudio-jobs')
                 .select('id')
                 .eq('batch_pair_job_id', batch_pair_job_id)
-                .not('status', 'in', ['failed', 'permanently_failed'])
+                .not('status', 'in', '(failed,permanently_failed)')
                 .maybeSingle();
             if (checkError) throw checkError;
             if (existingJob) {
