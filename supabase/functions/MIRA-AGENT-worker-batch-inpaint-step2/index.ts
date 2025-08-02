@@ -144,7 +144,7 @@ serve(async (req) => {
     const croppedSourceImage = sourceImage.clone().crop(bbox.x, bbox.y, bbox.width, bbox.height);
     const croppedSourceBuffer = await croppedSourceImage.encodeJPEG(75);
     const croppedPersonBlob = new Blob([croppedSourceBuffer], { type: 'image/jpeg' });
-    const tempPersonPath = `tmp/${job.user_id}/${Date.now()}-cropped_person.jpeg`;
+    const tempPersonPath = `tmp/${pairJob.user_id}/${Date.now()}-cropped_person.jpeg`;
     await supabase.storage.from(TMP_BUCKET).upload(tempPersonPath, croppedPersonBlob, { contentType: "image/jpeg" });
     const { data: { publicUrl: source_cropped_url } } = supabase.storage.from(TMP_BUCKET).getPublicUrl(tempPersonPath);
     console.log(`${logPrefix} Cropped person image uploaded to temp storage.`);
