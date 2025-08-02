@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { GoogleGenAI, Content, Part, HarmCategory, HarmBlockThreshold } from 'https://esm.sh/@google/genai@0.15.0';
+import { GoogleGenAI, Content, Part, HarmCategory, HarmBlockThreshold, GenerationResult } from 'https://esm.sh/@google/genai@0.15.0';
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
+import { encodeBase64, decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const MODEL_NAME = "gemini-2.5-flash-preview-05-20";
@@ -152,6 +152,17 @@ serve(async (req) => {
                     throw new Error("Model returned a JSON with an invalid or missing mask/box_2d structure.");
                 }
 
+                // --- NEW: Validate Base64 data before proceeding ---
+                for (const maskItem of responseJson) {
+                    const maskBase64 = maskItem.mask.startsWith('data:image/png;base64,') 
+                        ? maskItem.mask.split(',')[1] 
+                        : maskItem.mask;
+                    if (!maskBase64) throw new Error("Mask item contains empty base64 data.");
+                    decodeBase64(maskBase64); // This will throw if the base64 is invalid
+                }
+                console.log(`[SegmentWorker][${requestId}] Base64 validation passed for all masks.`);
+                // --- END VALIDATION ---
+
                 const normalizedResponse = responseJson.map(item => {
                     if (item.mask && typeof item.mask === 'string' && !item.mask.startsWith('data:image/png;base64,')) {
                         item.mask = `data:image/png;base64,${item.mask}`;
@@ -165,9 +176,9 @@ serve(async (req) => {
                 responseToStore = normalizedResponse;
                 console.log(`[SegmentWorker][${requestId}] Successfully parsed and normalized JSON. Found ${responseToStore.length} masks.`);
             } catch (parsingError) {
-                console.warn(`[SegmentWorker][${requestId}] JSON parsing failed. Storing raw text. Error: ${parsingError.message}`);
+                console.warn(`[SegmentWorker][${requestId}] JSON parsing or validation failed. Storing raw text. Error: ${parsingError.message}`);
                 responseToStore = {
-                    error: `JSON parsing failed: ${parsingError.message}`,
+                    error: `JSON parsing or validation failed: ${parsingError.message}`,
                     raw_text: result.text
                 };
             }
