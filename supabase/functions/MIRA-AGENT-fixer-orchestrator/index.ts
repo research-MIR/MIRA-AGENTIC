@@ -76,19 +76,15 @@ async function downloadAndEncodeImage(supabase: SupabaseClient, url: string): Pr
     if (url.includes('supabase.co')) {
         const urlObj = new URL(url);
         const pathSegments = urlObj.pathname.split('/');
-        
-        const publicSegmentIndex = pathSegments.indexOf('public');
-        if (publicSegmentIndex === -1 || publicSegmentIndex + 1 >= pathSegments.length) {
+        const objectSegmentIndex = pathSegments.indexOf('object');
+        if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) {
             throw new Error(`Could not parse bucket name from Supabase URL: ${url}`);
         }
-        
-        const bucketName = pathSegments[publicSegmentIndex + 1];
-        const filePath = decodeURIComponent(pathSegments.slice(publicSegmentIndex + 2).join('/'));
-
+        const bucketName = pathSegments[objectSegmentIndex + 2];
+        const filePath = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
         if (!bucketName || !filePath) {
             throw new Error(`Could not parse bucket or path from Supabase URL: ${url}`);
         }
-
         const { data, error } = await supabase.storage.from(bucketName).download(filePath);
         if (error) {
             throw new Error(`Failed to download image from Supabase storage (${filePath}): ${error.message}`);
@@ -127,13 +123,14 @@ serve(async (req) => {
     if (!lastReport || !original_request_payload || !source_garment_image_url || !failed_image_url || !bitstudio_person_image_id || !bitstudio_mask_image_id || !bitstudio_garment_image_id) {
       const errorMessage = "Job is missing critical metadata for a fix attempt (e.g., original image IDs, payload, or report). This may be an older job that cannot be automatically fixed.";
       console.error(`${logPrefix} Prerequisite check failed: ${errorMessage}`);
-      await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'permanently_failed', error_message: errorMessage }).eq('id', job_id);
-      return new Response(JSON.stringify({ success: true, message: "Job marked as permanently failed due to missing metadata." }), { headers: corsHeaders });
+      await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'complete', final_image_url: failed_image_url, error_message: errorMessage }).eq('id', job_id);
+      return new Response(JSON.stringify({ success: true, message: "Job marked as complete (with errors) due to missing metadata." }), { headers: corsHeaders });
     }
 
     if (retry_count >= MAX_RETRIES) {
-      console.log(`${logPrefix} Max retries reached. Giving up.`);
-      await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'permanently_failed', error_message: 'Automated repair failed after multiple attempts.' }).eq('id', job_id);
+      const finalErrorMessage = 'Automated repair exhausted. This is the last available image.';
+      console.log(`${logPrefix} Max retries reached. Giving up and saving last result.`);
+      await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'complete', final_image_url: failed_image_url, error_message: finalErrorMessage }).eq('id', job_id);
       return new Response(JSON.stringify({ success: true, message: "Max retries reached." }), { headers: corsHeaders });
     }
 
@@ -217,6 +214,10 @@ serve(async (req) => {
         const payload = plan.payload;
         if (!payload) throw new Error("Plan action 'retry' is missing the 'payload' parameter.");
         
+        // Enforce high resolution for all retry attempts
+        payload.resolution = 'high';
+        console.log(`[FixerOrchestrator][${job_id}] Enforced 'high' resolution for retry payload.`);
+        
         await supabase.from('mira-agent-bitstudio-jobs').update({ 
             metadata: { ...job.metadata, fix_history: newFixHistory }
         }).eq('id', job_id);
@@ -232,15 +233,19 @@ serve(async (req) => {
       }
       case 'give_up': {
         const reason = plan.reason || 'Automated repair failed after multiple attempts.';
+        const finalErrorMessage = `Automated fix given up by AI: ${reason}`;
         console.log(`${logPrefix} AI decided to GIVE UP. Reason: ${reason}`);
+        
         await supabase.from('mira-agent-bitstudio-jobs').update({ 
-            status: 'permanently_failed', 
-            error_message: reason,
+            status: 'complete', 
+            final_image_url: failed_image_url,
+            error_message: finalErrorMessage,
             metadata: { ...job.metadata, fix_history: newFixHistory }
         }).eq('id', job_id);
+
         if (job.metadata?.batch_pair_job_id) {
             await supabase.from('mira-agent-batch-inpaint-pair-jobs')
-                .update({ status: 'failed', error_message: reason })
+                .update({ status: 'complete', final_image_url: failed_image_url, error_message: finalErrorMessage })
                 .eq('id', job.metadata.batch_pair_job_id);
         }
         break;
