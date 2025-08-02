@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { Image as ISImage } from "https://deno.land/x/imagescript@1.2.15/mod.ts";
+import { decodeBase64, encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
@@ -47,7 +48,6 @@ async function uploadBuffer(buffer: Uint8Array, supabase: SupabaseClient) {
 }
 
 serve(async (req) => {
-  console.log(`[BatchInpaintWorker-Step2] Function invoked.`);
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
@@ -65,20 +65,18 @@ serve(async (req) => {
 
   try {
     // --- ATOMIC UPDATE TO CLAIM THE JOB ---
-    const { data: claimedJob, error: claimError } = await supabase
+    const { count, error: claimError } = await supabase
       .from('mira-agent-batch-inpaint-pair-jobs')
-      .update({ status: 'processing_step_2' }) // New status to indicate it's being processed
+      .update({ status: 'processing_step_2', updated_at: new Date().toISOString() })
       .eq('id', pair_job_id)
-      .eq('status', 'mask_expanded') // Only claim if it's in the correct state
-      .select('id')
-      .single();
+      .eq('status', 'mask_expanded');
 
     if (claimError) {
         console.error(`${logPrefix} Error trying to claim job:`, claimError.message);
         throw claimError;
     }
 
-    if (!claimedJob) {
+    if (count === 0) {
         console.log(`${logPrefix} Job was already claimed by another instance or is not in 'mask_expanded' state. Exiting gracefully.`);
         return new Response(JSON.stringify({ success: true, message: "Job already claimed or not in a valid state." }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -96,14 +94,6 @@ serve(async (req) => {
     if (fetchError) throw new Error(`Failed to fetch pair job: ${fetchError.message}`);
     if (!pairJob) throw new Error(`Pair job with ID ${pair_job_id} not found.`);
 
-    if (pairJob.inpainting_job_id && pairJob.status !== 'processing_step_2') {
-        console.warn(`${logPrefix} Safety check triggered. Inpainting job already exists (${pairJob.inpainting_job_id}). This is a duplicate invocation. Exiting gracefully.`);
-        return new Response(JSON.stringify({ success: true, message: "Duplicate invocation detected, exiting." }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            status: 200,
-        });
-    }
-
     const { user_id, source_person_image_url, source_garment_image_url, prompt_appendix, metadata } = pairJob;
     
     console.log(`${logPrefix} Downloading source and mask images...`);
@@ -120,7 +110,6 @@ serve(async (req) => {
 
     const { width, height } = sourceImage;
 
-    // --- CORRECTED BOUNDING BOX CALCULATION (Full Resolution Scan) ---
     console.log(`[BBoxCalculator][${pair_job_id}] Starting bounding box calculation. Original mask dimensions: ${width}x${height}.`);
     const startTime = performance.now();
 
@@ -151,11 +140,14 @@ serve(async (req) => {
     const endTime = performance.now();
     console.log(`[BBoxCalculator][${pair_job_id}] Final bounding box calculated. Padded BBox: { x: ${bbox.x}, y: ${bbox.y}, w: ${bbox.width}, h: ${bbox.height} }`);
     console.log(`[BBoxCalculator][${pair_job_id}] Calculation finished. PERF: Total execution time: ${(endTime - startTime).toFixed(2)}ms.`);
-    // --- END OF CORRECTION ---
 
     const croppedSourceImage = sourceImage.clone().crop(bbox.x, bbox.y, bbox.width, bbox.height);
     const croppedSourceBuffer = await croppedSourceImage.encodeJPEG(75);
-    const source_cropped_url = await uploadBuffer(croppedSourceBuffer, supabase);
+    const croppedPersonBlob = new Blob([croppedSourceBuffer], { type: 'image/jpeg' });
+    const tempPersonPath = `tmp/${job.user_id}/${Date.now()}-cropped_person.jpeg`;
+    await supabase.storage.from(TMP_BUCKET).upload(tempPersonPath, croppedPersonBlob, { contentType: "image/jpeg" });
+    const { data: { publicUrl: source_cropped_url } } = supabase.storage.from(TMP_BUCKET).getPublicUrl(tempPersonPath);
+    console.log(`${logPrefix} Cropped person image uploaded to temp storage.`);
 
     const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-prompt-helper', {
         body: {
@@ -170,7 +162,7 @@ serve(async (req) => {
     const finalPrompt = promptData.final_prompt;
     console.log(`${logPrefix} Prompt generated.`);
 
-    const { data: proxyData, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
+    const { error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
         body: { 
             mode: 'inpaint',
             user_id: user_id,
@@ -191,9 +183,9 @@ serve(async (req) => {
             }
         }
     });
-    if (proxyError) throw new Error(`Job queuing failed: ${proxyError.message}`);
+    if (proxyError) throw proxyError;
     
-    const inpaintingJobId = proxyData?.jobIds?.[0];
+    const inpaintingJobId = proxyError?.jobIds?.[0];
     if (!inpaintingJobId) throw new Error('Delegation failed: Proxy did not return a valid job ID.');
 
     await supabase.from('mira-agent-batch-inpaint-pair-jobs')

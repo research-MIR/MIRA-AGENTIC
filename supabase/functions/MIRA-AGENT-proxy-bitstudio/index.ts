@@ -174,52 +174,42 @@ serve(async (req) => {
     } else {
       // --- NEW JOB LOGIC ---
       const { user_id, mode, batch_pair_job_id, vto_pack_job_id, metadata } = body;
+      console.log(`[BitStudioProxy][${requestId}] Handling new job. Mode: ${mode}`);
       if (!user_id || !mode) throw new Error("user_id and mode are required for new jobs.");
 
       const jobIds: string[] = [];
 
       if (mode === 'inpaint') {
-        const { base64_image_data, base64_mask_data, source_cropped_url, mask_url, reference_image_url, prompt, denoise, resolution, num_images } = body;
+        const { source_cropped_url, mask_url, reference_image_url, prompt, denoise, resolution, num_images } = body;
+        console.log(`[BitStudioProxy][${requestId}] Inpaint mode: Received source URL: ${source_cropped_url}, mask URL: ${mask_url}`);
         
         let sourceBlob: Blob;
         let maskBlob: Blob;
 
         if (source_cropped_url) {
-            console.log(`[BitStudioProxy][${requestId}] Inpaint mode: Received source URL. Downloading...`);
-            const response = await fetch(source_cropped_url);
-            if (!response.ok) throw new Error(`Failed to download source image from URL: ${response.statusText}`);
-            sourceBlob = await response.blob();
-        } else if (base64_image_data) {
-            console.log(`[BitStudioProxy][${requestId}] Inpaint mode: Received source base64. Decoding...`);
-            sourceBlob = new Blob([decodeBase64(base64_image_data)], { type: 'image/png' });
+            sourceBlob = await downloadFromSupabase(supabase, source_cropped_url);
         } else {
-            throw new Error("Inpaint mode requires either 'source_cropped_url' or 'base64_image_data'.");
+            throw new Error("Inpaint mode requires 'source_cropped_url'.");
         }
 
         if (mask_url) {
-            console.log(`[BitStudioProxy][${requestId}] Inpaint mode: Received mask URL. Downloading...`);
-            const response = await fetch(mask_url);
-            if (!response.ok) throw new Error(`Failed to download mask image from URL: ${response.statusText}`);
-            const fullMaskBlob = await response.blob();
-            
+            const fullMaskBlob = await downloadFromSupabase(supabase, mask_url);
             const fullMaskImg = await ISImage.decode(await fullMaskBlob.arrayBuffer());
             const { bbox } = metadata;
             if (!bbox) throw new Error("Bbox metadata is required when providing a full mask URL.");
             const croppedMaskImg = fullMaskImg.clone().crop(bbox.x, bbox.y, bbox.width, bbox.height);
             const croppedMaskBuffer = await croppedMaskImg.encode(0);
             maskBlob = new Blob([croppedMaskBuffer], { type: 'image/png' });
-
-        } else if (base64_mask_data) {
-            console.log(`[BitStudioProxy][${requestId}] Inpaint mode: Received mask base64. Decoding...`);
-            maskBlob = new Blob([decodeBase64(base64_mask_data)], { type: 'image/png' });
         } else {
-            throw new Error("Inpaint mode requires either 'mask_url' or 'base64_mask_data'.");
+            throw new Error("Inpaint mode requires 'mask_url'.");
         }
+        console.log(`[BitStudioProxy][${requestId}] Assets downloaded. Uploading to BitStudio...`);
 
         const [sourceImageId, maskImageId] = await Promise.all([
           uploadToBitStudio(sourceBlob, 'inpaint-base', 'source.png'),
           uploadToBitStudio(maskBlob, 'inpaint-mask', 'mask.png')
         ]);
+        console.log(`[BitStudioProxy][${requestId}] Source and mask uploaded. Source ID: ${sourceImageId}, Mask ID: ${maskImageId}`);
 
         const inpaintPayload: any = {
           mask_image_id: maskImageId,
@@ -231,12 +221,15 @@ serve(async (req) => {
 
         let referenceImageId: string | null = null;
         if (reference_image_url) {
+          console.log(`[BitStudioProxy][${requestId}] Reference image provided. Uploading...`);
           const referenceBlob = await downloadFromSupabase(supabase, reference_image_url);
           referenceImageId = await uploadToBitStudio(referenceBlob, 'inpaint-reference', 'reference.png');
           inpaintPayload.reference_image_id = referenceImageId;
+          console.log(`[BitStudioProxy][${requestId}] Reference image uploaded. ID: ${referenceImageId}`);
         }
 
         const inpaintUrl = `${BITSTUDIO_API_BASE}/images/${sourceImageId}/inpaint`;
+        console.log(`[BitStudioProxy][${requestId}] Submitting inpaint job to BitStudio...`);
         const inpaintResponse = await fetch(inpaintUrl, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}`, 'Content-Type': 'application/json' },
@@ -247,6 +240,7 @@ serve(async (req) => {
         const inpaintResult = await inpaintResponse.json();
         const taskId = inpaintResult.versions?.[0]?.id;
         if (!taskId) throw new Error("BitStudio did not return a task ID for the inpaint job.");
+        console.log(`[BitStudioProxy][${requestId}] Inpaint job submitted. Task ID: ${taskId}`);
 
         const { data: newJob, error: insertError } = await supabase.from('mira-agent-bitstudio-jobs').insert({
           user_id, mode, status: 'queued', 
