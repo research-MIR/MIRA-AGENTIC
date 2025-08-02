@@ -122,13 +122,17 @@ serve(async (req) => {
         };
         console.log(`${logPrefix} Model ID found. Querying model's preferred wardrobe with RPC 'get_model_preferred_garments_for_pack'. Params:`, rpcParams);
         
-        const { data: preferredCandidates, error: rpcError } = await supabase.rpc('get_model_preferred_garments_for_pack', rpcParams);
+        const { data: rpcResult, error: rpcError } = await supabase.rpc('get_model_preferred_garments_for_pack', rpcParams);
 
         if (rpcError) {
             console.warn(`${logPrefix} Could not query model's wardrobe via RPC. Falling back to general choice. Error: ${rpcError.message}`);
-        } else if (preferredCandidates && preferredCandidates.length > 0) {
-            console.log(`${logPrefix} RPC successful. Found ${preferredCandidates.length} preferred candidates from the model's wardrobe.`);
-            garmentsForStylist = preferredCandidates;
+        } else if (rpcResult && rpcResult.garments && rpcResult.garments.length > 0) {
+            console.log(`${logPrefix} --- Logs from get_model_preferred_garments_for_pack ---`);
+            rpcResult.logs.forEach((log: string) => console.log(`${logPrefix} [SQL] ${log}`));
+            console.log(`${logPrefix} --- End of SQL logs ---`);
+            
+            console.log(`${logPrefix} RPC successful. Found ${rpcResult.garments.length} preferred candidates from the model's wardrobe.`);
+            garmentsForStylist = rpcResult.garments;
             choiceContext = "choice from the model's preferred wardrobe";
         } else {
             console.log(`${logPrefix} RPC successful but found no preferred candidates in the pack. Using general candidates.`);
