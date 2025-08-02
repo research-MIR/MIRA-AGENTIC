@@ -49,7 +49,7 @@ serve(async (req) => {
       .from('mira-agent-mask-aggregation-jobs')
       .update({ status: 'compositing' })
       .eq('id', aggregationJobId)
-      .eq('status', 'aggregating'); // Only update if it's in the correct state
+      .eq('status', 'aggregating');
 
     if (updateError) {
         console.error(`[Compositor][${requestId}] Error trying to claim job:`, updateError.message);
@@ -77,6 +77,14 @@ serve(async (req) => {
       throw new Error("Job data or source image path is missing from metadata.");
     }
 
+    // --- VALIDATION STEP ---
+    const allMasks = (job.results || []).flat().filter((item: any) => item && item.mask && item.box_2d);
+    if (allMasks.length === 0) {
+        throw new Error("Segmentation failed: No valid masks were produced by any of the analysis workers.");
+    }
+    console.log(`[Compositor][${requestId}] Validation passed. Found ${allMasks.length} valid mask segments to composite.`);
+    // --- END VALIDATION ---
+
     const url = new URL(sourceImageUrl);
     const pathSegments = url.pathname.split('/');
     const bucketName = pathSegments[pathSegments.indexOf('public') + 1];
@@ -93,8 +101,6 @@ serve(async (req) => {
     const rawMaskCtx = rawMaskCanvas.getContext('2d');
     rawMaskCtx.fillStyle = 'black';
     rawMaskCtx.fillRect(0, 0, width, height);
-
-    const allMasks = (job.results || []).flat().filter((item: any) => item && item.mask && item.box_2d);
 
     for (const maskData of allMasks) {
       try {
@@ -121,7 +127,6 @@ serve(async (req) => {
         }
       } catch (e) {
           console.warn(`[Compositor][${requestId}] Could not process a single mask from a worker. Error: ${e.message}. Skipping it and continuing.`);
-          // Don't re-throw, just continue to the next mask
       }
     }
 
