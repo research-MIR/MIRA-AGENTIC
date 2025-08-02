@@ -180,6 +180,25 @@ serve(async (req) => {
       const jobIds: string[] = [];
 
       if (mode === 'inpaint') {
+        // --- IDEMPOTENCY CHECK ---
+        if (batch_pair_job_id) {
+            const { data: existingJob, error: checkError } = await supabase
+                .from('mira-agent-bitstudio-jobs')
+                .select('id')
+                .eq('batch_pair_job_id', batch_pair_job_id)
+                .not('status', 'in', ['failed', 'permanently_failed'])
+                .maybeSingle();
+            if (checkError) throw checkError;
+            if (existingJob) {
+                console.log(`[BitStudioProxy][${requestId}] Idempotency check failed: An active job already exists for batch_pair_job_id ${batch_pair_job_id}. Skipping creation.`);
+                return new Response(JSON.stringify({ success: true, message: "Job already exists and is active.", jobId: existingJob.id }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 200,
+                });
+            }
+        }
+        // --- END IDEMPOTENCY CHECK ---
+
         const { source_cropped_url, mask_url, reference_image_url, prompt, denoise, resolution, num_images } = body;
         console.log(`[BitStudioProxy][${requestId}] Inpaint mode: Received source URL: ${source_cropped_url}, mask URL: ${mask_url}`);
         
