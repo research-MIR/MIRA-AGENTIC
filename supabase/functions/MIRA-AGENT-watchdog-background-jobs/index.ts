@@ -122,24 +122,21 @@ serve(async (req) => {
     try {
       console.log(`[Watchdog-BG][${requestId}] === Task 4: Triggering COMPLETED Segmentation Aggregation ===`);
       
-      const { data: readyJobs, error: readyJobsError } = await supabase
-        .from('mira-agent-mask-aggregation-jobs')
-        .select('id')
-        .eq('status', 'aggregating')
-        .gte('jsonb_array_length(results)', 5);
+      const { data: readyJobs, error: rpcError } = await supabase
+        .rpc('find_aggregation_jobs_ready_for_compositor');
 
-      if (readyJobsError) {
-        console.error(`[Watchdog-BG][${requestId}] Error querying for ready aggregation jobs:`, readyJobsError.message);
-        throw readyJobsError;
+      if (rpcError) {
+        console.error(`[Watchdog-BG][${requestId}] Error calling find_aggregation_jobs_ready_for_compositor RPC:`, rpcError.message);
+        throw rpcError;
       }
 
       if (readyJobs && readyJobs.length > 0) {
         console.log(`[Watchdog-BG][${requestId}] Found ${readyJobs.length} aggregation job(s) ready for compositing.`);
         
         const compositorPromises = readyJobs.map(job => {
-          console.log(`[Watchdog-BG][${requestId}] Invoking compositor for job ${job.id}.`);
+          console.log(`[Watchdog-BG][${requestId}] Invoking compositor for job ${job.job_id}.`);
           return supabase.functions.invoke('MIRA-AGENT-compositor-segmentation', {
-            body: { job_id: job.id }
+            body: { job_id: job.job_id }
           });
         });
 
