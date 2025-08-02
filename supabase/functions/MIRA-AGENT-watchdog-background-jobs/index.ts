@@ -101,7 +101,7 @@ serve(async (req) => {
     // --- Each task is now wrapped in its own try/catch block for maximum resilience ---
 
     try {
-      console.log(`[Watchdog-BG][${requestId}] === Task 1 (NEW): Proactive BitStudio Polling ===`);
+      console.log(`[Watchdog-BG][${requestId}] === Task 1: Proactive BitStudio Polling ===`);
       const { data: activeBitStudioJobs, error: bitstudioError } = await supabase
         .from('mira-agent-bitstudio-jobs')
         .select('id')
