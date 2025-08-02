@@ -9,7 +9,6 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const STALLED_POLLER_THRESHOLD_SECONDS = 5;
 const STALLED_AGGREGATION_THRESHOLD_SECONDS = 20;
 const STALLED_PAIR_JOB_THRESHOLD_SECONDS = 30;
 const STALLED_GOOGLE_VTO_THRESHOLD_SECONDS = 15;
@@ -102,9 +101,26 @@ serve(async (req) => {
     // --- Each task is now wrapped in its own try/catch block for maximum resilience ---
 
     try {
-      console.log(`[Watchdog-BG][${requestId}] === Task 1: Recovering BitStudio Pollers ===`);
-      await recoverStalledJobs('mira-agent-bitstudio-jobs', ['queued', 'processing'], STALLED_POLLER_THRESHOLD_SECONDS, 'MIRA-AGENT-poller-bitstudio', 'id', 'job_id', { 'metadata->>engine': ['bitstudio', 'bitstudio_fallback'] });
-    } catch (e) { console.error(`[Watchdog-BG][${requestId}] Task 1 (BitStudio Pollers) failed:`, e.message); }
+      console.log(`[Watchdog-BG][${requestId}] === Task 1 (NEW): Proactive BitStudio Polling ===`);
+      const { data: activeBitStudioJobs, error: bitstudioError } = await supabase
+        .from('mira-agent-bitstudio-jobs')
+        .select('id')
+        .in('status', ['queued', 'processing'])
+        .in('metadata->>engine', ['bitstudio', 'bitstudio_fallback']);
+
+      if (bitstudioError) throw bitstudioError;
+
+      if (activeBitStudioJobs && activeBitStudioJobs.length > 0) {
+        console.log(`[Watchdog-BG][${requestId}] Found ${activeBitStudioJobs.length} active BitStudio job(s). Invoking pollers.`);
+        const pollerPromises = activeBitStudioJobs.map(job => 
+          supabase.functions.invoke('MIRA-AGENT-poller-bitstudio', { body: { job_id: job.id } })
+        );
+        await Promise.allSettled(pollerPromises);
+        actionsTaken.push(`Dispatched pollers for ${activeBitStudioJobs.length} active BitStudio jobs.`);
+      } else {
+        console.log(`[Watchdog-BG][${requestId}] No active BitStudio jobs to poll.`);
+      }
+    } catch (e) { console.error(`[Watchdog-BG][${requestId}] Task 1 (BitStudio Polling) failed:`, e.message); }
 
     try {
       console.log(`[Watchdog-BG][${requestId}] === Task 2: Triggering Batch Inpaint Worker ===`);

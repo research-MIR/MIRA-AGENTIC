@@ -168,7 +168,7 @@ serve(async (req) => {
       }).eq('id', retry_job_id);
       if (updateError) throw updateError;
 
-      supabase.functions.invoke('MIRA-AGENT-poller-bitstudio', { body: { job_id: retry_job_id } }).catch(console.error);
+      // The watchdog will pick this up on its next run. No direct invocation needed.
       return new Response(JSON.stringify({ success: true, jobId: retry_job_id, message: "Job successfully retried." }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
     } else {
@@ -346,9 +346,7 @@ serve(async (req) => {
         }
       }
 
-      jobIds.forEach(jobId => {
-        supabase.functions.invoke('MIRA-AGENT-poller-bitstudio', { body: { job_id: jobId } }).catch(console.error);
-      });
+      // The watchdog will pick up the new 'queued' job(s). No direct invocation needed.
 
       return new Response(JSON.stringify({ success: true, jobIds }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
