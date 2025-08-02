@@ -10,6 +10,7 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const BITSTUDIO_API_KEY = Deno.env.get('BITSTUDIO_API_KEY');
 const BITSTUDIO_API_BASE = 'https://api.bitstudio.ai';
+const POLLING_INTERVAL_MS = 5000; // Poll every 5 seconds
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
@@ -31,7 +32,7 @@ serve(async (req) => {
       .single();
 
     if (fetchError) throw new Error(`Failed to fetch job: ${fetchError.message}`);
-    console.log(`[BitStudioPoller][${job.id}] Fetched job from DB. Current status: ${job.status}, mode: ${job.mode}`);
+    console.log(`[BitStudioPoller][${job_id}] Fetched job from DB. Current status: ${job.status}, mode: ${job.mode}`);
     
     if (job.status === 'complete' || job.status === 'failed' || job.status === 'compositing') {
         console.log(`[BitStudioPoller][${job.id}] Job already resolved or being composited. Halting check.`);
@@ -49,7 +50,7 @@ serve(async (req) => {
         statusUrl = `${BITSTUDIO_API_BASE}/images/${taskId}`;
     }
 
-    console.log(`[BitStudioPoller][${job.id}] Fetching status from BitStudio: ${statusUrl}`);
+    console.log(`[BitStudioPoller][${job_id}] Fetching status from BitStudio: ${statusUrl}`);
     const statusResponse = await fetch(statusUrl, {
       headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}` }
     });
@@ -72,7 +73,7 @@ serve(async (req) => {
         jobStatus = statusData.status;
         finalImageUrl = statusData.path;
     }
-    console.log(`[BitStudioPoller][${job.id}] BitStudio status: ${jobStatus}`);
+    console.log(`[BitStudioPoller][${job_id}] BitStudio status: ${jobStatus}`);
 
     if (jobStatus === 'completed') {
       console.log(`[BitStudioPoller][${job.id}] Status is 'completed'.`);
@@ -114,8 +115,17 @@ serve(async (req) => {
           .eq('id', job.batch_pair_job_id);
       }
     } else {
-      console.log(`[BitStudioPoller][${job.id}] Status is '${jobStatus}'. Updating status to 'processing' and awaiting next watchdog cycle.`);
+      console.log(`[BitStudioPoller][${job.id}] Status is '${jobStatus}'. Updating status to 'processing' and re-polling in ${POLLING_INTERVAL_MS}ms.`);
       await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'processing' }).eq('id', job_id);
+      
+      // Asynchronously re-invoke self after a delay
+      setTimeout(() => {
+        supabase.functions.invoke('MIRA-AGENT-poller-bitstudio', {
+          body: { job_id: job_id }
+        }).catch(err => {
+          console.error(`[BitStudioPoller][${job_id}] Failed to re-invoke self:`, err);
+        });
+      }, POLLING_INTERVAL_MS);
     }
 
     return new Response(JSON.stringify({ success: true, status: jobStatus }), { headers: corsHeaders });
