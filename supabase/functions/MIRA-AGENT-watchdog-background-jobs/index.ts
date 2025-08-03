@@ -12,7 +12,6 @@ const corsHeaders = {
 const STALLED_POLLER_THRESHOLD_SECONDS = 5;
 const STALLED_AGGREGATION_THRESHOLD_SECONDS = 20;
 const STALLED_PAIR_JOB_THRESHOLD_SECONDS = 30;
-const STALLED_GOOGLE_VTO_THRESHOLD_SECONDS = 15;
 const STALLED_REFRAME_THRESHOLD_SECONDS = 30;
 const STALLED_FIXER_THRESHOLD_SECONDS = 5;
 const STALLED_QA_REPORT_THRESHOLD_SECONDS = 5;
@@ -173,14 +172,15 @@ serve(async (req) => {
     } catch (e) { console.error(`[Watchdog-BG][${requestId}] Task 5 (Stalled Pair Jobs) failed:`, e.message); }
 
     try {
-      console.log(`[Watchdog-BG][${requestId}] === Task 6: Recovering Stalled Google VTO ===`);
-      await recoverStalledJobs('mira-agent-bitstudio-jobs', ['processing', 'fixing', 'prepare_assets', 'awaiting_auto_complete'], STALLED_GOOGLE_VTO_THRESHOLD_SECONDS, 'MIRA-AGENT-worker-vto-pack-item', 'id', 'pair_job_id', { 'metadata->>engine': 'google' });
-    } catch (e) { console.error(`[Watchdog-BG][${requestId}] Task 6 (Stalled Google VTO) failed:`, e.message); }
-
-    try {
-      console.log(`[Watchdog-BG][${requestId}] === Task 7: Generic VTO Worker Catch-All ===`);
+      console.log(`[Watchdog-BG][${requestId}] === Task 6 & 7: Generic VTO Worker Catch-All ===`);
       const catchAllThreshold = new Date(Date.now() - STALLED_VTO_WORKER_CATCH_ALL_THRESHOLD_SECONDS * 1000).toISOString();
-      const inProgressStatuses = ['processing', 'fixing', 'prepare_assets', 'awaiting_auto_complete', 'awaiting_reframe', 'awaiting_stylist_choice'];
+      // NEW: Comprehensive list of all possible in-progress states for the worker
+      const inProgressStatuses = [
+        'processing', 'fixing', 'prepare_assets', 'generate_step_1', 'quality_check',
+        'generate_step_2', 'quality_check_2', 'generate_step_3', 'quality_check_3',
+        'outfit_completeness_check', 'awaiting_stylist_choice', 'awaiting_auto_complete',
+        'reframe', 'awaiting_reframe'
+      ];
       const { data: longStalledJobs, error: catchAllError } = await supabase
         .from('mira-agent-bitstudio-jobs')
         .select('id, metadata')
@@ -208,7 +208,7 @@ serve(async (req) => {
       } else {
         console.log(`[Watchdog-BG][${requestId}] No long-stalled VTO jobs found.`);
       }
-    } catch (e) { console.error(`[Watchdog-BG][${requestId}] Task 7 (VTO Catch-All) failed:`, e.message); }
+    } catch (e) { console.error(`[Watchdog-BG][${requestId}] Task 6/7 (VTO Catch-All) failed:`, e.message); }
 
     try {
       console.log(`[Watchdog-BG][${requestId}] === Task 8: Starting New Google VTO Jobs ===`);
