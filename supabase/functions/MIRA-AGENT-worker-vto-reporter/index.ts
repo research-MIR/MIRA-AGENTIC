@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { GoogleGenAI, Content, Part, HarmCategory, HarmBlockThreshold, GenerationResult } from 'https://esm.sh/@google/genai@0.15.0';
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const MODEL_NAME = "gemini-2.5-pro-preview-06-05";
@@ -83,38 +84,39 @@ const extractJson = (text: string): any => {
     }
 };
 
-const createImagePartFromUrl = (url: string, label: string): Part[] => {
-    const extension = url.split('.').pop()?.toLowerCase() || '';
-    let mimeType = 'image/jpeg'; // A safe default
-    if (['png', 'webp'].includes(extension)) {
-        mimeType = `image/${extension}`;
+async function downloadAndEncodeImageAsPart(supabase: SupabaseClient, publicUrl: string, label: string): Promise<Part[]> {
+    const url = new URL(publicUrl);
+    const pathSegments = url.pathname.split('/');
+    const bucketName = pathSegments[pathSegments.indexOf('public') + 1];
+    const filePath = decodeURIComponent(pathSegments.slice(pathSegments.indexOf(bucketName) + 1).join('/'));
+
+    const { data: urlData } = supabase.storage
+        .from(bucketName)
+        .getPublicUrl(filePath, {
+            transform: {
+                width: 512,
+                height: 512,
+                resize: 'contain'
+            }
+        });
+
+    if (!urlData || !urlData.publicUrl) {
+        throw new Error(`Failed to create transformed URL for ${filePath}`);
     }
+
+    const response = await fetch(urlData.publicUrl);
+    if (!response.ok) {
+        throw new Error(`Failed to download transformed image from ${urlData.publicUrl}: ${response.statusText}`);
+    }
+    const data = await response.blob();
+
+    const buffer = await data.arrayBuffer();
+    const base64 = encodeBase64(buffer);
     return [
         { text: `--- ${label} ---` },
-        { fileData: { mimeType, fileUri: url } }
+        { inlineData: { mimeType: data.type, data: base64 } }
     ];
-};
-
-const analyzeGarment = async (ai: GoogleGenAI, imageUrl: string): Promise<any> => {
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-        try {
-            const imageParts = createImagePartFromUrl(imageUrl, "REFERENCE GARMENT");
-            const result = await ai.models.generateContent({
-                model: MODEL_NAME,
-                contents: [{ role: 'user', parts: imageParts }],
-                generationConfig: { responseMimeType: "application/json" },
-                config: { systemInstruction: { role: "system", parts: [{ text: garmentAnalysisPrompt }] } }
-            });
-            return extractJson(result.text);
-        } catch (error) {
-            if (attempt < MAX_RETRIES) {
-                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS * attempt));
-            } else {
-                throw error;
-            }
-        }
-    }
-};
+}
 
 const performFullAnalysis = async (ai: GoogleGenAI, garmentAnalysis: any, sourceParts: Part[], referenceParts: Part[], finalParts: Part[]): Promise<any> => {
   const parts: Part[] = [
@@ -159,14 +161,22 @@ serve(async (req) => {
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
 
-    console.log(`${logPrefix} Stage 0: Preparing image URLs...`);
-    const personImageParts = createImagePartFromUrl(sourcePersonImageUrl, "SOURCE PERSON");
-    const referenceGarmentParts = createImagePartFromUrl(vtoJob.source_garment_image_url, "REFERENCE GARMENT");
-    const finalResultParts = createImagePartFromUrl(vtoJob.final_image_url, "FINAL RESULT");
+    console.log(`${logPrefix} Stage 0: Downloading and encoding resized images in parallel...`);
+    const [personImageParts, referenceGarmentParts, finalResultParts] = await Promise.all([
+        downloadAndEncodeImageAsPart(supabase, sourcePersonImageUrl, "SOURCE PERSON"),
+        downloadAndEncodeImageAsPart(supabase, vtoJob.source_garment_image_url, "REFERENCE GARMENT"),
+        downloadAndEncodeImageAsPart(supabase, vtoJob.final_image_url, "FINAL RESULT")
+    ]);
     console.log(`${logPrefix} Stage 0 complete.`);
 
     console.log(`${logPrefix} Stage 1: Analyzing reference garment...`);
-    const garmentAnalysis = await analyzeGarment(ai, vtoJob.source_garment_image_url);
+    const garmentAnalysisResult = await ai.models.generateContent({
+        model: MODEL_NAME,
+        contents: [{ role: 'user', parts: referenceGarmentParts }],
+        generationConfig: { responseMimeType: "application/json" },
+        config: { systemInstruction: { role: "system", parts: [{ text: garmentAnalysisPrompt }] } }
+    });
+    const garmentAnalysis = extractJson(garmentAnalysisResult.text);
     await supabase.from('mira-agent-vto-qa-reports').update({ reference_garment_analysis: garmentAnalysis }).eq('id', qa_job_id);
     console.log(`${logPrefix} Stage 1 complete.`);
 
