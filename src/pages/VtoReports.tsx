@@ -16,7 +16,7 @@ import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast
 import { VtoPackDetailView } from '@/components/VTO/VtoPackDetailView';
 import { AnalyzePackModal, AnalysisScope } from '@/components/VTO/AnalyzePackModal';
 import { DownloadPackModal } from "@/components/VTO/DownloadPackModal";
-import { RefinePackModal, RefineScope } from "./RefinePackModal";
+import { RefinePackModal, RefineScope } from "@/components/VTO/RefinePackModal";
 
 interface QaReport {
   id: string;
