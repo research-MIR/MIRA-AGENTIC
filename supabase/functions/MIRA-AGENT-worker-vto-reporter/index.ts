@@ -90,9 +90,9 @@ async function downloadAndEncodeImageAsPart(supabase: SupabaseClient, publicUrl:
     const bucketName = pathSegments[pathSegments.indexOf('public') + 1];
     const filePath = decodeURIComponent(pathSegments.slice(pathSegments.indexOf(bucketName) + 1).join('/'));
 
-    const { data: urlData } = supabase.storage
+    const { data, error } = await supabase.storage
         .from(bucketName)
-        .getPublicUrl(filePath, {
+        .download(filePath, {
             transform: {
                 width: 512,
                 height: 512,
@@ -100,16 +100,10 @@ async function downloadAndEncodeImageAsPart(supabase: SupabaseClient, publicUrl:
             }
         });
 
-    if (!urlData || !urlData.publicUrl) {
-        throw new Error(`Failed to create transformed URL for ${filePath}`);
+    if (error) {
+        throw new Error(`Failed to download and transform image from ${filePath}: ${error.message}`);
     }
-
-    const response = await fetch(urlData.publicUrl);
-    if (!response.ok) {
-        throw new Error(`Failed to download transformed image from ${urlData.publicUrl}: ${response.statusText}`);
-    }
-    const data = await response.blob();
-
+    
     const buffer = await data.arrayBuffer();
     const base64 = encodeBase64(buffer);
     return [
