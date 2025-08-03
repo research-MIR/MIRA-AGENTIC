@@ -15,6 +15,9 @@ const GENERATION_STEPS = [
     { step: 2, sampleStep: 30, nextQaStep: 'quality_check_2' },
     { step: 3, sampleStep: 50, nextQaStep: 'quality_check_3' },
 ];
+const OUTFIT_ANALYSIS_MAX_RETRIES = 3;
+const OUTFIT_ANALYSIS_RETRY_DELAY_MS = 1000;
+const FAIL_ON_OUTFIT_ANALYSIS_ERROR = false; // If true, the job fails if analysis fails. If false, it just skips auto-complete.
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
