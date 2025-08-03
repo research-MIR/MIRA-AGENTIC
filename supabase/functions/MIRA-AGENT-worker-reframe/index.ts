@@ -102,7 +102,8 @@ serve(async (req) => {
         }).eq('id', job_id);
 
         console.log(`${logPrefix} Assets prepared. Re-invoking worker for next step.`);
-        supabase.functions.invoke('MIRA-AGENT-worker-reframe', { body: { job_id } }).catch(console.error);
+        // AWAIT the invocation to ensure it's queued before this function exits.
+        await supabase.functions.invoke('MIRA-AGENT-worker-reframe', { body: { job_id } });
         break;
       }
 
