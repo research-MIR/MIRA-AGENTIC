@@ -5,7 +5,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Progress } from "@/components/ui/progress";
-import { BarChart2, CheckCircle, XCircle, Loader2, AlertTriangle, UserCheck2, BadgeAlert, FileText, RefreshCw, Wand2, Download, HardDriveDownload, Shirt, ArrowLeft } from "lucide-react";
+import { BarChart2, CheckCircle, XCircle, Loader2, AlertTriangle, UserCheck2, BadgeAlert, FileText, RefreshCw, Wand2, Download, HardDriveDownload, Shirt, ArrowLeft, Trash2 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -16,6 +16,7 @@ import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast
 import { VtoPackDetailView } from '@/components/VTO/VtoPackDetailView';
 import { AnalyzePackModal, AnalysisScope } from '@/components/VTO/AnalyzePackModal';
 import { DownloadPackModal } from "@/components/VTO/DownloadPackModal";
+import { RefinePackModal, RefineScope } from "./RefinePackModal";
 
 interface QaReport {
   id: string;
@@ -68,6 +69,13 @@ const VtoReports = () => {
   const { supabase, session } = useSession();
   const queryClient = useQueryClient();
   const [openPackId, setOpenPackId] = useState<string | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState<string | null>(null);
+  const [packToAnalyze, setPackToAnalyze] = useState<PackSummary | null>(null);
+  const [packToDownload, setPackToDownload] = useState<PackSummary | null>(null);
+  const [isStartingRefinement, setIsStartingRefinement] = useState<string | null>(null);
+  const [packToRefine, setPackToRefine] = useState<PackSummary | null>(null);
+  const [isRetrying, setIsRetrying] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState<string | null>(null);
 
   const { data: queryData, isLoading, error } = useQuery<any>({
     queryKey: ['vtoQaReportsAndPacks', session?.user?.id],
@@ -91,6 +99,27 @@ const VtoReports = () => {
       .on<QaReport>(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'mira-agent-vto-qa-reports', filter: `user_id=eq.${session.user.id}` },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ['vtoQaReportsAndPacks', session.user.id] });
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'mira-agent-vto-packs-jobs', filter: `user_id=eq.${session.user.id}` },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ['vtoQaReportsAndPacks', session.user.id] });
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'mira-agent-bitstudio-jobs', filter: `user_id=eq.${session.user.id}` },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ['vtoQaReportsAndPacks', session.user.id] });
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'mira-agent-batch-inpaint-pair-jobs', filter: `user_id=eq.${session.user.id}` },
         () => {
           queryClient.invalidateQueries({ queryKey: ['vtoQaReportsAndPacks', session.user.id] });
         }
@@ -142,6 +171,95 @@ const VtoReports = () => {
     return Array.from(packsMap.values()).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   }, [queryData]);
 
+  const handleAnalyze = async (scope: AnalysisScope) => {
+    if (!packToAnalyze || !session?.user) return;
+    setIsAnalyzing(packToAnalyze.pack_id);
+    const toastId = showLoading("Starting analysis...");
+    try {
+      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-vto-reporter', {
+        body: { pack_id: packToAnalyze.pack_id, user_id: session.user.id, analysis_scope: scope }
+      });
+      if (error) throw error;
+      dismissToast(toastId);
+      showSuccess(data.message);
+      queryClient.invalidateQueries({ queryKey: ['vtoPackSummaries', session.user.id] });
+      setPackToAnalyze(null);
+    } catch (err: any) {
+      dismissToast(toastId);
+      showError(`Analysis failed: ${err.message}`);
+    } finally {
+      setIsAnalyzing(null);
+    }
+  };
+
+  const handleStartRefinement = async (scope: RefineScope) => {
+    if (!packToRefine || !session?.user) return;
+    setIsStartingRefinement(packToRefine.pack_id);
+    const toastId = showLoading("Preparing refinement pass...");
+
+    try {
+        const { data, error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-vto-refinement-pass', {
+            body: { 
+                pack_id: packToRefine.pack_id, 
+                user_id: session.user.id,
+                scope: scope
+            }
+        });
+        if (error) throw error;
+        
+        dismissToast(toastId);
+        showSuccess(data.message);
+        queryClient.invalidateQueries({ queryKey: ['vtoPackSummaries', session.user.id] });
+        setPackToRefine(null);
+    } catch (err: any) {
+        dismissToast(toastId);
+        showError(`Failed to start refinement: ${err.message}`);
+    } finally {
+        setIsStartingRefinement(null);
+    }
+  };
+
+  const handleRetryAllFailed = async (pack: PackSummary) => {
+    if (!session?.user) return;
+    setIsRetrying(pack.pack_id);
+    const toastId = showLoading(`Re-queueing ${pack.failed_jobs} failed jobs...`);
+    try {
+        const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-retry-all-failed-in-pack', {
+            body: { pack_id: pack.pack_id, user_id: session.user.id }
+        });
+        if (error) throw error;
+        dismissToast(toastId);
+        showSuccess(data.message);
+        queryClient.invalidateQueries({ queryKey: ['vtoPackSummaries', session.user.id] });
+    } catch (err: any) {
+        dismissToast(toastId);
+        showError(`Operation failed: ${err.message}`);
+    } finally {
+        setIsRetrying(null);
+    }
+  };
+
+  const handleDeleteAnalysis = async (pack: PackSummary) => {
+    if (!session?.user) return;
+    setIsDeleting(pack.pack_id);
+    const toastId = showLoading("Deleting analysis report...");
+    try {
+        const { error } = await supabase.rpc('MIRA-AGENT-admin-reset-vto-pack-analysis', {
+            p_pack_id: pack.pack_id,
+            p_user_id: session.user.id
+        });
+        if (error) throw error;
+        dismissToast(toastId);
+        showSuccess(`Analysis for "${pack.metadata?.name || pack.pack_id}" has been reset.`);
+        queryClient.invalidateQueries({ queryKey: ['vtoQaReportsAndPacks', session.user.id] });
+    } catch (err: any) {
+        dismissToast(toastId);
+        showError(`Failed to delete analysis: ${err.message}`);
+    } finally {
+        setIsDeleting(null);
+    }
+  };
+
   if (isLoading) {
     return <div className="p-8 space-y-4"><Skeleton className="h-32 w-full" /><Skeleton className="h-32 w-full" /></div>;
   }
@@ -166,55 +284,93 @@ const VtoReports = () => {
   }
 
   return (
-    <div className="p-4 md:p-8 h-screen overflow-y-auto">
-      <header className="pb-4 mb-8 border-b">
-        <h1 className="text-3xl font-bold">{t('vtoAnalysisReports')}</h1>
-        <p className="text-muted-foreground">{t('vtoAnalysisReportsDescription')}</p>
-      </header>
-      <div className="space-y-4">
-        {packSummaries.map(report => (
-          <Card key={report.pack_id}>
-            <CardHeader>
-              <CardTitle className="flex justify-between items-center">
-                <span>{report.metadata?.name || `Pack from ${new Date(report.created_at).toLocaleString()}`}</span>
-                <Link to={`/vto-reports/${report.pack_id}`}>
-                  <Button>{t('viewReport')}</Button>
-                </Link>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <h3 className="font-semibold text-sm">{t('overallPassRate')}</h3>
-                <div className="flex items-center gap-4 flex-wrap">
-                  <div className="flex items-center gap-2 text-green-600"><CheckCircle className="h-5 w-5" /><span className="text-2xl font-bold">{report.passed_perfect}</span><span>Passed</span></div>
-                  <div className="flex items-center gap-2 text-yellow-600"><UserCheck2 className="h-5 w-5" /><span className="text-2xl font-bold">{report.passed_pose_change}</span><span>Passed (Pose Change)</span></div>
-                  <div className="flex items-center gap-2 text-orange-500"><BadgeAlert className="h-5 w-5" /><span className="text-2xl font-bold">{report.passed_logo_issue}</span><span>Passed (Logo Issue)</span></div>
-                  <div className="flex items-center gap-2 text-orange-500"><FileText className="h-5 w-5" /><span className="text-2xl font-bold">{report.passed_detail_issue}</span><span>Passed (Detail Issue)</span></div>
-                  <div className="flex items-center gap-2 text-destructive"><XCircle className="h-5 w-5" /><span className="text-2xl font-bold">{report.failed_jobs}</span><span>Failed</span></div>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <h3 className="font-semibold text-sm">{t('failureReasons')}</h3>
-                {Object.keys(report.failure_summary).length > 0 ? (
-                  <div className="text-xs text-muted-foreground space-y-1">
-                    {Object.entries(report.failure_summary).map(([reason, count]) => (
-                      <div key={reason} className="flex justify-between">
-                        <span className="capitalize">{reason.replace(/_/g, ' ')}</span>
-                        <span>{count}</span>
+    <>
+      <div className="p-4 md:p-8 h-screen overflow-y-auto">
+        <header className="pb-4 mb-8 border-b">
+          <h1 className="text-3xl font-bold">{t('vtoAnalysisReports')}</h1>
+          <p className="text-muted-foreground">{t('vtoAnalysisReportsDescription')}</p>
+        </header>
+        <div className="space-y-4">
+          {packSummaries.map(report => {
+            const totalReports = report.passed_perfect + report.passed_pose_change + report.passed_logo_issue + report.passed_detail_issue + report.failed_jobs;
+            const isReportReady = totalReports > 0;
+            const isRefinementPack = !!report.metadata?.refinement_of_pack_id;
+
+            return (
+              <AccordionItem key={report.pack_id} value={report.pack_id} className="border rounded-md">
+                <div className="flex items-center p-4">
+                  <AccordionTrigger className="flex-1 text-left p-0 hover:no-underline">
+                    <div className="text-left">
+                      <p className="font-semibold flex items-center gap-2">
+                        {isRefinementPack && <Wand2 className="h-5 w-5 text-purple-500" />}
+                        <span>{report.metadata?.name || `Pack from ${new Date(report.created_at).toLocaleString()}`}</span>
+                      </p>
+                      <div className="flex items-center gap-2 mt-2">
+                        <Progress value={(report.completed_jobs / (report.metadata?.total_pairs || report.total_jobs || 1)) * 100} className="h-2 w-32" />
+                        <p className="text-sm text-muted-foreground">
+                          {report.completed_jobs} / {report.metadata?.total_pairs || report.total_jobs} completed
+                        </p>
                       </div>
-                    ))}
+                    </div>
+                  </AccordionTrigger>
+                  <div className="flex items-center gap-2 pl-4">
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10" disabled={!isReportReady}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>{t('deleteReportConfirmTitle')}</AlertDialogTitle>
+                          <AlertDialogDescription>{t('deleteReportConfirmDescription')}</AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction onClick={() => handleDeleteAnalysis(report)} disabled={isDeleting === report.pack_id}>
+                            {isDeleting === report.pack_id && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            {t('deleteReportConfirmAction')}
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                    {report.failed_jobs > 0 && (
+                      <Button variant="destructive" size="sm" onClick={() => handleRetryAllFailed(report)} disabled={isRetrying === report.pack_id}>
+                        {isRetrying === report.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+                        Retry All Failed ({report.failed_jobs})
+                      </Button>
+                    )}
+                    <Button variant="outline" size="sm" onClick={() => setPackToDownload(report)}>
+                      <HardDriveDownload className="h-4 w-4 mr-2" />
+                      {t('downloadPack')}
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => setPackToAnalyze(report)} disabled={isAnalyzing === report.pack_id}>
+                      {isAnalyzing === report.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <BarChart2 className="h-4 w-4 mr-2" />}
+                      {t('analyzePack')}
+                    </Button>
+                    {!isRefinementPack && (
+                      <Button variant="secondary" size="sm" onClick={() => setPackToRefine(report)} disabled={isStartingRefinement === report.pack_id || report.completed_jobs === 0}>
+                        {isStartingRefinement === report.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Wand2 className="h-4 w-4 mr-2" />}
+                        {t('refinePack')}
+                      </Button>
+                    )}
+                    <Link to={`/vto-reports/${report.pack_id}`} onClick={(e) => !isReportReady && e.preventDefault()}>
+                      <Button disabled={!isReportReady}>{t('viewReport')}</Button>
+                    </Link>
                   </div>
-                ) : (
-                  <div className="h-full bg-muted rounded-md flex items-center justify-center text-muted-foreground">
-                    <p>No failures recorded.</p>
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+                </div>
+                <AccordionContent className="p-4 pt-0">
+                  <VtoPackDetailView packId={report.pack_id} isOpen={openPackId === report.pack_id} />
+                </AccordionContent>
+              </AccordionItem>
+            )
+          })}
+        </Accordion>
       </div>
-    </div>
+      <AnalyzePackModal isOpen={!!packToAnalyze} onClose={() => setPackToAnalyze(null)} onAnalyze={handleAnalyze} isLoading={!!isAnalyzing} packName={packToAnalyze?.metadata?.name || ''} />
+      <DownloadPackModal isOpen={!!packToDownload} onClose={() => setPackToDownload(null)} pack={packToDownload} />
+      <RefinePackModal isOpen={!!packToRefine} onClose={() => setPackToRefine(null)} onRefine={handleStartRefinement} isLoading={!!isStartingRefinement} packName={packToRefine?.metadata?.name || ''} />
+    </>
   );
 };
 
