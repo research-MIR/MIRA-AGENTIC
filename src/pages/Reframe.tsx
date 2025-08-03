@@ -353,8 +353,8 @@ const Reframe = () => {
                         </CarouselItem>
                       ))}
                     </CarouselContent>
-                    <CarouselPrevious />
-                    <CarouselNext />
+                    <CarouselPrevious className="left-2" />
+                    <CarouselNext className="right-2" />
                   </Carousel>
                 ) : (
                   <p className="text-sm text-muted-foreground">{t('noRecentReframes')}</p>
