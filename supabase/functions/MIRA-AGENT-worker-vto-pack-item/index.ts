@@ -124,8 +124,20 @@ serve(async (req) => {
             case 'generate_step_1':
                 await handleGenerateStep(supabase, job, 15, 'quality_check', logPrefix);
                 break;
+            case 'generate_step_2':
+                await handleGenerateStep(supabase, job, 30, 'quality_check_2', logPrefix);
+                break;
+            case 'generate_step_3':
+                await handleGenerateStep(supabase, job, 45, 'quality_check_3', logPrefix);
+                break;
             case 'quality_check':
                 await handleQualityCheck(supabase, job, logPrefix);
+                break;
+            case 'quality_check_2':
+                await handleQualityCheckPass2(supabase, job, logPrefix);
+                break;
+            case 'quality_check_3':
+                await handleQualityCheckPass3(supabase, job, logPrefix);
                 break;
             case 'outfit_completeness_check':
                 await handleOutfitCompletenessCheck(supabase, job, logPrefix);
@@ -529,10 +541,10 @@ async function handleOutfitCompletenessCheck(supabase: SupabaseClient, job: any,
     const { metadata, id: pair_job_id } = job;
     const { qa_best_image_base64, garment_analysis, auto_complete_outfit } = metadata;
 
-    if (auto_complete_outfit === false || !garment_analysis?.type_of_fit) {
+    if (!auto_complete_outfit || !garment_analysis?.type_of_fit) {
         console.log(`${logPrefix} Skipping outfit check. Auto-complete: ${auto_complete_outfit}, Garment Fit: ${garment_analysis?.type_of_fit}`);
         await supabase.from('mira-agent-bitstudio-jobs').update({
-            metadata: { ...metadata, google_vto_step: 'reframe', outfit_analysis_skipped: true }
+            metadata: { ...metadata, google_vto_step: 'reframe' }
         }).eq('id', job.id);
         await invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
         return;
@@ -626,32 +638,22 @@ async function handleAutoComplete(supabase: SupabaseClient, job: any, logPrefix:
     const finalImageBase64 = vtoResult?.generatedImages?.[0]?.base64Image;
     if (!finalImageBase64) throw new Error("Auto-complete VTO did not return a valid image.");
 
-    console.log(`${logPrefix} Auto-complete generation successful. Directly invoking reframe proxy.`);
-    
-    // Directly invoke the reframe proxy with the new base64 data
-    const { data: reframeJobData, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-reframe', {
-        body: {
-            user_id: user_id,
-            base_image_base64: finalImageBase64,
-            prompt: metadata.prompt_appendix || "",
-            aspect_ratio: metadata.final_aspect_ratio,
-            source: 'reframe_from_vto',
-            parent_vto_job_id: parent_job_id
-        }
-    });
-    if (proxyError) throw new Error(`Failed to invoke reframe proxy: ${proxyError.message}`);
+    console.log(`${logPrefix} Auto-complete generation successful. Uploading final image.`);
+    const finalImage = await uploadBase64ToStorage(supabase, finalImageBase64, user_id, 'auto_complete_final.png');
 
     await supabase.from('mira-agent-bitstudio-jobs').update({
-        status: 'awaiting_reframe',
+        status: 'processing', // Set back to processing for the next step
         metadata: { 
             ...metadata, 
-            google_vto_step: 'done', // Mark this worker's part as done
-            delegated_reframe_job_id: reframeJobData.jobId,
-            qa_best_image_base64: null // Clear the old base64 data
+            google_vto_step: 'reframe',
+            auto_complete_result_url: finalImage.publicUrl,
+            qa_best_image_url: finalImage.publicUrl,
+            qa_best_image_base64: finalImageBase64
         }
     }).eq('id', parent_job_id);
 
-    console.log(`${logPrefix} Auto-complete finished. Handed off to reframe job ${reframeJobData.jobId}.`);
+    console.log(`${logPrefix} Auto-complete finished. Advancing parent job to 'reframe'.`);
+    await invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: parent_job_id });
 }
 
 async function handleReframe(supabase: SupabaseClient, job: any, logPrefix: string) {
