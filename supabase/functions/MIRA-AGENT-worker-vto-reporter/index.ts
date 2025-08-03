@@ -112,6 +112,26 @@ async function downloadAndEncodeImageAsPart(supabase: SupabaseClient, publicUrl:
     ];
 }
 
+const analyzeGarment = async (ai: GoogleGenAI, imageParts: Part[]): Promise<any> => {
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+            const result = await ai.models.generateContent({
+                model: MODEL_NAME,
+                contents: [{ role: 'user', parts: imageParts }],
+                generationConfig: { responseMimeType: "application/json" },
+                config: { systemInstruction: { role: "system", parts: [{ text: garmentAnalysisPrompt }] } }
+            });
+            return extractJson(result.text);
+        } catch (error) {
+            if (attempt < MAX_RETRIES) {
+                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS * attempt));
+            } else {
+                throw error;
+            }
+        }
+    }
+};
+
 const performFullAnalysis = async (ai: GoogleGenAI, garmentAnalysis: any, sourceParts: Part[], referenceParts: Part[], finalParts: Part[]): Promise<any> => {
   const parts: Part[] = [
     { text: "--- PRELIMINARY REFERENCE GARMENT ANALYSIS (JSON) ---" },
@@ -164,13 +184,7 @@ serve(async (req) => {
     console.log(`${logPrefix} Stage 0 complete.`);
 
     console.log(`${logPrefix} Stage 1: Analyzing reference garment...`);
-    const garmentAnalysisResult = await ai.models.generateContent({
-        model: MODEL_NAME,
-        contents: [{ role: 'user', parts: referenceGarmentParts }],
-        generationConfig: { responseMimeType: "application/json" },
-        config: { systemInstruction: { role: "system", parts: [{ text: garmentAnalysisPrompt }] } }
-    });
-    const garmentAnalysis = extractJson(garmentAnalysisResult.text);
+    const garmentAnalysis = await analyzeGarment(ai, referenceGarmentParts);
     await supabase.from('mira-agent-vto-qa-reports').update({ reference_garment_analysis: garmentAnalysis }).eq('id', qa_job_id);
     console.log(`${logPrefix} Stage 1 complete.`);
 
