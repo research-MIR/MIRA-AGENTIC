@@ -124,6 +124,12 @@ serve(async (req) => {
             case 'generate_step_1':
                 await handleGenerateStep(supabase, job, 15, 'quality_check', logPrefix);
                 break;
+            case 'generate_step_2':
+                await handleGenerateStep(supabase, job, 30, 'quality_check', logPrefix);
+                break;
+            case 'generate_step_3':
+                await handleGenerateStep(supabase, job, 50, 'quality_check', logPrefix);
+                break;
             case 'quality_check':
                 await handleQualityCheck(supabase, job, logPrefix);
                 break;
