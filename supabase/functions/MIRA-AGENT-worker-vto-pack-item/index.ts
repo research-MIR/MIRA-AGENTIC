@@ -22,12 +22,6 @@ const FAIL_ON_OUTFIT_ANALYSIS_ERROR = true; // FEATURE FLAG: If true, job fails 
 const OUTFIT_ANALYSIS_MAX_RETRIES = 3;
 const OUTFIT_ANALYSIS_RETRY_DELAY_MS = 1000;
 
-// --- NEW VTO-SPECIFIC REFRAME DEFAULTS ---
-const VTO_PIPELINE_DEFAULT_DILATION = 0.05;
-const VTO_PIPELINE_DEFAULT_STEPS = 55;
-const VTO_PIPELINE_DEFAULT_FEATHER_RATIO = 0.015;
-// -----------------------------------------
-
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -682,10 +676,7 @@ async function handleReframe(supabase: SupabaseClient, job: any, logPrefix: stri
                 prompt: prompt_appendix || "",
                 aspect_ratio: final_aspect_ratio,
                 source: 'reframe_from_vto',
-                parent_vto_job_id: job.id,
-                dilation: VTO_PIPELINE_DEFAULT_DILATION,
-                steps: VTO_PIPELINE_DEFAULT_STEPS,
-                feather_ratio: VTO_PIPELINE_DEFAULT_FEATHER_RATIO
+                parent_vto_job_id: job.id
             }
         });
         if (reframeError) throw new Error(reframeError.message || 'Reframe proxy failed.');

@@ -38,7 +38,7 @@ const blobToBase64 = (blob: Blob): Promise<string> => {
 serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response('ok', { headers: corsHeaders }); }
 
-  const { job_id, prompt: providedPrompt, dilation, steps } = await req.json();
+  const { job_id, prompt: providedPrompt } = await req.json();
   if (!job_id) throw new Error("job_id is required.");
 
   const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
@@ -51,7 +51,7 @@ serve(async (req) => {
     const { data: job, error: fetchError } = await supabase.from('mira-agent-jobs').select('context, user_id').eq('id', job_id).single();
     if (fetchError) throw fetchError;
 
-    const { base_image_url, mask_image_url, count, invert_mask } = job.context;
+    const { base_image_url, mask_image_url, dilation, steps, count, invert_mask } = job.context;
     const prompt = providedPrompt || job.context.prompt || "";
     if (!base_image_url || !mask_image_url) throw new Error("Missing image URLs in job context.");
 

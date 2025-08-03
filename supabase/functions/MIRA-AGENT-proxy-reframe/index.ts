@@ -30,9 +30,7 @@ serve(async (req) => {
         aspect_ratio,
         invert_mask,
         source,
-        parent_recontext_job_id,
-        parent_vto_job_id,
-        feather_ratio
+        parent_recontext_job_id // New parameter
     } = await req.json();
 
     if (!user_id || (!base_image_base64 && !base_image_url) || !aspect_ratio) {
@@ -71,8 +69,6 @@ serve(async (req) => {
         aspect_ratio,
         invert_mask: invert_mask || false,
         parent_recontext_job_id: parent_recontext_job_id || null,
-        parent_vto_job_id: parent_vto_job_id || null,
-        feather_ratio
     };
 
     const { data: newJob, error: insertError } = await supabase
