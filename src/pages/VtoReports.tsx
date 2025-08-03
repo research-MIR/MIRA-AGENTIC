@@ -291,81 +291,83 @@ const VtoReports = () => {
           <p className="text-muted-foreground">{t('vtoAnalysisReportsDescription')}</p>
         </header>
         <div className="space-y-4">
-          {packSummaries.map(report => {
-            const totalReports = report.passed_perfect + report.passed_pose_change + report.passed_logo_issue + report.passed_detail_issue + report.failed_jobs;
-            const isReportReady = totalReports > 0;
-            const isRefinementPack = !!report.metadata?.refinement_of_pack_id;
+          <Accordion type="single" collapsible className="w-full space-y-4" onValueChange={setOpenPackId}>
+            {packSummaries.map(report => {
+              const totalReports = report.passed_perfect + report.passed_pose_change + report.passed_logo_issue + report.passed_detail_issue + report.failed_jobs;
+              const isReportReady = totalReports > 0;
+              const isRefinementPack = !!report.metadata?.refinement_of_pack_id;
 
-            return (
-              <AccordionItem key={report.pack_id} value={report.pack_id} className="border rounded-md">
-                <div className="flex items-center p-4">
-                  <AccordionTrigger className="flex-1 text-left p-0 hover:no-underline">
-                    <div className="text-left">
-                      <p className="font-semibold flex items-center gap-2">
-                        {isRefinementPack && <Wand2 className="h-5 w-5 text-purple-500" />}
-                        <span>{report.metadata?.name || `Pack from ${new Date(report.created_at).toLocaleString()}`}</span>
-                      </p>
-                      <div className="flex items-center gap-2 mt-2">
-                        <Progress value={(report.completed_jobs / (report.metadata?.total_pairs || report.total_jobs || 1)) * 100} className="h-2 w-32" />
-                        <p className="text-sm text-muted-foreground">
-                          {report.completed_jobs} / {report.metadata?.total_pairs || report.total_jobs} completed
+              return (
+                <AccordionItem key={report.pack_id} value={report.pack_id} className="border rounded-md">
+                  <div className="flex items-center p-4">
+                    <AccordionTrigger className="flex-1 text-left p-0 hover:no-underline">
+                      <div className="text-left">
+                        <p className="font-semibold flex items-center gap-2">
+                          {isRefinementPack && <Wand2 className="h-5 w-5 text-purple-500" />}
+                          <span>{report.metadata?.name || `Pack from ${new Date(report.created_at).toLocaleString()}`}</span>
                         </p>
+                        <div className="flex items-center gap-2 mt-2">
+                          <Progress value={(report.completed_jobs / (report.metadata?.total_pairs || report.total_jobs || 1)) * 100} className="h-2 w-32" />
+                          <p className="text-sm text-muted-foreground">
+                            {report.completed_jobs} / {report.metadata?.total_pairs || report.total_jobs} completed
+                          </p>
+                        </div>
                       </div>
-                    </div>
-                  </AccordionTrigger>
-                  <div className="flex items-center gap-2 pl-4">
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10" disabled={!isReportReady}>
-                          <Trash2 className="h-4 w-4" />
+                    </AccordionTrigger>
+                    <div className="flex items-center gap-2 pl-4">
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10" disabled={!isReportReady}>
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>{t('deleteReportConfirmTitle')}</AlertDialogTitle>
+                            <AlertDialogDescription>{t('deleteReportConfirmDescription')}</AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                            <AlertDialogAction onClick={() => handleDeleteAnalysis(report)} disabled={isDeleting === report.pack_id}>
+                              {isDeleting === report.pack_id && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                              {t('deleteReportConfirmAction')}
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                      {report.failed_jobs > 0 && (
+                        <Button variant="destructive" size="sm" onClick={() => handleRetryAllFailed(report)} disabled={isRetrying === report.pack_id}>
+                          {isRetrying === report.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+                          Retry All Failed ({report.failed_jobs})
                         </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>{t('deleteReportConfirmTitle')}</AlertDialogTitle>
-                          <AlertDialogDescription>{t('deleteReportConfirmDescription')}</AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>Cancel</AlertDialogCancel>
-                          <AlertDialogAction onClick={() => handleDeleteAnalysis(report)} disabled={isDeleting === report.pack_id}>
-                            {isDeleting === report.pack_id && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                            {t('deleteReportConfirmAction')}
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
-                    {report.failed_jobs > 0 && (
-                      <Button variant="destructive" size="sm" onClick={() => handleRetryAllFailed(report)} disabled={isRetrying === report.pack_id}>
-                        {isRetrying === report.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
-                        Retry All Failed ({report.failed_jobs})
+                      )}
+                      <Button variant="outline" size="sm" onClick={() => setPackToDownload(report)}>
+                        <HardDriveDownload className="h-4 w-4 mr-2" />
+                        {t('downloadPack')}
                       </Button>
-                    )}
-                    <Button variant="outline" size="sm" onClick={() => setPackToDownload(report)}>
-                      <HardDriveDownload className="h-4 w-4 mr-2" />
-                      {t('downloadPack')}
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={() => setPackToAnalyze(report)} disabled={isAnalyzing === report.pack_id}>
-                      {isAnalyzing === report.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <BarChart2 className="h-4 w-4 mr-2" />}
-                      {t('analyzePack')}
-                    </Button>
-                    {!isRefinementPack && (
-                      <Button variant="secondary" size="sm" onClick={() => setPackToRefine(report)} disabled={isStartingRefinement === report.pack_id || report.completed_jobs === 0}>
-                        {isStartingRefinement === report.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Wand2 className="h-4 w-4 mr-2" />}
-                        {t('refinePack')}
+                      <Button variant="outline" size="sm" onClick={() => setPackToAnalyze(report)} disabled={isAnalyzing === report.pack_id}>
+                        {isAnalyzing === report.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <BarChart2 className="h-4 w-4 mr-2" />}
+                        {t('analyzePack')}
                       </Button>
-                    )}
-                    <Link to={`/vto-reports/${report.pack_id}`} onClick={(e) => !isReportReady && e.preventDefault()}>
-                      <Button disabled={!isReportReady}>{t('viewReport')}</Button>
-                    </Link>
+                      {!isRefinementPack && (
+                        <Button variant="secondary" size="sm" onClick={() => setPackToRefine(report)} disabled={isStartingRefinement === report.pack_id || report.completed_jobs === 0}>
+                          {isStartingRefinement === report.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Wand2 className="h-4 w-4 mr-2" />}
+                          {t('refinePack')}
+                        </Button>
+                      )}
+                      <Link to={`/vto-reports/${report.pack_id}`} onClick={(e) => !isReportReady && e.preventDefault()}>
+                        <Button disabled={!isReportReady}>{t('viewReport')}</Button>
+                      </Link>
+                    </div>
                   </div>
-                </div>
-                <AccordionContent className="p-4 pt-0">
-                  <VtoPackDetailView packId={report.pack_id} isOpen={openPackId === report.pack_id} />
-                </AccordionContent>
-              </AccordionItem>
-            )
-          })}
-        </Accordion>
+                  <AccordionContent className="p-4 pt-0">
+                    <VtoPackDetailView packId={report.pack_id} isOpen={openPackId === report.pack_id} />
+                  </AccordionContent>
+                </AccordionItem>
+              )
+            })}
+          </Accordion>
+        </div>
       </div>
       <AnalyzePackModal isOpen={!!packToAnalyze} onClose={() => setPackToAnalyze(null)} onAnalyze={handleAnalyze} isLoading={!!isAnalyzing} packName={packToAnalyze?.metadata?.name || ''} />
       <DownloadPackModal isOpen={!!packToDownload} onClose={() => setPackToDownload(null)} pack={packToDownload} />
