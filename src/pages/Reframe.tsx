@@ -108,7 +108,7 @@ const Reframe = () => {
         .eq('context->>source', 'reframe')
         .eq('user_id', session.user.id)
         .order('created_at', { ascending: false })
-        .limit(10);
+        .limit(20);
       if (error) throw error;
       return data;
     },
