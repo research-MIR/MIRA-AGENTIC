@@ -174,12 +174,13 @@ serve(async (req) => {
     try {
       console.log(`[Watchdog-BG][${requestId}] === Task 6 & 7: Generic VTO Worker Catch-All ===`);
       const catchAllThreshold = new Date(Date.now() - STALLED_VTO_WORKER_CATCH_ALL_THRESHOLD_SECONDS * 1000).toISOString();
-      // NEW: Comprehensive list of all possible in-progress states for the worker
       const inProgressStatuses = [
-        'processing', 'fixing', 'prepare_assets', 'generate_step_1', 'quality_check',
-        'generate_step_2', 'quality_check_2', 'generate_step_3', 'quality_check_3',
-        'outfit_completeness_check', 'awaiting_stylist_choice', 'awaiting_auto_complete',
-        'reframe', 'awaiting_reframe'
+        'processing', 'fixing', 'prepare_assets', 
+        'generate_step_1', 'quality_check', 
+        'generate_step_2', 'quality_check_2',
+        'generate_step_3', 'quality_check_3',
+        'outfit_completeness_check', 'awaiting_stylist_choice', 
+        'awaiting_auto_complete', 'reframe', 'awaiting_reframe'
       ];
       const { data: longStalledJobs, error: catchAllError } = await supabase
         .from('mira-agent-bitstudio-jobs')
