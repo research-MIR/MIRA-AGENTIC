@@ -35,16 +35,41 @@ const systemPrompt = `You are an expert image analyst specializing in fashion se
 Output a JSON list of segmentation masks where each entry contains the 2D bounding box in the key "box_2d", the segmentation mask in key "mask", and the text label in the key "label".`;
 
 function extractJson(text: string): any {
-    const match = text.match(/```json\s*([\s\S]*?)\s*```/);
-    if (match && match[1]) {
-        return JSON.parse(match[1]);
+    if (!text || text.trim() === "") {
+        throw new Error("The model returned an empty or whitespace-only response.");
     }
+
+    // Attempt 1: Direct JSON parsing
     try {
         return JSON.parse(text);
     } catch (e) {
-        console.error("[SegmentWorker] Failed to parse JSON from model response:", text);
-        throw new Error("The model returned a response that could not be parsed as JSON.");
+        // This is expected if there's extra text, so we continue silently.
     }
+
+    // Attempt 2: Extract from markdown block
+    const markdownMatch = text.match(/```json\s*([\s\S]*?)\s*```/);
+    if (markdownMatch && markdownMatch[1]) {
+        try {
+            return JSON.parse(markdownMatch[1]);
+        } catch (e) {
+            console.error("[SegmentWorker] Failed to parse JSON from extracted markdown block:", e);
+            // Fall through to the next attempt, as the content might still be salvageable.
+        }
+    }
+    
+    // Attempt 3: Surgical extraction (find first '[' and last ']')
+    const firstBracket = text.indexOf('[');
+    const lastBracket = text.lastIndexOf(']');
+    if (firstBracket !== -1 && lastBracket > firstBracket) {
+        const potentialJson = text.substring(firstBracket, lastBracket + 1);
+        try {
+            return JSON.parse(potentialJson);
+        } catch (e) {
+            // This also failed. We're out of good options.
+        }
+    }
+
+    throw new Error("The model returned a response that could not be parsed as JSON after multiple cleanup attempts.");
 }
 
 async function appendResultToJob(supabase: any, jobId: string, result: any) {
@@ -61,152 +86,168 @@ async function appendResultToJob(supabase: any, jobId: string, result: any) {
 }
 
 function parseStorageURL(url: string) {
-    const u = new URL(url);
-    const pathSegments = u.pathname.split('/');
-    const objectSegmentIndex = pathSegments.indexOf('object');
-    if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) {
-        throw new Error(`Invalid Supabase storage URL format: ${url}`);
-    }
-    const bucket = pathSegments[objectSegmentIndex + 2];
-    const path = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
-    return { bucket, path };
-}
-
-async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
-    const { bucket, path } = parseStorageURL(publicUrl);
-    const { data, error } = await supabase.storage.from(bucket).download(path);
-    if (error) throw new Error(`Failed to download from Supabase storage (${path}): ${error.message}`);
-    return data;
-}
-
-serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
+  const u = new URL(url);
+  const pathSegments = u.pathname.split('/');
+  const objectSegmentIndex = pathSegments.indexOf('object');
+  if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) {
+    throw new Error(`Invalid Supabase storage URL format: ${url}`);
   }
+  const bucket = pathSegments[objectSegmentIndex + 2];
+  const path = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
+  return {
+    bucket,
+    path
+  };
+}
 
+async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string) {
+  const { bucket, path } = parseStorageURL(publicUrl);
+  const { data, error } = await supabase.storage.from(bucket).download(path);
+  if (error) throw new Error(`Failed to download from Supabase storage (${path}): ${error.message}`);
+  return data;
+}
+
+serve(async (req)=>{
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', {
+      headers: corsHeaders
+    });
+  }
   // --- ARTIFICIAL DELAY TO PREVENT RACE CONDITIONS ---
   const delay = Math.random() * 1000; // Random delay up to 1 second
-  await new Promise(resolve => setTimeout(resolve, delay));
+  await new Promise((resolve)=>setTimeout(resolve, delay));
   // ----------------------------------------------------
-
   const { aggregation_job_id, reference_image_base64, reference_mime_type } = await req.json();
   const requestId = `segment-worker-${aggregation_job_id}-${Math.random().toString(36).substring(2, 8)}`;
   console.log(`[SegmentWorker][${requestId}] Invoked for aggregation job ${aggregation_job_id}.`);
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-
   try {
     if (!aggregation_job_id) {
       throw new Error("aggregation_job_id is required.");
     }
-
-    const { data: jobData, error: fetchError } = await supabase
-        .from('mira-agent-mask-aggregation-jobs')
-        .select('metadata')
-        .eq('id', aggregation_job_id)
-        .single();
-    
+    const { data: jobData, error: fetchError } = await supabase.from('mira-agent-mask-aggregation-jobs').select('metadata').eq('id', aggregation_job_id).single();
     if (fetchError) throw fetchError;
     const sourceImageUrl = jobData?.metadata?.source_image_storage_path;
     if (!sourceImageUrl) {
-        throw new Error(`Could not retrieve source image path from metadata for job ${aggregation_job_id}`);
+      throw new Error(`Could not retrieve source image path from metadata for job ${aggregation_job_id}`);
     }
-
     const imageBlob = await downloadFromSupabase(supabase, sourceImageUrl);
     const imageBuffer = await imageBlob.arrayBuffer();
     const image_base64 = encodeBase64(imageBuffer);
     const mime_type = imageBlob.type || 'image/png';
-
-    const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-
+    const ai = new GoogleGenAI({
+      apiKey: GEMINI_API_KEY
+    });
     const userParts: Part[] = [
-        { text: "SOURCE IMAGE:" },
-        { inlineData: { mimeType: mime_type, data: image_base64 } },
-    ];
-
-    if (reference_image_base64 && reference_mime_type) {
-        userParts.push(
-            { text: "REFERENCE IMAGE:" },
-            { inlineData: { mimeType: reference_mime_type, data: reference_image_base64 } }
-        );
-    }
-
-    userParts.push({ text: systemPrompt });
-    const contents: Content[] = [{ role: 'user', parts: userParts }];
-
-    let lastError: Error | null = null;
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-        try {
-            console.log(`[SegmentWorker][${requestId}] Calling Gemini API, attempt ${attempt}...`);
-            const result = await ai.models.generateContent({
-                model: MODEL_NAME,
-                contents: contents,
-                generationConfig: { responseMimeType: "application/json" },
-                safetySettings,
-            });
-            
-            console.log(`[SegmentWorker][${requestId}] Raw response from Gemini on attempt ${attempt}:`, result.text);
-
-            let responseToStore;
-            try {
-                const responseJson = extractJson(result.text);
-                if (!responseJson || !Array.isArray(responseJson) || responseJson.length === 0 || !responseJson[0].mask || typeof responseJson[0].mask !== 'string' || !responseJson[0].box_2d) {
-                    throw new Error("Model returned a JSON with an invalid or missing mask/box_2d structure.");
-                }
-
-                // --- NEW: Validate Base64 data before proceeding ---
-                for (const maskItem of responseJson) {
-                    const maskBase64 = maskItem.mask.startsWith('data:image/png;base64,') 
-                        ? maskItem.mask.split(',')[1] 
-                        : maskItem.mask;
-                    if (!maskBase64) throw new Error("Mask item contains empty base64 data.");
-                    decodeBase64(maskBase64); // This will throw if the base64 is invalid
-                }
-                console.log(`[SegmentWorker][${requestId}] Base64 validation passed for all masks.`);
-                // --- END VALIDATION ---
-
-                const normalizedResponse = responseJson.map(item => {
-                    if (item.mask && typeof item.mask === 'string' && !item.mask.startsWith('data:image/png;base64,')) {
-                        item.mask = `data:image/png;base64,${item.mask}`;
-                    }
-                    if (item.box_2d && Array.isArray(item.box_2d[0])) {
-                        item.box_2d = [item.box_2d[0][0], item.box_2d[0][1], item.box_2d[1][0], item.box_2d[1][1]];
-                    }
-                    return item;
-                });
-
-                responseToStore = normalizedResponse;
-                console.log(`[SegmentWorker][${requestId}] Successfully parsed and normalized JSON. Found ${responseToStore.length} masks.`);
-            } catch (parsingError) {
-                console.warn(`[SegmentWorker][${requestId}] JSON parsing or validation failed. Storing raw text. Error: ${parsingError.message}`);
-                responseToStore = {
-                    error: `JSON parsing or validation failed: ${parsingError.message}`,
-                    raw_text: result.text
-                };
-            }
-            
-            await appendResultToJob(supabase, aggregation_job_id, responseToStore);
-            
-            return new Response(JSON.stringify(responseToStore), {
-              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-              status: 200,
-            });
-        } catch (error) {
-            lastError = error;
-            console.warn(`[SegmentWorker][${requestId}] Attempt ${attempt} failed:`, error.message);
-            if (attempt < MAX_RETRIES) {
-                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS * attempt));
-            }
+      {
+        text: "SOURCE IMAGE:"
+      },
+      {
+        inlineData: {
+          mimeType: mime_type,
+          data: image_base64
         }
+      }
+    ];
+    if (reference_image_base64 && reference_mime_type) {
+      userParts.push({
+        text: "REFERENCE IMAGE:"
+      }, {
+        inlineData: {
+          mimeType: reference_mime_type,
+          data: reference_image_base64
+        }
+      });
     }
-
+    userParts.push({
+      text: systemPrompt
+    });
+    const contents: Content[] = [
+      {
+        role: 'user',
+        parts: userParts
+      }
+    ];
+    let lastError: Error | null = null;
+    for(let attempt = 1; attempt <= MAX_RETRIES; attempt++){
+      try {
+        console.log(`[SegmentWorker][${requestId}] Calling Gemini API, attempt ${attempt}...`);
+        const result = await ai.models.generateContent({
+          model: MODEL_NAME,
+          contents: contents,
+          generationConfig: {
+            responseMimeType: "application/json"
+          },
+          safetySettings
+        });
+        console.log(`[SegmentWorker][${requestId}] Raw response from Gemini on attempt ${attempt}:`, result.text);
+        let responseToStore;
+        try {
+          const responseJson = extractJson(result.text);
+          if (!responseJson || !Array.isArray(responseJson) || responseJson.length === 0 || !responseJson[0].mask || typeof responseJson[0].mask !== 'string' || !responseJson[0].box_2d) {
+            throw new Error("Model returned a JSON with an invalid or missing mask/box_2d structure.");
+          }
+          // --- NEW: Validate Base64 data before proceeding ---
+          for (const maskItem of responseJson){
+            const maskBase64 = maskItem.mask.startsWith('data:image/png;base64,') ? maskItem.mask.split(',')[1] : maskItem.mask;
+            if (!maskBase64) throw new Error("Mask item contains empty base64 data.");
+            decodeBase64(maskBase64); // This will throw if the base64 is invalid
+          }
+          console.log(`[SegmentWorker][${requestId}] Base64 validation passed for all masks.`);
+          // --- END VALIDATION ---
+          const normalizedResponse = responseJson.map((item)=>{
+            if (item.mask && typeof item.mask === 'string' && !item.mask.startsWith('data:image/png;base64,')) {
+              item.mask = `data:image/png;base64,${item.mask}`;
+            }
+            if (item.box_2d && Array.isArray(item.box_2d[0])) {
+              item.box_2d = [
+                item.box_2d[0][0],
+                item.box_2d[0][1],
+                item.box_2d[1][0],
+                item.box_2d[1][1]
+              ];
+            }
+            return item;
+          });
+          responseToStore = normalizedResponse;
+          console.log(`[SegmentWorker][${requestId}] Successfully parsed and normalized JSON. Found ${responseToStore.length} masks.`);
+        } catch (parsingError) {
+          console.warn(`[SegmentWorker][${requestId}] JSON parsing or validation failed. Storing raw text. Error: ${parsingError.message}`);
+          responseToStore = {
+            error: `JSON parsing or validation failed: ${parsingError.message}`,
+            raw_text: result.text
+          };
+        }
+        await appendResultToJob(supabase, aggregation_job_id, responseToStore);
+        return new Response(JSON.stringify(responseToStore), {
+          headers: {
+            ...corsHeaders,
+            'Content-Type': 'application/json'
+          },
+          status: 200
+        });
+      } catch (error) {
+        lastError = error;
+        console.warn(`[SegmentWorker][${requestId}] Attempt ${attempt} failed:`, error.message);
+        if (attempt < MAX_RETRIES) {
+          await new Promise((resolve)=>setTimeout(resolve, RETRY_DELAY_MS * attempt));
+        }
+      }
+    }
     throw lastError || new Error("Worker failed after all retries without a specific error.");
-
   } catch (error) {
     console.error(`[SegmentWorker][${aggregation_job_id || 'unknown'}] Unhandled Error:`, error);
-    await appendResultToJob(supabase, aggregation_job_id, { error: `Worker failed: ${error.message}` });
-    return new Response(JSON.stringify({ error: error.message }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 500,
+    await appendResultToJob(supabase, aggregation_job_id, {
+      error: `Worker failed: ${error.message}`
+    });
+    return new Response(JSON.stringify({
+      error: error.message
+    }), {
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/json'
+      },
+      status: 500
     });
   }
 });

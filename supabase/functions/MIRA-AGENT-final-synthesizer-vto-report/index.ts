@@ -31,7 +31,7 @@ Your entire response MUST be a single, valid JSON object with "thinking" and "re
 - This is your scratchpad. Write down your aggregation calculations and synthesis notes here. Show your work.
 
 **2. The "report" Field:**
-- This field must contain the final, user-facing report as a single Markdown string, following this exact structure:
+- This field must contain the final, user-facing report as a single Markdown string - and in italian -, following this exact structure:
 
 # VTO Pack Analysis Report
 
