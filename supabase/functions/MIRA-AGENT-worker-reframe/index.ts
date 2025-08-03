@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { createCanvas, loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
+import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
@@ -94,6 +95,7 @@ serve(async (req) => {
         await supabase.from('mira-agent-jobs').update({
           context: {
             ...job.context,
+            original_base_image_url: base_image_url, // Preserve the original
             base_image_url: new_base_image_url,
             mask_image_url: new_mask_image_url,
             invert_mask: false,
@@ -108,11 +110,44 @@ serve(async (req) => {
       }
 
       case 'assets_prepared': {
-        console.log(`${logPrefix} Step 'assets_prepared': Invoking final generation tool.`);
+        console.log(`${logPrefix} Step 'assets_prepared': Checking for prompt.`);
+        let finalPrompt = job.context.prompt || "";
+
+        if (!finalPrompt.trim()) {
+            console.log(`${logPrefix} No user prompt provided. Auto-generating scene description...`);
+            const original_base_image_url = job.context.original_base_image_url;
+            if (!original_base_image_url) {
+                throw new Error("Cannot auto-generate prompt: original_base_image_url is missing from job context.");
+            }
+
+            // Download original image and convert to base64
+            const url = new URL(original_base_image_url);
+            const pathPrefix = `/storage/v1/object/public/${UPLOAD_BUCKET}/`;
+            const imagePath = decodeURIComponent(url.pathname.substring(pathPrefix.length));
+            const { data: blob, error: downloadError } = await supabase.storage.from(UPLOAD_BUCKET).download(imagePath);
+            if (downloadError) throw new Error(`Failed to download original base image for analysis: ${downloadError.message}`);
+            
+            const arrayBuffer = await blob.arrayBuffer();
+            const base64String = encodeBase64(arrayBuffer);
+
+            const { data: sceneData, error: sceneError } = await supabase.functions.invoke('MIRA-AGENT-tool-auto-describe-scene', {
+                body: {
+                    base_image_base64: base64String,
+                    mime_type: blob.type,
+                    user_hint: "" // No hint from user
+                }
+            });
+            if (sceneError) throw new Error(`Auto-describe scene tool failed: ${sceneError.message}`);
+            
+            finalPrompt = sceneData.scene_prompt;
+            console.log(`${logPrefix} Auto-generated prompt: "${finalPrompt}"`);
+        }
+
+        console.log(`${logPrefix} Invoking final generation tool with prompt: "${finalPrompt}"`);
         const { error: reframeError } = await supabase.functions.invoke('MIRA-AGENT-tool-reframe-image', {
           body: { 
             job_id,
-            prompt: job.context.prompt || ""
+            prompt: finalPrompt
           }
         });
         if (reframeError) throw new Error(`Reframe tool invocation failed: ${reframeError.message}`);
