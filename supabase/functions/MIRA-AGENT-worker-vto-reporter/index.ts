@@ -76,6 +76,31 @@ Your primary task is to use the provided images and preliminary analysis to visu
   }
 }`;
 
+const poseAnalysisPrompt = `You are a meticulous Quality Assurance inspector AI. Compare the FINAL RESULT image against the SOURCE PERSON image. Focus on the model's pose, body type, and camera angle. Return a JSON object with the following shape:
+{
+  "original_camera_angle": {
+    "shot_type": "full_shot" | "medium_shot" | "close_up" | "other",
+    "camera_elevation": "eye_level" | "high_angle" | "low_angle",
+    "camera_position": "frontal" | "three_quarter" | "profile"
+  },
+  "body_type": "slim" | "athletic" | "average" | "plus-size" | "other",
+  "pose_changed": boolean,
+  "unsolicited_garment_generated": boolean,
+  "scores": {
+    "pose_preservation": number,
+    "anatomical_correctness": number,
+    "body_type_preservation": number
+  },
+  "notes": string
+}
+
+Rules:
+1. Focus only on pose, body type, and camera framing.
+2. Use the SOURCE PERSON image as the baseline. Determine if the pose changed in the FINAL RESULT.
+3. Assess whether any extra garments were generated (true if additional clothing appears).
+4. Score each subcategory from 0.0 to 10.0 and provide a detailed explanation in \`notes\`.
+5. Your response must be valid JSON.`;
+
 const extractJson = (text: string): any => {
     const match = text.match(/```json\s*([\s\S]*?)\s*```/);
     if (match && match[1]) return JSON.parse(match[1]);
@@ -96,10 +121,10 @@ const downloadImageAsPart = async (supabase: SupabaseClient, url: string, label:
     return [{ inlineData: { mimeType: data.type, data: base64 } }];
 };
 
-const analyzeGarment = async (ai: GoogleGenAI, supabase: SupabaseClient, imageUrl: string, label: string): Promise<any> => {
+const analyzeGarment = async (ai: GoogleGenAI, supabase: SupabaseClient, imageUrl: string): Promise<any> => {
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
-            const imageParts = await downloadImageAsPart(supabase, imageUrl, label);
+            const imageParts = await downloadImageAsPart(supabase, imageUrl, "REFERENCE GARMENT");
             const result = await ai.models.generateContent({
                 model: MODEL_NAME,
                 contents: [{ role: 'user', parts: imageParts }],
