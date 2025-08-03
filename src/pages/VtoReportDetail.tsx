@@ -21,6 +21,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Progress } from "@/components/ui/progress";
 import { useSecureImage } from "@/hooks/useSecureImage";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { ReportStats } from "@/components/VTO/ReportStats";
 
 interface ReportDetail {
   report_id: string;
@@ -225,6 +226,29 @@ const VtoReportDetail = () => {
     return reportDetails.filter(j => j.comparative_report && !j.comparative_report.overall_pass && (j.comparative_report.failure_category === 'Unknown' || !j.comparative_report.failure_category));
   }, [reportDetails]);
 
+  const reportStats = useMemo(() => {
+    if (!reportDetails) return null;
+    const stats = { passed_perfect: 0, passed_pose_change: 0, passed_logo_issue: 0, passed_detail_issue: 0, failed_jobs: 0 };
+    for (const report of reportDetails) {
+      const reportData = report.comparative_report;
+      if (reportData) {
+        if (reportData.overall_pass) {
+          if (reportData.pass_with_notes) {
+            if (reportData.pass_notes_category === 'logo_fidelity') stats.passed_logo_issue++;
+            else if (reportData.pass_notes_category === 'detail_accuracy') stats.passed_detail_issue++;
+          } else if (reportData.pose_and_body_analysis?.pose_changed) {
+            stats.passed_pose_change++;
+          } else {
+            stats.passed_perfect++;
+          }
+        } else {
+          stats.failed_jobs++;
+        }
+      }
+    }
+    return stats;
+  }, [reportDetails]);
+
   const handleGenerateAnalysis = async () => {
     if (!packId || !session?.user) return;
     setIsAnalyzing(true);
@@ -342,6 +366,10 @@ const VtoReportDetail = () => {
         </header>
 
         <div className="flex-1 overflow-y-auto">
+          <div className="mb-6">
+            <ReportStats stats={reportStats} />
+          </div>
+
           {(isAnalyzing || analysisInProgress) && <div className="flex justify-center p-8"><Loader2 className="h-8 w-8 animate-spin" /></div>}
           
           {packData?.synthesis_report && !analysisInProgress && (
