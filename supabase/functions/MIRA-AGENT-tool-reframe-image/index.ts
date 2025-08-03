@@ -106,14 +106,12 @@ serve(async (req) => {
     const accessToken = await auth.getAccessToken();
     const apiUrl = `https://${GOOGLE_LOCATION}-aiplatform.googleapis.com/v1/projects/${GOOGLE_PROJECT_ID}/locations/${GOOGLE_LOCATION}/publishers/google/models/${MODEL_ID}:predict`;
 
-    const finalDilation = (dilation || 0.03) * 3;
-
     const requestBody = {
       instances: [{
         prompt: prompt,
         referenceImages: [
           { referenceType: "REFERENCE_TYPE_RAW", referenceId: 1, referenceImage: { bytesBase64Encoded: finalBaseImageB64 } },
-          { referenceType: "REFERENCE_TYPE_MASK", referenceId: 2, referenceImage: { bytesBase64Encoded: finalMaskImageB64 }, maskImageConfig: { maskMode: "MASK_MODE_USER_PROVIDED", dilation: finalDilation } }
+          { referenceType: "REFERENCE_TYPE_MASK", referenceId: 2, referenceImage: { bytesBase64Encoded: finalMaskImageB64 }, maskImageConfig: { maskMode: "MASK_MODE_USER_PROVIDED", dilation: dilation || 0.03 } }
         ]
       }],
       parameters: {

@@ -64,7 +64,7 @@ serve(async (req) => {
         const maskCtx = maskCanvas.getContext('2d');
         maskCtx.fillStyle = 'white';
         maskCtx.fillRect(0, 0, newW, newH);
-        const featherAmount = Math.max(4, Math.round(Math.min(originalW, originalH) * 0.01));
+        const featherAmount = Math.max(2, Math.round(Math.min(originalW, originalH) * 0.005));
         maskCtx.filter = `blur(${featherAmount}px)`;
         maskCtx.fillStyle = 'black';
         maskCtx.fillRect(xOffset, yOffset, originalW, originalH);
