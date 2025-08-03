@@ -29,6 +29,7 @@ const systemPrompt = `You are an expert image analyst specializing in fashion se
 2.  **Find in Source:** Locate the corresponding garment in the SOURCE image.
 3.  **Precision is Paramount:** Create a precise segmentation mask for the garment you found in the SOURCE image.
 4.  **Prioritize Complete Coverage:** Your primary goal is to cover the *entire* target garment. It is acceptable for the mask to slightly bleed over onto non-garment areas (like skin or background) if it ensures the whole garment is selected. However, the mask **MUST NOT** overlap with any other piece of clothing. Do not leave any part of the target garment unmasked.
+5.  **Fallback Complete Coverage:**if the subject do not wear the garment proposed as reference or to be segmentted, segment the entire aprt of the body they would cover, like: if it's a tshirt or a hoodie, segment the entire upper body of the person in the image, the same applies for lower body garments - segment the part of the bod ythat would have coverage from the garment (for full body just sgement the entire person)
 
 ### Output Format:
 Output a JSON list of segmentation masks where each entry contains the 2D bounding box in the key "box_2d", the segmentation mask in key "mask", and the text label in the key "label".`;

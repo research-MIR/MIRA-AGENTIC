@@ -2,6 +2,7 @@ import { useState, useMemo, useRef, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,14 +13,13 @@ import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast
 import { ImageCompareModal } from "@/components/ImageCompareModal";
 import { Slider } from "@/components/ui/slider";
 import { RecentJobThumbnail } from "@/components/Jobs/RecentJobThumbnail";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { useDropzone } from "@/hooks/useDropzone";
 import { cn } from "@/lib/utils";
-import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { SecureImageDisplay } from "@/components/VTO/SecureImageDisplay";
 import { Badge } from "@/components/ui/badge";
+import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel";
 
 interface ReframeJob {
   id: string;
@@ -341,18 +341,21 @@ const Reframe = () => {
               <CardHeader><CardTitle>{t('recentReframes')}</CardTitle></CardHeader>
               <CardContent>
                 {isLoadingRecent ? <Skeleton className="h-24 w-full" /> : recentJobs && recentJobs.length > 0 ? (
-                  <ScrollArea className="h-32">
-                    <div className="flex gap-4 pb-2">
+                  <Carousel opts={{ align: "start" }} className="w-full">
+                    <CarouselContent className="-ml-4">
                       {recentJobs.map(job => (
-                        <RecentJobThumbnail
-                          key={job.id}
-                          job={{...job, metadata: { source_image_url: job.context?.base_image_url }}}
-                          onClick={() => setSelectedJobId(job.id)}
-                          isSelected={selectedJobId === job.id}
-                        />
+                        <CarouselItem key={job.id} className="pl-4 basis-auto">
+                          <RecentJobThumbnail
+                            job={{...job, metadata: { source_image_url: job.context?.base_image_url }}}
+                            onClick={() => setSelectedJobId(job.id)}
+                            isSelected={selectedJobId === job.id}
+                          />
+                        </CarouselItem>
                       ))}
-                    </div>
-                  </ScrollArea>
+                    </CarouselContent>
+                    <CarouselPrevious />
+                    <CarouselNext />
+                  </Carousel>
                 ) : (
                   <p className="text-sm text-muted-foreground">{t('noRecentReframes')}</p>
                 )}
