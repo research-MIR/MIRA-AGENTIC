@@ -74,6 +74,7 @@ export const RecentVtoPacks = () => {
   const [packToDownload, setPackToDownload] = useState<PackSummary | null>(null);
   const [isStartingRefinement, setIsStartingRefinement] = useState<string | null>(null);
   const [packToRefine, setPackToRefine] = useState<PackSummary | null>(null);
+  const [isRetrying, setIsRetrying] = useState<string | null>(null);
 
   const { data: queryData, isLoading, error } = useQuery<any>({
     queryKey: ['vtoPackSummaries', session?.user?.id],
@@ -278,6 +279,26 @@ export const RecentVtoPacks = () => {
     }
   };
 
+  const handleRetryAllFailed = async (pack: PackSummary) => {
+    if (!session?.user) return;
+    setIsRetrying(pack.pack_id);
+    const toastId = showLoading(`Re-queueing ${pack.failed_jobs} failed jobs...`);
+    try {
+        const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-retry-all-failed-in-pack', {
+            body: { pack_id: pack.pack_id, user_id: session.user.id }
+        });
+        if (error) throw error;
+        dismissToast(toastId);
+        showSuccess(data.message);
+        queryClient.invalidateQueries({ queryKey: ['vtoPackSummaries', session.user.id] });
+    } catch (err: any) {
+        dismissToast(toastId);
+        showError(`Operation failed: ${err.message}`);
+    } finally {
+        setIsRetrying(null);
+    }
+  };
+
   if (isLoading) {
     return <div className="space-y-4"><Skeleton className="h-20 w-full" /><Skeleton className="h-20 w-full" /></div>;
   }
@@ -316,6 +337,12 @@ export const RecentVtoPacks = () => {
                   </div>
                 </AccordionTrigger>
                 <div className="flex items-center gap-2 pl-4">
+                  {pack.failed_jobs > 0 && (
+                    <Button variant="destructive" size="sm" onClick={() => handleRetryAllFailed(pack)} disabled={isRetrying === pack.pack_id}>
+                      {isRetrying === pack.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+                      Retry All Failed ({pack.failed_jobs})
+                    </Button>
+                  )}
                   <Button variant="outline" size="sm" onClick={() => setPackToDownload(pack)}>
                     <HardDriveDownload className="h-4 w-4 mr-2" />
                     {t('downloadPack')}
