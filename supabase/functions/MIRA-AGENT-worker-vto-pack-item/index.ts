@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { Image as ISImage } from "https://deno.land/x/imagescript@1.2.15/mod.ts";
 import { decodeBase64, encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
@@ -164,6 +164,9 @@ serve(async (req) => {
           break;
         case 'reframe':
           await handleReframe(supabase, job, logPrefix);
+          break;
+        case 'awaiting_reframe':
+          await handleAwaitingReframe(supabase, job, logPrefix);
           break;
         case 'done':
         case 'fallback_to_bitstudio':
@@ -587,7 +590,7 @@ async function handleReframe(supabase: any, job: any, logPrefix: string) {
       
       await supabase.from('mira-agent-bitstudio-jobs').update({
         status: 'awaiting_reframe',
-        metadata: { ...job.metadata, google_vto_step: 'done', delegated_reframe_job_id: reframeJobData.jobId, qa_best_image_base64: null }
+        metadata: { ...job.metadata, google_vto_step: 'awaiting_reframe', delegated_reframe_job_id: reframeJobData.jobId, qa_best_image_base64: null }
       }).eq('id', job.id);
       console.log(`${logPrefix} Handed off to reframe job ${reframeJobData.jobId}. This VTO job is now awaiting the final result.`);
     } catch (error) {
@@ -607,5 +610,46 @@ async function handleReframe(supabase: any, job: any, logPrefix: string) {
         await finalizeAsIs(`Reframe failed after ${MAX_REFRAME_RETRIES} attempts: ${errorMessage}`);
       }
     }
+  }
+}
+
+async function handleAwaitingReframe(supabase: any, job: any, logPrefix: string) {
+  console.log(`${logPrefix} Step: AWAITING_REFRAME. Checking on delegated job.`);
+  const reframeJobId = job.metadata?.delegated_reframe_job_id;
+  if (!reframeJobId) {
+    throw new Error("Job is in 'awaiting_reframe' state but is missing the 'delegated_reframe_job_id' in metadata.");
+  }
+
+  const { data: reframeJob, error: fetchError } = await supabase
+    .from('mira-agent-jobs')
+    .select('status, final_result, error_message')
+    .eq('id', reframeJobId)
+    .single();
+
+  if (fetchError) {
+    console.warn(`${logPrefix} Could not fetch status of reframe job ${reframeJobId}. Will retry on next watchdog cycle. Error: ${fetchError.message}`);
+    // Do nothing, let the watchdog re-trigger
+    return;
+  }
+
+  if (reframeJob.status === 'complete') {
+    console.log(`${logPrefix} Delegated reframe job ${reframeJobId} is complete. Finalizing VTO job.`);
+    const finalImageUrl = reframeJob.final_result?.images?.[0]?.publicUrl;
+    if (!finalImageUrl) {
+      throw new Error(`Reframe job ${reframeJobId} completed but did not return a final image URL.`);
+    }
+    await supabase.from('mira-agent-bitstudio-jobs').update({
+      status: 'complete',
+      final_image_url: finalImageUrl,
+      metadata: { ...job.metadata, google_vto_step: 'done' }
+    }).eq('id', job.id);
+    console.log(`${logPrefix} VTO job successfully finalized.`);
+  } else if (reframeJob.status === 'failed') {
+    console.error(`${logPrefix} Delegated reframe job ${reframeJobId} has failed. Triggering fallback logic.`);
+    // Re-use the existing handleReframe function's catch block logic
+    await handleReframe(supabase, job, logPrefix);
+  } else {
+    console.log(`${logPrefix} Delegated reframe job ${reframeJobId} is still in progress (status: ${reframeJob.status}). Waiting for next watchdog cycle.`);
+    // Do nothing, let the watchdog re-trigger
   }
 }
