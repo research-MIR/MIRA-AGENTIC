@@ -76,31 +76,6 @@ Your primary task is to use the provided images and preliminary analysis to visu
   }
 }`;
 
-const poseAnalysisPrompt = `You are a meticulous Quality Assurance inspector AI. Compare the FINAL RESULT image against the SOURCE PERSON image. Focus on the model's pose, body type, and camera angle. Return a JSON object with the following shape:
-{
-  "original_camera_angle": {
-    "shot_type": "full_shot" | "medium_shot" | "close_up" | "other",
-    "camera_elevation": "eye_level" | "high_angle" | "low_angle",
-    "camera_position": "frontal" | "three_quarter" | "profile"
-  },
-  "body_type": "slim" | "athletic" | "average" | "plus-size" | "other",
-  "pose_changed": boolean,
-  "unsolicited_garment_generated": boolean,
-  "scores": {
-    "pose_preservation": number,
-    "anatomical_correctness": number,
-    "body_type_preservation": number
-  },
-  "notes": string
-}
-
-Rules:
-1. Focus only on pose, body type, and camera framing.
-2. Use the SOURCE PERSON image as the baseline. Determine if the pose changed in the FINAL RESULT.
-3. Assess whether any extra garments were generated (true if additional clothing appears).
-4. Score each subcategory from 0.0 to 10.0 and provide a detailed explanation in \`notes\`.
-5. Your response must be valid JSON.`;
-
 const extractJson = (text: string): any => {
     const match = text.match(/```json\s*([\s\S]*?)\s*```/);
     if (match && match[1]) return JSON.parse(match[1]);
@@ -142,10 +117,11 @@ const analyzeGarment = async (ai: GoogleGenAI, supabase: SupabaseClient, imageUr
     }
 };
 
-const performGarmentComparison = async (ai: GoogleGenAI, garmentAnalysis: any, referenceParts: Part[], finalParts: Part[]): Promise<any> => {
+const performFullAnalysis = async (ai: GoogleGenAI, garmentAnalysis: any, sourceParts: Part[], referenceParts: Part[], finalParts: Part[]): Promise<any> => {
   const parts: Part[] = [
     { text: "--- PRELIMINARY REFERENCE GARMENT ANALYSIS (JSON) ---" },
     { text: JSON.stringify(garmentAnalysis) },
+    { text: "--- SOURCE PERSON IMAGE ---" }, ...sourceParts,
     { text: "--- REFERENCE GARMENT IMAGE ---" }, ...referenceParts,
     { text: "--- FINAL RESULT IMAGE ---" }, ...finalParts
   ];
@@ -157,87 +133,6 @@ const performGarmentComparison = async (ai: GoogleGenAI, garmentAnalysis: any, r
   });
   return extractJson(response.text);
 };
-
-const performPoseAnalysis = async (ai: GoogleGenAI, sourceParts: Part[], finalParts: Part[]): Promise<any> => {
-  const parts: Part[] = [
-    { text: "--- SOURCE PERSON IMAGE ---" }, ...sourceParts,
-    { text: "--- FINAL RESULT IMAGE ---" }, ...finalParts
-  ];
-  const response = await ai.models.generateContent({
-    model: MODEL_NAME,
-    contents: [{ role: 'user', parts }],
-    generationConfig: { responseMimeType: "application/json" },
-    config: { systemInstruction: { role: 'system', parts: [{ text: poseAnalysisPrompt }] } }
-  });
-  return extractJson(response.text);
-};
-
-function buildComparativeReport(garmentAnalysis: any, garmentComparison: any, poseAnalysis: any) {
-    const shapeMismatch = garmentComparison.generated_garment_type && garmentAnalysis.garment_type && garmentComparison.generated_garment_type !== garmentAnalysis.garment_type;
-    let overallPass = true;
-    let failureCategory = null;
-    let passWithNotes = false;
-    let passNotesCategory = null;
-    let passNotesDetails = null;
-
-    if (shapeMismatch) {
-        overallPass = false;
-        failureCategory = "shape_mismatch";
-    } else {
-        const scores = [
-            garmentComparison.scores?.color_fidelity, garmentComparison.scores?.texture_realism,
-            garmentComparison.scores?.pattern_accuracy, garmentComparison.scores?.fit_and_shape,
-            garmentComparison.scores?.logo_fidelity, garmentComparison.scores?.detail_accuracy,
-            poseAnalysis.scores?.pose_preservation, poseAnalysis.scores?.anatomical_correctness,
-            poseAnalysis.scores?.body_type_preservation
-        ].filter(s => typeof s === "number");
-
-        const minScore = Math.min(...scores);
-        if (minScore <= 3) {
-            overallPass = false;
-            if (minScore === garmentComparison.scores?.fit_and_shape) failureCategory = "fitting_issue";
-            else if (minScore === poseAnalysis.scores?.anatomical_correctness) failureCategory = "anatomical_error";
-            else if (minScore === poseAnalysis.scores?.body_type_preservation) failureCategory = "body_distortion";
-            else failureCategory = "quality_issue";
-        } else {
-            const threshold = 6;
-            if (scores.some(s => s < threshold)) {
-                passWithNotes = true;
-                if (garmentComparison.scores?.logo_fidelity < threshold) {
-                    passNotesCategory = "logo_fidelity";
-                    passNotesDetails = garmentComparison.notes;
-                } else if (garmentComparison.scores?.detail_accuracy < threshold) {
-                    passNotesCategory = "detail_accuracy";
-                    passNotesDetails = garmentComparison.notes;
-                } else {
-                    passNotesCategory = "minor_artifact";
-                    passNotesDetails = poseAnalysis.notes;
-                }
-            }
-        }
-    }
-
-    const validScores = [
-        garmentComparison.scores?.color_fidelity, garmentComparison.scores?.texture_realism,
-        garmentComparison.scores?.pattern_accuracy, garmentComparison.scores?.fit_and_shape,
-        garmentComparison.scores?.logo_fidelity, garmentComparison.scores?.detail_accuracy,
-        poseAnalysis.scores?.pose_preservation, poseAnalysis.scores?.anatomical_correctness,
-        poseAnalysis.scores?.body_type_preservation
-    ].filter(s => typeof s === "number");
-    const confidence = validScores.length ? validScores.reduce((sum, val) => sum + val, 0) / validScores.length : 0;
-
-    return {
-        overall_pass: overallPass,
-        pass_with_notes: passWithNotes,
-        pass_notes_category: passWithNotes ? passNotesCategory : null,
-        pass_notes_details: passWithNotes ? passNotesDetails : null,
-        failure_category: overallPass ? null : failureCategory,
-        confidence_score: parseFloat(confidence.toFixed(2)),
-        garment_comparison: garmentComparison,
-        pose_and_body_analysis: poseAnalysis,
-        garment_analysis: garmentAnalysis
-    };
-}
 
 serve(async (req) => {
   const { qa_job_id } = await req.json();
@@ -278,16 +173,9 @@ serve(async (req) => {
     await supabase.from('mira-agent-vto-qa-reports').update({ reference_garment_analysis: garmentAnalysis }).eq('id', qa_job_id);
     console.log(`${logPrefix} Stage 1 complete.`);
 
-    console.log(`${logPrefix} Stage 2: Performing parallel comparative analyses...`);
-    const [garmentComparison, poseAnalysis] = await Promise.all([
-        performGarmentComparison(ai, garmentAnalysis, referenceGarmentParts, finalResultParts),
-        performPoseAnalysis(ai, personImageParts, finalResultParts)
-    ]);
+    console.log(`${logPrefix} Stage 2: Performing full comparative analysis...`);
+    const comparativeReport = await performFullAnalysis(ai, garmentAnalysis, personImageParts, referenceGarmentParts, finalResultParts);
     console.log(`${logPrefix} Stage 2 complete.`);
-
-    console.log(`${logPrefix} Stage 3: Building final report...`);
-    const comparativeReport = buildComparativeReport(garmentAnalysis, garmentComparison, poseAnalysis);
-    console.log(`${logPrefix} Stage 3 complete.`);
 
     await supabase.from('mira-agent-vto-qa-reports').update({ comparative_report: comparativeReport, status: 'complete' }).eq('id', qa_job_id);
     await supabase.from('mira-agent-bitstudio-jobs').update({ metadata: { ...vtoJob.metadata, verification_result: comparativeReport } }).eq('id', qaJob.source_vto_job_id);
