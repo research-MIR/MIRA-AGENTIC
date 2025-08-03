@@ -30,7 +30,7 @@ serve(async (req) => {
 
     switch (step) {
       case 'start': {
-        const { base_image_url, aspect_ratio } = job.context;
+        const { base_image_url, aspect_ratio, feather_ratio } = job.context;
         if (!base_image_url || !aspect_ratio) throw new Error("Missing base_image_url or aspect_ratio in job context.");
 
         console.log(`${logPrefix} Step 'start': Preparing assets.`);
@@ -64,7 +64,7 @@ serve(async (req) => {
         const maskCtx = maskCanvas.getContext('2d');
         maskCtx.fillStyle = 'white';
         maskCtx.fillRect(0, 0, newW, newH);
-        const featherAmount = Math.max(2, Math.round(Math.min(originalW, originalH) * 0.005));
+        const featherAmount = Math.max(2, Math.round(Math.min(originalW, originalH) * (feather_ratio || 0.005)));
         maskCtx.filter = `blur(${featherAmount}px)`;
         maskCtx.fillStyle = 'black';
         maskCtx.fillRect(xOffset, yOffset, originalW, originalH);
@@ -109,10 +109,13 @@ serve(async (req) => {
 
       case 'assets_prepared': {
         console.log(`${logPrefix} Step 'assets_prepared': Invoking final generation tool.`);
+        const { dilation, steps } = job.context;
         const { error: reframeError } = await supabase.functions.invoke('MIRA-AGENT-tool-reframe-image', {
           body: { 
             job_id,
-            prompt: job.context.prompt || ""
+            prompt: job.context.prompt || "",
+            dilation: dilation,
+            steps: steps,
           }
         });
         if (reframeError) throw new Error(`Reframe tool invocation failed: ${reframeError.message}`);
