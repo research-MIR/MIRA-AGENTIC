@@ -97,15 +97,122 @@ const downloadImageAsPart = async (supabase: SupabaseClient, url: string, label:
 };
 
 const analyzeGarment = async (ai: GoogleGenAI, supabase: SupabaseClient, imageUrl: string, label: string): Promise<any> => {
-    const imageParts = await downloadImageAsPart(supabase, imageUrl, label);
-    const result = await ai.models.generateContent({
-        model: MODEL_NAME,
-        contents: [{ role: 'user', parts: imageParts }],
-        generationConfig: { responseMimeType: "application/json" },
-        config: { systemInstruction: { role: "system", parts: [{ text: garmentAnalysisPrompt }] } }
-    });
-    return extractJson(result.text);
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+            const imageParts = await downloadImageAsPart(supabase, imageUrl, label);
+            const result = await ai.models.generateContent({
+                model: MODEL_NAME,
+                contents: [{ role: 'user', parts: imageParts }],
+                generationConfig: { responseMimeType: "application/json" },
+                config: { systemInstruction: { role: "system", parts: [{ text: garmentAnalysisPrompt }] } }
+            });
+            return extractJson(result.text);
+        } catch (error) {
+            if (attempt < MAX_RETRIES) {
+                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS * attempt));
+            } else {
+                throw error;
+            }
+        }
+    }
 };
+
+const performGarmentComparison = async (ai: GoogleGenAI, garmentAnalysis: any, referenceParts: Part[], finalParts: Part[]): Promise<any> => {
+  const parts: Part[] = [
+    { text: "--- PRELIMINARY REFERENCE GARMENT ANALYSIS (JSON) ---" },
+    { text: JSON.stringify(garmentAnalysis) },
+    { text: "--- REFERENCE GARMENT IMAGE ---" }, ...referenceParts,
+    { text: "--- FINAL RESULT IMAGE ---" }, ...finalParts
+  ];
+  const response = await ai.models.generateContent({
+    model: MODEL_NAME,
+    contents: [{ role: 'user', parts }],
+    generationConfig: { responseMimeType: "application/json" },
+    config: { systemInstruction: { role: 'system', parts: [{ text: comparativeAnalysisPrompt }] } }
+  });
+  return extractJson(response.text);
+};
+
+const performPoseAnalysis = async (ai: GoogleGenAI, sourceParts: Part[], finalParts: Part[]): Promise<any> => {
+  const parts: Part[] = [
+    { text: "--- SOURCE PERSON IMAGE ---" }, ...sourceParts,
+    { text: "--- FINAL RESULT IMAGE ---" }, ...finalParts
+  ];
+  const response = await ai.models.generateContent({
+    model: MODEL_NAME,
+    contents: [{ role: 'user', parts }],
+    generationConfig: { responseMimeType: "application/json" },
+    config: { systemInstruction: { role: 'system', parts: [{ text: poseAnalysisPrompt }] } }
+  });
+  return extractJson(response.text);
+};
+
+function buildComparativeReport(garmentAnalysis: any, garmentComparison: any, poseAnalysis: any) {
+    const shapeMismatch = garmentComparison.generated_garment_type && garmentAnalysis.garment_type && garmentComparison.generated_garment_type !== garmentAnalysis.garment_type;
+    let overallPass = true;
+    let failureCategory = null;
+    let passWithNotes = false;
+    let passNotesCategory = null;
+    let passNotesDetails = null;
+
+    if (shapeMismatch) {
+        overallPass = false;
+        failureCategory = "shape_mismatch";
+    } else {
+        const scores = [
+            garmentComparison.scores?.color_fidelity, garmentComparison.scores?.texture_realism,
+            garmentComparison.scores?.pattern_accuracy, garmentComparison.scores?.fit_and_shape,
+            garmentComparison.scores?.logo_fidelity, garmentComparison.scores?.detail_accuracy,
+            poseAnalysis.scores?.pose_preservation, poseAnalysis.scores?.anatomical_correctness,
+            poseAnalysis.scores?.body_type_preservation
+        ].filter(s => typeof s === "number");
+
+        const minScore = Math.min(...scores);
+        if (minScore <= 3) {
+            overallPass = false;
+            if (minScore === garmentComparison.scores?.fit_and_shape) failureCategory = "fitting_issue";
+            else if (minScore === poseAnalysis.scores?.anatomical_correctness) failureCategory = "anatomical_error";
+            else if (minScore === poseAnalysis.scores?.body_type_preservation) failureCategory = "body_distortion";
+            else failureCategory = "quality_issue";
+        } else {
+            const threshold = 6;
+            if (scores.some(s => s < threshold)) {
+                passWithNotes = true;
+                if (garmentComparison.scores?.logo_fidelity < threshold) {
+                    passNotesCategory = "logo_fidelity";
+                    passNotesDetails = garmentComparison.notes;
+                } else if (garmentComparison.scores?.detail_accuracy < threshold) {
+                    passNotesCategory = "detail_accuracy";
+                    passNotesDetails = garmentComparison.notes;
+                } else {
+                    passNotesCategory = "minor_artifact";
+                    passNotesDetails = poseAnalysis.notes;
+                }
+            }
+        }
+    }
+
+    const validScores = [
+        garmentComparison.scores?.color_fidelity, garmentComparison.scores?.texture_realism,
+        garmentComparison.scores?.pattern_accuracy, garmentComparison.scores?.fit_and_shape,
+        garmentComparison.scores?.logo_fidelity, garmentComparison.scores?.detail_accuracy,
+        poseAnalysis.scores?.pose_preservation, poseAnalysis.scores?.anatomical_correctness,
+        poseAnalysis.scores?.body_type_preservation
+    ].filter(s => typeof s === "number");
+    const confidence = validScores.length ? validScores.reduce((sum, val) => sum + val, 0) / validScores.length : 0;
+
+    return {
+        overall_pass: overallPass,
+        pass_with_notes: passWithNotes,
+        pass_notes_category: passWithNotes ? passNotesCategory : null,
+        pass_notes_details: passWithNotes ? passNotesDetails : null,
+        failure_category: overallPass ? null : failureCategory,
+        confidence_score: parseFloat(confidence.toFixed(2)),
+        garment_comparison: garmentComparison,
+        pose_and_body_analysis: poseAnalysis,
+        garment_analysis: garmentAnalysis
+    };
+}
 
 serve(async (req) => {
   const { qa_job_id } = await req.json();
@@ -113,15 +220,13 @@ serve(async (req) => {
 
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
   const logPrefix = `[VTO-QA-Worker][${qa_job_id}]`;
-  console.log(`${logPrefix} Worker invoked.`);
+  await supabase.from('mira-agent-vto-qa-reports').update({ status: 'processing' }).eq('id', qa_job_id);
 
   try {
-    await supabase.from('mira-agent-vto-qa-reports').update({ status: 'processing' }).eq('id', qa_job_id);
-
     const { data: qaJob, error: qaFetchError } = await supabase.from('mira-agent-vto-qa-reports').select('source_vto_job_id').eq('id', qa_job_id).single();
     if (qaFetchError) throw qaFetchError;
 
-    const { data: vtoJob, error: vtoFetchError } = await supabase.from('mira-agent-bitstudio-jobs').select('source_person_image_url, source_garment_image_url, final_image_url, batch_pair_job_id').eq('id', qaJob.source_vto_job_id).single();
+    const { data: vtoJob, error: vtoFetchError } = await supabase.from('mira-agent-bitstudio-jobs').select('source_person_image_url, source_garment_image_url, final_image_url, batch_pair_job_id, metadata').eq('id', qaJob.source_vto_job_id).single();
     if (vtoFetchError) throw vtoFetchError;
     if (!vtoJob.final_image_url) throw new Error("VTO job is missing a final_image_url.");
 
@@ -135,90 +240,41 @@ serve(async (req) => {
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
 
-    // --- STAGE 1: Garment Analysis (with retry) ---
-    let garment_analysis: any = null;
-    let lastGarmentError: Error | null = null;
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-        try {
-            console.log(`${logPrefix} Stage 1: Analyzing reference garment, attempt ${attempt}/${MAX_RETRIES}...`);
-            garment_analysis = await analyzeGarment(ai, supabase, vtoJob.source_garment_image_url, "REFERENCE GARMENT");
-            lastGarmentError = null;
-            break;
-        } catch (error) {
-            lastGarmentError = error;
-            console.warn(`${logPrefix} Garment analysis attempt ${attempt} failed:`, error.message);
-            if (attempt < MAX_RETRIES) {
-                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS * attempt));
-            }
-        }
-    }
-    if (lastGarmentError) throw lastGarmentError;
-    if (!garment_analysis) throw new Error("Garment analysis failed to produce a result after all retries.");
-    
-    await supabase.from('mira-agent-vto-qa-reports').update({ reference_garment_analysis: garment_analysis }).eq('id', qa_job_id);
+    console.log(`${logPrefix} Stage 0: Downloading all images in parallel...`);
+    const [personImageParts, referenceGarmentParts, finalResultParts] = await Promise.all([
+        downloadImageAsPart(supabase, sourcePersonImageUrl, "SOURCE PERSON"),
+        downloadImageAsPart(supabase, vtoJob.source_garment_image_url, "REFERENCE GARMENT"),
+        downloadImageAsPart(supabase, vtoJob.final_image_url, "FINAL RESULT")
+    ]);
+    console.log(`${logPrefix} Stage 0 complete.`);
+
+    console.log(`${logPrefix} Stage 1: Analyzing reference garment...`);
+    const garmentAnalysis = await analyzeGarment(ai, supabase, vtoJob.source_garment_image_url);
+    await supabase.from('mira-agent-vto-qa-reports').update({ reference_garment_analysis: garmentAnalysis }).eq('id', qa_job_id);
     console.log(`${logPrefix} Stage 1 complete.`);
 
-    // --- STAGE 2: Comparative Analysis (with retry and fallback) ---
-    let comparative_report: any = null;
-    let lastComparisonError: Error | null = null;
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-        try {
-            console.log(`${logPrefix} Stage 2: Performing comparative analysis, attempt ${attempt}/${MAX_RETRIES}...`);
-            const [personImageParts, referenceGarmentParts, finalResultParts] = await Promise.all([
-                downloadImageAsPart(supabase, sourcePersonImageUrl, "SOURCE PERSON"),
-                downloadImageAsPart(supabase, vtoJob.source_garment_image_url, "REFERENCE GARMENT"),
-                downloadImageAsPart(supabase, vtoJob.final_image_url, "FINAL RESULT")
-            ]);
-            const comparisonParts: Part[] = [
-                { text: "--- PRELIMINARY REFERENCE GARMENT ANALYSIS (JSON) ---" },
-                { text: JSON.stringify(garment_analysis) },
-                { text: "--- SOURCE PERSON IMAGE ---" }, ...personImageParts,
-                { text: "--- REFERENCE GARMENT IMAGE ---" }, ...referenceGarmentParts,
-                { text: "--- FINAL RESULT IMAGE ---" }, ...finalResultParts
-            ];
-            const comparisonResult = await ai.models.generateContent({
-                model: MODEL_NAME,
-                contents: [{ role: 'user', parts: comparisonParts }],
-                generationConfig: { responseMimeType: "application/json" },
-                config: { systemInstruction: { role: "system", parts: [{ text: comparativeAnalysisPrompt }] } }
-            });
-            comparative_report = { ...extractJson(comparisonResult.text), garment_analysis: garment_analysis };
-            lastComparisonError = null;
-            break;
-        } catch (error) {
-            lastComparisonError = error;
-            console.warn(`${logPrefix} Comparative analysis attempt ${attempt} failed:`, error.message);
-            if (attempt < MAX_RETRIES) {
-                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS * attempt));
-            }
-        }
-    }
-
-    if (lastComparisonError) {
-        console.error(`${logPrefix} Comparative analysis failed after all retries. Creating fallback report.`);
-        comparative_report = {
-            overall_pass: false,
-            pass_with_notes: false,
-            failure_category: "analysis_failed",
-            mismatch_reason: "The AI quality check failed to produce a valid analysis after multiple retries.",
-            fix_suggestion: "This may be a temporary issue. You can try re-running the analysis manually from the report page.",
-            confidence_score: 0.0,
-            garment_analysis: garment_analysis,
-            garment_comparison: { scores: {} },
-            pose_and_body_analysis: { scores: {} }
-        };
-    }
-    if (!comparative_report) throw new Error("Comparative analysis failed to produce a result after all retries.");
-
+    console.log(`${logPrefix} Stage 2: Performing parallel comparative analyses...`);
+    const [garmentComparison, poseAnalysis] = await Promise.all([
+        performGarmentComparison(ai, garmentAnalysis, referenceGarmentParts, finalResultParts),
+        performPoseAnalysis(ai, personImageParts, finalResultParts)
+    ]);
     console.log(`${logPrefix} Stage 2 complete.`);
-    await supabase.from('mira-agent-vto-qa-reports').update({ comparative_report, status: 'complete' }).eq('id', qa_job_id);
-    await supabase.from('mira-agent-bitstudio-jobs').update({ metadata: { ...vtoJob.metadata, verification_result: comparative_report } }).eq('id', qaJob.source_vto_job_id);
+
+    console.log(`${logPrefix} Stage 3: Building final report...`);
+    const comparativeReport = buildComparativeReport(garmentAnalysis, garmentComparison, poseAnalysis);
+    console.log(`${logPrefix} Stage 3 complete.`);
+
+    await supabase.from('mira-agent-vto-qa-reports').update({ comparative_report: comparativeReport, status: 'complete' }).eq('id', qa_job_id);
+    await supabase.from('mira-agent-bitstudio-jobs').update({ metadata: { ...vtoJob.metadata, verification_result: comparativeReport } }).eq('id', qaJob.source_vto_job_id);
     console.log(`${logPrefix} Job finished successfully.`);
 
     return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
   } catch (error) {
     console.error(`${logPrefix} Error:`, error);
     await supabase.from('mira-agent-vto-qa-reports').update({ status: 'failed', error_message: error.message }).eq('id', qa_job_id);
-    return new Response(JSON.stringify({ error: error.message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
+    return new Response(JSON.stringify({ error: error.message }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      status: 500,
+    });
   }
 });
