@@ -39,10 +39,6 @@ export const reportsTranslations = {
     refineSuccessfulOnlyDesc: "Crea un pass di affinamento usando solo le immagini che hanno superato il controllo qualità automatico. Ideale per migliorare i tuoi migliori risultati.",
     refineAllCompleted: "Affina Tutti i Job Completati",
     refineAllCompletedDesc: "Include tutti i job che hanno prodotto un'immagine, anche quelli falliti. Utile per tentare di correggere i fallimenti.",
-    deleteReport: "Elimina Report",
-    deleteReportConfirmTitle: "Eliminare il Report di Analisi?",
-    deleteReportConfirmDescription: "Questo eliminerà permanentemente tutti i dati di analisi esistenti per questo pack. Il pack e le sue immagini non saranno interessati. Potrai eseguire una nuova analisi in seguito. Sei sicuro?",
-    deleteReportConfirmAction: "Sì, Elimina Report",
   },
   en: {
     vtoAnalysisReports: "VTO Analysis Reports",
@@ -84,9 +80,5 @@ export const reportsTranslations = {
     refineSuccessfulOnlyDesc: "Create a refinement pass using only the images that passed the automated quality check. Best for improving your top results.",
     refineAllCompleted: "Refine All Completed Jobs",
     refineAllCompletedDesc: "Includes all jobs that produced an image, even those that failed QA. Useful for attempting to fix failures.",
-    deleteReport: "Delete Report",
-    deleteReportConfirmTitle: "Delete Analysis Report?",
-    deleteReportConfirmDescription: "This will permanently delete all existing analysis data for this pack. The pack and its images will not be affected. You will be able to run a new analysis afterwards. Are you sure?",
-    deleteReportConfirmAction: "Yes, Delete Report",
   },
 };
