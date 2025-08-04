@@ -778,13 +778,13 @@ async function handleAwaitingReframe(supabase: SupabaseClient, job: any, logPref
   const secondsSinceUpdate = (now - lastUpdate) / 1000;
 
   if (secondsSinceUpdate > REFRAME_STALL_THRESHOLD_SECONDS) {
-    console.warn(`${logPrefix} Reframe job ${reframeJobId} has stalled (last update ${secondsSinceUpdate.toFixed(0)}s ago). Attempting restart.`);
+    console.warn(`${logPrefix} STALL DETECTED! Reframe job ${reframeJobId} has not been updated for ${secondsSinceUpdate.toFixed(0)} seconds (threshold is ${REFRAME_STALL_THRESHOLD_SECONDS}s).`);
     
     const reframeRetryCount = (job.metadata.reframe_retry_count || 0) + 1;
 
     if (reframeRetryCount > MAX_REFRAME_RETRIES) {
       const errorMessage = `Reframe job stalled and failed after ${MAX_REFRAME_RETRIES} restart attempts.`;
-      console.error(`${logPrefix} ${errorMessage}`);
+      console.error(`${logPrefix} STALL FAILED: ${errorMessage}`);
       await supabase.from('mira-agent-bitstudio-jobs').update({
         status: 'failed',
         error_message: errorMessage
@@ -792,10 +792,10 @@ async function handleAwaitingReframe(supabase: SupabaseClient, job: any, logPref
       return;
     }
 
-    console.log(`${logPrefix} Deleting stalled reframe job ${reframeJobId}.`);
+    console.log(`${logPrefix} STALL ACTION: Deleting stalled reframe job ${reframeJobId}.`);
     await supabase.from('mira-agent-jobs').delete().eq('id', reframeJobId);
 
-    console.log(`${logPrefix} Restarting reframe process (Attempt ${reframeRetryCount}/${MAX_REFRAME_RETRIES}).`);
+    console.log(`${logPrefix} STALL ACTION: Restarting reframe process (Attempt ${reframeRetryCount}/${MAX_REFRAME_RETRIES}).`);
     
     const { data: newReframeJobData, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-reframe', { 
       body: { 
@@ -809,6 +809,7 @@ async function handleAwaitingReframe(supabase: SupabaseClient, job: any, logPref
     });
     if (proxyError) throw new Error(`Failed to re-invoke reframe proxy: ${proxyError.message}`);
 
+    console.log(`${logPrefix} STALL ACTION: New reframe job ${newReframeJobData.jobId} created. Updating parent VTO job with new link.`);
     await supabase.from('mira-agent-bitstudio-jobs').update({
       metadata: { 
         ...job.metadata, 
@@ -820,7 +821,7 @@ async function handleAwaitingReframe(supabase: SupabaseClient, job: any, logPref
     console.log(`${logPrefix} New reframe job ${newReframeJobData.jobId} created. Worker will check again on next cycle.`);
 
   } else {
-    console.log(`${logPrefix} Delegated reframe job ${reframeJobId} is still in progress (status: ${reframeJob.status}, last update ${secondsSinceUpdate.toFixed(0)}s ago). Waiting for next watchdog cycle.`);
+    console.log(`${logPrefix} Reframe job ${reframeJobId} is still in progress (status: ${reframeJob.status}, last update ${secondsSinceUpdate.toFixed(0)}s ago). This is within the ${REFRAME_STALL_THRESHOLD_SECONDS}s threshold. Waiting for next watchdog cycle.`);
     await supabase.from('mira-agent-bitstudio-jobs').update({ updated_at: new Date().toISOString() }).eq('id', job.id);
   }
 }
