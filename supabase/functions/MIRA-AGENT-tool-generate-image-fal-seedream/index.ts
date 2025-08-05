@@ -38,7 +38,7 @@ function mapToQwenImageSize(size?: string): string | { width: number, height: nu
     // Handle custom ratios like "21:9"
     if (size.includes(':')) {
         const [w, h] = size.split(':').map(Number);
-        if (!isNaN(w) && !isNaN(h)) {
+        if (!isNaN(w) && !isNaN(h) && h > 0) {
             // Scale to a reasonable default resolution while maintaining ratio
             const long_edge = 1344;
             if (w > h) {

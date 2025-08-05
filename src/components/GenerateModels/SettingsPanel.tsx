@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
 
 interface SettingsPanelProps {
   modelDescription: string;
@@ -142,14 +143,23 @@ export const SettingsPanel = ({
         </div>
         <div className="space-y-2">
             <Label>{t('aspectRatio')}</Label>
-            <Select value={aspectRatio} onValueChange={setAspectRatio} disabled={isJobActive}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+            <Select value={validRatios.includes(aspectRatio) ? aspectRatio : ''} onValueChange={setAspectRatio} disabled={isJobActive}>
+                <SelectTrigger><SelectValue placeholder="Select or type custom..." /></SelectTrigger>
                 <SelectContent>
                     {validRatios.map(option => (
                         <SelectItem key={option} value={option}>{resolutionToRatioMap[option] || option}</SelectItem>
                     ))}
                 </SelectContent>
             </Select>
+            {provider === 'fal.ai' && (
+                <Input 
+                    className="mt-2"
+                    placeholder="Or type custom ratio e.g., 21:9"
+                    value={!validRatios.includes(aspectRatio) ? aspectRatio : ''}
+                    onChange={(e) => setAspectRatio(e.target.value)}
+                    disabled={isJobActive}
+                />
+            )}
         </div>
         {activeTab === 'single' && (
           <div>
