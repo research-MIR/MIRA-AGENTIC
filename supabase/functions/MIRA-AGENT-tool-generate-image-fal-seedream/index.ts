@@ -30,9 +30,25 @@ const sizeToQwenEnum: { [key: string]: string } = {
     '1408x768': 'landscape_16_9',
 };
 
-function mapToQwenImageSize(size?: string): string {
+function mapToQwenImageSize(size?: string): string | { width: number, height: number } {
     if (!size) return "square_hd";
-    return sizeToQwenEnum[size] || 'square_hd';
+    if (sizeToQwenEnum[size]) {
+        return sizeToQwenEnum[size];
+    }
+    // Handle custom ratios like "21:9"
+    if (size.includes(':')) {
+        const [w, h] = size.split(':').map(Number);
+        if (!isNaN(w) && !isNaN(h)) {
+            // Scale to a reasonable default resolution while maintaining ratio
+            const long_edge = 1344;
+            if (w > h) {
+                return { width: long_edge, height: Math.round(long_edge * (h / w)) };
+            } else {
+                return { width: Math.round(long_edge * (w / h)), height: long_edge };
+            }
+        }
+    }
+    return 'square_hd';
 }
 
 async function describeImage(base64Data: string, mimeType: string): Promise<string> {
