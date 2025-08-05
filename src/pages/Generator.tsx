@@ -192,16 +192,23 @@ const Generator = () => {
                     <ModelSelector models={state.models} selectedModelId={state.selectedModelId} onModelChange={(val) => state.setField('selectedModelId', val)} />
                   </div>
                   <div className="grid grid-cols-2 gap-4">
-                    <div>
+                    <div className="space-y-2">
                       <Label htmlFor="aspect-ratio">{t('aspectRatio')}</Label>
-                      <Select value={state.aspectRatio} onValueChange={(val) => state.setField('aspectRatio', val)}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
+                      <Select value={validRatios.includes(state.aspectRatio) ? state.aspectRatio : ''} onValueChange={(val) => state.setField('aspectRatio', val)}>
+                        <SelectTrigger><SelectValue placeholder="Select..." /></SelectTrigger>
                         <SelectContent>
                           {validRatios.map(option => (
                             <SelectItem key={option} value={option}>{resolutionToRatioMap[option] || option}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
+                      {provider === 'fal.ai' && (
+                        <Input
+                          placeholder="e.g. 21:9"
+                          value={!validRatios.includes(state.aspectRatio) ? state.aspectRatio : ''}
+                          onChange={(e) => state.setField('aspectRatio', e.target.value)}
+                        />
+                      )}
                     </div>
                     <div>
                       <Label htmlFor="num-images">{t('images')}</Label>

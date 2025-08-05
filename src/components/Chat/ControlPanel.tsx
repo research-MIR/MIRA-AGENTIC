@@ -6,6 +6,7 @@ import { useLanguage } from "@/context/LanguageContext";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Info } from "lucide-react";
 import { Model } from "@/hooks/useChatManager";
+import { Input } from "@/components/ui/input";
 
 interface ControlPanelProps {
   models: Model[];
@@ -71,13 +72,23 @@ export const ControlPanel = ({
         </div>
         <div id="ratio-mode-select" className="flex items-center gap-2">
           <Label className="text-sm font-medium">Ratio:</Label>
-          <Select value={ratioMode} onValueChange={onRatioModeChange}>
-            <SelectTrigger className="w-[100px]"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="auto">Auto</SelectItem>
-              {validRatios.map(ratio => <SelectItem key={ratio} value={ratio}>{resolutionToRatioMap[ratio] || ratio}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <div className="flex flex-col gap-1">
+            <Select value={validRatios.includes(ratioMode) ? ratioMode : 'auto'} onValueChange={onRatioModeChange}>
+              <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="auto">Auto</SelectItem>
+                {validRatios.map(ratio => <SelectItem key={ratio} value={ratio}>{resolutionToRatioMap[ratio] || ratio}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            {provider === 'fal.ai' && (
+              <Input
+                className="w-[120px] h-8 text-xs"
+                placeholder="e.g. 21:9"
+                value={!validRatios.includes(ratioMode) && ratioMode !== 'auto' ? ratioMode : ''}
+                onChange={(e) => onRatioModeChange(e.target.value)}
+              />
+            )}
+          </div>
         </div>
         <div id="num-images-select" className="flex items-center gap-2">
           <Label className="text-sm font-medium">Images:</Label>
