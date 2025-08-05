@@ -92,6 +92,7 @@ serve(async (req) => {
         image_size: mapToQwenImageSize(size),
         num_images: finalImageCount,
         seed: seed ? Number(seed) : undefined,
+        enable_safety_checker: false,
     };
 
     console.log(`[QwenTool][${requestId}] Calling fal-ai/qwen-image with payload:`, falInput);
