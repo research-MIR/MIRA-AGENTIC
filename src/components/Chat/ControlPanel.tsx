@@ -22,26 +22,21 @@ interface ControlPanelProps {
 
 const modelAspectRatioMap: Record<string, string[]> = {
     google: ['1024x1024', '768x1408', '1408x768', '1280x896', '896x1280'],
-    'fal.ai': ['1:1', '3:4', '4:3', '16:9', '9:16', '2:3', '3:2', '21:9'],
+    'fal.ai': ['square_hd', 'square', 'portrait_4_3', 'portrait_16_9', 'landscape_4_3', 'landscape_16_9'],
 };
 
 const resolutionToRatioMap: { [key: string]: string } = {
-  '1024x1024': '1:1',
+  '1024x1024': '1:1 HD',
   '1408x768': '16:9',
   '768x1408': '9:16',
   '1280x896': '4:3',
   '896x1280': '3:4',
-  '1152x768': '3:2',
-  '768x1152': '2:3',
-  '1536x640': '21:9',
-  '1:1': '1:1',
-  '3:4': '3:4',
-  '4:3': '4:3',
-  '16:9': '16:9',
-  '9:16': '9:16',
-  '2:3': '2:3',
-  '3:2': '3:2',
-  '21:9': '21:9',
+  'square_hd': '1:1 HD',
+  'square': '1:1',
+  'portrait_4_3': '3:4',
+  'portrait_16_9': '9:16',
+  'landscape_4_3': '4:3',
+  'landscape_16_9': '16:9',
 };
 
 export const ControlPanel = ({

@@ -1,3 +1,5 @@
+// NOTE: This function has been updated to use 'fal-ai/qwen-image' instead of 'seedream'.
+// The filename is kept for backward compatibility to avoid changing orchestrator logic.
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { fal } from 'npm:@fal-ai/client@1.5.0';
@@ -12,35 +14,26 @@ const corsHeaders = {
 const FAL_KEY = Deno.env.get('FAL_KEY');
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
 
-const SUPPORTED_FAL_RATIOS = ['1:1', '3:4', '4:3', '16:9', '9:16', '2:3', '3:2', '21:9'];
+const sizeToQwenEnum: { [key: string]: string } = {
+    '1:1': 'square',
+    '1024x1024': 'square_hd',
+    '3:4': 'portrait_4_3', // Note: Qwen uses W:H format for enums
+    '4:3': 'landscape_4_3',
+    '16:9': 'landscape_16_9',
+    '9:16': 'portrait_16_9',
+    '2:3': 'portrait_4_3', // Closest match
+    '3:2': 'landscape_4_3', // Closest match
+    '21:9': 'landscape_16_9', // Closest match
+    '896x1280': 'portrait_4_3',
+    '1280x896': 'landscape_4_3',
+    '768x1408': 'portrait_16_9',
+    '1408x768': 'landscape_16_9',
+};
 
-function parseRatio(ratioStr: string): number {
-    if (!ratioStr || !ratioStr.includes(':')) return 1;
-    const parts = ratioStr.split(':').map(Number);
-    if (parts.length !== 2 || isNaN(parts[0]) || isNaN(parts[1]) || parts[1] === 0) {
-        return 1;
-    }
-    return parts[0] / parts[1];
+function mapToQwenImageSize(size?: string): string {
+    if (!size) return "square_hd";
+    return sizeToQwenEnum[size] || 'square_hd';
 }
-
-function mapToFalAspectRatio(size?: string): string {
-    if (!size) return "1:1";
-    
-    const targetRatio = parseRatio(size);
-    let closestRatio = "1:1";
-    let minDiff = Infinity;
-
-    for (const supported of SUPPORTED_FAL_RATIOS) {
-        const diff = Math.abs(targetRatio - parseRatio(supported));
-        if (diff < minDiff) {
-            minDiff = diff;
-            closestRatio = supported;
-        }
-    }
-    console.log(`[SeedDreamTool] Mapped size:${size} (ratio:${targetRatio}) to closest supported ratio: ${closestRatio}`);
-    return closestRatio;
-}
-
 
 async function describeImage(base64Data: string, mimeType: string): Promise<string> {
     const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
@@ -61,8 +54,8 @@ async function describeImage(base64Data: string, mimeType: string): Promise<stri
 }
 
 serve(async (req) => {
-  const requestId = req.headers.get("x-request-id") || `agent-seedream-${Date.now()}`;
-  console.log(`[SeedDreamTool][${requestId}] Function invoked.`);
+  const requestId = req.headers.get("x-request-id") || `agent-qwen-${Date.now()}`;
+  console.log(`[QwenTool][${requestId}] Function invoked.`);
 
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -95,14 +88,15 @@ serve(async (req) => {
 
     const falInput = {
         prompt: prompt,
-        aspect_ratio: mapToFalAspectRatio(size),
+        negative_prompt: negative_prompt,
+        image_size: mapToQwenImageSize(size),
         num_images: finalImageCount,
         seed: seed ? Number(seed) : undefined,
     };
 
-    console.log(`[SeedDreamTool][${requestId}] Calling fal-ai/bytedance/seedream/v3/text-to-image with payload:`, falInput);
+    console.log(`[QwenTool][${requestId}] Calling fal-ai/qwen-image with payload:`, falInput);
 
-    const result: any = await fal.subscribe("fal-ai/bytedance/seedream/v3/text-to-image", {
+    const result: any = await fal.subscribe("fal-ai/qwen-image", {
       input: falInput,
       logs: true,
       onQueueUpdate: (update) => {
@@ -112,9 +106,9 @@ serve(async (req) => {
       },
     });
 
-    const generatedImages = result?.data?.images;
+    const generatedImages = result?.images;
     if (!generatedImages || generatedImages.length === 0) {
-      throw new Error("SeedDream tool failed to generate any images.");
+      throw new Error("Qwen tool failed to generate any images.");
     }
 
     const uploadPromises = generatedImages.map(async (image: any, index: number) => {
@@ -123,7 +117,7 @@ serve(async (req) => {
         const imageBuffer = await imageResponse.arrayBuffer();
         const mimeType = imageResponse.headers.get('content-type') || 'image/png';
 
-        const filePath = `${invoker_user_id}/${Date.now()}_seedream_${index}.png`;
+        const filePath = `${invoker_user_id}/${Date.now()}_qwen_${index}.png`;
         await supabaseAdmin.storage.from(GENERATED_IMAGES_BUCKET).upload(filePath, imageBuffer, { contentType: mimeType, upsert: true });
         const { data: { publicUrl } } = supabaseAdmin.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
         
@@ -138,14 +132,14 @@ serve(async (req) => {
 
     const finalResult = {
       isImageGeneration: true,
-      message: `Successfully generated ${processedImages.length} images with SeedDream 3.0.`,
+      message: `Successfully generated ${processedImages.length} images with Qwen.`,
       images: processedImages
     };
 
     return new Response(JSON.stringify(finalResult), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
 
   } catch (error) {
-    console.error(`[SeedDreamTool][${requestId}] UNHANDLED ERROR:`, error);
+    console.error(`[QwenTool][${requestId}] UNHANDLED ERROR:`, error);
     return new Response(JSON.stringify({ error: error.message }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500 });
   }
 });
