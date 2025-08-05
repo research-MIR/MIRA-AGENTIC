@@ -31,7 +31,7 @@ interface SettingsPanelProps {
 
 const modelAspectRatioMap: Record<string, string[]> = {
     google: ['1024x1024', '768x1408', '1408x768', '1280x896', '896x1280'],
-    'fal.ai': ['square_hd', 'square', 'portrait_4_3', 'portrait_16_9', 'landscape_4_3', 'landscape_16_9'],
+    'fal.ai': ['square_hd', 'portrait_16_9', 'landscape_16_9', 'portrait_4_3', 'landscape_4_3', 'portrait_2_3', 'landscape_3_2'],
 };
 
 const resolutionToRatioMap: { [key: string]: string } = {
@@ -46,6 +46,8 @@ const resolutionToRatioMap: { [key: string]: string } = {
   'portrait_16_9': '9:16',
   'landscape_4_3': '4:3',
   'landscape_16_9': '16:9',
+  'portrait_2_3': '2:3',
+  'landscape_3_2': '3:2',
 };
 
 export const SettingsPanel = ({
