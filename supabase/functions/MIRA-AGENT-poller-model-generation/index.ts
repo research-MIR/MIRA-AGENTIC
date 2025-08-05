@@ -140,12 +140,14 @@ serve(async (req) => {
 
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
   console.log(`[ModelGenPoller][${job_id}] Poller invoked.`);
+  let job: any = null;
 
   try {
     await supabase.from('mira-agent-model-generation-jobs').update({ last_polled_at: new Date().toISOString() }).eq('id', job_id);
 
-    const { data: job, error: fetchError } = await supabase.from('mira-agent-model-generation-jobs').select('*').eq('id', job_id).single();
+    const { data: fetchedJob, error: fetchError } = await supabase.from('mira-agent-model-generation-jobs').select('*').eq('id', job_id).single();
     if (fetchError) throw fetchError;
+    job = fetchedJob;
 
     switch (job.status) {
         case 'pending':
@@ -178,7 +180,7 @@ serve(async (req) => {
     return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
 
   } catch (error) {
-    console.error(`[ModelGenPoller][${job.id}] ERROR:`, error);
+    console.error(`[ModelGenPoller][${job_id}] ERROR:`, error);
     await supabase.from('mira-agent-model-generation-jobs').update({ status: 'failed', error_message: error.message }).eq('id', job_id);
     return new Response(JSON.stringify({ error: error.message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
   }
@@ -275,10 +277,7 @@ async function handlePollingFalBaseState(supabase: any, job: any) {
         console.log(`[ModelGenPoller][${job.id}] Fal.ai images processed. Re-invoking poller.`);
         supabase.functions.invoke('MIRA-AGENT-poller-model-generation', { body: { job_id: job.id } }).catch(console.error);
     } else if (status.status === 'IN_PROGRESS' || status.status === 'IN_QUEUE') {
-        console.log(`[ModelGenPoller][${job.id}] Fal.ai job is still in progress. Re-polling in ${POLLING_INTERVAL_MS}ms.`);
-        setTimeout(() => {
-            supabase.functions.invoke('MIRA-AGENT-poller-model-generation', { body: { job_id: job.id } }).catch(console.error);
-        }, POLLING_INTERVAL_MS);
+        console.log(`[ModelGenPoller][${job.id}] Fal.ai job is still in progress. Polling will continue on next watchdog cycle.`);
     } else {
         throw new Error(`Fal.ai job failed with status: ${status.status}. Error: ${JSON.stringify(status.error)}`);
     }
@@ -495,10 +494,7 @@ async function handlePollingPosesState(supabase: any, job: any) {
         console.log(`${logPrefix} All pose jobs are complete. Finalizing main job.`);
         await supabase.from('mira-agent-model-generation-jobs').update({ status: 'complete' }).eq('id', job.id);
     } else if (isStillWorking) {
-        console.log(`${logPrefix} Not all pose jobs are complete (some may be processing or analyzing). Re-polling.`);
-        setTimeout(() => {
-            supabase.functions.invoke('MIRA-AGENT-poller-model-generation', { body: { job_id: job.id } }).catch(console.error);
-        }, POLLING_INTERVAL_MS);
+        console.log(`${logPrefix} Not all pose jobs are complete (some may be processing or analyzing). Polling will continue on next watchdog cycle.`);
     } else {
         console.log(`${logPrefix} All poses generated. Handed off to analyzers. Poller will now idle for this job.`);
     }
@@ -659,9 +655,6 @@ async function handleUpscalingPosesState(supabase: any, job: any) {
     
     // 5. Re-poll if necessary
     if (isStillWorking) {
-        console.log(`[ModelGenPoller][${job.id}] Still waiting for upscaling jobs to complete. Re-polling.`);
-        setTimeout(() => {
-            supabase.functions.invoke('MIRA-AGENT-poller-model-generation', { body: { job_id: job.id } }).catch(console.error);
-        }, POLLING_INTERVAL_MS);
+        console.log(`[ModelGenPoller][${job.id}] Still waiting for upscaling jobs to complete. Polling will continue on next watchdog cycle.`);
     }
 }
