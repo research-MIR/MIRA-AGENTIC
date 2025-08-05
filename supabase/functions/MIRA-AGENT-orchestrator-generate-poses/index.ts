@@ -25,7 +25,8 @@ serve(async (req) => {
         auto_approve, 
         pose_prompts, 
         user_id,
-        pack_id
+        pack_id,
+        aspect_ratio
     } = await req.json();
 
     if (!model_description || !selected_model_id || !pose_prompts || !Array.isArray(pose_prompts) || !user_id || !pack_id) {
@@ -40,7 +41,7 @@ serve(async (req) => {
       .from('mira-agent-model-generation-jobs')
       .insert({
         user_id,
-        pack_id, // <-- ADDED THIS
+        pack_id,
         model_description,
         set_description,
         auto_approve,
@@ -48,7 +49,8 @@ serve(async (req) => {
         status: 'pending', // Start the state machine
         last_polled_at: new Date().toISOString(),
         context: {
-          selectedModelId: selected_model_id
+          selectedModelId: selected_model_id,
+          aspect_ratio: aspect_ratio || '1024x1024'
         }
       })
       .select('id')

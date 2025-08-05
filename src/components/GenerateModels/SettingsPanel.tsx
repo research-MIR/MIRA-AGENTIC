@@ -8,6 +8,7 @@ import { useLanguage } from "@/context/LanguageContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 interface SettingsPanelProps {
   modelDescription: string;
@@ -24,7 +25,28 @@ interface SettingsPanelProps {
   setActiveTab: (tab: 'single' | 'multi') => void;
   multiModelPrompt: string;
   setMultiModelPrompt: (value: string) => void;
+  aspectRatio: string;
+  setAspectRatio: (value: string) => void;
 }
+
+const modelAspectRatioMap: Record<string, string[]> = {
+    google: ['1024x1024', '768x1408', '1408x768', '1280x896', '896x1280'],
+    'fal.ai': ['square_hd', 'square', 'portrait_4_3', 'portrait_16_9', 'landscape_4_3', 'landscape_16_9'],
+};
+
+const resolutionToRatioMap: { [key: string]: string } = {
+  '1024x1024': '1:1 HD',
+  '1408x768': '16:9',
+  '768x1408': '9:16',
+  '1280x896': '4:3',
+  '896x1280': '3:4',
+  'square_hd': '1:1 HD',
+  'square': '1:1',
+  'portrait_4_3': '3:4',
+  'portrait_16_9': '9:16',
+  'landscape_4_3': '4:3',
+  'landscape_16_9': '16:9',
+};
 
 export const SettingsPanel = ({
   modelDescription,
@@ -41,8 +63,13 @@ export const SettingsPanel = ({
   setActiveTab,
   multiModelPrompt,
   setMultiModelPrompt,
+  aspectRatio,
+  setAspectRatio,
 }: SettingsPanelProps) => {
   const { t } = useLanguage();
+  const selectedModel = models.find(m => m.model_id_string === selectedModelId);
+  const provider = selectedModel?.provider.toLowerCase().replace(/[^a-z0-9.-]/g, '') || 'google';
+  const validRatios = modelAspectRatioMap[provider] || modelAspectRatioMap.google;
 
   return (
     <Card>
@@ -110,6 +137,17 @@ export const SettingsPanel = ({
             onModelChange={setSelectedModelId}
             disabled={isJobActive}
           />
+        </div>
+        <div className="space-y-2">
+            <Label>{t('aspectRatio')}</Label>
+            <Select value={aspectRatio} onValueChange={setAspectRatio} disabled={isJobActive}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                    {validRatios.map(option => (
+                        <SelectItem key={option} value={option}>{resolutionToRatioMap[option] || option}</SelectItem>
+                    ))}
+                </SelectContent>
+            </Select>
         </div>
         {activeTab === 'single' && (
           <div>

@@ -73,6 +73,27 @@ const FALLBACK_NODE_IDS_UPSCALE = ["431", "430", "9", "4"];
 const FINAL_OUTPUT_NODE_ID_POSE = "9";
 const FALLBACK_NODE_IDS_POSE = ["213", "4"];
 
+const sizeToQwenEnum: { [key: string]: string } = {
+    '1:1': 'square',
+    '1024x1024': 'square_hd',
+    '3:4': 'portrait_4_3',
+    '4:3': 'landscape_4_3',
+    '16:9': 'landscape_16_9',
+    '9:16': 'portrait_16_9',
+    '2:3': 'portrait_4_3',
+    '3:2': 'landscape_4_3',
+    '21:9': 'landscape_16_9',
+    '896x1280': 'portrait_4_3',
+    '1280x896': 'landscape_4_3',
+    '768x1408': 'portrait_16_9',
+    '1408x768': 'landscape_16_9',
+};
+
+function mapToQwenImageSize(size?: string): string {
+    if (!size) return "square_hd";
+    return sizeToQwenEnum[size] || 'square_hd';
+}
+
 async function uploadImageToComfyUI(comfyUiUrl: string, imageBlob: Blob, filename: string) {
   const formData = new FormData();
   formData.append('image', imageBlob, filename);
@@ -200,6 +221,7 @@ async function handlePendingState(supabase: any, job: any) {
 
     console.log(`[ModelGenPoller][${job.id}] Base prompt generated. Determining generation engine...`);
     const selectedModelId = job.context?.selectedModelId;
+    const aspectRatio = job.context?.aspect_ratio || '1024x1024';
     if (!selectedModelId) throw new Error("No model selected in job context.");
 
     const { data: modelDetails, error: modelError } = await supabase.from('mira-agent-models').select('provider').eq('model_id_string', selectedModelId).single();
@@ -214,7 +236,7 @@ async function handlePendingState(supabase: any, job: any) {
             input: {
                 prompt: finalPrompt,
                 num_images: 4,
-                image_size: 'square_hd'
+                image_size: mapToQwenImageSize(aspectRatio)
             }
         });
         await supabase.from('mira-agent-model-generation-jobs').update({
@@ -231,7 +253,7 @@ async function handlePendingState(supabase: any, job: any) {
                 number_of_images: 4,
                 model_id: selectedModelId,
                 invoker_user_id: job.user_id,
-                size: '1024x1024'
+                size: aspectRatio
             }
         });
         if (generationError) throw new Error(`Image generation failed: ${generationError.message}`);

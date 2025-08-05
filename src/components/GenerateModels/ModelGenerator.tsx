@@ -43,6 +43,7 @@ export const ModelGenerator = ({ packId }: ModelGeneratorProps) => {
   const [poses, setPoses] = useState<Pose[]>([{ type: 'text', value: '', file: undefined, previewUrl: undefined }]);
   const [isLoading, setIsLoading] = useState(false);
   const [isPoseModalOpen, setIsPoseModalOpen] = useState(false);
+  const [aspectRatio, setAspectRatio] = useState("1024x1024");
 
   useEffect(() => {
     fetchModels();
@@ -96,6 +97,7 @@ export const ModelGenerator = ({ packId }: ModelGeneratorProps) => {
           auto_approve: autoApprove,
           pose_prompts: validPoses,
           pack_id: packId,
+          aspect_ratio: aspectRatio,
         }
       });
       if (error) throw error;
@@ -148,6 +150,7 @@ export const ModelGenerator = ({ packId }: ModelGeneratorProps) => {
               auto_approve: true, // Always true for multi-model
               pose_prompts: validPoses,
               pack_id: packId,
+              aspect_ratio: aspectRatio,
             }
           });
           if (error) throw error;
@@ -192,6 +195,8 @@ export const ModelGenerator = ({ packId }: ModelGeneratorProps) => {
           setActiveTab={setActiveTab}
           multiModelPrompt={multiModelPrompt}
           setMultiModelPrompt={setMultiModelPrompt}
+          aspectRatio={aspectRatio}
+          setAspectRatio={setAspectRatio}
         />
         
         <Card>
