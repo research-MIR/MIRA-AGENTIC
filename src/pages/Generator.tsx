@@ -30,16 +30,24 @@ const FileUploader = ({ onFileSelect, children, multiple = false }: { onFileSele
   );
 };
 
-const aspectRatioOptions = [
-  { value: "1024x1024", label: "1:1" },
-  { value: "1408x768", label: "16:9" },
-  { value: "768x1408", label: "9:16" },
-  { value: "1280x896", label: "4:3" },
-  { value: "896x1280", label: "3:4" },
-  { value: "1152x768", label: "3:2" },
-  { value: "768x1152", label: "2:3" },
-  { value: "1536x640", label: "21:9" },
-];
+const modelAspectRatioMap: Record<string, string[]> = {
+    google: ['1024x1024', '768x1408', '1408x768', '1280x896', '896x1280'],
+    'fal.ai': ['square_hd', 'square', 'portrait_4_3', 'portrait_16_9', 'landscape_4_3', 'landscape_16_9'],
+};
+
+const resolutionToRatioMap: { [key: string]: string } = {
+  '1024x1024': '1:1 HD',
+  '1408x768': '16:9',
+  '768x1408': '9:16',
+  '1280x896': '4:3',
+  '896x1280': '3:4',
+  'square_hd': '1:1 HD',
+  'square': '1:1',
+  'portrait_4_3': '3:4',
+  'portrait_16_9': '9:16',
+  'landscape_4_3': '4:3',
+  'landscape_16_9': '16:9',
+};
 
 const Generator = () => {
   const { session, supabase } = useSession();
@@ -100,6 +108,9 @@ const Generator = () => {
   };
 
   const selectedJob = state.recentJobs.find(j => j.id === state.selectedJobId);
+  const selectedModel = state.models.find(m => m.model_id_string === state.selectedModelId);
+  const provider = selectedModel?.provider.toLowerCase().replace(/[^a-z0-9.-]/g, '') || 'google';
+  const validRatios = modelAspectRatioMap[provider] || modelAspectRatioMap.google;
 
   return (
     <div className="p-4 md:p-8 h-screen overflow-y-auto">
@@ -184,8 +195,8 @@ const Generator = () => {
                       <Select value={state.aspectRatio} onValueChange={(val) => state.setField('aspectRatio', val)}>
                         <SelectTrigger><SelectValue /></SelectTrigger>
                         <SelectContent>
-                          {aspectRatioOptions.map(option => (
-                            <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                          {validRatios.map(option => (
+                            <SelectItem key={option} value={option}>{resolutionToRatioMap[option] || option}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>

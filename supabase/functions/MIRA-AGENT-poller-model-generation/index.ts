@@ -173,7 +173,7 @@ serve(async (req) => {
     return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
 
   } catch (error) {
-    console.error(`[ModelGenPoller][${job_id}] ERROR:`, error);
+    console.error(`[ModelGenPoller][${job.id}] ERROR:`, error);
     await supabase.from('mira-agent-model-generation-jobs').update({ status: 'failed', error_message: error.message }).eq('id', job_id);
     return new Response(JSON.stringify({ error: error.message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
   }
@@ -187,23 +187,27 @@ async function handlePendingState(supabase: any, job: any) {
     if (promptError) throw new Error(`Prompt generation failed: ${promptError.message}`);
     const finalPrompt = promptData.final_prompt;
 
-    // Store the final prompt used for generation in the job's metadata
     await supabase.from('mira-agent-model-generation-jobs').update({
         metadata: { ...job.metadata, final_prompt_used: finalPrompt }
     }).eq('id', job.id);
 
-    console.log(`[ModelGenPoller][${job.id}] Base prompt generated and saved. Generating 4 base images...`);
-    const { data: modelDetails, error: modelError } = await supabase.from('mira-agent-models').select('provider').eq('model_id_string', job.context.selectedModelId).single();
-    if (modelError) throw new Error(`Could not find model details for ${job.context.selectedModelId}`);
+    console.log(`[ModelGenPoller][${job.id}] Base prompt generated. Determining generation engine...`);
+    const selectedModelId = job.context?.selectedModelId;
+    if (!selectedModelId) throw new Error("No model selected in job context.");
+
+    const { data: modelDetails, error: modelError } = await supabase.from('mira-agent-models').select('provider').eq('model_id_string', selectedModelId).single();
+    if (modelError) throw new Error(`Could not find model details for ${selectedModelId}`);
     
     const provider = modelDetails.provider.toLowerCase().replace(/[^a-z0-9.-]/g, '');
     const imageGenTool = provider === 'google' ? 'MIRA-AGENT-tool-generate-image-google' : 'MIRA-AGENT-tool-generate-image-fal-seedream';
+    
+    console.log(`[ModelGenPoller][${job.id}] Using provider '${provider}', invoking tool '${imageGenTool}'.`);
 
     const { data: generationResult, error: generationError } = await supabase.functions.invoke(imageGenTool, {
         body: {
             prompt: finalPrompt,
             number_of_images: 4,
-            model_id: job.context.selectedModelId,
+            model_id: selectedModelId,
             invoker_user_id: job.user_id,
             size: '1024x1024'
         }
