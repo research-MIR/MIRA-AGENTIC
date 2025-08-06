@@ -33,18 +33,24 @@ function mapToQwenImageSize(size?: string): string | { width: number, height: nu
     if (sizeToQwenEnum[size]) {
         return sizeToQwenEnum[size];
     }
+    
+    let w, h;
     if (size.includes(':')) {
-        const [w, h] = size.split(':').map(Number);
-        if (!isNaN(w) && !isNaN(h) && h > 0) {
-            const long_edge = 1344;
-            if (w > h) {
-                return { width: long_edge, height: Math.round(long_edge * (h / w)) };
-            } else {
-                return { width: Math.round(long_edge * (w / h)), height: long_edge };
-            }
+        [w, h] = size.split(':').map(Number);
+    } else if (size.includes('x')) {
+        [w, h] = size.split('x').map(Number);
+    }
+
+    if (w && h && !isNaN(w) && !isNaN(h) && h > 0) {
+        const long_edge = 1440;
+        if (w > h) {
+            return { width: long_edge, height: Math.round(long_edge * (h / w)) };
+        } else {
+            return { width: Math.round(long_edge * (w / h)), height: long_edge };
         }
     }
-    return 'square_hd';
+    
+    return 'square_hd'; // Fallback
 }
 
 async function describeImage(base64Data: string, mimeType: string): Promise<string> {
