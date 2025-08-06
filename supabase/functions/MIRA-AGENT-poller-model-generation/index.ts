@@ -89,9 +89,23 @@ const sizeToQwenEnum: { [key: string]: string } = {
     '1408x768': 'landscape_16_9',
 };
 
-function mapToQwenImageSize(size?: string): string {
+function mapToQwenImageSize(size?: string): string | { width: number, height: number } {
     if (!size) return "square_hd";
-    return sizeToQwenEnum[size] || 'square_hd';
+    if (sizeToQwenEnum[size]) {
+        return sizeToQwenEnum[size];
+    }
+    if (size.includes(':')) {
+        const [w, h] = size.split(':').map(Number);
+        if (!isNaN(w) && !isNaN(h) && h > 0) {
+            const long_edge = 1344;
+            if (w > h) {
+                return { width: long_edge, height: Math.round(long_edge * (h / w)) };
+            } else {
+                return { width: Math.round(long_edge * (w / h)), height: long_edge };
+            }
+        }
+    }
+    return 'square_hd';
 }
 
 async function uploadImageToComfyUI(comfyUiUrl: string, imageBlob: Blob, filename: string) {
@@ -230,9 +244,9 @@ async function handlePendingState(supabase: any, job: any) {
     const provider = modelDetails.provider.toLowerCase().replace(/[^a-z0-9.-]/g, '');
     
     if (provider === 'fal.ai') {
-        console.log(`[ModelGenPoller][${job.id}] Using provider 'fal.ai'. Submitting async job.`);
+        console.log(`[ModelGenPoller][${job.id}] Using provider 'fal.ai'. Submitting async job to model: ${selectedModelId}`);
         fal.config({ credentials: FAL_KEY });
-        const { request_id } = await fal.queue.submit("fal-ai/qwen-image", {
+        const { request_id } = await fal.queue.submit(selectedModelId, {
             input: {
                 prompt: finalPrompt,
                 num_images: 4,
@@ -268,16 +282,17 @@ async function handlePendingState(supabase: any, job: any) {
 
 async function handlePollingFalBaseState(supabase: any, job: any) {
     const requestId = job.metadata?.fal_base_gen_request_id;
-    if (!requestId) throw new Error("Job is in polling state but has no request ID.");
+    const modelId = job.context?.selectedModelId;
+    if (!requestId || !modelId) throw new Error("Job is in polling state but has no request ID or model ID.");
 
-    console.log(`[ModelGenPoller][${job.id}] State: POLLING_FAL_BASE. Checking status for request ID ${requestId}.`);
+    console.log(`[ModelGenPoller][${job.id}] State: POLLING_FAL_BASE. Checking status for request ID ${requestId} on model ${modelId}.`);
     fal.config({ credentials: FAL_KEY });
-    const status = await fal.queue.status("fal-ai/qwen-image", { requestId });
+    const status = await fal.queue.status(modelId, { requestId });
 
     if (status.status === 'COMPLETED') {
         console.log(`[ModelGenPoller][${job.id}] Fal.ai job complete. Fetching result...`);
-        const result: any = await fal.queue.result("fal-ai/qwen-image", { requestId });
-        const generatedImages = result?.data?.images;
+        const result: any = await fal.queue.result(modelId, { requestId });
+        const generatedImages = result?.data?.images || (result.image ? [result.image] : []);
         if (!generatedImages || generatedImages.length === 0) throw new Error("Fal.ai job completed but returned no images.");
 
         const uploadPromises = generatedImages.map(async (image: any, index: number) => {
