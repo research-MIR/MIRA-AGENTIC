@@ -19,9 +19,9 @@ const sizeToQwenEnum: { [key: string]: string } = {
     '4:3': 'landscape_4_3',
     '16:9': 'landscape_16_9',
     '9:16': 'portrait_16_9',
-    '2:3': 'portrait_4_3',
-    '3:2': 'landscape_4_3',
-    '21:9': 'landscape_16_9',
+    '2:3': 'portrait_4_3', // Closest match
+    '3:2': 'landscape_4_3', // Closest match
+    '21:9': 'landscape_16_9', // Closest match
     '896x1280': 'portrait_4_3',
     '1280x896': 'landscape_4_3',
     '768x1408': 'portrait_16_9',
@@ -116,8 +116,8 @@ serve(async (req) => {
     console.log(`[WanTool][${requestId}] Full API response from Fal.ai:`, JSON.stringify(settledResults, null, 2));
 
     const successfulResults = settledResults
-        .filter(r => r.status === 'fulfilled' && r.value?.image)
-        .map((r: any) => r.value.image);
+        .filter(r => r.status === 'fulfilled' && r.value?.data?.image)
+        .map((r: any) => r.value.data.image);
 
     if (successfulResults.length === 0) {
       throw new Error("Fal.ai 'wan' tool failed to generate any images.");
