@@ -1,8 +1,10 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { GoogleGenAI } from 'https://esm.sh/@google/genai@0.15.0';
+import { GoogleGenAI, GenerationResult } from 'https://esm.sh/@google/genai@0.15.0';
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const MODEL_NAME = "gemini-2.5-flash";
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 1000;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -64,11 +66,38 @@ serve(async (req) => {
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
     const userPrompt = `Model Description: "${model_description}"\nSet Description: "${set_description || 'a minimal studio with a neutral background'}"`;
 
-    const result = await ai.models.generateContent({
-        model: MODEL_NAME,
-        contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
-        config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
-    });
+    let result: GenerationResult | null = null;
+    let lastError: Error | null = null;
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+            console.log(`[GenerateModelPromptTool] Calling Gemini API, attempt ${attempt}/${MAX_RETRIES}...`);
+            result = await ai.models.generateContent({
+                model: MODEL_NAME,
+                contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+                config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
+            });
+            lastError = null; // Clear error on success
+            break; // Exit the loop on success
+        } catch (error) {
+            lastError = error;
+            console.warn(`[GenerateModelPromptTool] Attempt ${attempt} failed:`, error.message);
+            if (attempt < MAX_RETRIES) {
+                const delay = RETRY_DELAY_MS * attempt; // Exponential backoff
+                console.log(`[GenerateModelPromptTool] Retrying in ${delay}ms...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+        }
+    }
+
+    if (lastError) {
+        console.error(`[GenerateModelPromptTool] All retries failed. Last error:`, lastError.message);
+        throw lastError;
+    }
+
+    if (!result) {
+        throw new Error("AI model failed to respond after all retries.");
+    }
 
     const finalPrompt = result.text.trim();
 
