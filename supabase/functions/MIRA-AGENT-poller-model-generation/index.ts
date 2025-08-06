@@ -73,52 +73,6 @@ const FALLBACK_NODE_IDS_UPSCALE = ["431", "430", "9", "4"];
 const FINAL_OUTPUT_NODE_ID_POSE = "9";
 const FALLBACK_NODE_IDS_POSE = ["213", "4"];
 
-const sizeToQwenEnum: { [key: string]: string } = {
-    '1:1': 'square',
-    '1024x1024': 'square_hd',
-    '3:4': 'portrait_4_3',
-    '4:3': 'landscape_4_3',
-    '16:9': 'landscape_16_9',
-    '9:16': 'portrait_16_9',
-    '2:3': 'portrait_4_3',
-    '3:2': 'landscape_4_3',
-    '21:9': 'landscape_16_9',
-    '896x1280': 'portrait_4_3',
-    '1280x896': 'landscape_4_3',
-    '768x1408': 'portrait_16_9',
-    '1408x768': 'landscape_16_9',
-};
-
-function mapToQwenImageSize(size?: string): string | { width: number, height: number } {
-    if (!size) return "square_hd";
-    if (sizeToQwenEnum[size]) {
-        return sizeToQwenEnum[size];
-    }
-    if (size.includes(':')) {
-        const [w, h] = size.split(':').map(Number);
-        if (!isNaN(w) && !isNaN(h) && h > 0) {
-            const long_edge = 1344;
-            if (w > h) {
-                return { width: long_edge, height: Math.round(long_edge * (h / w)) };
-            } else {
-                return { width: Math.round(long_edge * (w / h)), height: long_edge };
-            }
-        }
-    }
-    return 'square_hd';
-}
-
-async function uploadImageToComfyUI(comfyUiUrl: string, imageBlob: Blob, filename: string) {
-  const formData = new FormData();
-  formData.append('image', imageBlob, filename);
-  formData.append('overwrite', 'true');
-  const uploadUrl = `${comfyUiUrl}/upload/image`;
-  const response = await fetch(uploadUrl, { method: 'POST', body: formData });
-  if (!response.ok) throw new Error(`ComfyUI upload failed: ${await response.text()}`);
-  const data = await response.json();
-  return data.name;
-}
-
 async function findOutputImage(historyOutputs: any, primaryNodeId: string, fallbackNodeIds: string[]): Promise<any | null> {
     if (!historyOutputs) return null;
     // First, check the preferred nodes for efficiency
@@ -188,9 +142,6 @@ serve(async (req) => {
         case 'pending':
             await handlePendingState(supabase, job);
             break;
-        case 'polling_fal_base':
-            await handlePollingFalBaseState(supabase, job);
-            break;
         case 'base_generation_complete':
             await handleBaseGenerationCompleteState(supabase, job);
             break;
@@ -238,86 +189,42 @@ async function handlePendingState(supabase: any, job: any) {
     const aspectRatio = job.context?.aspect_ratio || '1024x1024';
     if (!selectedModelId) throw new Error("No model selected in job context.");
 
-    const { data: modelDetails, error: modelError } = await supabase.from('mira-agent-models').select('provider').eq('model_id_string', selectedModelId).single();
+    const { data: modelDetails, error: modelError } = await supabase.from('mira-agent-models').select('provider, model_id_string').eq('model_id_string', selectedModelId).single();
     if (modelError) throw new Error(`Could not find model details for ${selectedModelId}`);
     
     const provider = modelDetails.provider.toLowerCase().replace(/[^a-z0-9.-]/g, '');
+    const modelIdString = modelDetails.model_id_string;
     
-    if (provider === 'fal.ai') {
-        console.log(`[ModelGenPoller][${job.id}] Using provider 'fal.ai'. Submitting async job to model: ${selectedModelId}`);
-        fal.config({ credentials: FAL_KEY });
-        const { request_id } = await fal.queue.submit(selectedModelId, {
-            input: {
-                prompt: finalPrompt,
-                num_images: 4,
-                image_size: mapToQwenImageSize(aspectRatio)
-            }
-        });
-        await supabase.from('mira-agent-model-generation-jobs').update({
-            status: 'polling_fal_base',
-            metadata: { ...job.metadata, fal_base_gen_request_id: request_id }
-        }).eq('id', job.id);
-        console.log(`[ModelGenPoller][${job.id}] Fal.ai job submitted with ID ${request_id}. Re-invoking poller.`);
-        supabase.functions.invoke('MIRA-AGENT-poller-model-generation', { body: { job_id: job.id } }).catch(console.error);
+    let toolToInvoke = '';
+    if (modelIdString === 'fal-ai/wan/v2.2-a14b/text-to-image') {
+        toolToInvoke = 'MIRA-AGENT-tool-generate-image-fal-wan';
+    } else if (provider === 'fal.ai') {
+        toolToInvoke = 'MIRA-AGENT-tool-generate-image-fal-seedream';
+    } else if (provider === 'google') {
+        toolToInvoke = 'MIRA-AGENT-tool-generate-image-google';
     } else {
-        console.log(`[ModelGenPoller][${job.id}] Using provider '${provider}', invoking tool 'MIRA-AGENT-tool-generate-image-google'.`);
-        const { data: generationResult, error: generationError } = await supabase.functions.invoke('MIRA-AGENT-tool-generate-image-google', {
-            body: {
-                prompt: finalPrompt,
-                number_of_images: 4,
-                model_id: selectedModelId,
-                invoker_user_id: job.user_id,
-                size: aspectRatio
-            }
-        });
-        if (generationError) throw new Error(`Image generation failed: ${generationError.message}`);
-        await supabase.from('mira-agent-model-generation-jobs').update({
-            status: 'base_generation_complete',
-            base_generation_results: generationResult.images.map((img: any) => ({ id: img.storagePath, url: img.publicUrl }))
-        }).eq('id', job.id);
-        console.log(`[ModelGenPoller][${job.id}] Base images generated. Re-invoking poller.`);
-        supabase.functions.invoke('MIRA-AGENT-poller-model-generation', { body: { job_id: job.id } }).catch(console.error);
+        throw new Error(`Unsupported provider '${provider}' for model generation.`);
     }
-}
 
-async function handlePollingFalBaseState(supabase: any, job: any) {
-    const requestId = job.metadata?.fal_base_gen_request_id;
-    const modelId = job.context?.selectedModelId;
-    if (!requestId || !modelId) throw new Error("Job is in polling state but has no request ID or model ID.");
-
-    console.log(`[ModelGenPoller][${job.id}] State: POLLING_FAL_BASE. Checking status for request ID ${requestId} on model ${modelId}.`);
-    fal.config({ credentials: FAL_KEY });
-    const status = await fal.queue.status(modelId, { requestId });
-
-    if (status.status === 'COMPLETED') {
-        console.log(`[ModelGenPoller][${job.id}] Fal.ai job complete. Fetching result...`);
-        const result: any = await fal.queue.result(modelId, { requestId });
-        const generatedImages = result?.data?.images || (result.image ? [result.image] : []);
-        if (!generatedImages || generatedImages.length === 0) throw new Error("Fal.ai job completed but returned no images.");
-
-        const uploadPromises = generatedImages.map(async (image: any, index: number) => {
-            const imageResponse = await fetch(image.url);
-            if (!imageResponse.ok) throw new Error(`Failed to download generated image from ${image.url}`);
-            const imageBuffer = await imageResponse.arrayBuffer();
-            const mimeType = imageResponse.headers.get('content-type') || 'image/png';
-            const filePath = `${job.user_id}/model-bases/${Date.now()}_fal_${index}.png`;
-            await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(filePath, imageBuffer, { contentType: mimeType, upsert: true });
-            const { data: { publicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
-            return { id: filePath, url: publicUrl };
-        });
-        const processedImages = await Promise.all(uploadPromises);
-
-        await supabase.from('mira-agent-model-generation-jobs').update({
-            status: 'base_generation_complete',
-            base_generation_results: processedImages
-        }).eq('id', job.id);
-        console.log(`[ModelGenPoller][${job.id}] Fal.ai images processed. Re-invoking poller.`);
-        supabase.functions.invoke('MIRA-AGENT-poller-model-generation', { body: { job_id: job.id } }).catch(console.error);
-    } else if (status.status === 'IN_PROGRESS' || status.status === 'IN_QUEUE') {
-        console.log(`[ModelGenPoller][${job.id}] Fal.ai job is still in progress. Polling will continue on next watchdog cycle.`);
-    } else {
-        throw new Error(`Fal.ai job failed with status: ${status.status}. Error: ${JSON.stringify(status.error)}`);
-    }
+    console.log(`[ModelGenPoller][${job.id}] Using provider '${provider}', invoking tool '${toolToInvoke}'.`);
+    const { data: generationResult, error: generationError } = await supabase.functions.invoke(toolToInvoke, {
+        body: {
+            prompt: finalPrompt,
+            number_of_images: 4,
+            model_id: selectedModelId,
+            invoker_user_id: job.user_id,
+            size: aspectRatio
+        }
+    });
+    if (generationError) throw new Error(`Image generation failed: ${generationError.message}`);
+    
+    await supabase.from('mira-agent-model-generation-jobs').update({
+        status: 'base_generation_complete',
+        base_generation_results: generationResult.images.map((img: any) => ({ id: img.storagePath, url: img.publicUrl }))
+    }).eq('id', job.id);
+    
+    console.log(`[ModelGenPoller][${job.id}] Base images generated. Re-invoking poller.`);
+    supabase.functions.invoke('MIRA-AGENT-poller-model-generation', { body: { job_id: job.id } }).catch(console.error);
 }
 
 async function handleBaseGenerationCompleteState(supabase: any, job: any) {
@@ -404,7 +311,8 @@ async function handleGeneratingPosesState(supabase: any, job: any) {
             console.log(`[ModelGenPoller][${job.id}] All ${job.pose_prompts.length} pose generation jobs dispatched successfully.`);
         }
         // Finally, update the status to polling
-        supabase.from('mira-agent-model-generation-jobs').update({ status: 'polling_poses' }).eq('id', job.id)
+        supabase.from('mira-agent-model-generation-jobs').update({ status: 'polling_poses' })
+            .eq('id', job.id)
             .then(() => {
                 console.log(`[ModelGenPoller][${job.id}] Status updated to polling_poses. Re-invoking poller.`);
                 supabase.functions.invoke('MIRA-AGENT-poller-model-generation', { body: { job_id: job.id } }).catch(console.error);
