@@ -173,25 +173,35 @@ serve(async (req) => {
 });
 
 async function handlePendingState(supabase: any, job: any) {
-    console.log(`[ModelGenPoller][${job.id}] State: PENDING. Generating base prompt...`);
-    const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-generate-model-prompt', {
+    const logPrefix = `[ModelGenPoller][${job.id}]`;
+    console.log(`${logPrefix} State: PENDING. Generating base model candidates...`);
+
+    const existingImages = job.base_generation_results || [];
+    const neededImages = 4 - existingImages.length;
+
+    if (neededImages <= 0) {
+        console.log(`${logPrefix} All 4 base images already generated. Moving to next state.`);
+        await supabase.from('mira-agent-model-generation-jobs').update({ status: 'base_generation_complete' }).eq('id', job.id);
+        supabase.functions.invoke('MIRA-AGENT-poller-model-generation', { body: { job_id: job.id } }).catch(console.error);
+        return;
+    }
+
+    console.log(`${logPrefix} Need to generate ${neededImages} more image(s).`);
+
+    // Generate one image in this invocation
+    const finalPrompt = job.metadata?.final_prompt_used || (await supabase.functions.invoke('MIRA-AGENT-tool-generate-model-prompt', {
         body: { model_description: job.model_description, set_description: job.set_description }
-    });
-    if (promptError) throw new Error(`Prompt generation failed: ${promptError.message}`);
-    const finalPrompt = promptData.final_prompt;
+    })).data.final_prompt;
 
-    await supabase.from('mira-agent-model-generation-jobs').update({
-        metadata: { ...job.metadata, final_prompt_used: finalPrompt }
-    }).eq('id', job.id);
+    if (!job.metadata?.final_prompt_used) {
+        await supabase.from('mira-agent-model-generation-jobs').update({ metadata: { ...job.metadata, final_prompt_used: finalPrompt } }).eq('id', job.id);
+    }
 
-    console.log(`[ModelGenPoller][${job.id}] Base prompt generated. Determining generation engine...`);
     const selectedModelId = job.context?.selectedModelId;
     const aspectRatio = job.context?.aspect_ratio || '1024x1024';
     if (!selectedModelId) throw new Error("No model selected in job context.");
 
-    const { data: modelDetails, error: modelError } = await supabase.from('mira-agent-models').select('provider, model_id_string').eq('model_id_string', selectedModelId).single();
-    if (modelError) throw new Error(`Could not find model details for ${selectedModelId}`);
-    
+    const { data: modelDetails } = await supabase.from('mira-agent-models').select('provider, model_id_string').eq('model_id_string', selectedModelId).single();
     const provider = modelDetails.provider.toLowerCase().replace(/[^a-z0-9.-]/g, '');
     const modelIdString = modelDetails.model_id_string;
     
@@ -206,24 +216,27 @@ async function handlePendingState(supabase: any, job: any) {
         throw new Error(`Unsupported provider '${provider}' for model generation.`);
     }
 
-    console.log(`[ModelGenPoller][${job.id}] Using provider '${provider}', invoking tool '${toolToInvoke}'.`);
+    console.log(`${logPrefix} Using provider '${provider}', invoking tool '${toolToInvoke}' for one image.`);
     const { data: generationResult, error: generationError } = await supabase.functions.invoke(toolToInvoke, {
         body: {
             prompt: finalPrompt,
-            number_of_images: 4,
+            number_of_images: 1, // Generate one at a time
             model_id: selectedModelId,
             invoker_user_id: job.user_id,
-            size: aspectRatio
+            size: aspectRatio,
+            seed: Math.floor(Math.random() * 1e15) // Random seed for each candidate
         }
     });
     if (generationError) throw new Error(`Image generation failed: ${generationError.message}`);
     
+    const newImage = generationResult.images[0];
+    const updatedImages = [...existingImages, { id: newImage.storagePath, url: newImage.publicUrl }];
+
     await supabase.from('mira-agent-model-generation-jobs').update({
-        status: 'base_generation_complete',
-        base_generation_results: generationResult.images.map((img: any) => ({ id: img.storagePath, url: img.publicUrl }))
+        base_generation_results: updatedImages
     }).eq('id', job.id);
     
-    console.log(`[ModelGenPoller][${job.id}] Base images generated. Re-invoking poller.`);
+    console.log(`${logPrefix} Generated image ${updatedImages.length}/4. Re-invoking poller.`);
     supabase.functions.invoke('MIRA-AGENT-poller-model-generation', { body: { job_id: job.id } }).catch(console.error);
 }
 
