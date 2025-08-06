@@ -38,7 +38,7 @@ const systemPrompt = `You are a "Model Scout" AI. Your task is to take a user's 
 **Example 1:**
 -   **User Model Description:** "a tall female model with long brown hair"
 -   **User Set Description:** "a minimal studio with a light grey background"
--   **Your Output:** "A FULL BODY SHOOT WITH THE ENTIRE BODY VISIBLE, hyperrealistic 8k UHD photorealistic shot of a tall female model with long brown hair, captured in a professional e-commerce studio. She is standing in a neutral, frontal A-pose with her arms relaxed at her sides and a neutral facial expression. She is wearing simple grey underwear and a bra. The background is a seamless, plain, light grey studio backdrop ONLY. The image must be sharp focus, with extremely detailed skin texture showing pores and subtle imperfections, and hair rendered with individual strands visible. Captured with a high-end DSLR camera and a prime lens under soft, even, diffuse studio lighting."
+-   **Your Output:** "A FULL BODY SHOOT WITH THE ENTIRE BODY VISIBLE, hyperrealistic 8k UHD photorealistic shot of a tall female model with long brown hair, captured in a professional e-commerce studio. She is standing in a neutral, frontal A-pose with her arms relaxed at their sides and a neutral facial expression. She is wearing simple grey underwear and a bra. The background is a seamless, plain, light grey studio backdrop ONLY. The image must be sharp focus, with extremely detailed skin texture showing pores and subtle imperfections, and hair rendered with individual strands visible. Captured with a high-end DSLR camera and a prime lens under soft, even, diffuse studio lighting."
 
 **Example 2 (Italian Input):**
 -   **User Model Description:** "un modello uomo con i capelli corti"
