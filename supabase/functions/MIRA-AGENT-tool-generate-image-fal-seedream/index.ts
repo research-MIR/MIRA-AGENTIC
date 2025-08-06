@@ -123,6 +123,8 @@ serve(async (req) => {
       },
     });
 
+    console.log(`[QwenTool][${requestId}] Full API response from Fal.ai:`, JSON.stringify(result, null, 2));
+
     const generatedImages = result?.data?.images;
     if (!generatedImages || generatedImages.length === 0) {
       throw new Error("Qwen tool failed to generate any images.");

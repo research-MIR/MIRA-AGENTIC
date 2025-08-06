@@ -113,6 +113,8 @@ serve(async (req) => {
     });
 
     const settledResults = await Promise.allSettled(generationPromises);
+    console.log(`[WanTool][${requestId}] Full API response from Fal.ai:`, JSON.stringify(settledResults, null, 2));
+
     const successfulResults = settledResults
         .filter(r => r.status === 'fulfilled' && r.value?.image)
         .map((r: any) => r.value.image);
