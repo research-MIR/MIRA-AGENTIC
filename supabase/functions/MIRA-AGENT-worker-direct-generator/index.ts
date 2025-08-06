@@ -36,15 +36,14 @@ serve(async (req) => {
 
     const { data: modelDetails, error: modelError } = await supabase
         .from('mira-agent-models')
-        .select('provider')
+        .select('provider, model_id_string')
         .eq('model_id_string', modelId)
         .single();
 
     if (modelError) throw new Error(`Could not find details for model ${modelId}: ${modelError.message}`);
     
     const provider = modelDetails.provider.toLowerCase().replace(/[^a-z0-9.-]/g, '');
-    
-    console.log(`[DirectGenWorker][${job_id}] Sanitized provider string: "${provider}"`);
+    const modelIdString = modelDetails.model_id_string;
     
     let toolToInvoke = '';
     let payload: { [key: string]: any } = {
@@ -56,22 +55,15 @@ serve(async (req) => {
         invoker_user_id: job.user_id,
     };
 
-    if (provider === 'google') {
+    if (modelIdString === 'fal-ai/wan/v2.2-a14b/text-to-image') {
+        toolToInvoke = 'MIRA-AGENT-tool-generate-image-fal-wan';
+        payload.size = context.size;
+    } else if (provider === 'fal.ai') {
+        toolToInvoke = 'MIRA-AGENT-tool-generate-image-fal-seedream';
+        payload.size = context.size;
+    } else if (provider === 'google') {
         toolToInvoke = 'MIRA-AGENT-tool-generate-image-google';
         payload.size = context.size;
-    } else if (provider === 'fal.ai') { // Corrected from 'fal-ai' to 'fal.ai'
-        toolToInvoke = 'MIRA-AGENT-tool-generate-image-fal-seedream';
-        const sizeMap: { [key: string]: string } = {
-            '1024x1024': '1:1',
-            '1408x768': '16:9',
-            '768x1408': '9:16',
-            '1280x896': '4:3',
-            '896x1280': '3:4',
-            '1152x768': '3:2',
-            '768x1152': '2:3',
-            '1536x640': '21:9',
-        };
-        payload.size = sizeMap[context.size] || '1:1';
     } else {
         throw new Error(`Unsupported provider '${provider}' for direct generation.`);
     }
