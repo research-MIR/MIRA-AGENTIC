@@ -134,7 +134,7 @@ serve(async (req) => {
         const imageResponse = await fetch(image.url);
         if (!imageResponse.ok) throw new Error(`Failed to download generated image from ${image.url}`);
         const imageBuffer = await imageResponse.arrayBuffer();
-        const mimeType = imageResponse.headers.get('content-type') || 'image/png';
+        const mimeType = 'image/png'; // Enforce PNG, as Fal.ai returns octet-stream
 
         const filePath = `${invoker_user_id}/${Date.now()}_qwen_${index}.png`;
         await supabaseAdmin.storage.from(GENERATED_IMAGES_BUCKET).upload(filePath, imageBuffer, { contentType: mimeType, upsert: true });
