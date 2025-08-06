@@ -28,7 +28,7 @@ async function describeImage(base64Data: string, mimeType: string): Promise<stri
     try {
         const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
         const result = await ai.models.generateContent({
-            model: "gemini-1.5-flash-latest",
+            model: "gemini-2.5-flash-lite-preview-06-17",
             contents: [{
                 role: 'user',
                 parts: [{

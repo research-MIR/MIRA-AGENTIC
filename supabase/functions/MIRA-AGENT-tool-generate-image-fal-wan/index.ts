@@ -54,7 +54,7 @@ async function describeImage(base64Data: string, mimeType: string): Promise<stri
         const { GoogleGenAI } = await import('https://esm.sh/@google/genai@0.15.0');
         const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
         const result = await ai.models.generateContent({
-            model: "gemini-1.5-flash-latest",
+            model: "gemini-2.5-flash-lite-preview-06-17",
             contents: [{ role: 'user', parts: [{ inlineData: { mimeType, data: base64Data } }] }],
             config: { systemInstruction: { role: "system", parts: [{ text: "Describe this image in a single, concise sentence." }] } }
         });
