@@ -77,16 +77,24 @@ serve(async (req) => {
                 contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
                 config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
             });
-            lastError = null; // Clear error on success
-            break; // Exit the loop on success
+
+            if (result?.text) {
+                lastError = null;
+                break; 
+            }
+            
+            console.warn(`[GenerateModelPromptTool] Attempt ${attempt} resulted in an empty or blocked response. Full response:`, JSON.stringify(result, null, 2));
+            lastError = new Error("AI model returned an empty or blocked response.");
+
         } catch (error) {
             lastError = error;
             console.warn(`[GenerateModelPromptTool] Attempt ${attempt} failed:`, error.message);
-            if (attempt < MAX_RETRIES) {
-                const delay = RETRY_DELAY_MS * attempt; // Exponential backoff
-                console.log(`[GenerateModelPromptTool] Retrying in ${delay}ms...`);
-                await new Promise(resolve => setTimeout(resolve, delay));
-            }
+        }
+
+        if (attempt < MAX_RETRIES) {
+            const delay = RETRY_DELAY_MS * attempt;
+            console.log(`[GenerateModelPromptTool] Retrying in ${delay}ms...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
         }
     }
 
@@ -95,8 +103,9 @@ serve(async (req) => {
         throw lastError;
     }
 
-    if (!result) {
-        throw new Error("AI model failed to respond after all retries.");
+    if (!result || !result.text) {
+        console.error("[GenerateModelPromptTool] AI model failed to return a valid text response after all retries. Full response:", JSON.stringify(result, null, 2));
+        throw new Error("AI model failed to respond with valid text after all retries.");
     }
 
     const finalPrompt = result.text.trim();
