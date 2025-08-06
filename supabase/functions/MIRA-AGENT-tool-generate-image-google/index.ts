@@ -15,8 +15,11 @@ const GOOGLE_PROJECT_ID = Deno.env.get('GOOGLE_PROJECT_ID');
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const GOOGLE_LOCATION = 'us-central1';
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
-const MAX_RETRIES = 3; // Increased to 3 for more resilience
+const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1500;
+
+const PRIMARY_MODEL_ID = 'imagen-4.0-ultra-generate-preview-06-06';
+const FALLBACK_MODEL_ID = 'imagen-4.0-generate-preview-06-06';
 
 const visionSystemPrompt = "You are an expert image analyst. Your sole task is to describe the provided image in a single, concise sentence. Focus on the main subject, their pose, and key attributes. Do not mention colors or background unless they are critical for identification. Example: 'A woman standing with her hands on her hips, wearing a red dress.'";
 
@@ -136,36 +139,21 @@ serve(async (req)=>{
     }
     console.log(`[ImageGenerator-Google][${requestId}] Quota check passed for user ${invoker_user_id}.`);
 
-    let finalModelId = model_id;
-    if (!finalModelId) {
-        const { data: dbModel, error: modelError } = await supabaseAdmin.from('mira-agent-models').select('model_id_string').eq('model_type', 'image').eq('is_default', true).single();
-        if (modelError) throw new Error(`Failed to fetch default image model: ${modelError.message}`);
-        finalModelId = dbModel.model_id_string;
-    }
-
-    // Temporary fix for deprecated model ID
-    if (finalModelId === 'imagen-4.0-ultra-generate-exp-05-20') {
-        console.log(`[ImageGenerator-Google][${requestId}] Deprecated model ID detected. Swapping to new model.`);
-        finalModelId = 'imagen-4.0-ultra-generate-preview-06-06';
-    }
-
-    console.log(`[ImageGenerator-Google][${requestId}] Using model: ${finalModelId}`);
+    let finalModelId = model_id || PRIMARY_MODEL_ID;
+    console.log(`[ImageGenerator-Google][${requestId}] Initial model selected: ${finalModelId}`);
 
     const auth = new GoogleAuth({
       credentials: JSON.parse(GOOGLE_VERTEX_AI_SA_KEY_JSON),
       scopes: 'https://www.googleapis.com/auth/cloud-platform'
     });
     const accessToken = await auth.getAccessToken();
-    const apiUrl = `https://${GOOGLE_LOCATION}-aiplatform.googleapis.com/v1/projects/${GOOGLE_PROJECT_ID}/locations/${GOOGLE_LOCATION}/publishers/google/models/${finalModelId}:predict`;
     
-    const aspectRatioString = mapSizeToGoogleAspectRatio(size);
-
     const generationPromises = Array.from({ length: finalImageCount }).map((_, i) => {
       const requestBody = {
         instances: [{ prompt }],
         parameters: { 
             sampleCount: 1, 
-            aspectRatio: aspectRatioString, 
+            aspectRatio: mapSizeToGoogleAspectRatio(size), 
             negativePrompt: negative_prompt, 
             seed: seed ? Number(seed) + i : undefined,
             addWatermark: false,
@@ -175,20 +163,42 @@ serve(async (req)=>{
             }
         }
       };
+      
       return (async () => {
         for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
           try {
-            console.log(`[ImageGenerator-Google][${requestId}] Calling Vertex AI, attempt ${attempt}/${MAX_RETRIES} for image ${i+1}.`);
-            console.log(`[ImageGenerator-Google][${requestId}] Full Request Payload:`, JSON.stringify(requestBody, null, 2));
+            let currentModelId = finalModelId;
+            let apiUrl = `https://${GOOGLE_LOCATION}-aiplatform.googleapis.com/v1/projects/${GOOGLE_PROJECT_ID}/locations/${GOOGLE_LOCATION}/publishers/google/models/${currentModelId}:predict`;
+            
+            console.log(`[ImageGenerator-Google][${requestId}] Calling Vertex AI with model: ${currentModelId} for image ${i+1}, attempt ${attempt}.`);
+            
             const response = await fetch(apiUrl, {
               method: 'POST',
               headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
               body: JSON.stringify(requestBody)
             });
+
             if (!response.ok) {
-                const errorBody = await response.text();
-                console.error(`[ImageGenerator-Google][${requestId}] API Error Body:`, errorBody);
-                throw new Error(`API call failed with status ${response.status}`);
+                const errorBodyText = await response.text();
+                if (response.status === 429 && errorBodyText.includes('RESOURCE_EXHAUSTED') && errorBodyText.includes('imagen-4.0-ultra-generate')) {
+                    console.warn(`[ImageGenerator-Google][${requestId}] Quota exceeded for primary model. Falling back to ${FALLBACK_MODEL_ID}.`);
+                    currentModelId = FALLBACK_MODEL_ID;
+                    apiUrl = `https://${GOOGLE_LOCATION}-aiplatform.googleapis.com/v1/projects/${GOOGLE_PROJECT_ID}/locations/${GOOGLE_LOCATION}/publishers/google/models/${currentModelId}:predict`;
+                    
+                    const fallbackResponse = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+                        body: JSON.stringify(requestBody)
+                    });
+
+                    if (!fallbackResponse.ok) {
+                        const fallbackErrorBody = await fallbackResponse.text();
+                        throw new Error(`Fallback API call also failed with status ${fallbackResponse.status}: ${fallbackErrorBody}`);
+                    }
+                    const fallbackData = await fallbackResponse.json();
+                    return fallbackData.predictions?.[0];
+                }
+                throw new Error(`API call failed with status ${response.status}: ${errorBodyText}`);
             }
             const responseData = await response.json();
             return responseData.predictions?.[0];
@@ -213,7 +223,6 @@ serve(async (req)=>{
       await supabaseAdmin.storage.from(GENERATED_IMAGES_BUCKET).upload(filePath, imageBuffer, { contentType: 'image/jpeg', upsert: true });
       const { data: { publicUrl } } = supabaseAdmin.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
       
-      // Self-analysis step
       const description = await describeImage(prediction.bytesBase64Encoded, 'image/jpeg');
       console.log(`[ImageGenerator-Google][${requestId}] Generated description for image ${index + 1}: "${description}"`);
 
