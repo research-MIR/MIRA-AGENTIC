@@ -11,7 +11,7 @@ interface Garment {
 }
 
 const ImageDisplay = ({ url }: { url: string | null }) => {
-  const { displayUrl, isLoading } = useSecureImage(url);
+  const { displayUrl, isLoading } = useSecureImage(url, { width: 200, height: 200, resize: 'cover' });
   if (isLoading) return <Skeleton className="w-full h-full" />;
   if (!displayUrl) return <div className="w-full h-full bg-muted flex items-center justify-center"><Shirt className="h-10 w-10 text-muted-foreground" /></div>;
   return <img src={displayUrl} alt="Garment" className="w-full h-full object-cover" />;

@@ -19,7 +19,7 @@ const TEMP_UPLOAD_BUCKET = 'mira-agent-user-uploads';
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
 
 // --- FEATURE FLAGS & TUNABLES ---
-const ENABLE_BITSTUDIO_FALLBACK = true;
+const ENABLE_BITSTUDIO_FALLBACK = false;
 const FAIL_ON_OUTFIT_ANALYSIS_ERROR = true;
 const MAX_VTO_RETRIES = 3;
 const BASE_RETRY_DELAY_MS = 15000; // Start with a 15-second delay

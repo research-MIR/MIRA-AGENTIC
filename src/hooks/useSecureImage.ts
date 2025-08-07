@@ -1,7 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useSession } from '@/components/Auth/SessionContextProvider';
 
-export const useSecureImage = (imageUrl: string | null | undefined) => {
+export const useSecureImage = (
+  imageUrl: string | null | undefined,
+  options?: { width?: number; height?: number; resize?: 'cover' | 'contain' }
+) => {
   const { supabase } = useSession();
   const [displayUrl, setDisplayUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -42,13 +45,17 @@ export const useSecureImage = (imageUrl: string | null | undefined) => {
             throw new Error(`Could not parse bucket or path from URL: ${imageUrl}`);
           }
 
+          const transformOptions = options?.width && options?.height
+            ? { width: options.width, height: options.height, resize: options.resize || 'cover' }
+            : undefined;
+
           const MAX_RETRIES = 3;
           const RETRY_DELAY = 1000; // Base delay of 1 second
 
           for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
             const { data, error: downloadError } = await supabase.storage
               .from(bucketName)
-              .download(storagePath);
+              .download(storagePath, transformOptions ? { transform: transformOptions } : undefined);
 
             if (!downloadError) {
               objectUrl = URL.createObjectURL(data);
@@ -90,7 +97,7 @@ export const useSecureImage = (imageUrl: string | null | undefined) => {
         URL.revokeObjectURL(objectUrl);
       }
     };
-  }, [imageUrl, supabase]);
+  }, [imageUrl, supabase, options?.width, options?.height, options?.resize]);
 
   return { displayUrl, isLoading, error };
 };

@@ -21,6 +21,7 @@ import { DateRangePicker } from "@/components/DateRangePicker";
 import { DateRange } from "react-day-picker";
 import { endOfDay } from "date-fns";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { SecureImageDisplay } from "@/components/VTO/SecureImageDisplay";
 
 interface ImageResult {
   url: string;
@@ -379,7 +380,14 @@ const Gallery = () => {
               onClick={(e) => handleImageClick(image, index, e)}
             >
               {isNew && <NewBadge />}
-              <img src={image.url} alt={`Generated image ${index + 1}`} className={cn("w-full h-full object-cover rounded-md transition-transform", isSelectMode && "group-hover:scale-95")} />
+              <SecureImageDisplay 
+                imageUrl={image.url} 
+                alt={`Generated image ${index + 1}`} 
+                className={cn("w-full h-full object-cover rounded-md transition-transform", isSelectMode && "group-hover:scale-95")} 
+                width={300} 
+                height={300} 
+                resize="cover" 
+              />
               {isSelectMode && (
                 <div className={cn("absolute inset-0 rounded-md flex items-center justify-center transition-all", isSelected ? "bg-primary/60" : "bg-black/50 opacity-0 group-hover:opacity-100")}>
                   {isSelected && <CheckCircle className="h-10 w-10 text-white" />}

@@ -6,11 +6,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Folder, Plus, Users, Bot, Shirt, FolderGit2, ImageIcon, MessageSquare } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
+import { useSecureImage } from "@/hooks/useSecureImage";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Breadcrumbs } from "@/components/Clients/Breadcrumbs";
 import { StatCard } from "@/components/Clients/StatCard";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { ClientModelCard } from "@/components/Clients/ClientModelCard";
 import { ClientGarmentCard } from "@/components/Clients/ClientGarmentCard";
 import { ClientVtoCard } from "@/components/Clients/ClientVtoCard";
@@ -23,7 +24,6 @@ import { Label } from "@/components/ui/label";
 import { showError, showSuccess, showLoading, dismissToast } from "@/utils/toast";
 import { Loader2 } from "lucide-react";
 import { Link } from "react-router-dom";
-import { useSecureImage } from "@/hooks/useSecureImage";
 import { useImagePreview } from "@/context/ImagePreviewContext";
 import { ClientDeadlines } from "@/components/Clients/ClientDeadlines";
 
@@ -35,7 +35,7 @@ interface ProjectPreview {
 }
 
 const ProjectCard = ({ project }: { project: ProjectPreview }) => {
-  const { displayUrl, isLoading } = useSecureImage(project.latest_image_url);
+  const { displayUrl, isLoading } = useSecureImage(project.latest_image_url, { width: 400, height: 300, resize: 'cover' });
 
   return (
     <Link to={`/projects/${project.project_id}`}>
@@ -57,6 +57,12 @@ const ProjectCard = ({ project }: { project: ProjectPreview }) => {
             )}
           </div>
         </CardContent>
+        <CardFooter className="p-4 pt-0">
+          <div className="text-xs text-muted-foreground flex items-center gap-2">
+            <MessageSquare className="h-3 w-3" />
+            <span>{project.chat_count} {project.chat_count === 1 ? 'chat' : 'chats'}</span>
+          </div>
+        </CardFooter>
       </Card>
     </Link>
   );

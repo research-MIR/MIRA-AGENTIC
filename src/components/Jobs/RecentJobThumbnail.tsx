@@ -27,7 +27,7 @@ export const RecentJobThumbnail = ({ job, onClick, isSelected }: Props) => {
     ? job.final_result?.publicUrl || job.final_result?.images?.[0]?.publicUrl
     : job.metadata?.source_image_url || job.context?.base_image_url;
     
-  const { displayUrl, isLoading, error } = useSecureImage(imageUrl);
+  const { displayUrl, isLoading, error } = useSecureImage(imageUrl, { width: 200, height: 200, resize: 'cover' });
 
   const renderContent = () => {
     if (isLoading) {
