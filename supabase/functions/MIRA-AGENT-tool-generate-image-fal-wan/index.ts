@@ -64,7 +64,7 @@ async function describeImage(base64Data: string, mimeType: string): Promise<stri
             contents: [{ role: 'user', parts: [{ inlineData: { mimeType, data: base64Data } }] }],
             config: { systemInstruction: { role: "system", parts: [{ text: "Describe this image in a single, concise sentence." }] } }
         });
-        return result.text.trim();
+        return result?.text?.trim() || "Description could not be generated.";
     } catch (error) {
         console.error("[ImageDescriber] Error:", error.message);
         return "Description generation failed.";
@@ -89,7 +89,7 @@ serve(async (req) => {
   }
 
   try {
-    const { prompt, number_of_images, negative_prompt, seed, invoker_user_id, size } = await req.json();
+    const { prompt, number_of_images, negative_prompt, seed, invoker_user_id, size, source } = await req.json();
     if (!prompt || !invoker_user_id) {
       throw new Error("prompt and invoker_user_id are required.");
     }
@@ -140,7 +140,9 @@ serve(async (req) => {
         const { data: { publicUrl } } = supabaseAdmin.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
         
         const base64Data = encodeBase64(imageBuffer);
-        const description = await describeImage(base64Data, mimeType);
+        const description = source !== 'direct_generator'
+            ? await describeImage(base64Data, mimeType)
+            : "Generated directly.";
 
         return { storagePath: filePath, publicUrl, description };
     });

@@ -34,17 +34,6 @@ serve(async (req) => {
     }
     console.log(`[DirectGenWorker][${job_id}] Found model_id in context: ${modelId}`);
 
-    const { data: modelDetails, error: modelError } = await supabase
-        .from('mira-agent-models')
-        .select('provider, model_id_string')
-        .eq('model_id_string', modelId)
-        .single();
-
-    if (modelError) throw new Error(`Could not find details for model ${modelId}: ${modelError.message}`);
-    
-    const provider = modelDetails.provider.toLowerCase().replace(/[^a-z0-9.-]/g, '');
-    const modelIdString = modelDetails.model_id_string;
-    
     let toolToInvoke = '';
     let payload: { [key: string]: any } = {
         prompt: context.final_prompt_used || context.prompt,
@@ -53,22 +42,36 @@ serve(async (req) => {
         seed: context.seed,
         model_id: modelId,
         invoker_user_id: job.user_id,
+        size: context.size,
+        source: 'direct_generator'
     };
 
-    if (modelIdString === 'fal-ai/wan/v2.2-a14b/text-to-image') {
+    // --- REFACTORED ROUTING LOGIC ---
+    if (modelId === 'fal-ai/wan/v2.2-a14b/text-to-image') {
         toolToInvoke = 'MIRA-AGENT-tool-generate-image-fal-wan';
-        payload.size = context.size;
-    } else if (provider === 'fal.ai') {
-        toolToInvoke = 'MIRA-AGENT-tool-generate-image-fal-seedream';
-        payload.size = context.size;
-    } else if (provider === 'google') {
-        toolToInvoke = 'MIRA-AGENT-tool-generate-image-google';
-        payload.size = context.size;
     } else {
-        throw new Error(`Unsupported provider '${provider}' for direct generation.`);
-    }
+        // For all other models, we need to fetch the provider
+        const { data: modelDetails, error: modelError } = await supabase
+            .from('mira-agent-models')
+            .select('provider')
+            .eq('model_id_string', modelId)
+            .single();
 
-    console.log(`[DirectGenWorker][${job_id}] Routing to tool: ${toolToInvoke} for provider: ${provider} with payload:`, payload);
+        if (modelError) throw new Error(`Could not find details for model ${modelId}: ${modelError.message}`);
+        
+        const provider = modelDetails.provider.toLowerCase().replace(/[^a-z0-9.-]/g, '');
+
+        if (provider === 'fal.ai') {
+            toolToInvoke = 'MIRA-AGENT-tool-generate-image-fal-seedream';
+        } else if (provider === 'google') {
+            toolToInvoke = 'MIRA-AGENT-tool-generate-image-google';
+        } else {
+            throw new Error(`Unsupported provider '${provider}' for direct generation.`);
+        }
+    }
+    // --- END OF REFACTORED LOGIC ---
+
+    console.log(`[DirectGenWorker][${job_id}] Routing to tool: ${toolToInvoke} with payload:`, payload);
     
     const { data: generationResult, error: generationError } = await supabase.functions.invoke(toolToInvoke, {
       body: payload

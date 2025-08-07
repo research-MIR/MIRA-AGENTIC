@@ -50,7 +50,7 @@ async function describeImage(base64Data: string, mimeType: string): Promise<stri
                 }
             }
         });
-        return result.text.trim();
+        return result?.text?.trim() || "Description could not be generated.";
     } catch (error) {
         console.error("[ImageDescriber] Error generating description:", error.message);
         return "Description generation failed.";
@@ -107,7 +107,7 @@ serve(async (req)=>{
   }
   
   try {
-    const { prompt, number_of_images, negative_prompt, seed, model_id, invoker_user_id, size } = await req.json();
+    const { prompt, number_of_images, negative_prompt, seed, model_id, invoker_user_id, size, source } = await req.json();
     console.log(`[ImageGenerator-Google][${requestId}] Received request with prompt: "${prompt.substring(0, 50)}..."`);
 
     if (!prompt) throw new Error("Prompt is required.");
@@ -223,7 +223,9 @@ serve(async (req)=>{
       await supabaseAdmin.storage.from(GENERATED_IMAGES_BUCKET).upload(filePath, imageBuffer, { contentType: 'image/jpeg', upsert: true });
       const { data: { publicUrl } } = supabaseAdmin.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
       
-      const description = await describeImage(prediction.bytesBase64Encoded, 'image/jpeg');
+      const description = source !== 'direct_generator'
+        ? await describeImage(prediction.bytesBase64Encoded, 'image/jpeg')
+        : "Generated directly.";
       console.log(`[ImageGenerator-Google][${requestId}] Generated description for image ${index + 1}: "${description}"`);
 
       return { storagePath: filePath, publicUrl, description };

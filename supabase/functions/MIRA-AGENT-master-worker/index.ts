@@ -508,7 +508,8 @@ serve(async (req) => {
             negative_prompt: call.args.negative_prompt,
             seed: call.args.seed,
             model_id: finalModelId,
-            invoker_user_id: job.user_id
+            invoker_user_id: job.user_id,
+            source: 'agent'
         };
 
         if (currentContext.numImagesMode && currentContext.numImagesMode !== 'auto') {
