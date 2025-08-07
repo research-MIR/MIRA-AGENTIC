@@ -12,7 +12,7 @@ const corsHeaders = {
 const GOOGLE_VERTEX_AI_SA_KEY_JSON = Deno.env.get('GOOGLE_VERTEX_AI_SA_KEY_JSON');
 const GOOGLE_PROJECT_ID = Deno.env.get('GOOGLE_PROJECT_ID');
 const REGION = 'us-central1';
-const MODEL_ID = 'virtual-try-on-exp-05-31'; // CORRECTED MODEL ID
+const MODEL_ID = 'virtual-try-on-exp-05-31';
 const MAX_RETRIES = 6;
 const RETRY_DELAY_MS = 50000;
 
@@ -147,7 +147,7 @@ serve(async (req)=>{
         sampleCount: sample_count,
         addWatermark: false,
         safetySetting: 'block_only_high',
-        personGeneration: 'allow_all',
+        personGeneration: 'allow_adult',
         outputOptions: { mimeType: 'image/jpeg' },
         ...sample_step && { baseSteps: sample_step }
       }
