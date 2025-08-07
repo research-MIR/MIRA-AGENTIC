@@ -214,10 +214,9 @@ async function handlePendingState(supabase: any, job: any) {
     }
 
     const aspectRatio = job.context?.aspect_ratio || '1024x1024';
-    const modelIdString = modelDetails.model_id_string;
     
     let toolToInvoke = '';
-    if (modelIdString === 'fal-ai/wan/v2.2-a14b/text-to-image') {
+    if (selectedModelId === 'fal-ai/wan/v2.2-a14b/text-to-image') {
         toolToInvoke = 'MIRA-AGENT-tool-generate-image-fal-wan';
     } else if (provider === 'fal.ai') {
         toolToInvoke = 'MIRA-AGENT-tool-generate-image-fal-seedream';
@@ -390,7 +389,7 @@ async function handlePollingPosesState(supabase: any, job: any) {
                             job_id: job.id,
                             image_url: poseJob.final_url,
                             base_model_image_url: job.base_model_image_url,
-                            pose_prompt: poseJob.pose_prompt
+                            pose_prompt: updatedPoseJobs[index].pose_prompt
                         }
                     }).catch(err => {
                         console.error(`${logPrefix} ERROR: Failed to re-invoke analyzer for stalled pose ${index}:`, err);
