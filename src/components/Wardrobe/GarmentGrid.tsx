@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useSession } from '@/components/Auth/SessionContextProvider';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Shirt, AlertTriangle, Info } from 'lucide-react';
+import { Shirt, AlertTriangle, Info, Trash2 } from 'lucide-react';
 import { SecureImageDisplay } from '@/components/VTO/SecureImageDisplay';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -24,9 +24,10 @@ interface Garment {
 
 interface GarmentGridProps {
   selectedFolderId: string | null;
+  onDelete: (garment: Garment) => void;
 }
 
-export const GarmentGrid = ({ selectedFolderId }: GarmentGridProps) => {
+export const GarmentGrid = ({ selectedFolderId, onDelete }: GarmentGridProps) => {
   const { supabase, session } = useSession();
 
   const { data: garments, isLoading, error } = useQuery<Garment[]>({
@@ -109,6 +110,14 @@ export const GarmentGrid = ({ selectedFolderId }: GarmentGridProps) => {
                 )}
               </div>
             </CardContent>
+            <Button
+              variant="destructive"
+              size="icon"
+              className="absolute top-2 right-2 h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+              onClick={(e) => { e.stopPropagation(); onDelete(garment); }}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>

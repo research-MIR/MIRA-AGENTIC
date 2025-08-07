@@ -8,6 +8,7 @@ import { FolderModal } from "@/components/Wardrobe/FolderModal";
 import { showError, showSuccess, showLoading, dismissToast } from "@/utils/toast";
 import { optimizeImage, calculateFileHash, sanitizeFilename } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -24,6 +25,7 @@ const Wardrobe = () => {
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>('all');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [folderToEdit, setFolderToEdit] = useState<GarmentFolder | null>(null);
+  const [garmentToDelete, setGarmentToDelete] = useState<any | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleNewFolder = () => {
@@ -142,15 +144,33 @@ const Wardrobe = () => {
       if (movedCount > 0) finalMessage += `${movedCount} existing garment(s) moved.`;
       if (finalMessage) showSuccess(finalMessage.trim());
       
-      queryClient.invalidateQueries({ queryKey: ['garments', session?.user?.id, selectedFolderId] });
+      queryClient.invalidateQueries({ queryKey: ['garments', session.user.id, selectedFolderId] });
       if (targetFolderId !== undefined && targetFolderId !== selectedFolderId) {
-        queryClient.invalidateQueries({ queryKey: ['garments', session?.user?.id, targetFolderId] });
+        queryClient.invalidateQueries({ queryKey: ['garments', session.user.id, targetFolderId] });
       }
-      queryClient.invalidateQueries({ queryKey: ['garmentFolderCounts', session?.user?.id] });
+      queryClient.invalidateQueries({ queryKey: ['garmentFolderCounts', session.user.id] });
 
     } catch (err: any) {
       dismissToast(toastId);
       showError(err.message);
+    }
+  };
+
+  const handleDeleteGarment = async () => {
+    if (!garmentToDelete) return;
+    const toastId = showLoading(`Deleting ${garmentToDelete.name}...`);
+    try {
+      const { error } = await supabase.from('mira-agent-garments').delete().eq('id', garmentToDelete.id);
+      if (error) throw error;
+      dismissToast(toastId);
+      showSuccess("Garment deleted.");
+      queryClient.invalidateQueries({ queryKey: ['garments', session?.user?.id, selectedFolderId] });
+      queryClient.invalidateQueries({ queryKey: ['garmentFolderCounts', session?.user?.id] });
+    } catch (err: any) {
+      dismissToast(toastId);
+      showError(`Failed to delete garment: ${err.message}`);
+    } finally {
+      setGarmentToDelete(null);
     }
   };
 
@@ -176,7 +196,7 @@ const Wardrobe = () => {
           <ResizableHandle withHandle />
           <ResizablePanel defaultSize={80}>
             <div className="p-4 h-full overflow-y-auto" onDragStart={(e) => { (window as any).draggedGarmentId = e.dataTransfer.getData("garmentId"); }}>
-              <GarmentGrid selectedFolderId={selectedFolderId} />
+              <GarmentGrid selectedFolderId={selectedFolderId} onDelete={setGarmentToDelete} />
             </div>
           </ResizablePanel>
         </ResizablePanelGroup>
@@ -195,6 +215,20 @@ const Wardrobe = () => {
         className="hidden"
         onChange={(e) => handleFileUpload(e.target.files)}
       />
+      <AlertDialog open={!!garmentToDelete} onOpenChange={(open) => !open && setGarmentToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete "{garmentToDelete?.name}"?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete the garment from your wardrobe and remove it from any packs it belongs to. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteGarment}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 };
