@@ -11,8 +11,9 @@ const corsHeaders = {
 
 const GOOGLE_VERTEX_AI_SA_KEY_JSON = Deno.env.get('GOOGLE_VERTEX_AI_SA_KEY_JSON');
 const GOOGLE_PROJECT_ID = Deno.env.get('GOOGLE_PROJECT_ID');
+const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const REGION = 'us-central1';
-const MODEL_ID = 'virtual-try-on-exp-05-31';
+const MODEL_ID = 'imagen-product-recontext-preview-06-30';
 const MAX_RETRIES = 6;
 const RETRY_DELAY_MS = 50000;
 
@@ -25,7 +26,7 @@ self.addEventListener('error', (event)=>{
 });
 // --- END DIAGNOSTIC ---
 
-const fetchWithRetry = async (url, options, maxRetries = 3, delay = 15000, requestId)=>{
+const fetchWithRetry = async (url: string, options: any, maxRetries = 3, delay = 15000, requestId: string)=>{
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       const response = await fetch(url, options);
@@ -47,12 +48,12 @@ const fetchWithRetry = async (url, options, maxRetries = 3, delay = 15000, reque
   throw new Error("Fetch with retry failed unexpectedly.");
 };
 
-const blobToBase64 = async (blob)=>{
+const blobToBase64 = async (blob: Blob)=>{
   const buffer = await blob.arrayBuffer();
   return encodeBase64(new Uint8Array(buffer));
 };
 
-async function downloadImage(supabase, url, requestId) {
+async function downloadImage(supabase: any, url: string, requestId: string) {
   console.log(`[Downloader][${requestId}] Attempting to download from URL: ${url}`);
   if (url.includes('supabase.co')) {
     const urlObj = new URL(url);
@@ -89,7 +90,7 @@ serve(async (req)=>{
     return new Response('ok', { headers: corsHeaders });
   }
 
-  const supabase = createClient(Deno.env.get('SUPABASE_URL'), Deno.env.get('SUPABASE_SERVICE_ROLE_KEY'));
+  const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
 
   try {
     if (!GOOGLE_VERTEX_AI_SA_KEY_JSON || !GOOGLE_PROJECT_ID) {
@@ -191,7 +192,7 @@ serve(async (req)=>{
         continue;
       }
 
-      if (potentialPredictions && Array.isArray(potentialPredictions) && potentialPredictions.length > 0 && potentialPredictions.every((p)=>p && p.bytesBase64Encoded)) {
+      if (potentialPredictions && Array.isArray(potentialPredictions) && potentialPredictions.length > 0 && potentialPredictions.every((p: any)=>p && p.bytesBase64Encoded)) {
         console.log(`[VirtualTryOnTool][${requestId}] Successfully received and validated ${potentialPredictions.length} predictions on attempt ${attempt}.`);
         predictions = potentialPredictions;
         break;
@@ -208,12 +209,12 @@ serve(async (req)=>{
       throw new Error("Failed to get a valid response from the AI model after all retries.");
     }
 
-    const generatedImages = predictions.map((p)=>{
+    const generatedImages = predictions.map((p: any)=>{
       if (!p.bytesBase64Encoded) {
         console.error(`[VirtualTryOnTool][${requestId}] A prediction object was missing the 'bytesBase64Encoded' field.`);
         throw new Error("An image prediction was returned in an invalid format.");
       }
-      return { base64Image: p.bytesBase64Encoded, mimeType: p.mimeType || 'image/png' };
+      return { base64Image: p.bytesBase64Encoded, mimeType: 'image/jpeg' }; // Hardcode mimeType as per user request
     });
 
     console.log(`[VirtualTryOnTool][${requestId}] Job complete. Returning ${generatedImages.length} results.`);
