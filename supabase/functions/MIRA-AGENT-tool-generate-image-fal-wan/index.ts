@@ -72,6 +72,7 @@ async function describeImage(base64Data: string, mimeType: string): Promise<stri
 }
 
 serve(async (req) => {
+  console.log('[WanTool] Redeploying function...');
   const requestId = req.headers.get("x-request-id") || `agent-wan-${Date.now()}`;
   console.log(`[WanTool][${requestId}] Function invoked.`);
 
