@@ -105,6 +105,7 @@ const Developer = () => {
   const [isClearingFailedJobs, setIsClearingFailedJobs] = useState(false);
   const [isRecompositing, setIsRecompositing] = useState(false);
   const [isCancellingVtoPacks, setIsCancellingVtoPacks] = useState(false);
+  const [isCancellingWan, setIsCancellingWan] = useState(false);
 
   const handleCancelAllSegmentationJobs = async () => {
     setIsCancelling(true);
@@ -218,6 +219,22 @@ const Developer = () => {
     }
   };
 
+  const handleCancelWanJobs = async () => {
+    setIsCancellingWan(true);
+    const toastId = showLoading("Cancelling all active Wan jobs...");
+    try {
+        const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-admin-cancel-wan-jobs');
+        if (error) throw error;
+        dismissToast(toastId);
+        showSuccess(data.message);
+    } catch (err: any) {
+        dismissToast(toastId);
+        showError(`Failed to cancel jobs: ${err.message}`);
+    } finally {
+        setIsCancellingWan(false);
+    }
+  };
+
   return (
     <div className="p-4 md:p-8 h-screen overflow-y-auto">
       <header className="pb-4 mb-8 border-b">
@@ -233,6 +250,26 @@ const Developer = () => {
               <CardDescription>These actions affect all users and jobs on the platform. Use with extreme caution.</CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="destructive">Cancel All Wan Generator Jobs</Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This will cancel ALL active ('processing' or 'queued') jobs initiated from the Direct Generator using the 'Wan' model. This is useful for stopping a runaway loop.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={handleCancelWanJobs} disabled={isCancellingWan}>
+                      {isCancellingWan && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      Yes, cancel Wan jobs
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
               <AlertDialog>
                 <AlertDialogTrigger asChild>
                   <Button variant="destructive">Re-run Failed Compositors</Button>
