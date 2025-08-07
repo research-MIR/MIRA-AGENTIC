@@ -7,10 +7,12 @@ import { cn } from '@/lib/utils';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { showError, showSuccess } from '@/utils/toast';
+import { Badge } from '@/components/ui/badge';
 
 export interface GarmentFolder {
   id: string;
   name: string;
+  garment_count?: number;
 }
 
 interface FolderSidebarProps {
@@ -48,21 +50,24 @@ const FolderItem = ({ folder, isSelected, onSelect, onGarmentDrop, onFilesDroppe
       )}
       onClick={onSelect}
     >
-      <div className="flex items-center gap-2">
-        <Folder className="h-4 w-4" />
+      <div className="flex items-center gap-2 overflow-hidden">
+        <Folder className="h-4 w-4 flex-shrink-0" />
         <span className="text-sm font-medium truncate">{folder.name}</span>
       </div>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon" className="h-6 w-6 opacity-0 group-hover:opacity-100" onClick={(e) => e.stopPropagation()}>
-            <MoreVertical className="h-4 w-4" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent onClick={(e) => e.stopPropagation()}>
-          <DropdownMenuItem onClick={() => onEdit(folder)}><Pencil className="mr-2 h-4 w-4" />Rename</DropdownMenuItem>
-          <DropdownMenuItem className="text-destructive" onClick={() => onDelete(folder)}><Trash2 className="mr-2 h-4 w-4" />Delete</DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <div className="flex items-center gap-1">
+        <Badge variant="secondary">{folder.garment_count || 0}</Badge>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" className="h-6 w-6 opacity-0 group-hover:opacity-100" onClick={(e) => e.stopPropagation()}>
+              <MoreVertical className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent onClick={(e) => e.stopPropagation()}>
+            <DropdownMenuItem onClick={() => onEdit(folder)}><Pencil className="mr-2 h-4 w-4" />Rename</DropdownMenuItem>
+            <DropdownMenuItem className="text-destructive" onClick={() => onDelete(folder)}><Trash2 className="mr-2 h-4 w-4" />Delete</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
     </div>
   );
 };
@@ -72,11 +77,11 @@ export const FolderSidebar = ({ selectedFolderId, onSelectFolder, onGarmentDrop,
   const queryClient = useQueryClient();
   const [folderToDelete, setFolderToDelete] = useState<GarmentFolder | null>(null);
 
-  const { data: folders, isLoading } = useQuery<GarmentFolder[]>({
-    queryKey: ['garmentFolders', session?.user?.id],
+  const { data: folderData, isLoading } = useQuery({
+    queryKey: ['garmentFolderCounts', session?.user?.id],
     queryFn: async () => {
-      if (!session?.user) return [];
-      const { data, error } = await supabase.from('mira-agent-garment-folders').select('id, name').eq('user_id', session.user.id).order('name', { ascending: true });
+      if (!session?.user) return null;
+      const { data, error } = await supabase.rpc('get_garment_folder_counts', { p_user_id: session.user.id });
       if (error) throw error;
       return data;
     },
@@ -90,7 +95,7 @@ export const FolderSidebar = ({ selectedFolderId, onSelectFolder, onGarmentDrop,
       showError(`Failed to delete folder: ${error.message}`);
     } else {
       showSuccess(`Folder "${folderToDelete.name}" deleted.`);
-      queryClient.invalidateQueries({ queryKey: ['garmentFolders'] });
+      queryClient.invalidateQueries({ queryKey: ['garmentFolderCounts'] });
       onSelectFolder('all'); // Reselect all after deletion
     }
     setFolderToDelete(null);
@@ -106,18 +111,18 @@ export const FolderSidebar = ({ selectedFolderId, onSelectFolder, onGarmentDrop,
         </div>
       </div>
       <div className="space-y-1">
-        <div className={cn("flex items-center gap-2 p-2 rounded-md cursor-pointer", selectedFolderId === 'all' ? "bg-primary/10 text-primary" : "hover:bg-muted")} onClick={() => onSelectFolder('all')}>
-          <Archive className="h-4 w-4" />
-          <span className="text-sm font-medium">All Garments</span>
+        <div className={cn("flex items-center justify-between p-2 rounded-md cursor-pointer", selectedFolderId === 'all' ? "bg-primary/10 text-primary" : "hover:bg-muted")} onClick={() => onSelectFolder('all')}>
+          <div className="flex items-center gap-2"><Archive className="h-4 w-4" /><span className="text-sm font-medium">All Garments</span></div>
+          <Badge variant="secondary">{folderData?.all_count || 0}</Badge>
         </div>
-        <div className={cn("flex items-center gap-2 p-2 rounded-md cursor-pointer", selectedFolderId === 'unassigned' ? "bg-primary/10 text-primary" : "hover:bg-muted")} onClick={() => onSelectFolder('unassigned')}>
-          <Inbox className="h-4 w-4" />
-          <span className="text-sm font-medium">Unassigned</span>
+        <div className={cn("flex items-center justify-between p-2 rounded-md cursor-pointer", selectedFolderId === 'unassigned' ? "bg-primary/10 text-primary" : "hover:bg-muted")} onClick={() => onSelectFolder('unassigned')}>
+          <div className="flex items-center gap-2"><Inbox className="h-4 w-4" /><span className="text-sm font-medium">Unassigned</span></div>
+          <Badge variant="secondary">{folderData?.unassigned_count || 0}</Badge>
         </div>
       </div>
       <div className="border-t my-4"></div>
       <div className="flex-1 overflow-y-auto space-y-1">
-        {isLoading ? <p>Loading...</p> : folders?.map(folder => (
+        {isLoading ? <p>Loading...</p> : folderData?.folder_counts?.map((folder: GarmentFolder) => (
           <FolderItem
             key={folder.id}
             folder={folder}

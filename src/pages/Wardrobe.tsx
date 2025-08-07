@@ -48,7 +48,7 @@ const Wardrobe = () => {
       if (error) throw error;
       dismissToast(toastId);
       showSuccess(folderToEdit ? "Folder updated." : "Folder created.");
-      queryClient.invalidateQueries({ queryKey: ['garmentFolders'] });
+      queryClient.invalidateQueries({ queryKey: ['garmentFolderCounts'] });
       setIsModalOpen(false);
     } catch (err: any) {
       dismissToast(toastId);
@@ -68,6 +68,7 @@ const Wardrobe = () => {
       if (error) throw error;
       queryClient.invalidateQueries({ queryKey: ['garments', session?.user?.id, selectedFolderId] });
       queryClient.invalidateQueries({ queryKey: ['garments', session?.user?.id, folderId] });
+      queryClient.invalidateQueries({ queryKey: ['garmentFolderCounts', session?.user?.id] });
     } catch (err: any) {
       showError(`Failed to move garment: ${err.message}`);
     } finally {
@@ -141,10 +142,11 @@ const Wardrobe = () => {
       if (movedCount > 0) finalMessage += `${movedCount} existing garment(s) moved.`;
       if (finalMessage) showSuccess(finalMessage.trim());
       
-      queryClient.invalidateQueries({ queryKey: ['garments', session.user.id, selectedFolderId] });
+      queryClient.invalidateQueries({ queryKey: ['garments', session?.user?.id, selectedFolderId] });
       if (targetFolderId !== undefined && targetFolderId !== selectedFolderId) {
-        queryClient.invalidateQueries({ queryKey: ['garments', session.user.id, targetFolderId] });
+        queryClient.invalidateQueries({ queryKey: ['garments', session?.user?.id, targetFolderId] });
       }
+      queryClient.invalidateQueries({ queryKey: ['garmentFolderCounts', session?.user?.id] });
 
     } catch (err: any) {
       dismissToast(toastId);
