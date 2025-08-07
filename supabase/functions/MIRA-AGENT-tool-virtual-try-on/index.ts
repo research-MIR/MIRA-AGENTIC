@@ -11,9 +11,8 @@ const corsHeaders = {
 
 const GOOGLE_VERTEX_AI_SA_KEY_JSON = Deno.env.get('GOOGLE_VERTEX_AI_SA_KEY_JSON');
 const GOOGLE_PROJECT_ID = Deno.env.get('GOOGLE_PROJECT_ID');
-const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const REGION = 'us-central1';
-const MODEL_ID = 'imagen-product-recontext-preview-06-30';
+const MODEL_ID = 'virtual-try-on-exp-05-31'; // CORRECTED MODEL ID
 const MAX_RETRIES = 6;
 const RETRY_DELAY_MS = 50000;
 
@@ -214,7 +213,7 @@ serve(async (req)=>{
         console.error(`[VirtualTryOnTool][${requestId}] A prediction object was missing the 'bytesBase64Encoded' field.`);
         throw new Error("An image prediction was returned in an invalid format.");
       }
-      return { base64Image: p.bytesBase64Encoded, mimeType: 'image/jpeg' }; // Hardcode mimeType as per user request
+      return { base64Image: p.bytesBase64Encoded, mimeType: 'image/jpeg' };
     });
 
     console.log(`[VirtualTryOnTool][${requestId}] Job complete. Returning ${generatedImages.length} results.`);
