@@ -16,18 +16,29 @@ export interface GarmentFolder {
 interface FolderSidebarProps {
   selectedFolderId: string | null;
   onSelectFolder: (folderId: string | null) => void;
-  onDrop: (folderId: string | null) => void;
+  onGarmentDrop: (folderId: string | null) => void;
+  onFilesDropped: (files: FileList, folderId: string | null) => void;
   onNewFolder: () => void;
   onEditFolder: (folder: GarmentFolder) => void;
   onUploadClick: () => void;
 }
 
-const FolderItem = ({ folder, isSelected, onSelect, onDrop, onEdit, onDelete }: { folder: GarmentFolder, isSelected: boolean, onSelect: () => void, onDrop: () => void, onEdit: (folder: GarmentFolder) => void, onDelete: (folder: GarmentFolder) => void }) => {
+const FolderItem = ({ folder, isSelected, onSelect, onGarmentDrop, onFilesDropped, onEdit, onDelete }: { folder: GarmentFolder, isSelected: boolean, onSelect: () => void, onGarmentDrop: () => void, onFilesDropped: (files: FileList, folderId: string) => void, onEdit: (folder: GarmentFolder) => void, onDelete: (folder: GarmentFolder) => void }) => {
   const [isDragOver, setIsDragOver] = useState(false);
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      onFilesDropped(e.dataTransfer.files, folder.id);
+    } else {
+      onGarmentDrop();
+    }
+  };
 
   return (
     <div
-      onDrop={(e) => { e.preventDefault(); setIsDragOver(false); onDrop(); }}
+      onDrop={handleDrop}
       onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
       onDragLeave={() => setIsDragOver(false)}
       className={cn(
@@ -56,7 +67,7 @@ const FolderItem = ({ folder, isSelected, onSelect, onDrop, onEdit, onDelete }: 
   );
 };
 
-export const FolderSidebar = ({ selectedFolderId, onSelectFolder, onDrop, onNewFolder, onEditFolder, onUploadClick }: FolderSidebarProps) => {
+export const FolderSidebar = ({ selectedFolderId, onSelectFolder, onGarmentDrop, onFilesDropped, onNewFolder, onEditFolder, onUploadClick }: FolderSidebarProps) => {
   const { supabase, session } = useSession();
   const queryClient = useQueryClient();
   const [folderToDelete, setFolderToDelete] = useState<GarmentFolder | null>(null);
@@ -112,7 +123,8 @@ export const FolderSidebar = ({ selectedFolderId, onSelectFolder, onDrop, onNewF
             folder={folder}
             isSelected={selectedFolderId === folder.id}
             onSelect={() => onSelectFolder(folder.id)}
-            onDrop={() => onDrop(folder.id)}
+            onGarmentDrop={() => onGarmentDrop(folder.id)}
+            onFilesDropped={onFilesDropped}
             onEdit={onEditFolder}
             onDelete={setFolderToDelete}
           />

@@ -95,6 +95,15 @@ serve(async (req) => {
     });
 
     if (uniqueGarments.size > 0) {
+        const { data: folderId, error: folderError } = await supabase.rpc('find_or_create_folder_by_name', {
+            p_user_id: user_id,
+            p_folder_name: 'VTO Uploads'
+        });
+
+        if (folderError) {
+            console.error(`[VTO-Packs-Orchestrator] Could not find or create 'VTO Uploads' folder. Garments will be unassigned. Error: ${folderError.message}`);
+        }
+
         const garmentsToInsert = Array.from(uniqueGarments.values())
             .filter(g => g.image_hash)
             .map(g => ({
@@ -102,7 +111,8 @@ serve(async (req) => {
                 storage_path: g.storage_path,
                 attributes: g.attributes,
                 name: g.name,
-                image_hash: g.image_hash
+                image_hash: g.image_hash,
+                folder_id: folderId || null
             }));
 
         if (garmentsToInsert.length > 0) {

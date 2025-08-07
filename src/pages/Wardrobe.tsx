@@ -56,7 +56,7 @@ const Wardrobe = () => {
     }
   };
 
-  const handleDrop = async (folderId: string | null) => {
+  const handleGarmentDrop = async (folderId: string | null) => {
     const garmentId = (window as any).draggedGarmentId;
     if (!garmentId) return;
 
@@ -75,7 +75,7 @@ const Wardrobe = () => {
     }
   };
 
-  const handleFileUpload = async (files: FileList | null) => {
+  const handleFileUpload = async (files: FileList | null, targetFolderId?: string | null) => {
     if (!files || files.length === 0 || !session?.user) return;
     const imageFiles = Array.from(files).filter(file => file.type.startsWith('image/'));
     if (imageFiles.length === 0) {
@@ -86,7 +86,7 @@ const Wardrobe = () => {
     const toastId = showLoading(`Processing ${imageFiles.length} image(s)...`);
     let successCount = 0;
     let movedCount = 0;
-    const folderIdToAssign = selectedFolderId === 'all' || selectedFolderId === 'unassigned' ? null : selectedFolderId;
+    const folderIdToAssign = targetFolderId !== undefined ? targetFolderId : selectedFolderId;
 
     try {
       for (const file of imageFiles) {
@@ -101,17 +101,15 @@ const Wardrobe = () => {
         if (checkError) throw checkError;
         
         if (existing) {
-          // Garment exists, so move it to the current folder
           const { error: moveError } = await supabase
             .from('mira-agent-garments')
-            .update({ folder_id: folderIdToAssign })
+            .update({ folder_id: folderIdToAssign === 'unassigned' ? null : folderIdToAssign })
             .eq('id', existing.id);
           if (moveError) throw moveError;
           movedCount++;
           continue;
         }
 
-        // Garment is new, proceed with full upload and analysis
         const base64 = await fileToBase64(file);
         const { data: analysis, error: analysisError } = await supabase.functions.invoke('MIRA-AGENT-tool-analyze-garment-attributes', {
           body: { image_base64: base64, mime_type: file.type }
@@ -130,7 +128,7 @@ const Wardrobe = () => {
           storage_path: publicUrl,
           attributes: analysis,
           image_hash: hash,
-          folder_id: folderIdToAssign,
+          folder_id: folderIdToAssign === 'all' || folderIdToAssign === 'unassigned' ? null : folderIdToAssign,
         });
         if (insertError) throw new Error(`Database insert failed for ${file.name}: ${insertError.message}`);
         
@@ -144,6 +142,9 @@ const Wardrobe = () => {
       if (finalMessage) showSuccess(finalMessage.trim());
       
       queryClient.invalidateQueries({ queryKey: ['garments', session.user.id, selectedFolderId] });
+      if (targetFolderId !== undefined && targetFolderId !== selectedFolderId) {
+        queryClient.invalidateQueries({ queryKey: ['garments', session.user.id, targetFolderId] });
+      }
 
     } catch (err: any) {
       dismissToast(toastId);
@@ -163,7 +164,8 @@ const Wardrobe = () => {
             <FolderSidebar
               selectedFolderId={selectedFolderId}
               onSelectFolder={setSelectedFolderId}
-              onDrop={handleDrop}
+              onGarmentDrop={handleGarmentDrop}
+              onFilesDropped={handleFileUpload}
               onNewFolder={handleNewFolder}
               onEditFolder={handleEditFolder}
               onUploadClick={() => fileInputRef.current?.click()}
