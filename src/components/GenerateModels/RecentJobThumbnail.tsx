@@ -1,9 +1,11 @@
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
-import { AlertTriangle, Loader2, CheckCircle, XCircle, Wand2 } from 'lucide-react';
+import { AlertTriangle, Loader2, CheckCircle, XCircle, Wand2, Info } from 'lucide-react';
 import { useSecureImage } from '@/hooks/useSecureImage';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Badge } from "@/components/ui/badge";
+import { Button } from '@/components/ui/button';
+import { showSuccess } from '@/utils/toast';
 
 interface Job {
   id: string;
@@ -22,6 +24,12 @@ interface Props {
 
 export const RecentJobThumbnail = ({ job, onClick, isSelected }: Props) => {
   const { displayUrl, isLoading, error } = useSecureImage(job.base_model_image_url);
+
+  const handleInfoClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(job.id);
+    showSuccess("Job ID copied to clipboard!");
+  };
 
   const getAggregateStatus = () => {
     if (job.status === 'failed') return { icon: <XCircle className="h-5 w-5 text-white" />, color: 'bg-destructive', tooltip: 'Job Failed' };
@@ -78,23 +86,47 @@ export const RecentJobThumbnail = ({ job, onClick, isSelected }: Props) => {
     );
   };
 
+  const renderContent = () => {
+    if (isLoading) {
+      return <Skeleton className="w-full h-full" />;
+    }
+    if (error || !displayUrl) {
+      return <div className="w-full h-full bg-muted rounded-md flex items-center justify-center text-xs text-muted-foreground text-center p-1"><AlertTriangle className="h-6 w-6 text-destructive/50" /></div>;
+    }
+    return (
+      <div className="relative w-full h-full">
+        <img src={displayUrl} alt="Job source" className="w-full h-full object-cover rounded-md" />
+        {job.gender && (
+          <Badge variant="secondary" className="absolute top-1 left-1 z-10 h-6 w-6 flex items-center justify-center p-0 font-bold text-xs">
+            {job.gender.charAt(0).toUpperCase()}
+          </Badge>
+        )}
+        {renderStatusIcon()}
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="absolute bottom-1 left-1 h-6 w-6 z-10 bg-black/50 hover:bg-black/70 text-white hover:text-white"
+                onClick={handleInfoClick}
+              >
+                <Info className="h-3 w-3" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" align="start" onClick={(e) => e.stopPropagation()}>
+              <p className="text-xs">Click to copy Job ID</p>
+              <p className="text-xs font-mono max-w-xs break-all">{job.id}</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      </div>
+    );
+  };
+
   return (
     <button onClick={onClick} className={cn("border-2 rounded-lg p-1 flex-shrink-0 w-24 h-24 relative", isSelected ? "border-primary" : "border-transparent")}>
-      {isLoading ? (
-        <Skeleton className="w-full h-full" />
-      ) : error || !displayUrl ? (
-        <div className="w-full h-full bg-muted rounded-md flex items-center justify-center text-xs text-muted-foreground text-center p-1">
-            <AlertTriangle className="h-6 w-6 text-destructive/50" />
-        </div>
-      ) : (
-        <img src={displayUrl} alt="Job source" className="w-full h-full object-cover rounded-md" />
-      )}
-      {job.gender && (
-        <Badge variant="secondary" className="absolute top-1 left-1 z-10 h-6 w-6 flex items-center justify-center p-0 font-bold text-xs">
-          {job.gender.charAt(0).toUpperCase()}
-        </Badge>
-      )}
-      {renderStatusIcon()}
+      {renderContent()}
     </button>
   );
 };

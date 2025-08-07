@@ -42,6 +42,7 @@ interface Pose {
   pose_prompt: string;
   jobId: string;
   analysis?: PoseAnalysis;
+  comfyui_prompt_id?: string;
 }
 
 interface Job {

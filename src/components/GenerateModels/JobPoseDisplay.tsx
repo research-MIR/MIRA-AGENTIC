@@ -1,11 +1,13 @@
 import { useLanguage } from "@/context/LanguageContext";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { AlertTriangle, CheckCircle, Loader2, Wand2 } from "lucide-react";
+import { AlertTriangle, CheckCircle, Loader2, Wand2, Info } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useImagePreview } from "@/context/ImagePreviewContext";
 import { SecureImageDisplay } from "@/components/VTO/SecureImageDisplay";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { showSuccess } from "@/utils/toast";
 
 interface PoseAnalysis {
   shoot_focus: 'upper_body' | 'lower_body' | 'full_body';
@@ -23,6 +25,7 @@ interface Pose {
   pose_prompt: string;
   jobId: string;
   analysis?: PoseAnalysis;
+  comfyui_prompt_id?: string;
 }
 
 interface Job {
@@ -89,6 +92,12 @@ export const JobPoseDisplay = ({ job }: JobPoseDisplayProps) => {
   const { showImage } = useImagePreview();
   const poses = job?.final_posed_images || [];
 
+  const handleInfoClick = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(id);
+    showSuccess("Pose ID copied to clipboard!");
+  };
+
   if (!job) {
     return (
       <Card className="h-full flex items-center justify-center">
@@ -133,6 +142,26 @@ export const JobPoseDisplay = ({ job }: JobPoseDisplayProps) => {
                       </>
                     )}
                     <PoseStatusIcon pose={pose} />
+                    {pose.comfyui_prompt_id && (
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="absolute bottom-1 left-1 h-6 w-6 z-10 bg-black/50 hover:bg-black/70 text-white hover:text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                              onClick={(e) => handleInfoClick(e, pose.comfyui_prompt_id!)}
+                            >
+                              <Info className="h-3 w-3" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom" align="start" onClick={(e) => e.stopPropagation()}>
+                            <p className="text-xs">Click to copy Pose ID</p>
+                            <p className="text-xs font-mono max-w-xs break-all">{pose.comfyui_prompt_id}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    )}
                 </div>
                 <p className="text-xs text-muted-foreground truncate">{pose.pose_prompt}</p>
                 </div>
