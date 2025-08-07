@@ -398,18 +398,20 @@ async function handlePollingPosesState(supabase: any, job: any) {
                 continue;
             }
 
-            const historyUrl = `${comfyUiAddress}/history/${poseJob.comfyui_prompt_id}`;
-            const historyResponse = await fetch(historyUrl);
-            
-            if (historyResponse.ok) {
-                const historyData = await historyResponse.json();
-                const promptHistory = historyData[poseJob.comfyui_prompt_id];
-                
-                if (!promptHistory) {
-                    console.log(`${logPrefix} Pose job ${poseJob.comfyui_prompt_id} is finished but not yet in history. Re-polling.`);
-                    continue;
+            let promptHistory = null;
+            for (let i = 0; i < 3; i++) {
+                const historyUrl = `${comfyUiAddress}/history/${poseJob.comfyui_prompt_id}`;
+                const historyResponse = await fetch(historyUrl);
+                if (historyResponse.ok) {
+                    const historyData = await historyResponse.json();
+                    promptHistory = historyData[poseJob.comfyui_prompt_id];
+                    if (promptHistory) break;
                 }
+                console.log(`${logPrefix} Pose job ${poseJob.comfyui_prompt_id} not in history yet. Waiting 1.5s... (Attempt ${i+1}/3)`);
+                await new Promise(resolve => setTimeout(resolve, 1500));
+            }
 
+            if (promptHistory) {
                 const outputNode = await findOutputImage(promptHistory.outputs, FINAL_OUTPUT_NODE_ID_POSE, FALLBACK_NODE_IDS_POSE);
                 if (outputNode) {
                     const image = outputNode;
@@ -442,36 +444,15 @@ async function handlePollingPosesState(supabase: any, job: any) {
                         console.error(`${logPrefix} ERROR: Failed to invoke analyzer for pose ${index}:`, err);
                     });
                 } else {
-                    console.warn(`${logPrefix} Pose job ${poseJob.comfyui_prompt_id} finished with no output. Attempting retry.`);
-                    const currentRetries = poseJob.retry_count || 0;
-                    if (currentRetries < MAX_RETRIES) {
-                        const pose = job.pose_prompts[index - 1];
-                        if (!pose) {
-                            console.error(`${logPrefix} ERROR: Could not find matching pose in pose_prompts for retry at index ${index - 1}. Prompt: "${poseJob.pose_prompt}"`);
-                            updatedPoseJobs[index].status = 'failed';
-                            updatedPoseJobs[index].error_message = 'Internal error: Could not find original prompt for retry.';
-                            hasChanged = true;
-                            continue;
-                        }
-                        const { data: result, error } = await supabase.functions.invoke('MIRA-AGENT-tool-comfyui-pose-generator', { body: { base_model_url: job.base_model_image_url, pose_prompt: pose.value, pose_image_url: pose.type === 'image' ? pose.value : null } });
-                        if (error) {
-                            updatedPoseJobs[index].status = 'failed';
-                            updatedPoseJobs[index].error_message = `Retry failed: ${error.message}`;
-                        } else {
-                            updatedPoseJobs[index].comfyui_prompt_id = result.comfyui_prompt_id;
-                            updatedPoseJobs[index].status = 'processing';
-                            updatedPoseJobs[index].retry_count = currentRetries + 1;
-                        }
-                    } else {
-                        updatedPoseJobs[index].status = 'failed';
-                        updatedPoseJobs[index].error_message = 'Job failed after max retries.';
-                    }
+                    console.warn(`${logPrefix} Pose job ${poseJob.comfyui_prompt_id} finished with no output. Marking as failed.`);
+                    updatedPoseJobs[index].status = 'failed';
+                    updatedPoseJobs[index].error_message = 'Job finished with no output.';
                     hasChanged = true;
                 }
             } else {
-                console.error(`${logPrefix} ERROR: Pose job ${poseJob.comfyui_prompt_id} not found in queue or history. Marking as failed.`);
+                console.error(`${logPrefix} ERROR: Pose job ${poseJob.comfyui_prompt_id} not found in queue or history after retries. Marking as failed.`);
                 updatedPoseJobs[index].status = 'failed';
-                updatedPoseJobs[index].error_message = 'Job not found in ComfyUI history.';
+                updatedPoseJobs[index].error_message = 'Job not found in ComfyUI history after retries.';
                 hasChanged = true;
             }
         }
