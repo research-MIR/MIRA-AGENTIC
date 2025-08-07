@@ -1,5 +1,5 @@
 import { useVtoPackJobs } from '@/hooks/useVtoPackJobs';
-import { Loader2, XCircle, CheckCircle, AlertTriangle } from 'lucide-react';
+import { Loader2, XCircle, CheckCircle, AlertTriangle, UserCheck2, BadgeAlert, FileText, RefreshCw, Wand2, Download, HardDriveDownload, Shirt, ArrowLeft, Copy } from "lucide-react";
 import { SecureImageDisplay } from './SecureImageDisplay';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useState } from 'react';
@@ -54,6 +54,9 @@ export const VtoPackDetailView = ({ packId, isOpen }: { packId: string, isOpen: 
                 imageUrl={job.final_image_url || job.source_person_image_url || null} 
                 alt="Job result" 
                 className="w-full h-full object-cover rounded-md"
+                width={200}
+                height={200}
+                resize="cover"
               />
               <TooltipProvider>
                 <Tooltip>

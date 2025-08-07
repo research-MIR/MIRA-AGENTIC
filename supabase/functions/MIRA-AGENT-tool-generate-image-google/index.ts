@@ -16,7 +16,7 @@ const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const GOOGLE_LOCATION = 'us-central1';
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
 const MAX_RETRIES = 3;
-const RETRY_DELAY_MS = 1500;
+const RETRY_DELAY_MS = 5000;
 
 const PRIMARY_MODEL_ID = 'imagen-4.0-ultra-generate-preview-06-06';
 const FALLBACK_MODEL_ID = 'imagen-4.0-generate-preview-06-06';
@@ -32,23 +32,8 @@ async function describeImage(base64Data: string, mimeType: string): Promise<stri
         const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
         const result = await ai.models.generateContent({
             model: "gemini-2.5-flash-lite-preview-06-17",
-            contents: [{
-                role: 'user',
-                parts: [{
-                    inlineData: {
-                        mimeType: mimeType,
-                        data: base64Data
-                    }
-                }, {
-                    text: "Describe this image based on the system instructions."
-                }]
-            }],
-            config: {
-                systemInstruction: {
-                    role: "system",
-                    parts: [{ text: visionSystemPrompt }]
-                }
-            }
+            contents: [{ role: 'user', parts: [{ inlineData: { mimeType, data: base64Data } }] }],
+            config: { systemInstruction: { role: "system", parts: [{ text: visionSystemPrompt }] } }
         });
         return result?.text?.trim() || "Description could not be generated.";
     } catch (error) {
