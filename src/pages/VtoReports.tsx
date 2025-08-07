@@ -5,7 +5,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Progress } from "@/components/ui/progress";
-import { BarChart2, CheckCircle, XCircle, Loader2, AlertTriangle, UserCheck2, BadgeAlert, FileText, RefreshCw, Wand2, Download, HardDriveDownload, Shirt, ArrowLeft } from "lucide-react";
+import { BarChart2, CheckCircle, XCircle, Loader2, AlertTriangle, UserCheck2, BadgeAlert, FileText, RefreshCw, Wand2, Download, HardDriveDownload, Shirt, ArrowLeft, Copy } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -76,6 +76,7 @@ const VtoReports = () => {
   const [packToRefine, setPackToRefine] = useState<PackSummary | null>(null);
   const [isRetrying, setIsRetrying] = useState<string | null>(null);
   const [isResetting, setIsResetting] = useState<string | null>(null);
+  const [isCorrecting, setIsCorrecting] = useState<string | null>(null);
 
   const { data: queryData, isLoading, error } = useQuery<any>({
     queryKey: ['vtoPackSummaries', session?.user?.id],
@@ -333,6 +334,27 @@ const VtoReports = () => {
     }
   };
 
+  const handleCreateCorrectedBatch = async (pack: PackSummary) => {
+    if (!session?.user) return;
+    setIsCorrecting(pack.pack_id);
+    const toastId = showLoading(`Creating corrected batch for "${pack.metadata?.name || 'Untitled Pack'}"...`);
+    try {
+        const { data: newPackId, error } = await supabase.rpc('MIRA-AGENT-create-corrected-vto-pack', {
+            p_source_pack_id: pack.pack_id,
+            p_user_id: session.user.id
+        });
+        if (error) throw error;
+        dismissToast(toastId);
+        showSuccess(`New corrected pack created. ID: ${newPackId}`);
+        queryClient.invalidateQueries({ queryKey: ['vtoPackSummaries', session.user.id] });
+    } catch (err: any) {
+        dismissToast(toastId);
+        showError(`Failed to create corrected batch: ${err.message}`);
+    } finally {
+        setIsCorrecting(null);
+    }
+  };
+
   if (isLoading) {
     return <div className="p-8 space-y-4"><Skeleton className="h-32 w-full" /><Skeleton className="h-32 w-full" /></div>;
   }
@@ -364,78 +386,72 @@ const VtoReports = () => {
           <p className="text-muted-foreground">{t('vtoAnalysisReportsDescription')}</p>
         </header>
         <div className="space-y-4">
-          {packSummaries.map(report => {
-            const totalReports = report.passed_perfect + report.passed_pose_change + report.passed_logo_issue + report.passed_detail_issue + report.failed_jobs;
+          {packSummaries.map(pack => {
+            const totalReports = pack.passed_perfect + pack.passed_pose_change + pack.passed_logo_issue + pack.passed_detail_issue + pack.failed_jobs;
             const isReportReady = totalReports > 0;
-            const isRefinementPack = !!report.metadata?.refinement_of_pack_id;
+            const isRefinementPack = !!pack.metadata?.refinement_of_pack_id;
 
             return (
-              <Card key={report.pack_id}>
-                <CardHeader>
-                  <CardTitle className="flex justify-between items-center">
-                    <span className="flex items-center gap-2">
-                      {isRefinementPack && <Wand2 className="h-5 w-5 text-purple-500" />}
-                      {report.metadata?.name || `Pack from ${new Date(report.created_at).toLocaleString()}`}
-                    </span>
-                    <div className="flex items-center gap-2">
+              <AccordionItem key={pack.pack_id} value={pack.pack_id} className="border rounded-md">
+                <div className="flex items-center p-4">
+                  <AccordionTrigger className="flex-1 text-left p-0 hover:no-underline">
+                    <div className="text-left">
+                      <p className="font-semibold flex items-center gap-2">
+                        {isRefinementPack && <Wand2 className="h-5 w-5 text-purple-500" />}
+                        <span>{pack.metadata?.name || `Pack from ${new Date(pack.created_at).toLocaleString()}`}</span>
+                      </p>
+                      <div className="flex items-center gap-2 mt-2">
+                        <Progress value={(pack.completed_jobs / (pack.metadata?.total_pairs || pack.total_jobs || 1)) * 100} className="h-2 w-32" />
+                        <p className="text-sm text-muted-foreground">
+                          {pack.completed_jobs} / {pack.metadata?.total_pairs || pack.total_jobs} completed
+                        </p>
+                      </div>
+                    </div>
+                  </AccordionTrigger>
+                  <div className="flex items-center gap-2 pl-4">
+                    {pack.failed_jobs > 0 && (
                       <AlertDialog>
                         <AlertDialogTrigger asChild>
-                          <Button variant="destructive" size="sm" disabled={isResetting === report.pack_id}>
-                            {isResetting === report.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
-                            Reset & Retry Analysis
+                          <Button variant="outline" size="sm" disabled={isCorrecting === pack.pack_id}>
+                            {isCorrecting === pack.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Copy className="h-4 w-4 mr-2" />}
+                            {t('createCorrectedBatch')}
                           </Button>
                         </AlertDialogTrigger>
                         <AlertDialogContent>
                           <AlertDialogHeader>
-                            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-                            <AlertDialogDescription>
-                              This will permanently delete all existing analysis reports for this pack and re-queue them for analysis. This action cannot be undone.
-                            </AlertDialogDescription>
+                            <AlertDialogTitle>{t('createCorrectedBatch')}</AlertDialogTitle>
+                            <AlertDialogDescription>{t('createCorrectedBatchDesc')}</AlertDialogDescription>
                           </AlertDialogHeader>
                           <AlertDialogFooter>
                             <AlertDialogCancel>Cancel</AlertDialogCancel>
-                            <AlertDialogAction onClick={() => handleResetAndRetry(report)}>
-                              Yes, Reset & Retry
-                            </AlertDialogAction>
+                            <AlertDialogAction onClick={() => handleCreateCorrectedBatch(pack)}>{t('createCorrectedBatchAction')}</AlertDialogAction>
                           </AlertDialogFooter>
                         </AlertDialogContent>
                       </AlertDialog>
-                      <Link to={`/vto-reports/${report.pack_id}`} onClick={(e) => !isReportReady && e.preventDefault()}>
-                        <Button disabled={!isReportReady}>{t('viewReport')}</Button>
-                      </Link>
-                    </div>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <h3 className="font-semibold text-sm">{t('overallPassRate')}</h3>
-                    <div className="flex items-center gap-4 flex-wrap">
-                      <div className="flex items-center gap-2 text-green-600"><CheckCircle className="h-5 w-5" /><span className="text-2xl font-bold">{report.passed_perfect}</span><span>Passed</span></div>
-                      <div className="flex items-center gap-2 text-yellow-600"><UserCheck2 className="h-5 w-5" /><span className="text-2xl font-bold">{report.passed_pose_change}</span><span>Passed (Pose Change)</span></div>
-                      <div className="flex items-center gap-2 text-orange-500"><BadgeAlert className="h-5 w-5" /><span className="text-2xl font-bold">{report.passed_logo_issue}</span><span>Passed (Logo Issue)</span></div>
-                      <div className="flex items-center gap-2 text-orange-500"><FileText className="h-5 w-5" /><span className="text-2xl font-bold">{report.passed_detail_issue}</span><span>Passed (Detail Issue)</span></div>
-                      <div className="flex items-center gap-2 text-destructive"><XCircle className="h-5 w-5" /><span className="text-2xl font-bold">{report.failed_jobs}</span><span>Failed</span></div>
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <h3 className="font-semibold text-sm">{t('failureReasons')}</h3>
-                    {Object.keys(report.failure_summary).length > 0 ? (
-                      <div className="text-xs text-muted-foreground space-y-1">
-                        {Object.entries(report.failure_summary).map(([reason, count]) => (
-                          <div key={reason} className="flex justify-between">
-                            <span className="capitalize">{reason.replace(/_/g, ' ')}</span>
-                            <span>{count}</span>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="h-full bg-muted rounded-md flex items-center justify-center text-muted-foreground">
-                        <p>No failures recorded.</p>
-                      </div>
                     )}
+                    <Button variant="outline" size="sm" onClick={() => setPackToDownload(pack)}>
+                      <HardDriveDownload className="h-4 w-4 mr-2" />
+                      {t('downloadPack')}
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => setPackToAnalyze(pack)} disabled={isAnalyzing === pack.pack_id}>
+                      {isAnalyzing === pack.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <BarChart2 className="h-4 w-4 mr-2" />}
+                      {t('analyzePack')}
+                    </Button>
+                    {!isRefinementPack && (
+                      <Button variant="secondary" size="sm" onClick={() => setPackToRefine(pack)} disabled={isStartingRefinement === pack.pack_id || pack.completed_jobs === 0}>
+                        {isStartingRefinement === pack.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Wand2 className="h-4 w-4 mr-2" />}
+                        {t('refinePack')}
+                      </Button>
+                    )}
+                    <Link to={`/vto-reports/${pack.pack_id}`} onClick={(e) => !isReportReady && e.preventDefault()}>
+                      <Button disabled={!isReportReady}>{t('viewReport')}</Button>
+                    </Link>
                   </div>
-                </CardContent>
-              </Card>
+                </div>
+                <AccordionContent className="p-4 pt-0">
+                  <VtoPackDetailView packId={pack.pack_id} isOpen={openPackId === pack.pack_id} />
+                </AccordionContent>
+              </AccordionItem>
             )
           })}
         </div>

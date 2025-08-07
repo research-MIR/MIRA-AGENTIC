@@ -39,6 +39,9 @@ export const reportsTranslations = {
     refineSuccessfulOnlyDesc: "Crea un pass di affinamento usando solo le immagini che hanno superato il controllo qualità automatico. Ideale per migliorare i tuoi migliori risultati.",
     refineAllCompleted: "Affina Tutti i Job Completati",
     refineAllCompletedDesc: "Include tutti i job che hanno prodotto un'immagine, anche quelli falliti. Utile per tentare di correggere i fallimenti.",
+    createCorrectedBatch: "Crea Batch Corretta",
+    createCorrectedBatchDesc: "Questo creerà un nuovo pack contenente tutti i job di successo di questo, e rimetterà in coda tutti i job falliti per un nuovo tentativo. Il pack originale non verrà modificato.",
+    createCorrectedBatchAction: "Sì, Crea Batch Corretta",
   },
   en: {
     vtoAnalysisReports: "VTO Analysis Reports",
@@ -80,5 +83,8 @@ export const reportsTranslations = {
     refineSuccessfulOnlyDesc: "Create a refinement pass using only the images that passed the automated quality check. Best for improving your top results.",
     refineAllCompleted: "Refine All Completed Jobs",
     refineAllCompletedDesc: "Includes all jobs that produced an image, even those that failed QA. Useful for attempting to fix failures.",
+    createCorrectedBatch: "Create Corrected Batch",
+    createCorrectedBatchDesc: "This will create a new pack containing all successful jobs from this one, and will re-queue all failed jobs for a new attempt. The original pack will not be modified.",
+    createCorrectedBatchAction: "Yes, Create Corrected Batch",
   },
 };
