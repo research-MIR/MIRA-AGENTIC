@@ -5,13 +5,14 @@ import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Shirt, Plus, ArrowLeft, Trash2 } from "lucide-react";
+import { Shirt, Plus, ArrowLeft, Trash2, Info } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
 import { Button } from "@/components/ui/button";
 import { showError, showSuccess } from "@/utils/toast";
 import { SecureImageDisplay } from "@/components/VTO/SecureImageDisplay";
 import { AddGarmentsModal } from "@/components/Wardrobe/AddGarmentsModal";
 import { Badge } from "@/components/ui/badge";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface Garment {
   id: string;
@@ -65,6 +66,12 @@ const WardrobePackDetail = () => {
     }
   };
 
+  const handleInfoClick = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(id);
+    showSuccess("Garment ID copied to clipboard!");
+  };
+
   if (isLoadingPack) {
     return <div className="p-8"><Skeleton className="h-12 w-1/3" /><Skeleton className="mt-4 h-64 w-full" /></div>;
   }
@@ -114,6 +121,24 @@ const WardrobePackDetail = () => {
                 <Button variant="destructive" size="icon" className="absolute top-2 right-2 h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => handleRemoveGarment(garment.id)}>
                   <Trash2 className="h-4 w-4" />
                 </Button>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="absolute bottom-1 left-1 h-6 w-6 z-10 bg-black/50 hover:bg-black/70 text-white hover:text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                        onClick={(e) => handleInfoClick(e, garment.id)}
+                      >
+                        <Info className="h-3 w-3" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" align="start" onClick={(e) => e.stopPropagation()}>
+                      <p className="text-xs">Click to copy Garment ID</p>
+                      <p className="text-xs font-mono max-w-xs break-all">{garment.id}</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
               </Card>
             ))}
           </div>
