@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
@@ -6,6 +6,17 @@ import { FolderSidebar, GarmentFolder } from "@/components/Wardrobe/FolderSideba
 import { GarmentGrid } from "@/components/Wardrobe/GarmentGrid";
 import { FolderModal } from "@/components/Wardrobe/FolderModal";
 import { showError, showSuccess, showLoading, dismissToast } from "@/utils/toast";
+import { optimizeImage, calculateFileHash, sanitizeFilename } from "@/lib/utils";
+import { Input } from "@/components/ui/input";
+
+const fileToBase64 = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve((reader.result as string).split(',')[1]);
+    reader.onerror = (error) => reject(error);
+  });
+};
 
 const Wardrobe = () => {
   const { supabase, session } = useSession();
@@ -13,6 +24,7 @@ const Wardrobe = () => {
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>('all');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [folderToEdit, setFolderToEdit] = useState<GarmentFolder | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleNewFolder = () => {
     setFolderToEdit(null);
@@ -63,6 +75,74 @@ const Wardrobe = () => {
     }
   };
 
+  const handleFileUpload = async (files: FileList | null) => {
+    if (!files || files.length === 0 || !session?.user) return;
+    const imageFiles = Array.from(files).filter(file => file.type.startsWith('image/'));
+    if (imageFiles.length === 0) {
+      showError("Please select valid image files.");
+      return;
+    }
+
+    const toastId = showLoading(`Processing ${imageFiles.length} image(s)...`);
+    let successCount = 0;
+    let skippedCount = 0;
+
+    try {
+      for (const file of imageFiles) {
+        const hash = await calculateFileHash(file);
+        const { data: existing, error: checkError } = await supabase
+          .from('mira-agent-garments')
+          .select('id')
+          .eq('user_id', session.user.id)
+          .eq('image_hash', hash)
+          .maybeSingle();
+
+        if (checkError) throw checkError;
+        if (existing) {
+          skippedCount++;
+          continue;
+        }
+
+        const base64 = await fileToBase64(file);
+        const { data: analysis, error: analysisError } = await supabase.functions.invoke('MIRA-AGENT-tool-analyze-garment-attributes', {
+          body: { image_base64: base64, mime_type: file.type }
+        });
+        if (analysisError) throw new Error(`Analysis failed for ${file.name}: ${analysisError.message}`);
+
+        const optimizedFile = await optimizeImage(file);
+        const filePath = `${session.user.id}/wardrobe/${Date.now()}-${sanitizeFilename(file.name)}`;
+        const { error: uploadError } = await supabase.storage.from('mira-agent-user-uploads').upload(filePath, optimizedFile);
+        if (uploadError) throw new Error(`Upload failed for ${file.name}: ${uploadError.message}`);
+        const { data: { publicUrl } } = supabase.storage.from('mira-agent-user-uploads').getPublicUrl(filePath);
+
+        const folderIdToAssign = selectedFolderId === 'all' || selectedFolderId === 'unassigned' ? null : selectedFolderId;
+        const { error: insertError } = await supabase.from('mira-agent-garments').insert({
+          user_id: session.user.id,
+          name: file.name,
+          storage_path: publicUrl,
+          attributes: analysis,
+          image_hash: hash,
+          folder_id: folderIdToAssign,
+        });
+        if (insertError) throw new Error(`Database insert failed for ${file.name}: ${insertError.message}`);
+        
+        successCount++;
+      }
+
+      dismissToast(toastId);
+      let finalMessage = `${successCount} new garment(s) added.`;
+      if (skippedCount > 0) {
+        finalMessage += ` ${skippedCount} duplicate(s) skipped.`;
+      }
+      showSuccess(finalMessage);
+      queryClient.invalidateQueries({ queryKey: ['garments', session.user.id, selectedFolderId] });
+
+    } catch (err: any) {
+      dismissToast(toastId);
+      showError(err.message);
+    }
+  };
+
   return (
     <>
       <div className="h-screen flex flex-col">
@@ -78,6 +158,7 @@ const Wardrobe = () => {
               onDrop={handleDrop}
               onNewFolder={handleNewFolder}
               onEditFolder={handleEditFolder}
+              onUploadClick={() => fileInputRef.current?.click()}
             />
           </ResizablePanel>
           <ResizableHandle withHandle />
@@ -93,6 +174,14 @@ const Wardrobe = () => {
         onClose={() => setIsModalOpen(false)}
         onSave={handleSaveFolder}
         folderToEdit={folderToEdit}
+      />
+      <Input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => handleFileUpload(e.target.files)}
       />
     </>
   );

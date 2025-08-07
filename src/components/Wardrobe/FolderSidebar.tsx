@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSession } from '@/components/Auth/SessionContextProvider';
 import { Button } from '@/components/ui/button';
-import { Folder, Plus, MoreVertical, Pencil, Trash2, Inbox, Archive } from 'lucide-react';
+import { Folder, Plus, MoreVertical, Pencil, Trash2, Inbox, Archive, Upload } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
@@ -19,6 +19,7 @@ interface FolderSidebarProps {
   onDrop: (folderId: string | null) => void;
   onNewFolder: () => void;
   onEditFolder: (folder: GarmentFolder) => void;
+  onUploadClick: () => void;
 }
 
 const FolderItem = ({ folder, isSelected, onSelect, onDrop, onEdit, onDelete }: { folder: GarmentFolder, isSelected: boolean, onSelect: () => void, onDrop: () => void, onEdit: (folder: GarmentFolder) => void, onDelete: (folder: GarmentFolder) => void }) => {
@@ -55,7 +56,7 @@ const FolderItem = ({ folder, isSelected, onSelect, onDrop, onEdit, onDelete }: 
   );
 };
 
-export const FolderSidebar = ({ selectedFolderId, onSelectFolder, onDrop, onNewFolder, onEditFolder }: FolderSidebarProps) => {
+export const FolderSidebar = ({ selectedFolderId, onSelectFolder, onDrop, onNewFolder, onEditFolder, onUploadClick }: FolderSidebarProps) => {
   const { supabase, session } = useSession();
   const queryClient = useQueryClient();
   const [folderToDelete, setFolderToDelete] = useState<GarmentFolder | null>(null);
@@ -88,7 +89,10 @@ export const FolderSidebar = ({ selectedFolderId, onSelectFolder, onDrop, onNewF
     <div className="p-4 h-full flex flex-col">
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-lg font-semibold">Folders</h2>
-        <Button size="sm" onClick={onNewFolder}><Plus className="h-4 w-4 mr-2" />New Folder</Button>
+        <div className="flex items-center gap-1">
+          <Button size="sm" onClick={onNewFolder}><Plus className="h-4 w-4 mr-2" />New</Button>
+          <Button size="sm" variant="outline" onClick={onUploadClick}><Upload className="h-4 w-4 mr-2" />Upload</Button>
+        </div>
       </div>
       <div className="space-y-1">
         <div className={cn("flex items-center gap-2 p-2 rounded-md cursor-pointer", selectedFolderId === 'all' ? "bg-primary/10 text-primary" : "hover:bg-muted")} onClick={() => onSelectFolder('all')}>
