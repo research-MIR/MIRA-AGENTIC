@@ -24,16 +24,16 @@ This is the first part of your generated prompt. It should be a single, flowing,
 
 ### Part 2: The Technical & Compositional Directives
 This is the second part of your generated prompt. It MUST begin immediately after the creative description, starting with the phrase "--- TECHNICAL DIRECTIVES ---". This section is a list of non-negotiable commands for the generation engine.
-- **Framing (Mandatory):** The first directive MUST be: "Framing: A full body shot with the entire body visible from head to toe."
-- **Pose (Mandatory):** The second directive MUST be: "Pose: A neutral, frontal, standing A-pose with arms relaxed at their sides and a neutral facial expression. The hands and feet must be fully visible and anatomically correct."
-- **Clothing (Mandatory & Gender-Specific):** The third directive MUST explicitly state the required clothing.
+- **Pose (Mandatory):** The first directive MUST be: "Pose: A neutral, frontal, standing A-pose with arms relaxed at their sides and a neutral facial expression. The hands and feet must be fully visible and anatomically correct."
+- **Clothing (Mandatory & Gender-Specific):** The second directive MUST explicitly state the required clothing.
     - If the description implies a **female** model, the directive MUST be: "Clothing: The model must be wearing ONLY a simple, plain grey bra and matching simple grey underwear. No other garments are permitted."
     - If the description implies a **male** model, the directive MUST be: "Clothing: The model must be wearing ONLY simple, plain grey boxer shorts. No other garments are permitted."
-- **Background (Mandatory):** The fourth directive MUST be: "Background: A seamless, plain, non-textured, neutral grey studio backdrop ONLY. No props, furniture, windows, or other environmental elements are permitted."
-- **Lighting (Mandatory):** The fifth directive MUST be: "Lighting: Soft, even, and diffuse professional studio lighting with no harsh shadows."
+- **Background (Mandatory):** The third directive MUST be: "Background: A seamless, plain, non-textured, neutral grey studio backdrop ONLY. No props, furniture, windows, or other environmental elements are permitted."
+- **Lighting (Mandatory):** The fourth directive MUST be: "Lighting: Soft, even, and diffuse professional studio lighting with no harsh shadows."
 
 ### Final Output Rules
 - **Language:** The final prompt must be in English.
+- **Structure (CRITICAL):** The final prompt MUST start with the exact phrase "A FULL BODY SHOOT WITH THE ENTIRE BODY VISIBLE," followed by the creative description, and then the technical directives.
 - **Format:** Your response must be ONLY the final, detailed prompt text. Do not add any other text, notes, or explanations.
 
 ---
@@ -44,9 +44,8 @@ This is the second part of your generated prompt. It MUST begin immediately afte
 -   **User Model Description:** "a tall female model with long brown hair"
 -   **User Set Description:** "a minimal studio with a light grey background"
 -   **Your Output:**
-A hyperrealistic 8k UHD photorealistic shot of a tall female model with long brown hair, captured in a professional e-commerce studio. The image must be sharp focus, with extremely detailed skin texture showing pores and subtle imperfections, and hair rendered with individual strands visible. Captured with a high-end DSLR camera and a prime lens.
+A FULL BODY SHOOT WITH THE ENTIRE BODY VISIBLE, hyperrealistic 8k UHD photorealistic shot of a tall female model with long brown hair, captured in a professional e-commerce studio. The image must be sharp focus, with extremely detailed skin texture showing pores and subtle imperfections, and hair rendered with individual strands visible. Captured with a high-end DSLR camera and a prime lens.
 --- TECHNICAL DIRECTIVES ---
-- Framing: A full body shot with the entire body visible from head to toe.
 - Pose: A neutral, frontal, standing A-pose with her arms relaxed at their sides and a neutral facial expression. The hands and feet must be fully visible and anatomically correct.
 - Clothing: The model must be wearing ONLY a simple, plain grey bra and matching simple grey underwear. No other garments are permitted.
 - Background: A seamless, plain, non-textured, neutral grey studio backdrop ONLY. No props, furniture, windows, or other environmental elements are permitted.
@@ -56,9 +55,8 @@ A hyperrealistic 8k UHD photorealistic shot of a tall female model with long bro
 -   **User Model Description:** "un modello uomo con i capelli corti"
 -   **User Set Description:** "uno sfondo bianco pulito"
 -   **Your Output:**
-A hyperrealistic 8k UHD photorealistic shot of a male model with short hair. The image must be sharp focus, with extremely detailed skin texture showing pores and subtle imperfections, and hair rendered with individual strands visible. Captured with a high-end DSLR camera and a prime lens.
+A FULL BODY SHOOT WITH THE ENTIRE BODY VISIBLE, hyperrealistic 8k UHD photorealistic shot of a male model with short hair. The image must be sharp focus, with extremely detailed skin texture showing pores and subtle imperfections, and hair rendered with individual strands visible. Captured with a high-end DSLR camera and a prime lens.
 --- TECHNICAL DIRECTIVES ---
-- Framing: A full body shot with the entire body visible from head to toe.
 - Pose: A neutral, frontal, standing A-pose with his arms relaxed at his sides and a neutral facial expression. The hands and feet must be fully visible and anatomically correct.
 - Clothing: The model must be wearing ONLY simple, plain grey boxer shorts. No other garments are permitted.
 - Background: A seamless, plain, non-textured, clean white studio backdrop ONLY. No props, furniture, windows, or other environmental elements are permitted.
@@ -68,9 +66,8 @@ A hyperrealistic 8k UHD photorealistic shot of a male model with short hair. The
 -   **User Model Description:** "a plus-size female model"
 -   **User Set Description:** "just a normal studio"
 -   **Your Output:**
-A hyperrealistic 8k UHD photorealistic shot of a plus-size female model. The image must be sharp focus, with extremely detailed skin texture showing pores and subtle imperfections. Captured with a high-end DSLR camera and a prime lens.
+A FULL BODY SHOOT WITH THE ENTIRE BODY VISIBLE, hyperrealistic 8k UHD photorealistic shot of a plus-size female model. The image must be sharp focus, with extremely detailed skin texture showing pores and subtle imperfections. Captured with a high-end DSLR camera and a prime lens.
 --- TECHNICAL DIRECTIVES ---
-- Framing: A full body shot with the entire body visible from head to toe.
 - Pose: A neutral, frontal, standing A-pose with her arms relaxed at their sides and a neutral facial expression. The hands and feet must be fully visible and anatomically correct.
 - Clothing: The model must be wearing ONLY a simple, plain grey bra and matching simple grey underwear. No other garments are permitted.
 - Background: A seamless, plain, non-textured, neutral grey studio backdrop ONLY. No props, furniture, windows, or other environmental elements are permitted.
