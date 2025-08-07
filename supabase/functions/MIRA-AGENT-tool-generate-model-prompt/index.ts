@@ -33,7 +33,7 @@ This is the second part of your generated prompt. It MUST begin immediately afte
 
 ### Final Output Rules
 - **Language:** The final prompt must be in English.
-- **Structure (CRITICAL):** The final prompt MUST start with the exact phrase "A FULL BODY SHOOT WITH THE ENTIRE BODY VISIBLE," followed by the creative description, and then the technical directives.
+- **Structure (CRITICAL):** The final prompt MUST start with the exact phrase "A FULL BODY SHOOT WITH THE ENTIRE BODY VISIBLE, from head to toe, of a", followed by the creative description, and then the technical directives.
 - **Format:** Your response must be ONLY the final, detailed prompt text. Do not add any other text, notes, or explanations.
 
 ---
@@ -44,7 +44,7 @@ This is the second part of your generated prompt. It MUST begin immediately afte
 -   **User Model Description:** "a tall female model with long brown hair"
 -   **User Set Description:** "a minimal studio with a light grey background"
 -   **Your Output:**
-A FULL BODY SHOOT WITH THE ENTIRE BODY VISIBLE, hyperrealistic 8k UHD photorealistic shot of a tall female model with long brown hair, captured in a professional e-commerce studio. The image must be sharp focus, with extremely detailed skin texture showing pores and subtle imperfections, and hair rendered with individual strands visible. Captured with a high-end DSLR camera and a prime lens.
+A FULL BODY SHOOT WITH THE ENTIRE BODY VISIBLE, from head to toe, of a tall female model with long brown hair, captured in a professional e-commerce studio. The image must be a hyperrealistic 8k UHD photorealistic shot, with extremely detailed skin texture showing pores and subtle imperfections, and hair rendered with individual strands visible. Captured with a high-end DSLR camera and a prime lens.
 --- TECHNICAL DIRECTIVES ---
 - Pose: A neutral, frontal, standing A-pose with her arms relaxed at their sides and a neutral facial expression. The hands and feet must be fully visible and anatomically correct.
 - Clothing: The model must be wearing ONLY a simple, plain grey bra and matching simple grey underwear. No other garments are permitted.
@@ -55,7 +55,7 @@ A FULL BODY SHOOT WITH THE ENTIRE BODY VISIBLE, hyperrealistic 8k UHD photoreali
 -   **User Model Description:** "un modello uomo con i capelli corti"
 -   **User Set Description:** "uno sfondo bianco pulito"
 -   **Your Output:**
-A FULL BODY SHOOT WITH THE ENTIRE BODY VISIBLE, hyperrealistic 8k UHD photorealistic shot of a male model with short hair. The image must be sharp focus, with extremely detailed skin texture showing pores and subtle imperfections, and hair rendered with individual strands visible. Captured with a high-end DSLR camera and a prime lens.
+A FULL BODY SHOOT WITH THE ENTIRE BODY VISIBLE, from head to toe, of a male model with short hair. The image must be a hyperrealistic 8k UHD photorealistic shot, with extremely detailed skin texture showing pores and subtle imperfections, and hair rendered with individual strands visible. Captured with a high-end DSLR camera and a prime lens.
 --- TECHNICAL DIRECTIVES ---
 - Pose: A neutral, frontal, standing A-pose with his arms relaxed at his sides and a neutral facial expression. The hands and feet must be fully visible and anatomically correct.
 - Clothing: The model must be wearing ONLY simple, plain grey boxer shorts. No other garments are permitted.
@@ -66,7 +66,7 @@ A FULL BODY SHOOT WITH THE ENTIRE BODY VISIBLE, hyperrealistic 8k UHD photoreali
 -   **User Model Description:** "a plus-size female model"
 -   **User Set Description:** "just a normal studio"
 -   **Your Output:**
-A FULL BODY SHOOT WITH THE ENTIRE BODY VISIBLE, hyperrealistic 8k UHD photorealistic shot of a plus-size female model. The image must be sharp focus, with extremely detailed skin texture showing pores and subtle imperfections. Captured with a high-end DSLR camera and a prime lens.
+A FULL BODY SHOOT WITH THE ENTIRE BODY VISIBLE, from head to toe, of a plus-size female model. The image must be a hyperrealistic 8k UHD photorealistic shot, with extremely detailed skin texture showing pores and subtle imperfections. Captured with a high-end DSLR camera and a prime lens.
 --- TECHNICAL DIRECTIVES ---
 - Pose: A neutral, frontal, standing A-pose with her arms relaxed at their sides and a neutral facial expression. The hands and feet must be fully visible and anatomically correct.
 - Clothing: The model must be wearing ONLY a simple, plain grey bra and matching simple grey underwear. No other garments are permitted.
