@@ -647,29 +647,40 @@ async function handleAutoComplete(supabase: SupabaseClient, job: any, logPrefix:
   if (vtoError) throw new Error(`Auto-complete VTO generation failed: ${vtoError.message}`);
   const finalImageBase64 = vtoResult?.generatedImages?.[0]?.base64Image;
   if (!finalImageBase64) throw new Error("Auto-complete VTO did not return a valid image.");
-  console.log(`${logPrefix} Auto-complete generation successful. Directly invoking reframe proxy.`);
-  // Directly invoke the reframe proxy with the new base64 data
-  const { data: reframeJobData, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-reframe', {
-    body: {
-      user_id: user_id,
-      base_image_base64: finalImageBase64,
-      prompt: metadata.prompt_appendix || "",
-      aspect_ratio: metadata.final_aspect_ratio,
-      source: 'reframe_from_vto',
-      parent_vto_job_id: parent_job_id
-    }
-  });
-  if (proxyError) throw new Error(`Failed to invoke reframe proxy: ${proxyError.message}`);
-  await supabase.from('mira-agent-bitstudio-jobs').update({
-    status: 'awaiting_reframe',
-    metadata: {
-      ...metadata,
-      google_vto_step: 'awaiting_reframe',
-      delegated_reframe_job_id: reframeJobData.jobId,
-      qa_best_image_base64: null // Clear the old base64 data
-    }
-  }).eq('id', parent_job_id);
-  console.log(`${logPrefix} Auto-complete finished. Handed off to reframe job ${reframeJobData.jobId}.`);
+  
+  if (job.metadata.skip_reframe === true) {
+      console.log(`${logPrefix} Auto-complete finished. 'skip_reframe' is true. Finalizing job with 1:1 image.`);
+      const finalImage = await uploadBase64ToStorage(supabase, finalImageBase64, user_id, 'final_vto_pack_autocomplete.png');
+      await supabase.from('mira-agent-bitstudio-jobs').update({
+          status: 'complete',
+          final_image_url: finalImage.publicUrl,
+          metadata: { ...metadata, qa_best_image_base64: null, google_vto_step: 'done' }
+      }).eq('id', parent_job_id);
+      console.log(`${logPrefix} Job finalized with auto-completed 1:1 image at ${finalImage.publicUrl}.`);
+  } else {
+      console.log(`${logPrefix} Auto-complete generation successful. Invoking reframe proxy.`);
+      const { data: reframeJobData, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-reframe', {
+        body: {
+          user_id: user_id,
+          base_image_base64: finalImageBase64,
+          prompt: metadata.prompt_appendix || "",
+          aspect_ratio: metadata.final_aspect_ratio,
+          source: 'reframe_from_vto',
+          parent_vto_job_id: parent_job_id
+        }
+      });
+      if (proxyError) throw new Error(`Failed to invoke reframe proxy: ${proxyError.message}`);
+      await supabase.from('mira-agent-bitstudio-jobs').update({
+        status: 'awaiting_reframe',
+        metadata: {
+          ...metadata,
+          google_vto_step: 'awaiting_reframe',
+          delegated_reframe_job_id: reframeJobData.jobId,
+          qa_best_image_base64: null // Clear the old base64 data
+        }
+      }).eq('id', parent_job_id);
+      console.log(`${logPrefix} Auto-complete finished. Handed off to reframe job ${reframeJobData.jobId}.`);
+  }
 }
 
 async function handleReframe(supabase: SupabaseClient, job: any, logPrefix: string) {
