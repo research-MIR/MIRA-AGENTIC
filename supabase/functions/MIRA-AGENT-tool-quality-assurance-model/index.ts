@@ -4,9 +4,11 @@ import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-const MODEL_NAME = "gemini-2.5-flash-lite-preview-06-17";
+const MODEL_NAME = "gemini-2.5-pro-preview-06-05";
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 1000;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -62,9 +64,22 @@ async function downloadImageAsPart(supabase: SupabaseClient, publicUrl: string, 
 }
 
 function extractJson(text: string): any {
+    if (!text) { // Guard clause for null, undefined, or empty string
+        throw new Error("The model returned an empty response.");
+    }
     const match = text.match(/```json\s*([\s\S]*?)\s*```/);
-    if (match && match[1]) return JSON.parse(match[1]);
-    try { return JSON.parse(text); } catch (e) {
+    if (match && match[1]) {
+        try {
+            return JSON.parse(match[1]);
+        } catch (e) {
+            console.error("[QualityAssuranceTool] Failed to parse extracted JSON block:", e);
+            // Fall through to try parsing the whole string
+        }
+    }
+    try {
+        return JSON.parse(text);
+    } catch (e) {
+        console.error(`[QualityAssuranceTool] Failed to parse raw text as JSON. Text was: "${text}"`);
         throw new Error("The model returned a response that could not be parsed as JSON.");
     }
 }
@@ -91,12 +106,49 @@ serve(async (req) => {
     const imagePartsArrays = await Promise.all(imagePartsPromises);
     parts.push(...imagePartsArrays.flat());
 
-    const result = await ai.models.generateContent({
-        model: MODEL_NAME,
-        contents: [{ role: 'user', parts }],
-        generationConfig: { responseMimeType: "application/json" },
-        config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
-    });
+    let result: GenerationResult | null = null;
+    let lastError: Error | null = null;
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+            console.log(`[QualityAssuranceTool] Calling Gemini API, attempt ${attempt}/${MAX_RETRIES}...`);
+            result = await ai.models.generateContent({
+                model: MODEL_NAME,
+                contents: [{ role: 'user', parts: parts }],
+                generationConfig: { responseMimeType: "application/json" },
+                safetySettings,
+                config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
+            });
+
+            if (result?.text) {
+                lastError = null; // Clear error on success
+                break; // Exit loop on success
+            }
+            
+            console.warn(`[QualityAssuranceTool] Attempt ${attempt} resulted in an empty or blocked response. Full response:`, JSON.stringify(result, null, 2));
+            lastError = new Error("AI model returned an empty or blocked response.");
+
+        } catch (error) {
+            lastError = error;
+            console.warn(`[QualityAssuranceTool] Attempt ${attempt} failed:`, error.message);
+        }
+
+        if (attempt < MAX_RETRIES) {
+            const delay = RETRY_DELAY_MS * attempt; // Exponential backoff
+            console.log(`[QualityAssuranceTool] Retrying in ${delay}ms...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+        }
+    }
+
+    if (lastError) {
+        console.error(`[QualityAssuranceTool] All retries failed. Last error:`, lastError.message);
+        throw lastError;
+    }
+
+    if (!result || !result.text) {
+        console.error("[QualityAssuranceTool] AI model failed to return a valid text response after all retries. Full response:", JSON.stringify(result, null, 2));
+        throw new Error("AI model failed to respond with valid text after all retries.");
+    }
 
     const responseJson = extractJson(result.text);
     const bestIndex = responseJson.best_image_index;
