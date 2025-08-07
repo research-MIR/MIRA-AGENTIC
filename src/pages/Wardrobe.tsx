@@ -85,7 +85,8 @@ const Wardrobe = () => {
 
     const toastId = showLoading(`Processing ${imageFiles.length} image(s)...`);
     let successCount = 0;
-    let skippedCount = 0;
+    let movedCount = 0;
+    const folderIdToAssign = selectedFolderId === 'all' || selectedFolderId === 'unassigned' ? null : selectedFolderId;
 
     try {
       for (const file of imageFiles) {
@@ -98,11 +99,19 @@ const Wardrobe = () => {
           .maybeSingle();
 
         if (checkError) throw checkError;
+        
         if (existing) {
-          skippedCount++;
+          // Garment exists, so move it to the current folder
+          const { error: moveError } = await supabase
+            .from('mira-agent-garments')
+            .update({ folder_id: folderIdToAssign })
+            .eq('id', existing.id);
+          if (moveError) throw moveError;
+          movedCount++;
           continue;
         }
 
+        // Garment is new, proceed with full upload and analysis
         const base64 = await fileToBase64(file);
         const { data: analysis, error: analysisError } = await supabase.functions.invoke('MIRA-AGENT-tool-analyze-garment-attributes', {
           body: { image_base64: base64, mime_type: file.type }
@@ -115,7 +124,6 @@ const Wardrobe = () => {
         if (uploadError) throw new Error(`Upload failed for ${file.name}: ${uploadError.message}`);
         const { data: { publicUrl } } = supabase.storage.from('mira-agent-user-uploads').getPublicUrl(filePath);
 
-        const folderIdToAssign = selectedFolderId === 'all' || selectedFolderId === 'unassigned' ? null : selectedFolderId;
         const { error: insertError } = await supabase.from('mira-agent-garments').insert({
           user_id: session.user.id,
           name: file.name,
@@ -130,11 +138,11 @@ const Wardrobe = () => {
       }
 
       dismissToast(toastId);
-      let finalMessage = `${successCount} new garment(s) added.`;
-      if (skippedCount > 0) {
-        finalMessage += ` ${skippedCount} duplicate(s) skipped.`;
-      }
-      showSuccess(finalMessage);
+      let finalMessage = "";
+      if (successCount > 0) finalMessage += `${successCount} new garment(s) added. `;
+      if (movedCount > 0) finalMessage += `${movedCount} existing garment(s) moved.`;
+      if (finalMessage) showSuccess(finalMessage.trim());
+      
       queryClient.invalidateQueries({ queryKey: ['garments', session.user.id, selectedFolderId] });
 
     } catch (err: any) {
