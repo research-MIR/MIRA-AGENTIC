@@ -12,45 +12,33 @@ const corsHeaders = {
 const FAL_KEY = Deno.env.get('FAL_KEY');
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
 
-const sizeToQwenEnum: { [key: string]: string } = {
-    '1:1': 'square',
-    '1024x1024': 'square_hd',
-    '3:4': 'portrait_4_3',
-    '4:3': 'landscape_4_3',
-    '16:9': 'landscape_16_9',
-    '9:16': 'portrait_16_9',
-    '2:3': 'portrait_4_3', // Closest match
-    '3:2': 'landscape_4_3', // Closest match
-    '21:9': 'landscape_16_9', // Closest match
-    '896x1280': 'portrait_4_3',
-    '1280x896': 'landscape_4_3',
-    '768x1408': 'portrait_16_9',
-    '1408x768': 'landscape_16_9',
-};
-
-function mapToQwenImageSize(size?: string): string | { width: number, height: number } {
-    if (!size) return "square_hd";
-    if (sizeToQwenEnum[size]) {
-        return sizeToQwenEnum[size];
+function mapToCustomImageSize(size?: string): { width: number, height: number } {
+    const long_edge = 1440;
+    
+    if (!size) {
+        return { width: long_edge, height: long_edge }; // Default to 1:1
     }
     
-    let w, h;
+    let w_part, h_part;
     if (size.includes(':')) {
-        [w, h] = size.split(':').map(Number);
+        [w_part, h_part] = size.split(':').map(Number);
     } else if (size.includes('x')) {
-        [w, h] = size.split('x').map(Number);
+        [w_part, h_part] = size.split('x').map(Number);
+    } else {
+        // Fallback for invalid format
+        return { width: long_edge, height: long_edge };
     }
 
-    if (w && h && !isNaN(w) && !isNaN(h) && h > 0) {
-        const long_edge = 1440;
-        if (w > h) {
-            return { width: long_edge, height: Math.round(long_edge * (h / w)) };
+    if (w_part && h_part && !isNaN(w_part) && !isNaN(h_part) && h_part > 0 && w_part > 0) {
+        if (w_part > h_part) {
+            return { width: long_edge, height: Math.round(long_edge * (h_part / w_part)) };
         } else {
-            return { width: Math.round(long_edge * (w / h)), height: long_edge };
+            return { width: Math.round(long_edge * (w_part / h_part)), height: long_edge };
         }
     }
     
-    return 'square_hd'; // Fallback
+    // Fallback for invalid numbers (e.g., "0:0")
+    return { width: long_edge, height: long_edge };
 }
 
 async function describeImage(base64Data: string, mimeType: string): Promise<string> {
@@ -110,7 +98,8 @@ serve(async (req) => {
             negative_prompt: negative_prompt,
             seed: seed ? Number(seed) + i : undefined,
             enable_safety_checker: false,
-            image_size: mapToQwenImageSize(size),
+            image_size: mapToCustomImageSize(size),
+            enable_prompt_expansion: true,
         };
         return fal.subscribe("fal-ai/wan/v2.2-a14b/text-to-image", {
             input: falInput,
