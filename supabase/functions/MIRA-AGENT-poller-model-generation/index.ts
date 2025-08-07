@@ -345,116 +345,159 @@ async function handlePollingPosesState(supabase: any, job: any) {
     const queueData = await queueResponse.json();
 
     for (const [index, poseJob] of updatedPoseJobs.entries()) {
-        if (['complete', 'failed', 'analyzing'].includes(poseJob.status) || !poseJob.comfyui_prompt_id) {
+        if (['complete', 'failed'].includes(poseJob.status)) {
             continue;
         }
 
-        const isJobInQueue = queueData.queue_running.some((item: any) => item[1] === poseJob.comfyui_prompt_id) || 
-                             queueData.queue_pending.some((item: any) => item[1] === poseJob.comfyui_prompt_id);
-
-        if (isJobInQueue) {
-            console.log(`${logPrefix} Pose job ${poseJob.comfyui_prompt_id} is still in queue. Continuing to poll.`);
-            continue;
-        }
-
-        const historyUrl = `${comfyUiAddress}/history/${poseJob.comfyui_prompt_id}`;
-        const historyResponse = await fetch(historyUrl);
-        
-        if (historyResponse.ok) {
-            const historyData = await historyResponse.json();
-            const promptHistory = historyData[poseJob.comfyui_prompt_id];
-            
-            if (!promptHistory) {
-                console.log(`${logPrefix} Pose job ${poseJob.comfyui_prompt_id} is finished but not yet in history. Re-polling.`);
-                continue; // Not an error, just a delay in ComfyUI's history writing
+        if (poseJob.status === 'analyzing') {
+            if (poseJob.analysis) {
+                console.log(`${logPrefix} Found completed analysis for a pose stuck in 'analyzing' state. Correcting status to 'complete'.`);
+                updatedPoseJobs[index].status = 'complete';
+                hasChanged = true;
+                continue;
             }
 
-            const outputNode = await findOutputImage(promptHistory.outputs, FINAL_OUTPUT_NODE_ID_POSE, FALLBACK_NODE_IDS_POSE);
-            if (outputNode) {
-                const image = outputNode;
-                const tempImageUrl = `${comfyUiAddress}/view?filename=${encodeURIComponent(image.filename)}&subfolder=${encodeURIComponent(image.subfolder)}&type=${image.type}`;
-                
-                console.log(`${logPrefix} Pose job ${poseJob.comfyui_prompt_id} is complete. Downloading from ComfyUI...`);
-                const imageResponse = await fetch(tempImageUrl);
-                if (!imageResponse.ok) throw new Error(`Failed to download final pose image from ComfyUI: ${imageResponse.statusText}`);
-                const imageBuffer = await imageResponse.arrayBuffer();
+            const analysisStartedAt = poseJob.analysis_started_at ? new Date(poseJob.analysis_started_at).getTime() : 0;
+            const now = Date.now();
+            const secondsSinceStart = (now - analysisStartedAt) / 1000;
 
-                const filePath = `${job.user_id}/model-poses/${Date.now()}_${image.filename}`;
-                await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(filePath, imageBuffer, { contentType: 'image/png', upsert: true });
-                const { data: { publicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
-
-                updatedPoseJobs[index].status = 'analyzing';
-                updatedPoseJobs[index].final_url = publicUrl;
-                updatedPoseJobs[index].is_upscaled = false;
-                updatedPoseJobs[index].analysis_started_at = new Date().toISOString();
-                hasChanged = true;
-                console.log(`${logPrefix} Pose job generated. Stored at Supabase URL: ${publicUrl}. Triggering analysis.`);
-
-                supabase.functions.invoke('MIRA-AGENT-analyzer-pose-image', {
-                    body: {
-                        job_id: job.id,
-                        image_url: publicUrl,
-                        base_model_image_url: job.base_model_image_url,
-                        pose_prompt: updatedPoseJobs[index].pose_prompt
-                    }
-                }).catch(err => {
-                    console.error(`${logPrefix} ERROR: Failed to invoke analyzer for pose ${index}:`, err);
-                });
-            } else {
-                console.warn(`${logPrefix} Pose job ${poseJob.comfyui_prompt_id} finished with no output. Attempting retry.`);
-                const currentRetries = poseJob.retry_count || 0;
-                if (currentRetries < MAX_RETRIES) {
-                    const pose = job.pose_prompts[index - 1];
-                    if (!pose) {
-                        console.error(`${logPrefix} ERROR: Could not find matching pose in pose_prompts for retry at index ${index - 1}. Prompt: "${poseJob.pose_prompt}"`);
-                        updatedPoseJobs[index].status = 'failed';
-                        updatedPoseJobs[index].error_message = 'Internal error: Could not find original prompt for retry.';
-                        hasChanged = true;
-                        continue;
-                    }
-                    const { data: result, error } = await supabase.functions.invoke('MIRA-AGENT-tool-comfyui-pose-generator', { body: { base_model_url: job.base_model_image_url, pose_prompt: pose.value, pose_image_url: pose.type === 'image' ? pose.value : null } });
-                    if (error) {
-                        updatedPoseJobs[index].status = 'failed';
-                        updatedPoseJobs[index].error_message = `Retry failed: ${error.message}`;
-                    } else {
-                        updatedPoseJobs[index].comfyui_prompt_id = result.comfyui_prompt_id;
-                        updatedPoseJobs[index].status = 'processing';
-                        updatedPoseJobs[index].retry_count = currentRetries + 1;
-                    }
-                } else {
+            if (secondsSinceStart > ANALYSIS_STALLED_THRESHOLD_SECONDS) {
+                const retryCount = (poseJob.analysis_retry_count || 0) + 1;
+                if (retryCount > MAX_RETRIES) {
+                    console.error(`${logPrefix} ERROR: Pose analysis for "${poseJob.pose_prompt}" failed after max retries. Marking as failed.`);
                     updatedPoseJobs[index].status = 'failed';
-                    updatedPoseJobs[index].error_message = 'Job failed after max retries.';
+                    updatedPoseJobs[index].error_message = `Analysis stalled and failed after ${MAX_RETRIES} retries.`;
+                    hasChanged = true;
+                } else {
+                    console.warn(`${logPrefix} STALL DETECTED: Pose analysis for "${poseJob.pose_prompt}" has been running for over ${ANALYSIS_STALLED_THRESHOLD_SECONDS}s. Re-triggering analyzer (Attempt ${retryCount}/${MAX_RETRIES}).`);
+                    updatedPoseJobs[index].analysis_retry_count = retryCount;
+                    updatedPoseJobs[index].analysis_started_at = new Date().toISOString();
+                    hasChanged = true;
+                    
+                    supabase.functions.invoke('MIRA-AGENT-analyzer-pose-image', {
+                        body: {
+                            job_id: job.id,
+                            image_url: poseJob.final_url,
+                            base_model_image_url: job.base_model_image_url,
+                            pose_prompt: poseJob.pose_prompt
+                        }
+                    }).catch(err => {
+                        console.error(`${logPrefix} ERROR: Failed to re-invoke analyzer for stalled pose ${index}:`, err);
+                    });
                 }
+            }
+            continue;
+        }
+
+        if (poseJob.status === 'processing' && poseJob.comfyui_prompt_id) {
+            const isJobInQueue = queueData.queue_running.some((item: any) => item[1] === poseJob.comfyui_prompt_id) || 
+                                 queueData.queue_pending.some((item: any) => item[1] === poseJob.comfyui_prompt_id);
+
+            if (isJobInQueue) {
+                console.log(`${logPrefix} Pose job ${poseJob.comfyui_prompt_id} is still in queue. Continuing to poll.`);
+                continue;
+            }
+
+            const historyUrl = `${comfyUiAddress}/history/${poseJob.comfyui_prompt_id}`;
+            const historyResponse = await fetch(historyUrl);
+            
+            if (historyResponse.ok) {
+                const historyData = await historyResponse.json();
+                const promptHistory = historyData[poseJob.comfyui_prompt_id];
+                
+                if (!promptHistory) {
+                    console.log(`${logPrefix} Pose job ${poseJob.comfyui_prompt_id} is finished but not yet in history. Re-polling.`);
+                    continue;
+                }
+
+                const outputNode = await findOutputImage(promptHistory.outputs, FINAL_OUTPUT_NODE_ID_POSE, FALLBACK_NODE_IDS_POSE);
+                if (outputNode) {
+                    const image = outputNode;
+                    const tempImageUrl = `${comfyUiAddress}/view?filename=${encodeURIComponent(image.filename)}&subfolder=${encodeURIComponent(image.subfolder)}&type=${image.type}`;
+                    
+                    console.log(`${logPrefix} Pose job ${poseJob.comfyui_prompt_id} is complete. Downloading from ComfyUI...`);
+                    const imageResponse = await fetch(tempImageUrl);
+                    if (!imageResponse.ok) throw new Error(`Failed to download final pose image from ComfyUI: ${imageResponse.statusText}`);
+                    const imageBuffer = await imageResponse.arrayBuffer();
+
+                    const filePath = `${job.user_id}/model-poses/${Date.now()}_${image.filename}`;
+                    await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(filePath, imageBuffer, { contentType: 'image/png', upsert: true });
+                    const { data: { publicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
+
+                    updatedPoseJobs[index].status = 'analyzing';
+                    updatedPoseJobs[index].final_url = publicUrl;
+                    updatedPoseJobs[index].is_upscaled = false;
+                    updatedPoseJobs[index].analysis_started_at = new Date().toISOString();
+                    hasChanged = true;
+                    console.log(`${logPrefix} Pose job generated. Stored at Supabase URL: ${publicUrl}. Triggering analysis.`);
+
+                    supabase.functions.invoke('MIRA-AGENT-analyzer-pose-image', {
+                        body: {
+                            job_id: job.id,
+                            image_url: publicUrl,
+                            base_model_image_url: job.base_model_image_url,
+                            pose_prompt: updatedPoseJobs[index].pose_prompt
+                        }
+                    }).catch(err => {
+                        console.error(`${logPrefix} ERROR: Failed to invoke analyzer for pose ${index}:`, err);
+                    });
+                } else {
+                    console.warn(`${logPrefix} Pose job ${poseJob.comfyui_prompt_id} finished with no output. Attempting retry.`);
+                    const currentRetries = poseJob.retry_count || 0;
+                    if (currentRetries < MAX_RETRIES) {
+                        const pose = job.pose_prompts[index - 1];
+                        if (!pose) {
+                            console.error(`${logPrefix} ERROR: Could not find matching pose in pose_prompts for retry at index ${index - 1}. Prompt: "${poseJob.pose_prompt}"`);
+                            updatedPoseJobs[index].status = 'failed';
+                            updatedPoseJobs[index].error_message = 'Internal error: Could not find original prompt for retry.';
+                            hasChanged = true;
+                            continue;
+                        }
+                        const { data: result, error } = await supabase.functions.invoke('MIRA-AGENT-tool-comfyui-pose-generator', { body: { base_model_url: job.base_model_image_url, pose_prompt: pose.value, pose_image_url: pose.type === 'image' ? pose.value : null } });
+                        if (error) {
+                            updatedPoseJobs[index].status = 'failed';
+                            updatedPoseJobs[index].error_message = `Retry failed: ${error.message}`;
+                        } else {
+                            updatedPoseJobs[index].comfyui_prompt_id = result.comfyui_prompt_id;
+                            updatedPoseJobs[index].status = 'processing';
+                            updatedPoseJobs[index].retry_count = currentRetries + 1;
+                        }
+                    } else {
+                        updatedPoseJobs[index].status = 'failed';
+                        updatedPoseJobs[index].error_message = 'Job failed after max retries.';
+                    }
+                    hasChanged = true;
+                }
+            } else {
+                console.error(`${logPrefix} ERROR: Pose job ${poseJob.comfyui_prompt_id} not found in queue or history. Marking as failed.`);
+                updatedPoseJobs[index].status = 'failed';
+                updatedPoseJobs[index].error_message = 'Job not found in ComfyUI history.';
                 hasChanged = true;
             }
-        } else {
-            console.error(`${logPrefix} ERROR: Pose job ${poseJob.comfyui_prompt_id} not found in queue or history. Marking as failed.`);
-            updatedPoseJobs[index].status = 'failed';
-            updatedPoseJobs[index].error_message = 'Job not found in ComfyUI history.';
-            hasChanged = true;
         }
-    }
-
-    if (updatedPoseJobs.some(p => p.status === 'failed')) {
-        console.error(`${logPrefix} ERROR: At least one pose failed permanently. Failing the entire job.`);
-        await supabase.from('mira-agent-model-generation-jobs').update({ status: 'failed', error_message: 'One or more poses failed to generate.', final_posed_images: updatedPoseJobs }).eq('id', job.id);
-        return;
-    }
-
-    if (hasChanged) {
-        await supabase.from('mira-agent-model-generation-jobs').update({ final_posed_images: updatedPoseJobs }).eq('id', job.id);
     }
 
     const isFullyFinished = updatedPoseJobs.every(p => p.status === 'complete' || p.status === 'failed');
-    const isStillWorking = updatedPoseJobs.some(p => p.status === 'processing' || p.status === 'analyzing');
 
-    if (isFullyFinished) {
-        console.log(`${logPrefix} All pose jobs are complete. Finalizing main job.`);
-        await supabase.from('mira-agent-model-generation-jobs').update({ status: 'complete' }).eq('id', job.id);
-    } else if (isStillWorking) {
-        console.log(`${logPrefix} Not all pose jobs are complete (some may be processing or analyzing). Polling will continue on next watchdog cycle.`);
+    if (hasChanged || (isFullyFinished && job.status !== 'complete')) {
+        const finalStatus = isFullyFinished ? 'complete' : job.status;
+        console.log(`${logPrefix} Changes detected or job is finished. Updating DB with status: ${finalStatus}.`);
+        
+        await supabase.from('mira-agent-model-generation-jobs').update({ 
+            final_posed_images: updatedPoseJobs,
+            status: finalStatus 
+        }).eq('id', job.id);
+
+        if (finalStatus === 'complete') {
+            console.log(`${logPrefix} All pose jobs are complete. Main job finalized.`);
+        }
     } else {
-        console.log(`${logPrefix} All poses generated. Handed off to analyzers. Poller will now idle for this job.`);
+        const isStillWorking = updatedPoseJobs.some(p => p.status === 'processing' || p.status === 'analyzing');
+        if (isStillWorking) {
+            console.log(`${logPrefix} Not all pose jobs are complete (some may be processing or analyzing). Polling will continue on next watchdog cycle.`);
+        } else {
+            console.log(`${logPrefix} All poses generated. Handed off to analyzers. Poller will now idle for this job.`);
+        }
     }
 }
 
