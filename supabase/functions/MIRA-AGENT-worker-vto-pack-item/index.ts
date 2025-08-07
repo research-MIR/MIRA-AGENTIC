@@ -689,7 +689,7 @@ async function handleReframe(supabase: SupabaseClient, job: any, logPrefix: stri
     console.log(`${logPrefix} Job finalized with 1:1 image at ${finalImage.publicUrl}.`);
   };
 
-  if (skip_reframe || final_aspect_ratio === '1:1') {
+  if (job.metadata.skip_reframe === true || job.metadata.final_aspect_ratio === '1:1') {
     await finalizeAsIs();
   } else {
     try {
