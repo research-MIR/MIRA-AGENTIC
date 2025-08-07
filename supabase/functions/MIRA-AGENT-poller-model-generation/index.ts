@@ -73,6 +73,17 @@ const FALLBACK_NODE_IDS_UPSCALE = ["431", "430", "9", "4"];
 const FINAL_OUTPUT_NODE_ID_POSE = "9";
 const FALLBACK_NODE_IDS_POSE = ["213", "4"];
 
+async function uploadImageToComfyUI(comfyUiUrl: string, imageBlob: Blob, filename: string) {
+  const formData = new FormData();
+  formData.append('image', imageBlob, filename);
+  formData.append('overwrite', 'true');
+  const uploadUrl = `${comfyUiUrl}/upload/image`;
+  const response = await fetch(uploadUrl, { method: 'POST', body: formData });
+  if (!response.ok) throw new Error(`ComfyUI upload failed: ${await response.text()}`);
+  const data = await response.json();
+  return data.name;
+}
+
 async function findOutputImage(historyOutputs: any, primaryNodeId: string, fallbackNodeIds: string[]): Promise<any | null> {
     if (!historyOutputs) return null;
     // First, check the preferred nodes for efficiency
