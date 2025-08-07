@@ -21,7 +21,7 @@ interface Garment {
   storage_path: string;
   attributes: {
     intended_gender: 'male' | 'female' | 'unisex';
-    type_of_fit: 'upper body' | 'lower body' | 'full body' | 'upper_body' | 'lower_body' | 'full_body';
+    type_of_fit: 'upper body' | 'lower body' | 'full body' | 'shoes' | 'upper_body' | 'lower_body' | 'full_body';
     primary_color: string;
     style_tags?: string[];
   } | null;
@@ -69,84 +69,87 @@ export const AddGarmentsModal = ({ isOpen, onClose, packId, existingGarmentIds, 
     return counts;
   }, [existingGarments]);
 
-  const handleFileUpload = async (files: FileList | null, targetFolderId?: string | null) => {
+  const handleFileUpload = async (files: FileList | null) => {
     if (!files || files.length === 0 || !session?.user) return;
     const imageFiles = Array.from(files).filter(file => file.type.startsWith('image/'));
-    if (imageFiles.length === 0) {
-      showError("Please select valid image files.");
-      return;
-    }
+    if (imageFiles.length === 0) return showError("Please select valid image files.");
 
+    setIsAdding(true);
     const toastId = showLoading(`Processing ${imageFiles.length} image(s)...`);
-    let successCount = 0;
-    let movedCount = 0;
-    const folderIdToAssign = targetFolderId !== undefined ? targetFolderId : selectedFolderId;
+    
+    const currentCounts = { ...existingCounts };
+    const skippedFiles: string[] = [];
+    const itemsToInsert: { pack_id: string; garment_id: string }[] = [];
 
     try {
-      for (const file of imageFiles) {
+      const processFile = async (file: File) => {
         const hash = await calculateFileHash(file);
-        const { data: existing, error: checkError } = await supabase
-          .from('mira-agent-garments')
-          .select('id, attributes')
-          .eq('user_id', session.user.id)
-          .eq('image_hash', hash)
-          .maybeSingle();
-
-        if (checkError) throw checkError;
+        const { data: existing } = await supabase.from('mira-agent-garments').select('id, attributes').eq('user_id', session!.user.id).eq('image_hash', hash).single();
         
-        if (existing) {
-          const { error: moveError } = await supabase
-            .from('mira-agent-garments')
-            .update({ folder_id: folderIdToAssign === 'unassigned' ? null : folderIdToAssign })
-            .eq('id', existing.id);
-          if (moveError) throw moveError;
-          movedCount++;
-          continue;
+        let garmentId = existing?.id;
+        let garmentAttributes = existing?.attributes;
+
+        if (!garmentId) {
+          const optimizedFile = await optimizeImage(file);
+          const filePath = `${session.user.id}/wardrobe/${Date.now()}-${sanitizeFilename(file.name)}`;
+          const { error: uploadError } = await supabase.storage.from('mira-agent-user-uploads').upload(filePath, optimizedFile);
+          if (uploadError) throw new Error(`Upload failed for ${file.name}: ${uploadError.message}`);
+          
+          const { data: { publicUrl } } = supabase.storage.from('mira-agent-user-uploads').getPublicUrl(filePath);
+          
+          const { data: analysis, error: analysisError } = await supabase.functions.invoke('MIRA-AGENT-tool-analyze-garment-attributes', {
+            body: { image_base64: (await fileToBase64(optimizedFile)), mime_type: optimizedFile.type }
+          });
+          if (analysisError) throw new Error(`Analysis failed for ${file.name}: ${analysisError.message}`);
+          garmentAttributes = analysis;
+
+          const { data: newGarment, error: insertError } = await supabase.from('mira-agent-garments').insert({
+            user_id: session.user.id,
+            name: file.name,
+            storage_path: publicUrl,
+            attributes: analysis,
+            image_hash: hash,
+          }).select('id').single();
+          if (insertError) throw new Error(`Failed to save garment ${file.name}: ${insertError.message}`);
+          garmentId = newGarment.id;
         }
-
-        const base64 = await fileToBase64(file);
-        const { data: analysis, error: analysisError } = await supabase.functions.invoke('MIRA-AGENT-tool-analyze-garment-attributes', {
-          body: { image_base64: base64, mime_type: file.type }
-        });
-        if (analysisError) throw new Error(`Analysis failed for ${file.name}: ${analysisError.message}`);
-        garmentAttributes = analysis;
-
-        const optimizedFile = await optimizeImage(file);
-        const filePath = `${session.user.id}/wardrobe/${Date.now()}-${sanitizeFilename(file.name)}`;
-        const { error: uploadError } = await supabase.storage.from('mira-agent-user-uploads').upload(filePath, optimizedFile);
-        if (uploadError) throw new Error(`Upload failed for ${file.name}: ${uploadError.message}`);
-        const { data: { publicUrl } } = supabase.storage.from('mira-agent-user-uploads').getPublicUrl(filePath);
-
-        const { error: insertError } = await supabase.from('mira-agent-garments').insert({
-          user_id: session.user.id,
-          name: file.name,
-          storage_path: publicUrl,
-          attributes: analysis,
-          image_hash: hash,
-          folder_id: folderIdToAssign === 'all' || folderIdToAssign === 'unassigned' ? null : folderIdToAssign,
-        });
-        if (insertError) throw new Error(`Database insert failed for ${file.name}: ${insertError.message}`);
         
-        successCount++;
-      }
+        const zone = garmentAttributes?.type_of_fit?.replace(/ /g, '_');
+        if (zone && currentCounts[zone] < MAX_PER_ZONE) {
+            if (garmentId && !existingGarmentIds.includes(garmentId)) {
+                itemsToInsert.push({ pack_id: packId, garment_id: garmentId });
+                currentCounts[zone]++;
+            }
+        } else {
+            skippedFiles.push(file.name);
+        }
+      };
 
-      dismissToast(toastId);
-      let finalMessage = "";
-      if (successCount > 0) finalMessage += `${successCount} new garment(s) added. `;
-      if (movedCount > 0) finalMessage += `${movedCount} existing garment(s) moved.`;
-      if (finalMessage) showSuccess(finalMessage.trim());
+      await Promise.all(imageFiles.map(processFile));
+
+      if (itemsToInsert.length > 0) {
+        const { error: linkError } = await supabase.from('mira-agent-garment-pack-items').insert(itemsToInsert);
+        if (linkError) throw linkError;
+      }
       
-      queryClient.invalidateQueries({ queryKey: ['garments', session.user.id, selectedFolderId] });
-      if (targetFolderId !== undefined && targetFolderId !== selectedFolderId) {
-        queryClient.invalidateQueries({ queryKey: ['garments', session.user.id, targetFolderId] });
+      dismissToast(toastId);
+      let successMessage = `${itemsToInsert.length} garments processed and added to pack.`;
+      if (skippedFiles.length > 0) {
+        successMessage += ` ${skippedFiles.length} files were skipped as their body zone is full.`;
       }
-      queryClient.invalidateQueries({ queryKey: ['garmentFolderCounts', session.user.id] });
-
+      showSuccess(successMessage);
+      queryClient.invalidateQueries({ queryKey: ['garmentsInPack', packId] });
+      queryClient.invalidateQueries({ queryKey: ['allGarmentsForPack'] });
+      onClose();
     } catch (err: any) {
       dismissToast(toastId);
       showError(err.message);
+    } finally {
+      setIsAdding(false);
     }
   };
+
+  const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: (e) => handleFileUpload(e.dataTransfer.files) });
 
   const toggleSelection = (garment: Garment) => {
     const zoneWithSpaceOrUnderscore = garment.attributes?.type_of_fit;
@@ -248,7 +251,7 @@ export const AddGarmentsModal = ({ isOpen, onClose, packId, existingGarmentIds, 
                     const isDisabled = zone ? (existingCounts[zone] || 0) >= MAX_PER_ZONE : false;
                     return (
                       <div key={garment.id} className={cn("relative cursor-pointer", isDisabled && "opacity-50 cursor-not-allowed")} onClick={() => !isDisabled && toggleSelection(garment)}>
-                        <SecureImageDisplay imageUrl={garment.storage_path} alt={garment.name} width={200} height={200} resize="cover" />
+                        <SecureImageDisplay imageUrl={garment.storage_path} alt={garment.name} />
                         {isSelected && (
                           <div className="absolute inset-0 bg-black/60 flex items-center justify-center rounded-md">
                             <CheckCircle className="h-8 w-8 text-white" />

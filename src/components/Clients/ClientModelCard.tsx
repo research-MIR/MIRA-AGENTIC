@@ -11,7 +11,7 @@ interface Model {
 }
 
 const ImageDisplay = ({ url }: { url: string | null }) => {
-  const { displayUrl, isLoading } = useSecureImage(url, { width: 200, height: 200, resize: 'cover' });
+  const { displayUrl, isLoading } = useSecureImage(url);
   if (isLoading) return <Skeleton className="w-full h-full" />;
   if (!displayUrl) return <div className="w-full h-full bg-muted flex items-center justify-center"><Bot className="h-10 w-10 text-muted-foreground" /></div>;
   return <img src={displayUrl} alt="Model" className="w-full h-full object-cover" />;

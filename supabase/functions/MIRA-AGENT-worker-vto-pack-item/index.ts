@@ -2,14 +2,13 @@ import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { Image as ISImage } from "https://deno.land/x/imagescript@1.2.15/mod.ts";
 import { decodeBase64, encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
-import imageSize from "https://esm.sh/image-size";
 
 // --- Global Error Handlers for Observability ---
-self.addEventListener('unhandledrejection', (event) => {
-  console.error(`[GLOBAL UNHANDLED REJECTION] Reason:`, event.reason);
+self.addEventListener("error", (evt)=>{
+  console.error("[GLOBAL ERROR]", evt.error);
 });
-self.addEventListener('error', (event) => {
-  console.error(`[GLOBAL ERROR] Message: ${event.message}, Filename: ${event.filename}, Lineno: ${event.lineno}, Error:`, event.error);
+self.addEventListener("unhandledrejection", (evt)=>{
+  console.error("[GLOBAL UNHANDLED REJECTION]", evt.reason);
 });
 // ------------------------------------------------
 
@@ -17,27 +16,25 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const TEMP_UPLOAD_BUCKET = 'mira-agent-user-uploads';
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
-
-// --- FEATURE FLAGS & TUNABLES ---
-const ENABLE_BITSTUDIO_FALLBACK = false;
-const FAIL_ON_OUTFIT_ANALYSIS_ERROR = true;
-const MAX_VTO_RETRIES = 3;
-const BASE_RETRY_DELAY_MS = 15000; // Start with a 15-second delay
-const MAX_REFRAME_RETRIES = 2;
-const REFRAME_STALL_THRESHOLD_SECONDS = 55;
+const ENABLE_BITSTUDIO_FALLBACK = false; // FEATURE FLAG
+const FAIL_ON_OUTFIT_ANALYSIS_ERROR = true; // FEATURE FLAG: If true, job fails on analysis error. If false, it skips and proceeds.
 const OUTFIT_ANALYSIS_MAX_RETRIES = 3;
 const OUTFIT_ANALYSIS_RETRY_DELAY_MS = 1000;
-// --------------------------------
+const REFRAME_STALL_THRESHOLD_SECONDS = 55;
+const MAX_REFRAME_RETRIES = 2;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
 };
 
-// --- UTILITY FUNCTIONS ---
+// --- Hardened Safe Wrapper Functions ---
 async function invokeNextStep(supabase: SupabaseClient, functionName: string, payload: object) {
-  const { error } = await supabase.functions.invoke(functionName, { body: payload });
+  const { error } = await supabase.functions.invoke(functionName, {
+    body: payload
+  });
   if (error) {
+    // Log the error but also re-throw it so the calling function knows it failed.
     console.error(`[invokeNextStep] Error invoking ${functionName}:`, error);
     throw error;
   }
@@ -52,190 +49,373 @@ function parseStorageURL(url: string) {
   }
   const bucket = pathSegments[objectSegmentIndex + 2];
   const path = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
-  return { bucket, path };
+  return {
+    bucket,
+    path
+  };
 }
 
 async function safeDownload(supabase: SupabaseClient, publicUrl: string, logPrefix: string) {
   console.log(`${logPrefix} [safeDownload] Starting download for: ${publicUrl}`);
   const { bucket, path } = parseStorageURL(publicUrl);
-  const { data, error } = await supabase.storage.from(bucket).download(path);
-  if (error) throw error;
+  console.log(`${logPrefix} [safeDownload] Parsed URL. Bucket: ${bucket}, Path: ${path}`);
+  const { data, error } = await supabase.storage.from(bucket).download(path).catch((e: any) => { throw e ?? new Error(`[safeDownload:${path}] rejected with null`) });
+  if (error) throw error ?? new Error(`[safeDownload:${path}] error was null`);
   if (!data) throw new Error(`[safeDownload:${path}] data missing`);
   console.log(`${logPrefix} [safeDownload] Download successful. Blob size: ${data.size}`);
   return data;
 }
 
-async function uploadBase64ToStorage(supabase: SupabaseClient, base64: string, userId: string, filename: string) {
-    const buffer = decodeBase64(base64);
-    const filePath = `${userId}/vto-pack-results/${Date.now()}-${filename}`;
-    const { error } = await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(filePath, buffer, { contentType: 'image/png', upsert: true });
-    if (error) throw error;
-    const { data: { publicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
-    return { publicUrl, storagePath: filePath };
+async function safeUpload(supabase: SupabaseClient, bucket: string, path: string, body: any, options: any) {
+  const { error } = await supabase.storage.from(bucket).upload(path, body, options).catch((e: any) => { throw e ?? new Error(`[safeUpload:${path}] rejected with null`) });
+  if (error) throw error ?? new Error(`[safeUpload:${path}] error was null`);
 }
 
-const blobToBase64 = async (blob: Blob): Promise<string> => {
+async function safeGetPublicUrl(supabase: SupabaseClient, bucket: string, path: string) {
+  const { data } = supabase.storage.from(bucket).getPublicUrl(path);
+  if (!data || !data.publicUrl) throw new Error(`[safeGetPublicUrl:${path}] Failed to create public URL.`);
+  return data.publicUrl;
+}
+
+async function uploadBase64ToStorage(supabase: SupabaseClient, base64: string, userId: string, filename: string) {
+  const buffer = decodeBase64(base64);
+  const filePath = `${userId}/vto-pack-results/${Date.now()}-${filename}`;
+  await safeUpload(supabase, GENERATED_IMAGES_BUCKET, filePath, new Blob([
+    buffer
+  ], {
+    type: 'image/png'
+  }), {
+    contentType: 'image/png',
+    upsert: true
+  });
+  const publicUrl = await safeGetPublicUrl(supabase, GENERATED_IMAGES_BUCKET, filePath);
+  return {
+    publicUrl,
+    storagePath: filePath
+  };
+}
+
+// --- Utility Functions ---
+const blobToBase64 = async (blob: Blob)=>{
   const buffer = await blob.arrayBuffer();
   return encodeBase64(new Uint8Array(buffer));
 };
 
-async function invokeWithRetryAndExponentialBackoff(
-  supabase: SupabaseClient,
-  functionName: string,
-  payload: object,
-  maxRetries: number,
-  baseDelay: number,
-  logPrefix: string
-) {
-  let lastError: Error | null = null;
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      const { data, error } = await supabase.functions.invoke(functionName, payload);
-      if (error) {
-        throw new Error(error.message || 'Function invocation failed with an unknown error.');
-      }
-      return data; // Success
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err));
-      console.warn(`${logPrefix} Invocation of '${functionName}' failed on attempt ${attempt}/${maxRetries}. Error: ${lastError.message}`);
-      if (attempt < maxRetries) {
-        const exponentialDelay = baseDelay * Math.pow(2, attempt - 1);
-        const jitter = Math.random() * 1000;
-        const totalDelay = exponentialDelay + jitter;
-        console.warn(`${logPrefix} Waiting ${totalDelay.toFixed(0)}ms before retrying...`);
-        await new Promise(resolve => setTimeout(resolve, totalDelay));
+// --- State Machine Logic ---
+serve(async (req)=>{
+  if (req.method === 'OPTIONS') {
+    return new Response(null, {
+      headers: corsHeaders
+    });
+  }
+  const { pair_job_id, reframe_result_url, bitstudio_result_url } = await req.json();
+  if (!pair_job_id) {
+    return new Response(JSON.stringify({
+      error: "pair_job_id is required."
+    }), {
+      status: 400,
+      headers: corsHeaders
+    });
+  }
+  const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
+  const logPrefix = `[VTO-Pack-Worker][${pair_job_id}]`;
+  let job: any;
+  try {
+    const { data: fetchedJob, error: fetchError } = await supabase.from('mira-agent-bitstudio-jobs').select('*').eq('id', pair_job_id).single();
+    if (fetchError) throw new Error(fetchError.message || 'Failed to fetch job.');
+    job = fetchedJob;
+    if (reframe_result_url) {
+      console.log(`${logPrefix} Received reframe result. Finalizing job.`);
+      await supabase.from('mira-agent-bitstudio-jobs').update({
+        status: 'complete',
+        final_image_url: reframe_result_url
+      }).eq('id', pair_job_id);
+      console.log(`${logPrefix} Job successfully finalized.`);
+    } else if (bitstudio_result_url) {
+      console.log(`${logPrefix} Received BitStudio fallback result. Running final quality check.`);
+      await handleQualityCheck(supabase, job, logPrefix, bitstudio_result_url);
+    } else {
+      console.log(`${logPrefix} Starting job.`);
+      const step = job.metadata?.google_vto_step || 'start';
+      console.log(`${logPrefix} Current step: ${step}`);
+      switch(step){
+        case 'start':
+          await handleStart_GetBbox(supabase, job, logPrefix);
+          break;
+        case 'prepare_assets':
+          await handlePrepareAssets(supabase, job, logPrefix);
+          break;
+        case 'generate_step_1':
+          await handleGenerateStep(supabase, job, 15, 'quality_check', logPrefix);
+          break;
+        case 'generate_step_2':
+          await handleGenerateStep(supabase, job, 30, 'quality_check', logPrefix);
+          break;
+        case 'generate_step_3':
+          await handleGenerateStep(supabase, job, 50, 'quality_check', logPrefix);
+          break;
+        case 'quality_check':
+          await handleQualityCheck(supabase, job, logPrefix);
+          break;
+        case 'outfit_completeness_check':
+          await handleOutfitCompletenessCheck(supabase, job, logPrefix);
+          break;
+        case 'awaiting_auto_complete':
+          await handleAutoComplete(supabase, job, logPrefix);
+          break;
+        case 'reframe':
+          await handleReframe(supabase, job, logPrefix);
+          break;
+        case 'awaiting_reframe':
+          await handleAwaitingReframe(supabase, job, logPrefix);
+          break;
+        case 'done':
+        case 'fallback_to_bitstudio':
+        case 'awaiting_stylist_choice':
+          console.log(`${logPrefix} Job is in a waiting or terminal state ('${step}'). Exiting gracefully.`);
+          break;
+        default:
+          throw new Error(`Unknown step: ${step}`);
       }
     }
+    return new Response(JSON.stringify({
+      success: true,
+      message: "Step initiated."
+    }), {
+      headers: corsHeaders
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`${logPrefix} Error:`, errorMessage);
+    const currentStep = job?.metadata?.google_vto_step;
+    if (job && (currentStep?.startsWith('generate_step') || currentStep?.startsWith('quality_check')) && ENABLE_BITSTUDIO_FALLBACK) {
+      console.warn(`[BITSTUDIO_FALLBACK][${job.id}] A Google VTO generation or quality check step failed. Escalating to BitStudio. Triggering reason: ${errorMessage}`);
+      try {
+        await supabase.from('mira-agent-bitstudio-jobs').update({
+          metadata: {
+            ...job.metadata,
+            google_vto_step: 'fallback_to_bitstudio',
+            engine: 'bitstudio_fallback'
+          }
+        }).eq('id', pair_job_id);
+        const { data: proxyData, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
+          body: {
+            existing_job_id: pair_job_id,
+            mode: 'base',
+            user_id: job.user_id,
+            person_image_url: job.source_person_image_url,
+            garment_image_url: job.source_garment_image_url,
+            prompt: job.metadata.prompt_appendix,
+            num_images: 1,
+            resolution: 'high'
+          }
+        });
+        if (proxyError) throw new Error(proxyError.message || 'Proxy invocation failed.');
+        console.log(`${logPrefix} BitStudio fallback job created with ID ${proxyData.jobIds[0]}. The BitStudio poller will now take over.`);
+        await supabase.from('mira-agent-bitstudio-jobs').update({
+          status: 'awaiting_bitstudio_fallback',
+          metadata: {
+            ...job.metadata,
+            delegated_bitstudio_job_id: proxyData.jobIds[0]
+          }
+        }).eq('id', pair_job_id);
+        return new Response(JSON.stringify({
+          success: true,
+          message: "Escalated to BitStudio fallback."
+        }), {
+          headers: corsHeaders
+        });
+      } catch (fallbackError) {
+        const fallbackErrorMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+        console.error(`${logPrefix} CRITICAL: BitStudio fallback attempt also failed:`, fallbackErrorMessage);
+        await supabase.from('mira-agent-bitstudio-jobs').update({
+          status: 'failed',
+          error_message: `Google VTO failed and BitStudio fallback also failed: ${fallbackErrorMessage}`
+        }).eq('id', pair_job_id);
+        return new Response(JSON.stringify({
+          error: fallbackErrorMessage
+        }), {
+          headers: {
+            ...corsHeaders,
+            'Content-Type': 'application/json'
+          },
+          status: 500
+        });
+      }
+    } else {
+      if (job && (currentStep?.startsWith('generate_step') || currentStep?.startsWith('quality_check'))) {
+        console.warn(`[BITSTUDIO_FALLBACK][${job.id}] Fallback is disabled. Job will fail.`);
+      }
+      await supabase.from('mira-agent-bitstudio-jobs').update({
+        status: 'failed',
+        error_message: errorMessage
+      }).eq('id', pair_job_id);
+      return new Response(JSON.stringify({
+        error: errorMessage
+      }), {
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json'
+        },
+        status: 500
+      });
+    }
   }
-  throw lastError; // Rethrow the last error if all retries fail
-}
+});
 
-// --- STATE HANDLERS ---
 async function handleStart_GetBbox(supabase: SupabaseClient, job: any, logPrefix: string) {
   console.log(`${logPrefix} Step 1: Getting bounding box.`);
   await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'processing' }).eq('id', job.id);
   const { data: bboxData, error: bboxError } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-bbox', {
-    body: { image_url: job.source_person_image_url, job_id: job.id }
+    body: {
+      image_url: job.source_person_image_url,
+      job_id: job.id
+    }
   });
   if (bboxError) throw new Error(bboxError.message || 'BBox orchestrator failed.');
   const personBox = bboxData?.person;
   if (!personBox || !Array.isArray(personBox) || personBox.length !== 4 || personBox.some((v: any) => typeof v !== 'number')) {
     throw new Error("Orchestrator did not return a valid bounding box array.");
   }
+  console.log(`${logPrefix} Bounding box received.`);
   await supabase.from('mira-agent-bitstudio-jobs').update({
-    metadata: { ...job.metadata, bbox_person: personBox, google_vto_step: 'prepare_assets' },
+    metadata: {
+      ...job.metadata,
+      bbox_person: personBox,
+      google_vto_step: 'prepare_assets'
+    },
     status: 'prepare_assets'
   }).eq('id', job.id);
   console.log(`${logPrefix} Bounding box saved. Advancing to 'prepare_assets'.`);
-  await invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
+  await invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', {
+    pair_job_id: job.id
+  });
 }
 
 async function handlePrepareAssets(supabase: SupabaseClient, job: any, logPrefix: string) {
-    // This function remains largely the same as it's a data preparation step.
-    console.log(`${logPrefix} Step 2: Preparing and optimizing image assets.`);
-    await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'prepare_assets' }).eq('id', job.id);
-    const { source_person_image_url, source_garment_image_url, metadata } = job;
-    const personBox = metadata.bbox_person;
-    if (!personBox) throw new Error("Cannot prepare assets: bbox_person is missing from metadata.");
-    
-    let [personBlob, garmentBlob] = await Promise.all([
-        safeDownload(supabase, source_person_image_url, logPrefix),
-        safeDownload(supabase, source_garment_image_url, logPrefix)
-    ]);
+  console.log(`${logPrefix} Step 2: Preparing and optimizing image assets.`);
+  await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'prepare_assets' }).eq('id', job.id);
+  const { source_person_image_url, source_garment_image_url, metadata } = job;
+  const personBox = metadata.bbox_person;
+  if (!personBox) throw new Error("Cannot prepare assets: bbox_person is missing from metadata.");
+  let [personBlob, garmentBlob] = await Promise.all([
+    safeDownload(supabase, source_person_image_url, logPrefix),
+    safeDownload(supabase, source_garment_image_url, logPrefix)
+  ]);
+  console.log(`${logPrefix} Original blob sizes - Person: ${personBlob.size} bytes, Garment: ${garmentBlob.size} bytes.`);
+  const personImage = await ISImage.decode(await personBlob.arrayBuffer());
+  personBlob = null; // GC
+  const { width: originalWidth, height: originalHeight } = personImage;
+  const abs_x = Math.floor(personBox[1] / 1000 * originalWidth);
+  const abs_y = Math.floor(personBox[0] / 1000 * originalHeight);
+  const abs_width = Math.ceil((personBox[3] - personBox[1]) / 1000 * originalWidth);
+  const abs_height = Math.ceil((personBox[2] - personBox[0]) / 1000 * originalHeight);
+  const bbox = {
+    x: Math.max(0, Math.min(abs_x, originalWidth - 1)),
+    y: Math.max(0, Math.min(abs_y, originalHeight - 1)),
+    width: Math.max(1, Math.min(abs_width, originalWidth - abs_x)),
+    height: Math.max(1, Math.min(abs_height, originalHeight - abs_y))
+  };
+  const croppedPersonImage = personImage.clone().crop(bbox.x, bbox.y, bbox.width, bbox.height);
+  const croppedPersonBuffer = await croppedPersonImage.encodeJPEG(75);
+  const croppedPersonBlob = new Blob([
+    croppedPersonBuffer
+  ], {
+    type: 'image/jpeg'
+  });
+  const tempPersonPath = `tmp/${job.user_id}/${Date.now()}-cropped_person.jpeg`;
+  await safeUpload(supabase, TEMP_UPLOAD_BUCKET, tempPersonPath, croppedPersonBlob, {
+    contentType: "image/jpeg"
+  });
+  const croppedPersonUrl = await safeGetPublicUrl(supabase, TEMP_UPLOAD_BUCKET, tempPersonPath);
+  console.log(`${logPrefix} Cropped person image uploaded to temp storage.`);
+  const garmentImage = await ISImage.decode(await garmentBlob.arrayBuffer());
+  garmentBlob = null; // GC
+  const MAX_GARMENT_DIMENSION = 2048;
+  if (Math.max(garmentImage.width, garmentImage.height) > MAX_GARMENT_DIMENSION) {
+    garmentImage.resize(garmentImage.width > garmentImage.height ? MAX_GARMENT_DIMENSION : ISImage.RESIZE_AUTO, garmentImage.height > garmentImage.width ? MAX_GARMENT_DIMENSION : ISImage.RESIZE_AUTO);
+  }
+  const optimizedGarmentBuffer = await garmentImage.encodeJPEG(75);
+  const optimizedGarmentBlob = new Blob([
+    optimizedGarmentBuffer
+  ], {
+    type: 'image/jpeg'
+  });
+  const tempGarmentPath = `tmp/${job.user_id}/${Date.now()}-optimized_garment.jpeg`;
+  await safeUpload(supabase, TEMP_UPLOAD_BUCKET, tempGarmentPath, optimizedGarmentBlob, { contentType: "image/jpeg" });
+  const optimizedGarmentUrl = await safeGetPublicUrl(supabase, TEMP_UPLOAD_BUCKET, tempGarmentPath);
+  console.log(`${logPrefix} Optimized garment image uploaded to temp storage.`);
+  await supabase.from('mira-agent-bitstudio-jobs').update({
+    metadata: {
+      ...metadata,
+      bbox: bbox,
+      cropped_person_url: croppedPersonUrl,
+      optimized_garment_url: optimizedGarmentUrl,
+      google_vto_step: 'generate_step_1'
+    },
+    status: 'generate_step_1'
+  }).eq('id', job.id);
+  console.log(`${logPrefix} All assets prepared. Advancing to 'generate_step_1'.`);
+  await invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', {
+    pair_job_id: job.id
+  });
+}
 
-    const personImage = await ISImage.decode(await personBlob.arrayBuffer());
-    personBlob = null; // GC
-    const { width: originalWidth, height: originalHeight } = personImage;
-    const abs_x = Math.floor(personBox[1] / 1000 * originalWidth);
-    const abs_y = Math.floor(personBox[0] / 1000 * originalHeight);
-    const abs_width = Math.ceil((personBox[3] - personBox[1]) / 1000 * originalWidth);
-    const abs_height = Math.ceil((personBox[2] - personBox[0]) / 1000 * originalHeight);
-    const bbox = {
-      x: Math.max(0, Math.min(abs_x, originalWidth - 1)),
-      y: Math.max(0, Math.min(abs_y, originalHeight - 1)),
-      width: Math.max(1, Math.min(abs_width, originalWidth - abs_x)),
-      height: Math.max(1, Math.min(abs_height, originalHeight - abs_y))
-    };
-    const croppedPersonImage = personImage.clone().crop(bbox.x, bbox.y, bbox.width, bbox.height);
-    const croppedPersonBuffer = await croppedPersonImage.encodeJPEG(75);
-    const croppedPersonBlob = new Blob([croppedPersonBuffer], { type: 'image/jpeg' });
-    const tempPersonPath = `tmp/${job.user_id}/${Date.now()}-cropped_person.jpeg`;
-    await supabase.storage.from(TEMP_UPLOAD_BUCKET).upload(tempPersonPath, croppedPersonBlob, { contentType: "image/jpeg" });
-    const { data: { publicUrl: croppedPersonUrl } } = supabase.storage.from(TEMP_UPLOAD_BUCKET).getPublicUrl(tempPersonPath);
-
-    const garmentImage = await ISImage.decode(await garmentBlob.arrayBuffer());
-    garmentBlob = null; // GC
-    const MAX_GARMENT_DIMENSION = 2048;
-    if (Math.max(garmentImage.width, garmentImage.height) > MAX_GARMENT_DIMENSION) {
-      garmentImage.resize(garmentImage.width > garmentImage.height ? MAX_GARMENT_DIMENSION : ISImage.RESIZE_AUTO, garmentImage.height > garmentImage.width ? MAX_GARMENT_DIMENSION : ISImage.RESIZE_AUTO);
+async function invokeWithRetry(supabase: SupabaseClient, functionName: string, payload: object, maxRetries: number, logPrefix: string) {
+  let lastError: Error | null = null;
+  for(let attempt = 1; attempt <= maxRetries; attempt++){
+    try {
+      const { data, error } = await supabase.functions.invoke(functionName, payload);
+      if (error) {
+        throw new Error(error.message || 'Function invocation failed with an unknown error.');
+      }
+      return data;
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      console.warn(`${logPrefix} Invocation of '${functionName}' failed on attempt ${attempt}/${maxRetries}. Error: ${lastError.message}`);
+      if (attempt < maxRetries) {
+        const delay = 1500 * attempt;
+        console.warn(`${logPrefix} Waiting ${delay}ms before retrying...`);
+        await new Promise((resolve)=>setTimeout(resolve, delay));
+      }
     }
-    const optimizedGarmentBuffer = await garmentImage.encodeJPEG(75);
-    const optimizedGarmentBlob = new Blob([optimizedGarmentBuffer], { type: 'image/jpeg' });
-    const tempGarmentPath = `tmp/${job.user_id}/${Date.now()}-optimized_garment.jpeg`;
-    await supabase.storage.from(TEMP_UPLOAD_BUCKET).upload(tempGarmentPath, optimizedGarmentBlob, { contentType: "image/jpeg" });
-    const { data: { publicUrl: optimizedGarmentUrl } } = supabase.storage.from(TEMP_UPLOAD_BUCKET).getPublicUrl(tempGarmentPath);
-
-    await supabase.from('mira-agent-bitstudio-jobs').update({
-      metadata: { ...metadata, bbox: bbox, cropped_person_url: croppedPersonUrl, optimized_garment_url: optimizedGarmentUrl, google_vto_step: 'generate_step_1' },
-      status: 'generate_step_1'
-    }).eq('id', job.id);
-    console.log(`${logPrefix} All assets prepared. Advancing to 'generate_step_1'.`);
-    await invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
+  }
+  throw lastError || new Error("Function failed after all retries without a specific error.");
 }
 
 async function handleGenerateStep(supabase: SupabaseClient, job: any, sampleStep: number, nextStep: string, logPrefix: string) {
   console.log(`${logPrefix} Generating variation with ${sampleStep} steps.`);
-  try {
-    const data = await invokeWithRetryAndExponentialBackoff(
-      supabase,
-      'MIRA-AGENT-tool-virtual-try-on',
-      { body: { person_image_url: job.metadata.cropped_person_url, garment_image_url: job.metadata.optimized_garment_url, sample_count: 3, sample_step: sampleStep } },
-      MAX_VTO_RETRIES,
-      BASE_RETRY_DELAY_MS,
-      logPrefix
-    );
-
-    const generatedImages = data?.generatedImages;
-    if (!generatedImages || !Array.isArray(generatedImages) || generatedImages.length === 0 || !generatedImages[0]?.base64Image) {
-      throw new Error(`VTO tool did not return a valid image for step ${sampleStep}`);
+  const data = await invokeWithRetry(supabase, 'MIRA-AGENT-tool-virtual-try-on', {
+    body: {
+      person_image_url: job.metadata.cropped_person_url,
+      garment_image_url: job.metadata.optimized_garment_url,
+      sample_count: 3,
+      sample_step: sampleStep
     }
-    const currentVariations = job.metadata.generated_variations || [];
-    await supabase.from('mira-agent-bitstudio-jobs').update({
-      metadata: { ...job.metadata, generated_variations: [...currentVariations, ...generatedImages], google_vto_step: nextStep },
-      status: nextStep
-    }).eq('id', job.id);
-    console.log(`${logPrefix} Step ${sampleStep} complete. Advancing to ${nextStep}.`);
-    await invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
-
-  } catch (finalError) {
-    console.error(`${logPrefix} All ${MAX_VTO_RETRIES} attempts with primary VTO tool failed. Last error: ${finalError.message}`);
-    if (ENABLE_BITSTUDIO_FALLBACK) {
-      console.log(`${logPrefix} Escalating job to BitStudio fallback provider.`);
-      await supabase.from('mira-agent-bitstudio-jobs').update({
-        metadata: { ...job.metadata, google_vto_step: 'fallback_to_bitstudio', engine: 'bitstudio_fallback' }
-      }).eq('id', job.id);
-      const { data: proxyData, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
-        body: { existing_job_id: job.id, mode: 'base', user_id: job.user_id, person_image_url: job.source_person_image_url, garment_image_url: job.source_garment_image_url, prompt: job.metadata.prompt_appendix, num_images: 1, resolution: 'high' }
-      });
-      if (proxyError) throw new Error(proxyError.message || 'Proxy invocation failed.');
-      console.log(`${logPrefix} BitStudio fallback job created with ID ${proxyData.jobIds[0]}. The BitStudio poller will now take over.`);
-      await supabase.from('mira-agent-bitstudio-jobs').update({
-        status: 'awaiting_bitstudio_fallback',
-        metadata: { ...job.metadata, delegated_bitstudio_job_id: proxyData.jobIds[0] }
-      }).eq('id', job.id);
-    } else {
-      console.log(`${logPrefix} Fallback is disabled. Marking job as permanently failed.`);
-      throw new Error(`Job failed after ${MAX_VTO_RETRIES} attempts with primary VTO. Fallback disabled.`);
-    }
+  }, 3, logPrefix);
+  const generatedImages = data?.generatedImages;
+  if (!generatedImages || !Array.isArray(generatedImages) || generatedImages.length === 0 || !generatedImages[0]?.base64Image) {
+    throw new Error(`VTO tool did not return a valid image for step ${sampleStep}`);
   }
+  const currentVariations = job.metadata.generated_variations || [];
+  await supabase.from('mira-agent-bitstudio-jobs').update({
+    metadata: {
+      ...job.metadata,
+      generated_variations: [
+        ...currentVariations,
+        ...generatedImages
+      ],
+      google_vto_step: nextStep
+    },
+    status: nextStep
+  }).eq('id', job.id);
+  console.log(`${logPrefix} Step ${sampleStep} complete. Advancing to ${nextStep}.`);
+  await invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', {
+    pair_job_id: job.id
+  });
 }
 
-// Other state handlers (handleQualityCheck, handleOutfitCompletenessCheck, etc.) remain the same
-// as they are part of the logic flow after a successful generation.
-// I will include them to make the file complete.
-
 async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix: string, bitstudio_result_url?: string) {
-  // This function's logic remains the same.
   await supabase.from('mira-agent-bitstudio-jobs').update({ status: `quality_check_${(job.metadata.qa_retry_count || 0) + 1}` }).eq('id', job.id);
   console.log(`${logPrefix} Performing quality check.`);
   const { metadata, id: pair_job_id } = job;
@@ -342,7 +522,6 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
 }
 
 async function handleOutfitCompletenessCheck(supabase: SupabaseClient, job: any, logPrefix: string) {
-  // This function's logic remains the same.
   await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'outfit_completeness_check' }).eq('id', job.id);
   console.log(`${logPrefix} Performing outfit completeness check.`);
   const { metadata, id: pair_job_id } = job;
@@ -350,10 +529,16 @@ async function handleOutfitCompletenessCheck(supabase: SupabaseClient, job: any,
   if (auto_complete_outfit === false || !garment_analysis?.type_of_fit) {
     console.log(`${logPrefix} Skipping outfit check. Auto-complete: ${auto_complete_outfit}, Garment Fit: ${garment_analysis?.type_of_fit}`);
     await supabase.from('mira-agent-bitstudio-jobs').update({
-      metadata: { ...metadata, google_vto_step: 'reframe', outfit_analysis_skipped: true },
+      metadata: {
+        ...metadata,
+        google_vto_step: 'reframe',
+        outfit_analysis_skipped: true
+      },
       status: 'reframe'
     }).eq('id', job.id);
-    await invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
+    await invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', {
+      pair_job_id: job.id
+    });
     return;
   }
   let analysisData;
@@ -362,12 +547,15 @@ async function handleOutfitCompletenessCheck(supabase: SupabaseClient, job: any,
     try {
       console.log(`${logPrefix} Attempt ${attempt}/${OUTFIT_ANALYSIS_MAX_RETRIES} to analyze outfit completeness...`);
       const { data, error: analysisError } = await supabase.functions.invoke('MIRA-AGENT-analyzer-outfit-completeness', {
-        body: { image_to_analyze_base64: qa_best_image_base64, vto_garment_type: garment_analysis.type_of_fit }
+        body: {
+          image_to_analyze_base64: qa_best_image_base64,
+          vto_garment_type: garment_analysis.type_of_fit
+        }
       });
       if (analysisError) throw new Error(`Outfit completeness analysis failed: ${analysisError.message}`);
       analysisData = data;
-      lastAnalysisError = null;
-      break;
+      lastAnalysisError = null; // Clear error on success
+      break; // Success, exit loop
     } catch (err) {
       lastAnalysisError = err instanceof Error ? err : new Error(String(err));
       console.warn(`${logPrefix} Outfit completeness analysis attempt ${attempt} failed: ${lastAnalysisError.message}`);
@@ -379,39 +567,62 @@ async function handleOutfitCompletenessCheck(supabase: SupabaseClient, job: any,
   if (lastAnalysisError) {
     console.error(`${logPrefix} Outfit completeness analysis failed after all retries. Final error: ${lastAnalysisError.message}`);
     if (FAIL_ON_OUTFIT_ANALYSIS_ERROR) {
-      throw lastAnalysisError;
+      // Fail Loudly (Debug Mode)
+      throw lastAnalysisError; // This will be caught by the main try/catch and fail the job
     } else {
+      // Skip Silently (Production Mode)
       console.warn(`${logPrefix} FAIL_ON_OUTFIT_ANALYSIS_ERROR is false. Skipping auto-complete and proceeding to reframe.`);
       await supabase.from('mira-agent-bitstudio-jobs').update({
-        metadata: { ...metadata, google_vto_step: 'reframe', outfit_analysis_skipped: true, outfit_analysis_error: lastAnalysisError.message },
+        metadata: {
+          ...metadata,
+          google_vto_step: 'reframe',
+          outfit_analysis_skipped: true,
+          outfit_analysis_error: lastAnalysisError.message
+        },
         status: 'reframe'
       }).eq('id', job.id);
-      await invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
-      return;
+      await invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', {
+        pair_job_id: job.id
+      });
+      return; // Exit this function call
     }
   }
-  const fullAnalysisLog = { ...analysisData, vto_garment_type: garment_analysis.type_of_fit };
+  const fullAnalysisLog = {
+    ...analysisData,
+    vto_garment_type: garment_analysis.type_of_fit
+  };
   console.log(`[VTO_OUTFIT_COMPLETENESS_ANALYSIS][${pair_job_id}] Full Analysis: ${JSON.stringify(fullAnalysisLog)}`);
   if (analysisData.is_outfit_complete || analysisData.missing_items.length === 0) {
     console.log(`${logPrefix} Outfit is complete. Proceeding to reframe.`);
     await supabase.from('mira-agent-bitstudio-jobs').update({
-      metadata: { ...metadata, google_vto_step: 'reframe', outfit_completeness_analysis: fullAnalysisLog },
+      metadata: {
+        ...metadata,
+        google_vto_step: 'reframe',
+        outfit_completeness_analysis: fullAnalysisLog
+      },
       status: 'reframe'
     }).eq('id', job.id);
-    await invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
+    await invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', {
+      pair_job_id: job.id
+    });
   } else {
     console.log(`${logPrefix} Outfit incomplete. Missing: ${analysisData.missing_items[0]}. Setting status to 'awaiting_stylist_choice' and invoking stylist.`);
     await supabase.from('mira-agent-bitstudio-jobs').update({
       status: 'awaiting_stylist_choice',
-      metadata: { ...metadata, google_vto_step: 'awaiting_stylist_choice', outfit_completeness_analysis: fullAnalysisLog }
+      metadata: {
+        ...metadata,
+        google_vto_step: 'awaiting_stylist_choice',
+        outfit_completeness_analysis: fullAnalysisLog
+      }
     }).eq('id', job.id);
-    await invokeNextStep(supabase, 'MIRA-AGENT-stylist-chooser', { pair_job_id: job.id });
+    await invokeNextStep(supabase, 'MIRA-AGENT-stylist-chooser', {
+      pair_job_id: job.id
+    });
     console.log(`${logPrefix} Stylist invoked. Worker is now paused for this job.`);
   }
 }
 
 async function handleAutoComplete(supabase: SupabaseClient, job: any, logPrefix: string) {
-  // This function's logic remains the same.
   await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'awaiting_auto_complete' }).eq('id', job.id);
   console.log(`${logPrefix} Handling auto-complete step.`);
   const { metadata, user_id, id: parent_job_id } = job;
@@ -427,25 +638,41 @@ async function handleAutoComplete(supabase: SupabaseClient, job: any, logPrefix:
   }
   console.log(`${logPrefix} Creating new VTO generation pass to add chosen garment: ${chosen_completion_garment.name}`);
   const { data: vtoResult, error: vtoError } = await supabase.functions.invoke('MIRA-AGENT-tool-virtual-try-on', {
-    body: { person_image_url: personImageUrl, garment_image_url: chosen_completion_garment.storage_path, sample_count: 1 }
+    body: {
+      person_image_url: personImageUrl,
+      garment_image_url: chosen_completion_garment.storage_path,
+      sample_count: 1
+    }
   });
   if (vtoError) throw new Error(`Auto-complete VTO generation failed: ${vtoError.message}`);
   const finalImageBase64 = vtoResult?.generatedImages?.[0]?.base64Image;
   if (!finalImageBase64) throw new Error("Auto-complete VTO did not return a valid image.");
   console.log(`${logPrefix} Auto-complete generation successful. Directly invoking reframe proxy.`);
+  // Directly invoke the reframe proxy with the new base64 data
   const { data: reframeJobData, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-reframe', {
-    body: { user_id: user_id, base_image_base64: finalImageBase64, prompt: metadata.prompt_appendix || "", aspect_ratio: metadata.final_aspect_ratio, source: 'reframe_from_vto', parent_vto_job_id: parent_job_id }
+    body: {
+      user_id: user_id,
+      base_image_base64: finalImageBase64,
+      prompt: metadata.prompt_appendix || "",
+      aspect_ratio: metadata.final_aspect_ratio,
+      source: 'reframe_from_vto',
+      parent_vto_job_id: parent_job_id
+    }
   });
   if (proxyError) throw new Error(`Failed to invoke reframe proxy: ${proxyError.message}`);
   await supabase.from('mira-agent-bitstudio-jobs').update({
     status: 'awaiting_reframe',
-    metadata: { ...metadata, google_vto_step: 'awaiting_reframe', delegated_reframe_job_id: reframeJobData.jobId, qa_best_image_base64: null }
+    metadata: {
+      ...metadata,
+      google_vto_step: 'awaiting_reframe',
+      delegated_reframe_job_id: reframeJobData.jobId,
+      qa_best_image_base64: null // Clear the old base64 data
+    }
   }).eq('id', parent_job_id);
   console.log(`${logPrefix} Auto-complete finished. Handed off to reframe job ${reframeJobData.jobId}.`);
 }
 
 async function handleReframe(supabase: SupabaseClient, job: any, logPrefix: string) {
-  // This function's logic remains the same.
   console.log(`${logPrefix} Final step: Reframe.`);
   const { qa_best_image_base64, final_aspect_ratio, prompt_appendix, skip_reframe } = job.metadata;
   if (!qa_best_image_base64) throw new Error("Missing best VTO image for reframe step.");
@@ -467,7 +694,14 @@ async function handleReframe(supabase: SupabaseClient, job: any, logPrefix: stri
   } else {
     try {
       const { data: reframeJobData, error: reframeError } = await supabase.functions.invoke('MIRA-AGENT-proxy-reframe', { 
-        body: { user_id: job.user_id, base_image_base64: qa_best_image_base64, prompt: prompt_appendix || "", aspect_ratio: final_aspect_ratio, source: 'reframe_from_vto', parent_vto_job_id: job.id } 
+        body: { 
+          user_id: job.user_id, 
+          base_image_base64: qa_best_image_base64, 
+          prompt: prompt_appendix || "", 
+          aspect_ratio: final_aspect_ratio, 
+          source: 'reframe_from_vto', 
+          parent_vto_job_id: job.id 
+        } 
       });
       if (reframeError) throw new Error(reframeError.message || 'Reframe proxy failed.');
       
@@ -497,7 +731,6 @@ async function handleReframe(supabase: SupabaseClient, job: any, logPrefix: stri
 }
 
 async function handleAwaitingReframe(supabase: SupabaseClient, job: any, logPrefix: string) {
-  // This function's logic remains the same.
   console.log(`${logPrefix} Step: AWAITING_REFRAME. Checking on delegated job.`);
   const reframeJobId = job.metadata?.delegated_reframe_job_id;
   if (!reframeJobId) {

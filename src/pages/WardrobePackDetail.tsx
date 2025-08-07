@@ -106,7 +106,7 @@ const WardrobePackDetail = () => {
               <Card key={garment.id} className="overflow-hidden group relative">
                 <CardContent className="p-0">
                   <div className="aspect-square bg-muted">
-                    <SecureImageDisplay imageUrl={garment.storage_path} alt={garment.name} width={200} height={200} resize="cover" />
+                    <SecureImageDisplay imageUrl={garment.storage_path} alt={garment.name} />
                   </div>
                   <div className="p-2 text-xs space-y-1 border-t">
                     <p className="font-semibold truncate">{garment.name}</p>

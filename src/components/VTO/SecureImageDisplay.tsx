@@ -9,13 +9,10 @@ interface SecureImageDisplayProps {
     onClick?: (e: React.MouseEvent<HTMLImageElement>) => void;
     className?: string;
     style?: React.CSSProperties;
-    width?: number;
-    height?: number;
-    resize?: 'cover' | 'contain';
 }
 
-export const SecureImageDisplay = ({ imageUrl, alt, onClick, className, style, width, height, resize }: SecureImageDisplayProps) => {
-    const { displayUrl, isLoading, error } = useSecureImage(imageUrl, { width, height, resize });
+export const SecureImageDisplay = ({ imageUrl, alt, onClick, className, style }: SecureImageDisplayProps) => {
+    const { displayUrl, isLoading, error } = useSecureImage(imageUrl);
     const hasClickHandler = !!onClick;
   
     if (!imageUrl) return <div className={cn("w-full h-full bg-muted rounded-md flex items-center justify-center", className)} style={style}><ImageIcon className="h-6 w-6 text-muted-foreground" /></div>;

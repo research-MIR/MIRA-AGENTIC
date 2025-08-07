@@ -23,7 +23,7 @@ interface Props {
 }
 
 export const RecentJobThumbnail = ({ job, onClick, isSelected }: Props) => {
-  const { displayUrl, isLoading, error } = useSecureImage(job.base_model_image_url, { width: 200, height: 200, resize: 'cover' });
+  const { displayUrl, isLoading, error } = useSecureImage(job.base_model_image_url);
 
   const handleInfoClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -74,10 +74,7 @@ export const RecentJobThumbnail = ({ job, onClick, isSelected }: Props) => {
       <TooltipProvider>
         <Tooltip>
           <TooltipTrigger asChild>
-            <div className={cn(
-              "absolute bottom-1 right-1 h-8 w-8 rounded-full flex items-center justify-center border-2 border-background",
-              aggregateStatus.color
-            )}>
+            <div className={cn("absolute bottom-1 right-1 h-8 w-8 rounded-full flex items-center justify-center border-2 border-background", aggregateStatus.color)}>
               {aggregateStatus.icon}
             </div>
           </TooltipTrigger>
