@@ -234,7 +234,8 @@ async function handlePendingState(supabase: any, job: any) {
             model_id: selectedModelId,
             invoker_user_id: job.user_id,
             size: aspectRatio,
-            seed: Math.floor(Math.random() * 1e15)
+            seed: Math.floor(Math.random() * 1e15),
+            source: 'model_pack_generator'
         }
     });
     if (generationError) throw new Error(`Image generation failed: ${generationError.message}`);
