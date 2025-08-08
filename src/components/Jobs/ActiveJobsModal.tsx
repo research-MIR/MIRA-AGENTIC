@@ -7,7 +7,7 @@ import {
 } from "@/components/ui/dialog";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Loader2, X, RefreshCw, Wand2, Shirt } from "lucide-react";
+import { Loader2, X, RefreshCw, Wand2, Shirt, HardDriveDownload } from "lucide-react";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { useQueryClient } from "@tanstack/react-query";
 import { showError } from "@/utils/toast";
@@ -16,9 +16,11 @@ import { cn } from "@/lib/utils";
 
 export interface UnifiedJob {
   id: string;
-  type: 'refine' | 'vto';
-  status: 'queued' | 'processing';
+  type: 'refine' | 'vto' | 'export';
+  status: 'queued' | 'processing' | 'pending' | 'complete';
   sourceImageUrl?: string;
+  packName?: string;
+  downloadUrl?: string;
 }
 
 interface ActiveJobsModalProps {
@@ -32,7 +34,7 @@ export const ActiveJobsModal = ({ isOpen, onClose, jobs }: ActiveJobsModalProps)
   const queryClient = useQueryClient();
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const handleCancelJob = async (jobId: string, jobType: 'refine' | 'vto') => {
+  const handleCancelJob = async (jobId: string, jobType: UnifiedJob['type']) => {
     try {
       if (jobType === 'refine') {
         const { error } = await supabase.rpc('cancel_comfyui_job_by_id', { p_job_id: jobId });
@@ -56,6 +58,24 @@ export const ActiveJobsModal = ({ isOpen, onClose, jobs }: ActiveJobsModalProps)
     setTimeout(() => setIsRefreshing(false), 500);
   };
 
+  const renderJobIcon = (type: UnifiedJob['type']) => {
+    switch (type) {
+      case 'refine': return <Wand2 className="h-4 w-4 mr-2 text-purple-500" />;
+      case 'vto': return <Shirt className="h-4 w-4 mr-2 text-blue-500" />;
+      case 'export': return <HardDriveDownload className="h-4 w-4 mr-2 text-green-500" />;
+      default: return null;
+    }
+  };
+
+  const renderJobTitle = (job: UnifiedJob) => {
+    switch (job.type) {
+      case 'refine': return 'Refining Image...';
+      case 'vto': return 'Virtual Try-On...';
+      case 'export': return `Exporting: ${job.packName}`;
+      default: return 'Processing...';
+    }
+  };
+
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent>
@@ -64,7 +84,7 @@ export const ActiveJobsModal = ({ isOpen, onClose, jobs }: ActiveJobsModalProps)
             <div>
               <DialogTitle>Active Background Jobs</DialogTitle>
               <DialogDescription>
-                These jobs are running in the background. Your results will be downloaded automatically when complete.
+                These jobs are running in the background. You will be notified upon completion.
               </DialogDescription>
             </div>
             <Button variant="outline" size="icon" onClick={handleRefresh} disabled={isRefreshing}>
@@ -85,14 +105,16 @@ export const ActiveJobsModal = ({ isOpen, onClose, jobs }: ActiveJobsModalProps)
                 )}
                 <div className="flex-1">
                   <p className="text-sm font-medium capitalize flex items-center">
-                    {job.type === 'refine' ? <Wand2 className="h-4 w-4 mr-2 text-purple-500" /> : <Shirt className="h-4 w-4 mr-2 text-blue-500" />}
-                    {job.type === 'refine' ? 'Refining Image...' : 'Virtual Try-On...'}
+                    {renderJobIcon(job.type)}
+                    {renderJobTitle(job)}
                   </p>
                   <p className="text-xs text-muted-foreground truncate">Job ID: {job.id}</p>
                 </div>
-                <Button variant="ghost" size="icon" onClick={() => handleCancelJob(job.id, job.type)}>
-                  <X className="h-4 w-4" />
-                </Button>
+                {job.status !== 'complete' && (
+                  <Button variant="ghost" size="icon" onClick={() => handleCancelJob(job.id, job.type)}>
+                    <X className="h-4 w-4" />
+                  </Button>
+                )}
               </CardContent>
             </Card>
           )) : (

@@ -8,6 +8,7 @@ import { useLanguage } from "@/context/LanguageContext";
 import { useSession } from '@/components/Auth/SessionContextProvider';
 import { showError, showLoading, dismissToast, showSuccess } from '@/utils/toast';
 import { cn } from '@/lib/utils';
+import { useQueryClient } from '@tanstack/react-query';
 
 type ExportStructure = 'flat' | 'by_garment' | 'by_model' | 'by_pose' | 'data_export';
 
@@ -45,6 +46,7 @@ const ExportOption = ({ value, title, description, structure, icon, selected, on
 export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalProps) => {
   const { t } = useLanguage();
   const { supabase, session } = useSession();
+  const queryClient = useQueryClient();
   const [structure, setStructure] = useState<ExportStructure>('by_garment');
   const [isStarting, setIsStarting] = useState(false);
 
@@ -65,7 +67,8 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
       if (error) throw error;
 
       dismissToast(toastId);
-      showSuccess("Export started! You will be notified when your download is ready.");
+      showSuccess("Export started! You can track its progress in the sidebar.");
+      queryClient.invalidateQueries({ queryKey: ['activeJobs', session.user.id] });
       onClose();
     } catch (err: any) {
       dismissToast(toastId);

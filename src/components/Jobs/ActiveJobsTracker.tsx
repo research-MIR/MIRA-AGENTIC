@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSession } from '@/components/Auth/SessionContextProvider';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Download } from 'lucide-react';
 import { showSuccess, showError } from '@/utils/toast';
 import { downloadImage } from '@/lib/utils';
 import { ActiveJobsModal, UnifiedJob } from './ActiveJobsModal';
@@ -30,27 +30,42 @@ export const ActiveJobsTracker = () => {
         .select('id, status, source_person_image_url')
         .eq('user_id', session.user.id)
         .in('status', ['queued', 'processing']);
+      
+      const exportPromise = supabase
+        .from('mira-agent-export-jobs')
+        .select('id, status, download_url, pack:mira-agent-vto-packs-jobs(metadata)')
+        .eq('user_id', session.user.id)
+        .in('status', ['pending', 'processing', 'complete']);
 
-      const [comfyResult, vtoResult] = await Promise.all([comfyPromise, vtoPromise]);
+      const [comfyResult, vtoResult, exportResult] = await Promise.all([comfyPromise, vtoPromise, exportPromise]);
 
       if (comfyResult.error) throw new Error(`ComfyUI jobs fetch failed: ${comfyResult.error.message}`);
       if (vtoResult.error) throw new Error(`VTO jobs fetch failed: ${vtoResult.error.message}`);
+      if (exportResult.error) throw new Error(`Export jobs fetch failed: ${exportResult.error.message}`);
 
       const comfyJobs: UnifiedJob[] = (comfyResult.data || []).map(job => ({
         id: job.id,
         type: 'refine',
-        status: job.status as 'queued' | 'processing',
+        status: job.status as any,
         sourceImageUrl: job.metadata?.source_image_url,
       }));
 
       const vtoJobs: UnifiedJob[] = (vtoResult.data || []).map(job => ({
         id: job.id,
         type: 'vto',
-        status: job.status as 'queued' | 'processing',
+        status: job.status as any,
         sourceImageUrl: job.source_person_image_url,
       }));
 
-      return [...comfyJobs, ...vtoJobs];
+      const exportJobs: UnifiedJob[] = (exportResult.data || []).map((job: any) => ({
+        id: job.id,
+        type: 'export',
+        status: job.status,
+        downloadUrl: job.download_url,
+        packName: job.pack?.metadata?.name || `Pack ${job.id.substring(0, 8)}`,
+      }));
+
+      return [...comfyJobs, ...vtoJobs, ...exportJobs];
     },
     enabled: !!session?.user,
     refetchInterval: 15000,
@@ -61,39 +76,9 @@ export const ActiveJobsTracker = () => {
   useEffect(() => {
     if (!session?.user?.id) return;
 
-    const updateQueryData = (queryKey: any[], updatedJob: any) => {
-      queryClient.setQueryData(queryKey, (oldData: any) => {
-        if (!oldData) return oldData;
-
-        // Handle infinite query data structure
-        if (oldData.pages && Array.isArray(oldData.pages)) {
-          const newPages = oldData.pages.map((page: any[]) =>
-            page.map((job: any) =>
-              job.id === updatedJob.id ? { ...job, ...updatedJob } : job
-            )
-          );
-          return { ...oldData, pages: newPages };
-        }
-        
-        // Handle standard flat array data structure
-        if (Array.isArray(oldData)) {
-          return oldData.map((job: any) =>
-            job.id === updatedJob.id ? { ...job, ...updatedJob } : job
-          );
-        }
-
-        // Return old data if the structure is not recognized
-        return oldData;
-      });
-    };
-
     const handleComfyUpdate = (payload: any) => {
-      console.log('[ActiveJobsTracker] Realtime ComfyUI event:', payload.eventType, payload.new.id);
       const updatedJob = payload.new;
-      
-      updateQueryData(['recentRefinerJobs', session.user.id], updatedJob);
       queryClient.invalidateQueries({ queryKey: ['activeJobs', session.user.id] });
-
       if (payload.eventType === 'UPDATE' && (updatedJob.status === 'complete' || updatedJob.status === 'failed')) {
         if (updatedJob.status === 'complete' && updatedJob.final_result?.publicUrl) {
           showSuccess(`Upscale complete! Downloading now...`, { duration: 10000 });
@@ -106,12 +91,8 @@ export const ActiveJobsTracker = () => {
     };
 
     const handleVtoUpdate = (payload: any) => {
-      console.log('[ActiveJobsTracker] Realtime VTO event:', payload.eventType, payload.new.id);
       const updatedJob = payload.new;
-
-      updateQueryData(['bitstudioJobs', session.user.id], updatedJob);
       queryClient.invalidateQueries({ queryKey: ['activeJobs', session.user.id] });
-
       if (payload.eventType === 'UPDATE' && (updatedJob.status === 'complete' || updatedJob.status === 'failed')) {
         if (updatedJob.status === 'complete' && updatedJob.final_image_url) {
           showSuccess(`Virtual Try-On complete! Downloading now...`, { duration: 10000 });
@@ -123,40 +104,73 @@ export const ActiveJobsTracker = () => {
       }
     };
 
-    const comfyChannel = supabase.channel('comfyui-jobs-tracker')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'mira-agent-comfyui-jobs', filter: `user_id=eq.${session.user.id}` }, handleComfyUpdate)
-      .subscribe();
+    const handleExportUpdate = (payload: any) => {
+        const updatedJob = payload.new;
+        queryClient.invalidateQueries({ queryKey: ['activeJobs', session.user.id] });
+        if (payload.eventType === 'UPDATE' && updatedJob.status === 'complete' && updatedJob.download_url) {
+            showSuccess("Your pack export is ready!", {
+                action: {
+                    label: "Download",
+                    onClick: () => window.open(updatedJob.download_url, '_blank'),
+                },
+                duration: 600000 // 10 minutes
+            });
+        } else if (updatedJob.status === 'failed') {
+            showError(`Pack export failed: ${updatedJob.error_message || 'Unknown error'}`);
+        }
+    };
 
-    const vtoChannel = supabase.channel('bitstudio-jobs-tracker')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'mira-agent-bitstudio-jobs', filter: `user_id=eq.${session.user.id}` }, handleVtoUpdate)
-      .subscribe();
+    const comfyChannel = supabase.channel('comfyui-jobs-tracker').on('postgres_changes', { event: '*', schema: 'public', table: 'mira-agent-comfyui-jobs', filter: `user_id=eq.${session.user.id}` }, handleComfyUpdate).subscribe();
+    const vtoChannel = supabase.channel('bitstudio-jobs-tracker').on('postgres_changes', { event: '*', schema: 'public', table: 'mira-agent-bitstudio-jobs', filter: `user_id=eq.${session.user.id}` }, handleVtoUpdate).subscribe();
+    const exportChannel = supabase.channel('export-jobs-tracker').on('postgres_changes', { event: '*', schema: 'public', table: 'mira-agent-export-jobs', filter: `user_id=eq.${session.user.id}` }, handleExportUpdate).subscribe();
 
     return () => {
       supabase.removeChannel(comfyChannel);
       supabase.removeChannel(vtoChannel);
+      supabase.removeChannel(exportChannel);
     };
   }, [supabase, session?.user?.id, queryClient]);
 
-  if (isLoading || !activeJobs || activeJobs.length === 0) {
+  const activeJobsCount = activeJobs?.filter(j => j.status !== 'complete').length || 0;
+  const completedExports = activeJobs?.filter(j => j.type === 'export' && j.status === 'complete') || [];
+
+  if (isLoading || (activeJobsCount === 0 && completedExports.length === 0)) {
     return null;
   }
 
   return (
     <>
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" className="w-full justify-start gap-2 text-primary" onClick={() => setIsModalOpen(true)}>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span>{activeJobs.length} job(s) in progress</span>
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>
-            <p>Click to view details. Your results will be downloaded automatically when ready.</p>
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-      <ActiveJobsModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} jobs={activeJobs} />
+      {activeJobsCount > 0 && (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" className="w-full justify-start gap-2 text-primary" onClick={() => setIsModalOpen(true)}>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>{activeJobsCount} job(s) in progress</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Click to view details. Your results will be downloaded automatically when ready.</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      )}
+      {completedExports.map(job => (
+        <TooltipProvider key={job.id}>
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <Button variant="secondary" className="w-full justify-start gap-2" onClick={() => window.open(job.downloadUrl, '_blank')}>
+                        <Download className="h-4 w-4" />
+                        <span>Download: {job.packName}</span>
+                    </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                    <p>Your pack export is ready. Click to download.</p>
+                </TooltipContent>
+            </Tooltip>
+        </TooltipProvider>
+      ))}
+      <ActiveJobsModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} jobs={activeJobs || []} />
     </>
   );
 };
