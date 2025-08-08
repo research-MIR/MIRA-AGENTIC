@@ -75,20 +75,53 @@ serve(async (req)=>{
       headers: corsHeaders
     });
   }
-  const { pair_job_id, final_mask_url } = await req.json();
-  const logPrefix = `[BatchInpaintWorker-Step2][${pair_job_id}]`;
-  console.log(`${logPrefix} Received payload. pair_job_id: ${pair_job_id}, final_mask_url: ${final_mask_url}`);
-  if (!pair_job_id || !final_mask_url) {
-    console.error(`${logPrefix} Missing required parameters.`);
-    return new Response(JSON.stringify({
-      error: "pair_job_id and final_mask_url are required."
-    }), {
-      status: 400,
-      headers: corsHeaders
-    });
-  }
+  
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
+  let pair_job_id: string | null = null;
+
   try {
+    const { pair_job_id: pid, final_mask_url } = await req.json();
+    pair_job_id = pid;
+    const logPrefix = `[BatchInpaintWorker-Step2][${pair_job_id}]`;
+    console.log(`${logPrefix} Received payload. pair_job_id: ${pair_job_id}, final_mask_url: ${final_mask_url}`);
+    if (!pair_job_id || !final_mask_url) {
+      console.error(`${logPrefix} Missing required parameters.`);
+      return new Response(JSON.stringify({
+        error: "pair_job_id and final_mask_url are required."
+      }), {
+        status: 400,
+        headers: corsHeaders
+      });
+    }
+
+    let lockAcquired = false;
+    let lastLockError: Error | null = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+        const { data, error } = await supabase.rpc('try_acquire_watchdog_lock');
+        if (!error) {
+            lockAcquired = data;
+            lastLockError = null;
+            break; // Success
+        }
+        lastLockError = error;
+        console.warn(`${logPrefix} Failed to acquire lock, attempt ${attempt}. Retrying...`);
+        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+    }
+
+    if (lastLockError) throw lastLockError;
+
+    if (!lockAcquired) {
+      console.log(`${logPrefix} Advisory lock is held by another process. Exiting gracefully.`);
+      return new Response(JSON.stringify({
+        success: true,
+        message: "Lock held, skipping execution."
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 200
+      });
+    }
+    console.log(`${logPrefix} Advisory lock acquired. Proceeding with job.`);
+
     // --- ATOMIC UPDATE TO CLAIM THE JOB ---
     console.log(`${logPrefix} Attempting to claim job by updating status from 'mask_expanded' to 'processing_step_2'.`);
     const { count, error: claimError } = await supabase.from('mira-agent-batch-inpaint-pair-jobs').update({
@@ -169,6 +202,7 @@ serve(async (req)=>{
     });
     const { data: { publicUrl: source_cropped_url } } = supabase.storage.from(TMP_BUCKET).getPublicUrl(tempPersonPath);
     console.log(`${logPrefix} Cropped person image uploaded to temp storage.`);
+    
     const promptData = await invokeWithRetry(supabase, 'MIRA-AGENT-tool-vto-prompt-helper', {
       body: {
         person_image_url: source_cropped_url,
@@ -178,6 +212,7 @@ serve(async (req)=>{
         is_garment_mode: true
       }
     }, 3, logPrefix);
+
     const finalPrompt = promptData.final_prompt;
     console.log(`${logPrefix} Prompt generated successfully.`);
 
