@@ -104,7 +104,7 @@ export const RecentVtoPacks = () => {
 
       const packsPromise = supabase.from('mira-agent-vto-packs-jobs').select('id, created_at, metadata').eq('user_id', session.user.id);
       const jobsPromise = fetchAll(supabase.from('mira-agent-bitstudio-jobs').select('id, vto_pack_job_id, status, batch_pair_job_id, final_image_url').eq('user_id', session.user.id).not('vto_pack_job_id', 'is', null));
-      const batchPairJobsPromise = fetchAll(supabase.from('mira-agent-batch-inpaint-pair-jobs').select('id, metadata, status').eq('user_id', session.user.id).not('metadata->>vto_pack_job_id', 'is', null));
+      const batchPairJobsPromise = fetchAll(supabase.from('mira-agent-batch-inpaint-pair-jobs').select('id, metadata, status, final_image_url').eq('user_id', session.user.id).not('metadata->>vto_pack_job_id', 'is', null));
       const reportsPromise = supabase.rpc('get_vto_qa_reports_for_user', { p_user_id: session.user.id });
 
       const [{ data: packs, error: packsError }, bitstudioJobs, batchPairJobs, { data: reports, error: reportsError }] = await Promise.all([packsPromise, jobsPromise, batchPairJobsPromise, reportsPromise]);
@@ -156,47 +156,29 @@ export const RecentVtoPacks = () => {
   const packSummaries = useMemo((): PackSummary[] => {
     if (!queryData?.packs) return [];
     const { packs, jobs: bitstudioJobs = [], batchPairJobs = [], reports = [] } = queryData;
+    
+    const allJobs = [
+      ...bitstudioJobs.map((j: any) => ({ ...j, pack_id: j.vto_pack_job_id })),
+      ...batchPairJobs.map((j: any) => ({ ...j, pack_id: j.metadata?.vto_pack_job_id }))
+    ];
+
     const packsMap = new Map<string, PackSummary>();
 
     for (const pack of packs) {
-        packsMap.set(pack.id, {
+        const jobsForThisPack = allJobs.filter(j => j.pack_id === pack.id);
+        
+        const summary: PackSummary = {
             pack_id: pack.id,
             created_at: pack.created_at,
             metadata: pack.metadata || {},
-            total_jobs: 0,
-            completed_jobs: 0,
-            pending_jobs: 0,
+            total_jobs: jobsForThisPack.length,
+            completed_jobs: jobsForThisPack.filter((j: any) => ['complete', 'done'].includes(j.status) && j.final_image_url).length,
+            failed_jobs: jobsForThisPack.filter((j: any) => ['failed', 'permanently_failed'].includes(j.status)).length,
+            pending_jobs: jobsForThisPack.filter((j: any) => j.status === 'pending').length,
             passed_perfect: 0, passed_pose_change: 0, passed_logo_issue: 0, passed_detail_issue: 0,
-            failed_jobs: 0, failure_summary: {}, shape_mismatches: 0, avg_body_preservation_score: null, has_refinement_pass: false,
-        });
-    }
-
-    const allJobsForPack = new Map<string, any[]>();
-
-    bitstudioJobs.forEach((job: any) => {
-        if (job.vto_pack_job_id) {
-            if (!allJobsForPack.has(job.vto_pack_job_id)) allJobsForPack.set(job.vto_pack_job_id, []);
-            allJobsForPack.get(job.vto_pack_job_id)!.push(job);
-        }
-    });
-
-    const processedPairJobIds = new Set(bitstudioJobs.map((j: any) => j.batch_pair_job_id).filter(Boolean));
-    batchPairJobs.forEach((job: any) => {
-        const packId = job.metadata?.vto_pack_job_id;
-        if (packId && !processedPairJobIds.has(job.id)) {
-            if (!allJobsForPack.has(packId)) allJobsForPack.set(packId, []);
-            allJobsForPack.get(packId)!.push(job);
-        }
-    });
-
-    for (const pack of packs) {
-        const summary = packsMap.get(pack.id)!;
-        const jobsForThisPack = allJobsForPack.get(pack.id) || [];
-        
-        summary.total_jobs = jobsForThisPack.length;
-        summary.completed_jobs = jobsForThisPack.filter((j: any) => ['complete', 'done'].includes(j.status) && j.final_image_url).length;
-        summary.failed_jobs = jobsForThisPack.filter((j: any) => ['failed', 'permanently_failed'].includes(j.status)).length;
-        summary.pending_jobs = jobsForThisPack.filter((j: any) => j.status === 'pending').length;
+            failure_summary: {}, shape_mismatches: 0, avg_body_preservation_score: null, has_refinement_pass: false,
+        };
+        packsMap.set(pack.id, summary);
     }
 
     for (const report of reports) {
