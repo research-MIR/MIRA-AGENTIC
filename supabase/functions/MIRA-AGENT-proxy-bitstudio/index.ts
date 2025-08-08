@@ -110,8 +110,17 @@ serve(async (req) => {
     if (retry_job_id) {
       // --- RETRY LOGIC ---
       console.log(`[BitStudioProxy][${requestId}] Handling retry for job ID: ${retry_job_id}`);
-      const { data: jobToRetry, error: fetchError } = await supabase.from('mira-agent-bitstudio-jobs').select('*').eq('id', retry_job_id).single();
+      
+      // Resilient fetch logic
+      let { data: jobToRetry, error: fetchError } = await supabase.from('mira-agent-bitstudio-jobs').select('*').eq('id', retry_job_id).maybeSingle();
       if (fetchError) throw fetchError;
+      if (!jobToRetry) {
+          console.warn(`[BitStudioProxy][${requestId}] Could not find job by ID. Retrying search by batch_pair_job_id...`);
+          const { data: foundByPairId, error: pairFetchError } = await supabase.from('mira-agent-bitstudio-jobs').select('*').eq('batch_pair_job_id', retry_job_id).maybeSingle();
+          if (pairFetchError) throw pairFetchError;
+          if (!foundByPairId) throw new Error(`Job with ID or pair ID ${retry_job_id} not found.`);
+          jobToRetry = foundByPairId;
+      }
 
       if (!retryPayload) {
         throw new Error("Retry request is missing the 'payload' object from the orchestrator.");
@@ -163,12 +172,13 @@ serve(async (req) => {
         bitstudio_task_id: newTaskId,
         metadata: { ...jobToRetry.metadata, engine: 'bitstudio', prompt_used: retryPayload.prompt, retry_count: (jobToRetry.metadata.retry_count || 0) + 1 },
         error_message: null,
-        last_polled_at: null // Reset the poll timestamp to make it immediately available to the poller
-      }).eq('id', retry_job_id);
+        final_image_url: null, // CRITICAL: Clear the old result
+        last_polled_at: null // CRITICAL: Reset the poll timestamp
+      }).eq('id', jobToRetry.id);
       if (updateError) throw updateError;
 
       // The watchdog will pick this up on its next run. No direct invocation needed.
-      return new Response(JSON.stringify({ success: true, jobId: retry_job_id, message: "Job successfully retried." }), {
+      return new Response(JSON.stringify({ success: true, jobId: jobToRetry.id, message: "Job successfully retried." }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 200
       });
