@@ -53,6 +53,7 @@ interface PackSummary {
   };
   total_jobs: number;
   completed_jobs: number;
+  pending_jobs: number;
   passed_perfect: number;
   passed_pose_change: number;
   passed_logo_issue: number;
@@ -64,7 +65,7 @@ interface PackSummary {
   has_refinement_pass: boolean;
 }
 
-const VtoReports = () => {
+export const RecentVtoPacks = () => {
   const { t } = useLanguage();
   const { supabase, session } = useSession();
   const queryClient = useQueryClient();
@@ -74,7 +75,8 @@ const VtoReports = () => {
   const [packToDownload, setPackToDownload] = useState<PackSummary | null>(null);
   const [isStartingRefinement, setIsStartingRefinement] = useState<string | null>(null);
   const [packToRefine, setPackToRefine] = useState<PackSummary | null>(null);
-  const [isResetting, setIsResetting] = useState<string | null>(null);
+  const [isRetrying, setIsRetrying] = useState<string | null>(null);
+  const [isRequeuing, setIsRequeuing] = useState<string | null>(null);
 
   const { data: queryData, isLoading, error } = useQuery<any>({
     queryKey: ['vtoPackSummaries', session?.user?.id],
@@ -162,6 +164,7 @@ const VtoReports = () => {
             metadata: pack.metadata || {},
             total_jobs: 0,
             completed_jobs: 0,
+            pending_jobs: 0,
             passed_perfect: 0, passed_pose_change: 0, passed_logo_issue: 0, passed_detail_issue: 0,
             failed_jobs: 0, failure_summary: {}, shape_mismatches: 0, avg_body_preservation_score: null, has_refinement_pass: false,
         });
@@ -191,6 +194,8 @@ const VtoReports = () => {
         
         summary.total_jobs = jobsForThisPack.length;
         summary.completed_jobs = jobsForThisPack.filter((j: any) => ['complete', 'done', 'failed', 'permanently_failed'].includes(j.status)).length;
+        summary.failed_jobs = jobsForThisPack.filter((j: any) => ['failed', 'permanently_failed'].includes(j.status)).length;
+        summary.pending_jobs = jobsForThisPack.filter((j: any) => j.status === 'pending').length;
     }
 
     for (const report of reports) {
@@ -208,10 +213,10 @@ const VtoReports = () => {
               summary.passed_perfect++;
           }
         } else {
-          summary.failed_jobs++;
-          const reason = reportData.failure_category || "Unknown";
-          summary.failure_summary[reason] = (summary.failure_summary[reason] || 0) + 1;
+          // This count is now derived from job status, not reports
         }
+        const reason = reportData.failure_category || "Unknown";
+        summary.failure_summary[reason] = (summary.failure_summary[reason] || 0) + 1;
         if (reportData.garment_analysis?.garment_type && reportData.garment_comparison?.generated_garment_type && reportData.garment_analysis.garment_type !== reportData.garment_comparison.generated_garment_type) {
             summary.shape_mismatches++;
         }
@@ -279,12 +284,52 @@ const VtoReports = () => {
     }
   };
 
+  const handleRetryFailed = async (pack: PackSummary) => {
+    if (!session?.user) return;
+    setIsRetrying(pack.pack_id);
+    const toastId = showLoading(`Re-queueing ${pack.failed_jobs} failed jobs...`);
+    try {
+        const { data, error } = await supabase.rpc('MIRA-AGENT-retry-failed-jobs-in-pack', {
+            p_pack_id: pack.pack_id
+        });
+        if (error) throw error;
+        dismissToast(toastId);
+        showSuccess(`${data} jobs have been re-queued for processing.`);
+        queryClient.invalidateQueries({ queryKey: ['vtoPackSummaries', session.user.id] });
+    } catch (err: any) {
+        dismissToast(toastId);
+        showError(`Failed to retry jobs: ${err.message}`);
+    } finally {
+        setIsRetrying(null);
+    }
+  };
+
+  const handleRequeuePending = async (pack: PackSummary) => {
+    if (!session?.user) return;
+    setIsRequeuing(pack.pack_id);
+    const toastId = showLoading(`Re-queueing ${pack.pending_jobs} pending jobs...`);
+    try {
+        const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-requeue-pending-in-pack', {
+            body: { pack_id: pack.pack_id, user_id: session.user.id }
+        });
+        if (error) throw error;
+        dismissToast(toastId);
+        showSuccess(data.message);
+        queryClient.invalidateQueries({ queryKey: ['vtoPackSummaries', session.user.id] });
+    } catch (err: any) {
+        dismissToast(toastId);
+        showError(`Failed to re-queue jobs: ${err.message}`);
+    } finally {
+        setIsRequeuing(null);
+    }
+  };
+
   if (isLoading) {
-    return <div className="p-8 space-y-4"><Skeleton className="h-32 w-full" /><Skeleton className="h-32 w-full" /></div>;
+    return <div className="space-y-4"><Skeleton className="h-20 w-full" /><Skeleton className="h-20 w-full" /></div>;
   }
 
   if (error) {
-    return <div className="p-8"><Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Error</AlertTitle><AlertDescription>{error.message}</AlertDescription></Alert></div>;
+    return <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Error</AlertTitle><AlertDescription>{error.message}</AlertDescription></Alert>;
   }
 
   if (packSummaries.length === 0) {
@@ -333,6 +378,18 @@ const VtoReports = () => {
                     </div>
                   </AccordionTrigger>
                   <div className="flex items-center gap-2 pl-4">
+                    {pack.pending_jobs > 0 && (
+                      <Button variant="outline" size="sm" onClick={() => handleRequeuePending(pack)} disabled={isRequeuing === pack.pack_id}>
+                        {isRequeuing === pack.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+                        Re-queue Pending ({pack.pending_jobs})
+                      </Button>
+                    )}
+                    {pack.failed_jobs > 0 && (
+                      <Button variant="outline" size="sm" onClick={() => handleRetryFailed(pack)} disabled={isRetrying === pack.pack_id}>
+                        {isRetrying === pack.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+                        Retry Failed ({pack.failed_jobs})
+                      </Button>
+                    )}
                     <Button variant="outline" size="sm" onClick={() => setPackToDownload(pack)}>
                       <HardDriveDownload className="h-4 w-4 mr-2" />
                       {t('downloadPack')}
