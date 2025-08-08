@@ -163,6 +163,7 @@ serve(async (req) => {
         bitstudio_task_id: newTaskId,
         metadata: { ...jobToRetry.metadata, engine: 'bitstudio', prompt_used: retryPayload.prompt, retry_count: (jobToRetry.metadata.retry_count || 0) + 1 },
         error_message: null,
+        last_polled_at: null // Reset the poll timestamp to make it immediately available to the poller
       }).eq('id', retry_job_id);
       if (updateError) throw updateError;
 
@@ -352,7 +353,7 @@ serve(async (req) => {
         console.log(`[BitStudioProxy][${requestId}] Proactively invoking poller for new job ID: ${newJobId}`);
         let success = false;
         for (let attempt = 1; attempt <= 3; attempt++) {
-            const { error: invokeError } = await supabase.functions.invoke('MIRA-AGENT-poller-bitstudio', { body: { job_id: newJobId } });
+            const { error: invokeError } = await supabase.functions.invoke('MIRA-AGENT-poller-bitstudio', { body: {} });
             if (!invokeError) {
                 console.log(`[BitStudioProxy][${requestId}] Poller for job ${newJobId} invoked successfully on attempt ${attempt}.`);
                 success = true;
