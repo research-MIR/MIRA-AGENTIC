@@ -50,7 +50,7 @@ const fetchWithRetry = async (url: string, options: any, requestId: string, maxR
   throw new Error("Fetch with retry failed unexpectedly.");
 };
 
-async function uploadToBitStudio(fileBlob: Blob, type: BitStudioImageType, filename: string, requestId: string) {
+async function uploadToBitStudio(fileBlob: Blob, type: any, filename: string, requestId: string) {
   const formData = new FormData();
   formData.append('file', fileBlob, filename);
   formData.append('type', type);
