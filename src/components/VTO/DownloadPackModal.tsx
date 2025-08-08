@@ -61,7 +61,6 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
     setProgressMessage("Fetching job list...");
 
     try {
-      // Step 1: Fetch all job details for the pack
       const { data: jobs, error: jobsError } = await supabase
         .from('mira-agent-bitstudio-jobs')
         .select('id, status, final_image_url, source_person_image_url, source_garment_image_url, metadata')
@@ -76,7 +75,6 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
       const totalFiles = jobs.length;
       let processedCount = 0;
 
-      // Step 2: Download and add files to zip one by one
       for (const job of jobs) {
         processedCount++;
         setProgress((processedCount / totalFiles) * 100);
@@ -84,18 +82,22 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
 
         if (!job.final_image_url) continue;
 
-        const modelId = job.metadata?.model_generation_job_id || 'unknown_model';
-        const garmentUrl = job.source_garment_image_url || 'unknown_garment';
-        const garmentId = garmentUrl.split('/').pop()?.split('.')[0] || 'unknown_garment';
-        const posePrompt = job.metadata?.prompt_used || 'unknown_pose';
-        const poseId = sanitize(posePrompt);
-        const filename = `${sanitize(modelId)}_${sanitize(garmentId)}_${poseId}.jpg`;
+        const poseId = job.metadata?.model_generation_job_id?.substring(0, 8) || 'model_unknown';
+        const garmentHash = job.metadata?.garment_analysis?.hash?.substring(0, 8);
+        let garmentId;
+        if (garmentHash) {
+            garmentId = garmentHash;
+        } else {
+            const garmentUrlParts = (job.source_garment_image_url || '').split('/');
+            garmentId = garmentUrlParts.pop()?.split('.')[0].substring(0, 8) || 'garment_unknown';
+        }
+        const filename = `Pose_${poseId}_Garment_${garmentId}.jpg`;
+        
         let folderPath = '';
-
         switch (structure) {
-            case 'by_garment': folderPath = `By_Garment/${sanitize(garmentId)}/`; break;
-            case 'by_model': folderPath = `By_Model/${sanitize(modelId)}/`; break;
-            case 'by_pose': folderPath = `By_Pose/${poseId}/`; break;
+            case 'by_garment': folderPath = `By_Garment/${garmentId}/`; break;
+            case 'by_model': folderPath = `By_Model/${poseId}/`; break;
+            case 'by_pose': folderPath = `By_Pose/${sanitize(job.metadata?.prompt_used || 'unknown_pose')}/`; break;
             case 'data_export': folderPath = 'images/'; break;
             case 'flat': default: folderPath = ''; break;
         }
@@ -110,7 +112,6 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
         }
       }
 
-      // Step 3: Generate and trigger download
       setProgressMessage("Zipping files...");
       const content = await zip.generateAsync({ type: "blob" });
       
@@ -133,10 +134,10 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
   };
 
   const options = [
-    { value: 'by_garment', title: 'By Garment (for Product Analysis)', description: 'Creates a folder for each garment, containing all model images wearing it.', structure: `[Garment_ID]/\n  - [Model_ID]_[Pose].jpg\n  - ...`, icon: <Shirt className="h-5 w-5" /> },
-    { value: 'by_model', title: 'By Model (for Lookbooks)', description: 'Creates a folder for each model, containing all images of them wearing different garments.', structure: `[Model_ID]/\n  - [Garment_ID]_[Pose].jpg\n  - ...`, icon: <Users className="h-5 w-5" /> },
-    { value: 'by_pose', title: 'By Pose (for Technical Analysis)', description: 'Creates a folder for each pose, containing all models and garments in that pose.', structure: `[Pose_ID]/\n  - [Model_ID]_[Garment_ID].jpg\n  - ...`, icon: <PersonStanding className="h-5 w-5" /> },
-    { value: 'flat', title: 'Simple List (Quick Review)', description: 'All images in a single folder, named with their IDs.', structure: `[Model]_[Garment]_[Pose].jpg\n...`, icon: <List className="h-5 w-5" /> },
+    { value: 'by_garment', title: 'By Garment (for Product Analysis)', description: 'Creates a folder for each garment, containing all model images wearing it.', structure: `[Garment_ID]/\n  - Pose_[Pose_ID].jpg\n  - ...`, icon: <Shirt className="h-5 w-5" /> },
+    { value: 'by_model', title: 'By Model (for Lookbooks)', description: 'Creates a folder for each model, containing all images of them wearing different garments.', structure: `[Model_ID]/\n  - Garment_[Garment_ID].jpg\n  - ...`, icon: <Users className="h-5 w-5" /> },
+    { value: 'by_pose', title: 'By Pose (for Technical Analysis)', description: 'Creates a folder for each pose, containing all models and garments in that pose.', structure: `[Pose_ID]/\n  - Model_[Model_ID]_[Garment_ID].jpg\n  - ...`, icon: <PersonStanding className="h-5 w-5" /> },
+    { value: 'flat', title: 'Simple List (Quick Review)', description: 'All images in a single folder, named with their IDs.', structure: `Pose_[Pose_ID]_Garment_[Garment_ID].jpg\n...`, icon: <List className="h-5 w-5" /> },
     { value: 'data_export', title: 'Data Export (for Analysts)', description: 'Exports all images plus a CSV file with detailed metadata for each job.', structure: `images/\nreport.csv`, icon: <Database className="h-5 w-5" /> },
   ];
 
