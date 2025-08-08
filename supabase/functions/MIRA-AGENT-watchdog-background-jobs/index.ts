@@ -15,6 +15,8 @@ const STALLED_AWAITING_FIX_THRESHOLD_SECONDS = 60;
 const STALLED_COMPOSITING_THRESHOLD_SECONDS = 120;
 const STALLED_VTO_WORKER_CATCH_ALL_THRESHOLD_SECONDS = 55;
 const MAX_WATCHDOG_RETRIES = 3;
+const STALLED_MASK_EXPANDED_THRESHOLD_SECONDS = 120;
+const STALLED_PROCESSING_STEP_2_THRESHOLD_SECONDS = 60;
 
 serve(async (req)=>{
   const requestId = `watchdog-bg-${Date.now()}`;
@@ -95,89 +97,184 @@ serve(async (req)=>{
       console.error(`[Watchdog-BG][${requestId}] Task 3 (Completed Aggregations) failed:`, e.message);
     }
     try {
-        console.log(`[Watchdog-BG][${requestId}] === NEW TASK: Recovering Stalled 'pending' Pair Jobs ===`);
-        const threshold = new Date(Date.now() - STALLED_PENDING_PAIR_JOB_THRESHOLD_SECONDS * 1000).toISOString();
-        const { data: stalledJobs, error } = await supabase.from('mira-agent-batch-inpaint-pair-jobs').select('id').eq('status', 'pending').lt('updated_at', threshold);
-        if (error) throw error;
-        if (stalledJobs && stalledJobs.length > 0) {
-            console.log(`[Watchdog-BG][${requestId}] Found ${stalledJobs.length} stalled 'pending' jobs. Re-triggering worker...`);
-            const recoveryPromises = stalledJobs.map(job => supabase.functions.invoke('MIRA-AGENT-worker-batch-inpaint', { body: { pair_job_id: job.id } }));
-            await Promise.allSettled(recoveryPromises);
-            actionsTaken.push(`Re-triggered ${stalledJobs.length} stalled 'pending' jobs.`);
-        } else {
-            console.log(`[Watchdog-BG][${requestId}] No stalled 'pending' jobs found.`);
-        }
+      console.log(`[Watchdog-BG][${requestId}] === NEW TASK: Recovering Stalled 'pending' Pair Jobs ===`);
+      const threshold = new Date(Date.now() - STALLED_PENDING_PAIR_JOB_THRESHOLD_SECONDS * 1000).toISOString();
+      const { data: stalledJobs, error } = await supabase.from('mira-agent-batch-inpaint-pair-jobs').select('id').eq('status', 'pending').lt('updated_at', threshold);
+      if (error) throw error;
+      if (stalledJobs && stalledJobs.length > 0) {
+        console.log(`[Watchdog-BG][${requestId}] Found ${stalledJobs.length} stalled 'pending' jobs. Re-triggering worker...`);
+        const recoveryPromises = stalledJobs.map((job)=>supabase.functions.invoke('MIRA-AGENT-worker-batch-inpaint', {
+            body: {
+              pair_job_id: job.id
+            }
+          }));
+        await Promise.allSettled(recoveryPromises);
+        actionsTaken.push(`Re-triggered ${stalledJobs.length} stalled 'pending' jobs.`);
+      } else {
+        console.log(`[Watchdog-BG][${requestId}] No stalled 'pending' jobs found.`);
+      }
     } catch (e) {
-        console.error(`[Watchdog-BG][${requestId}] Task (Stalled Pending) failed:`, e.message);
+      console.error(`[Watchdog-BG][${requestId}] Task (Stalled Pending) failed:`, e.message);
     }
     try {
-        console.log(`[Watchdog-BG][${requestId}] === NEW TASK: Recovering Stalled 'segmenting'/'expanding_mask' Jobs ===`);
-        const threshold = new Date(Date.now() - STALLED_SEGMENTING_THRESHOLD_SECONDS * 1000).toISOString();
-        const { data: stalledJobs, error } = await supabase.from('mira-agent-batch-inpaint-pair-jobs').select('id').in('status', ['segmenting', 'expanding_mask']).lt('updated_at', threshold);
-        if (error) throw error;
-        if (stalledJobs && stalledJobs.length > 0) {
-            console.log(`[Watchdog-BG][${requestId}] Found ${stalledJobs.length} stalled 'segmenting'/'expanding_mask' jobs. Resetting to 'pending'.`);
-            const jobIds = stalledJobs.map(j => j.id);
-            await supabase.from('mira-agent-batch-inpaint-pair-jobs').update({ status: 'pending', error_message: 'Reset by watchdog due to stall.' }).in('id', jobIds);
-            actionsTaken.push(`Reset ${stalledJobs.length} stalled 'segmenting'/'expanding_mask' jobs.`);
-        } else {
-            console.log(`[Watchdog-BG][${requestId}] No stalled 'segmenting'/'expanding_mask' jobs found.`);
-        }
+      console.log(`[Watchdog-BG][${requestId}] === NEW TASK: Recovering Stalled 'segmenting' Jobs ===`);
+      const threshold = new Date(Date.now() - STALLED_SEGMENTING_THRESHOLD_SECONDS * 1000).toISOString();
+      const { data: stalledJobs, error } = await supabase.from('mira-agent-batch-inpaint-pair-jobs').select('id').in('status', ['segmenting']).lt('updated_at', threshold);
+      if (error) throw error;
+      if (stalledJobs && stalledJobs.length > 0) {
+        console.log(`[Watchdog-BG][${requestId}] Found ${stalledJobs.length} stalled 'segmenting' jobs. Resetting to 'pending'.`);
+        const jobIds = stalledJobs.map((j)=>j.id);
+        await supabase.from('mira-agent-batch-inpaint-pair-jobs').update({
+          status: 'pending',
+          error_message: 'Reset by watchdog due to stall in segmentation.'
+        }).in('id', jobIds);
+        actionsTaken.push(`Reset ${stalledJobs.length} stalled 'segmenting' jobs.`);
+      } else {
+        console.log(`[Watchdog-BG][${requestId}] No stalled 'segmenting' jobs found.`);
+      }
     } catch (e) {
-        console.error(`[Watchdog-BG][${requestId}] Task (Stalled Segmenting) failed:`, e.message);
+      console.error(`[Watchdog-BG][${requestId}] Task (Stalled Segmenting) failed:`, e.message);
     }
     try {
-        console.log(`[Watchdog-BG][${requestId}] === NEW TASK: Recovering Stalled 'awaiting_fix' Jobs ===`);
-        const threshold = new Date(Date.now() - STALLED_AWAITING_FIX_THRESHOLD_SECONDS * 1000).toISOString();
-        const { data: stalledJobs, error } = await supabase.from('mira-agent-bitstudio-jobs').select('id, metadata').eq('status', 'awaiting_fix').lt('updated_at', threshold);
+        console.log(`[Watchdog-BG][${requestId}] === NEW TASK: Recovering Stalled 'mask_expanded' Jobs ===`);
+        const threshold = new Date(Date.now() - STALLED_MASK_EXPANDED_THRESHOLD_SECONDS * 1000).toISOString();
+        const { data: stalledJobs, error } = await supabase.from('mira-agent-batch-inpaint-pair-jobs').select('id, user_id, metadata').eq('status', 'mask_expanded').lt('updated_at', threshold);
         if (error) throw error;
         if (stalledJobs && stalledJobs.length > 0) {
-            console.log(`[Watchdog-BG][${requestId}] Found ${stalledJobs.length} stalled 'awaiting_fix' jobs. Applying retry logic...`);
-            const recoveryPromises = stalledJobs.map(async (job) => {
-                const retries = (job.metadata?.watchdog_retries || 0) + 1;
-                if (retries > MAX_WATCHDOG_RETRIES) {
-                    await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'permanently_failed', error_message: `Job stalled in 'awaiting_fix' and failed after ${MAX_WATCHDOG_RETRIES} recovery attempts.` }).eq('id', job.id);
-                } else {
-                    await supabase.from('mira-agent-bitstudio-jobs').update({ metadata: { ...job.metadata, watchdog_retries: retries } }).eq('id', job.id);
-                    await supabase.functions.invoke('MIRA-AGENT-fixer-orchestrator', { body: { job_id: job.id, qa_report_object: job.metadata?.qa_history?.slice(-1)[0] } });
+            console.log(`[Watchdog-BG][${requestId}] Found ${stalledJobs.length} stalled 'mask_expanded' jobs. Re-triggering expander...`);
+            const recoveryPromises = stalledJobs.map(job => {
+                const rawMaskUrl = job.metadata?.debug_assets?.raw_mask_url;
+                if (!rawMaskUrl) {
+                    console.error(`[Watchdog-BG][${requestId}] Cannot recover job ${job.id}, missing raw_mask_url.`);
+                    return Promise.resolve();
                 }
+                return supabase.functions.invoke('MIRA-AGENT-expander-mask', { body: { parent_pair_job_id: job.id, raw_mask_url: rawMaskUrl, user_id: job.user_id } });
             });
             await Promise.allSettled(recoveryPromises);
-            actionsTaken.push(`Processed ${stalledJobs.length} stalled 'awaiting_fix' jobs.`);
+            actionsTaken.push(`Re-triggered ${stalledJobs.length} stalled 'mask_expanded' jobs.`);
         } else {
-            console.log(`[Watchdog-BG][${requestId}] No stalled 'awaiting_fix' jobs found.`);
+            console.log(`[Watchdog-BG][${requestId}] No stalled 'mask_expanded' jobs found.`);
         }
     } catch (e) {
-        console.error(`[Watchdog-BG][${requestId}] Task (Stalled Awaiting Fix) failed:`, e.message);
+        console.error(`[Watchdog-BG][${requestId}] Task (Stalled Mask Expanded) failed:`, e.message);
     }
     try {
-        console.log(`[Watchdog-BG][${requestId}] === NEW TASK: Recovering Stalled 'compositing' Jobs ===`);
-        const threshold = new Date(Date.now() - STALLED_COMPOSITING_THRESHOLD_SECONDS * 1000).toISOString();
-        const { data: stalledJobs, error } = await supabase.from('mira-agent-bitstudio-jobs').select('id, metadata, final_image_url').eq('status', 'compositing').lt('updated_at', threshold);
+        console.log(`[Watchdog-BG][${requestId}] === NEW TASK: Recovering Stalled 'processing_step_2' Jobs ===`);
+        const threshold = new Date(Date.now() - STALLED_PROCESSING_STEP_2_THRESHOLD_SECONDS * 1000).toISOString();
+        const { data: stalledJobs, error } = await supabase.from('mira-agent-batch-inpaint-pair-jobs').select('id, metadata').eq('status', 'processing_step_2').lt('updated_at', threshold);
         if (error) throw error;
         if (stalledJobs && stalledJobs.length > 0) {
-            console.log(`[Watchdog-BG][${requestId}] Found ${stalledJobs.length} stalled 'compositing' jobs. Applying retry logic...`);
-            const recoveryPromises = stalledJobs.map(async (job) => {
-                const retries = (job.metadata?.watchdog_retries || 0) + 1;
-                if (retries > MAX_WATCHDOG_RETRIES) {
-                    await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'permanently_failed', error_message: `Job stalled in 'compositing' and failed after ${MAX_WATCHDOG_RETRIES} recovery attempts.` }).eq('id', job.id);
-                } else {
-                    await supabase.from('mira-agent-bitstudio-jobs').update({ metadata: { ...job.metadata, watchdog_retries: retries } }).eq('id', job.id);
-                    await supabase.functions.invoke('MIRA-AGENT-compositor-inpaint', { body: { job_id: job.id, final_image_url: job.final_image_url, job_type: 'bitstudio' } });
+            console.log(`[Watchdog-BG][${requestId}] Found ${stalledJobs.length} stalled 'processing_step_2' jobs. Re-triggering worker...`);
+            const recoveryPromises = stalledJobs.map(job => {
+                const finalMaskUrl = job.metadata?.debug_assets?.expanded_mask_url;
+                if (!finalMaskUrl) {
+                    console.error(`[Watchdog-BG][${requestId}] Cannot recover job ${job.id}, missing expanded_mask_url.`);
+                    return Promise.resolve();
                 }
+                return supabase.functions.invoke('MIRA-AGENT-worker-batch-inpaint-step2', { body: { pair_job_id: job.id, final_mask_url: finalMaskUrl } });
             });
             await Promise.allSettled(recoveryPromises);
-            actionsTaken.push(`Processed ${stalledJobs.length} stalled 'compositing' jobs.`);
+            actionsTaken.push(`Re-triggered ${stalledJobs.length} stalled 'processing_step_2' jobs.`);
         } else {
-            console.log(`[Watchdog-BG][${requestId}] No stalled 'compositing' jobs found.`);
+            console.log(`[Watchdog-BG][${requestId}] No stalled 'processing_step_2' jobs found.`);
         }
     } catch (e) {
-        console.error(`[Watchdog-BG][${requestId}] Task (Stalled Compositing) failed:`, e.message);
+        console.error(`[Watchdog-BG][${requestId}] Task (Stalled Step 2) failed:`, e.message);
+    }
+    try {
+      console.log(`[Watchdog-BG][${requestId}] === NEW TASK: Recovering Stalled 'awaiting_fix' Jobs ===`);
+      const threshold = new Date(Date.now() - STALLED_AWAITING_FIX_THRESHOLD_SECONDS * 1000).toISOString();
+      const { data: stalledJobs, error } = await supabase.from('mira-agent-bitstudio-jobs').select('id, metadata').eq('status', 'awaiting_fix').lt('updated_at', threshold);
+      if (error) throw error;
+      if (stalledJobs && stalledJobs.length > 0) {
+        console.log(`[Watchdog-BG][${requestId}] Found ${stalledJobs.length} stalled 'awaiting_fix' jobs. Applying retry logic...`);
+        const recoveryPromises = stalledJobs.map(async (job)=>{
+          const retries = (job.metadata?.watchdog_retries || 0) + 1;
+          if (retries > MAX_WATCHDOG_RETRIES) {
+            await supabase.from('mira-agent-bitstudio-jobs').update({
+              status: 'permanently_failed',
+              error_message: `Job stalled in 'awaiting_fix' and failed after ${MAX_WATCHDOG_RETRIES} recovery attempts.`
+            }).eq('id', job.id);
+          } else {
+            await supabase.from('mira-agent-bitstudio-jobs').update({
+              metadata: {
+                ...job.metadata,
+                watchdog_retries: retries
+              }
+            }).eq('id', job.id);
+            await supabase.functions.invoke('MIRA-AGENT-fixer-orchestrator', {
+              body: {
+                job_id: job.id,
+                qa_report_object: job.metadata?.qa_history?.slice(-1)[0]
+              }
+            });
+          }
+        });
+        await Promise.allSettled(recoveryPromises);
+        actionsTaken.push(`Processed ${stalledJobs.length} stalled 'awaiting_fix' jobs.`);
+      } else {
+        console.log(`[Watchdog-BG][${requestId}] No stalled 'awaiting_fix' jobs found.`);
+      }
+    } catch (e) {
+      console.error(`[Watchdog-BG][${requestId}] Task (Stalled Awaiting Fix) failed:`, e.message);
+    }
+    try {
+      console.log(`[Watchdog-BG][${requestId}] === NEW TASK: Recovering Stalled 'compositing' Jobs ===`);
+      const threshold = new Date(Date.now() - STALLED_COMPOSITING_THRESHOLD_SECONDS * 1000).toISOString();
+      const { data: stalledJobs, error } = await supabase.from('mira-agent-bitstudio-jobs').select('id, metadata, final_image_url').eq('status', 'compositing').lt('updated_at', threshold);
+      if (error) throw error;
+      if (stalledJobs && stalledJobs.length > 0) {
+        console.log(`[Watchdog-BG][${requestId}] Found ${stalledJobs.length} stalled 'compositing' jobs. Applying retry logic...`);
+        const recoveryPromises = stalledJobs.map(async (job)=>{
+          const retries = (job.metadata?.watchdog_retries || 0) + 1;
+          if (retries > MAX_WATCHDOG_RETRIES) {
+            await supabase.from('mira-agent-bitstudio-jobs').update({
+              status: 'permanently_failed',
+              error_message: `Job stalled in 'compositing' and failed after ${MAX_WATCHDOG_RETRIES} recovery attempts.`
+            }).eq('id', job.id);
+          } else {
+            await supabase.from('mira-agent-bitstudio-jobs').update({
+              metadata: {
+                ...job.metadata,
+                watchdog_retries: retries
+              }
+            }).eq('id', job.id);
+            await supabase.functions.invoke('MIRA-AGENT-compositor-inpaint', {
+              body: {
+                job_id: job.id,
+                final_image_url: job.final_image_url,
+                job_type: 'bitstudio'
+              }
+            });
+          }
+        });
+        await Promise.allSettled(recoveryPromises);
+        actionsTaken.push(`Processed ${stalledJobs.length} stalled 'compositing' jobs.`);
+      } else {
+        console.log(`[Watchdog-BG][${requestId}] No stalled 'compositing' jobs found.`);
+      }
+    } catch (e) {
+      console.error(`[Watchdog-BG][${requestId}] Task (Stalled Compositing) failed:`, e.message);
     }
     try {
       console.log(`[Watchdog-BG][${requestId}] === Task (Catch-All): Generic VTO Worker Catch-All ===`);
       const catchAllThreshold = new Date(Date.now() - STALLED_VTO_WORKER_CATCH_ALL_THRESHOLD_SECONDS * 1000).toISOString();
-      const inProgressStatuses = [ 'processing', 'fixing', 'prepare_assets', 'generate_step_1', 'quality_check', 'generate_step_2', 'quality_check_2', 'generate_step_3', 'quality_check_3', 'outfit_completeness_check', 'awaiting_stylist_choice', 'awaiting_auto_complete', 'reframe', 'awaiting_reframe' ];
+      const inProgressStatuses = [
+        'processing',
+        'fixing',
+        'prepare_assets',
+        'generate_step_1',
+        'quality_check',
+        'generate_step_2',
+        'quality_check_2',
+        'generate_step_3',
+        'quality_check_3',
+        'outfit_completeness_check',
+        'awaiting_stylist_choice',
+        'awaiting_auto_complete',
+        'reframe',
+        'awaiting_reframe'
+      ];
       const { data: longStalledJobs, error: catchAllError } = await supabase.from('mira-agent-bitstudio-jobs').select('id, metadata').in('status', inProgressStatuses).eq('metadata->>engine', 'google').lt('updated_at', catchAllThreshold);
       if (catchAllError) throw catchAllError;
       if (longStalledJobs && longStalledJobs.length > 0) {
@@ -186,11 +283,23 @@ serve(async (req)=>{
           const retries = (job.metadata?.watchdog_retries || 0) + 1;
           if (retries > MAX_WATCHDOG_RETRIES) {
             console.error(`[Watchdog-BG][${requestId}] Job ${job.id} has exceeded max watchdog retries. Marking as permanently failed.`);
-            await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'permanently_failed', error_message: `Job stalled and failed after ${MAX_WATCHDOG_RETRIES} watchdog recovery attempts.` }).eq('id', job.id);
+            await supabase.from('mira-agent-bitstudio-jobs').update({
+              status: 'permanently_failed',
+              error_message: `Job stalled and failed after ${MAX_WATCHDOG_RETRIES} watchdog recovery attempts.`
+            }).eq('id', job.id);
           } else {
             console.log(`[Watchdog-BG][${requestId}] Re-triggering worker for long-stalled job ${job.id} (Attempt ${retries}/${MAX_WATCHDOG_RETRIES}).`);
-            await supabase.from('mira-agent-bitstudio-jobs').update({ metadata: { ...job.metadata, watchdog_retries: retries } }).eq('id', job.id);
-            await supabase.functions.invoke('MIRA-AGENT-worker-vto-pack-item', { body: { pair_job_id: job.id } });
+            await supabase.from('mira-agent-bitstudio-jobs').update({
+              metadata: {
+                ...job.metadata,
+                watchdog_retries: retries
+              }
+            }).eq('id', job.id);
+            await supabase.functions.invoke('MIRA-AGENT-worker-vto-pack-item', {
+              body: {
+                pair_job_id: job.id
+              }
+            });
           }
         });
         await Promise.allSettled(recoveryPromises);
@@ -205,13 +314,25 @@ serve(async (req)=>{
       console.log(`[Watchdog-BG][${requestId}] === Task: Starting New Google VTO Jobs ===`);
       const { data: config } = await supabase.from('mira-agent-config').select('value').eq('key', 'VTO_CONCURRENCY_LIMIT').single();
       const concurrencyLimit = config?.value?.limit || 1;
-      const { count: runningJobsCount } = await supabase.from('mira-agent-bitstudio-jobs').select('id', { count: 'exact' }).in('status', [ 'processing', 'fixing', 'prepare_assets' ]).eq('metadata->>engine', 'google');
+      const { count: runningJobsCount } = await supabase.from('mira-agent-bitstudio-jobs').select('id', {
+        count: 'exact'
+      }).in('status', [
+        'processing',
+        'fixing',
+        'prepare_assets'
+      ]).eq('metadata->>engine', 'google');
       const availableSlots = concurrencyLimit - (runningJobsCount || 0);
       if (availableSlots > 0) {
-        const { data: jobsToStart, error: claimError } = await supabase.rpc('claim_next_vto_google_jobs', { p_limit: availableSlots });
+        const { data: jobsToStart, error: claimError } = await supabase.rpc('claim_next_vto_google_jobs', {
+          p_limit: availableSlots
+        });
         if (claimError) throw claimError;
         if (jobsToStart && jobsToStart.length > 0) {
-          const workerPromises = jobsToStart.map((job)=>supabase.functions.invoke('MIRA-AGENT-worker-vto-pack-item', { body: { pair_job_id: job.job_id } }));
+          const workerPromises = jobsToStart.map((job)=>supabase.functions.invoke('MIRA-AGENT-worker-vto-pack-item', {
+              body: {
+                pair_job_id: job.job_id
+              }
+            }));
           await Promise.allSettled(workerPromises);
           actionsTaken.push(`Started ${jobsToStart.length} new Google VTO workers.`);
         } else {
@@ -227,7 +348,11 @@ serve(async (req)=>{
       console.log(`[Watchdog-BG][${requestId}] === Task: Starting New QA Jobs ===`);
       const { data: claimedQaJobId } = await supabase.rpc('claim_next_vto_qa_job');
       if (claimedQaJobId) {
-        supabase.functions.invoke('MIRA-AGENT-worker-vto-reporter', { body: { qa_job_id: claimedQaJobId } }).catch(console.error);
+        supabase.functions.invoke('MIRA-AGENT-worker-vto-reporter', {
+          body: {
+            qa_job_id: claimedQaJobId
+          }
+        }).catch(console.error);
         actionsTaken.push(`Started new VTO QA worker for job ${claimedQaJobId}.`);
       } else {
         console.log(`[Watchdog-BG][${requestId}] No new QA jobs to start.`);
@@ -239,9 +364,15 @@ serve(async (req)=>{
       console.log(`[Watchdog-BG][${requestId}] === Task: Triggering Report Chunk Workers ===`);
       const { data: pendingChunk } = await supabase.from('mira-agent-vto-report-chunks').select('id').eq('status', 'pending').limit(1).maybeSingle();
       if (pendingChunk) {
-        const { error: updateError } = await supabase.from('mira-agent-vto-report-chunks').update({ status: 'processing' }).eq('id', pendingChunk.id);
+        const { error: updateError } = await supabase.from('mira-agent-vto-report-chunks').update({
+          status: 'processing'
+        }).eq('id', pendingChunk.id);
         if (!updateError) {
-          supabase.functions.invoke('MIRA-AGENT-analyzer-vto-report-chunk-worker', { body: { chunk_id: pendingChunk.id } }).catch(console.error);
+          supabase.functions.invoke('MIRA-AGENT-analyzer-vto-report-chunk-worker', {
+            body: {
+              chunk_id: pendingChunk.id
+            }
+          }).catch(console.error);
           actionsTaken.push(`Triggered VTO report chunk worker for ${pendingChunk.id}.`);
         }
       } else {
@@ -254,7 +385,11 @@ serve(async (req)=>{
       console.log(`[Watchdog-BG][${requestId}] === Task: Triggering Final Synthesis ===`);
       const { data: readyPacks } = await supabase.rpc('find_packs_ready_for_synthesis');
       if (readyPacks && readyPacks.length > 0) {
-        const synthesizerPromises = readyPacks.map((pack)=>supabase.functions.invoke('MIRA-AGENT-final-synthesizer-vto-report', { body: { pack_id: pack.pack_id } }));
+        const synthesizerPromises = readyPacks.map((pack)=>supabase.functions.invoke('MIRA-AGENT-final-synthesizer-vto-report', {
+            body: {
+              pack_id: pack.pack_id
+            }
+          }));
         await Promise.allSettled(synthesizerPromises);
         actionsTaken.push(`Triggered final synthesis for ${readyPacks.length} VTO report packs.`);
       } else {
