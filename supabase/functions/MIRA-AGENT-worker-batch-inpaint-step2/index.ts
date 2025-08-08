@@ -169,7 +169,6 @@ serve(async (req)=>{
     });
     const { data: { publicUrl: source_cropped_url } } = supabase.storage.from(TMP_BUCKET).getPublicUrl(tempPersonPath);
     console.log(`${logPrefix} Cropped person image uploaded to temp storage.`);
-    
     const promptData = await invokeWithRetry(supabase, 'MIRA-AGENT-tool-vto-prompt-helper', {
       body: {
         person_image_url: source_cropped_url,
@@ -179,7 +178,6 @@ serve(async (req)=>{
         is_garment_mode: true
       }
     }, 3, logPrefix);
-
     const finalPrompt = promptData.final_prompt;
     console.log(`${logPrefix} Prompt generated successfully.`);
 
