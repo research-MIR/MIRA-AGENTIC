@@ -9,8 +9,8 @@ const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const BITSTUDIO_API_KEY = Deno.env.get('BITSTUDIO_API_KEY');
 const BITSTUDIO_API_BASE = 'https://api.bitstudio.ai';
 const MODEL_NAME = "gemini-2.5-pro-preview-06-05";
-const MAX_RETRIES = 3;
-const RETRY_DELAY_MS = 1500;
+const MAX_RETRIES = 1;
+const RETRY_DELAY_MS = 2500;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
