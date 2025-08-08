@@ -53,6 +53,7 @@ interface PackSummary {
   };
   total_jobs: number;
   completed_jobs: number;
+  pending_jobs: number;
   passed_perfect: number;
   passed_pose_change: number;
   passed_logo_issue: number;
@@ -75,6 +76,7 @@ export const RecentVtoPacks = () => {
   const [isStartingRefinement, setIsStartingRefinement] = useState<string | null>(null);
   const [packToRefine, setPackToRefine] = useState<PackSummary | null>(null);
   const [isRetrying, setIsRetrying] = useState<string | null>(null);
+  const [isRequeuing, setIsRequeuing] = useState<string | null>(null);
 
   const { data: queryData, isLoading, error } = useQuery<any>({
     queryKey: ['vtoPackSummaries', session?.user?.id],
@@ -162,6 +164,7 @@ export const RecentVtoPacks = () => {
             metadata: pack.metadata || {},
             total_jobs: 0,
             completed_jobs: 0,
+            pending_jobs: 0,
             passed_perfect: 0, passed_pose_change: 0, passed_logo_issue: 0, passed_detail_issue: 0,
             failed_jobs: 0, failure_summary: {}, shape_mismatches: 0, avg_body_preservation_score: null, has_refinement_pass: false,
         });
@@ -192,6 +195,7 @@ export const RecentVtoPacks = () => {
         summary.total_jobs = jobsForThisPack.length;
         summary.completed_jobs = jobsForThisPack.filter((j: any) => ['complete', 'done', 'failed', 'permanently_failed'].includes(j.status)).length;
         summary.failed_jobs = jobsForThisPack.filter((j: any) => ['failed', 'permanently_failed'].includes(j.status)).length;
+        summary.pending_jobs = jobsForThisPack.filter((j: any) => j.status === 'pending').length;
     }
 
     for (const report of reports) {
@@ -209,9 +213,10 @@ export const RecentVtoPacks = () => {
               summary.passed_perfect++;
           }
         } else {
-          const reason = reportData.failure_category || "Unknown";
-          summary.failure_summary[reason] = (summary.failure_summary[reason] || 0) + 1;
+          // This count is now derived from job status, not reports
         }
+        const reason = reportData.failure_category || "Unknown";
+        summary.failure_summary[reason] = (summary.failure_summary[reason] || 0) + 1;
         if (reportData.garment_analysis?.garment_type && reportData.garment_comparison?.generated_garment_type && reportData.garment_analysis.garment_type !== reportData.garment_comparison.generated_garment_type) {
             summary.shape_mismatches++;
         }
@@ -299,6 +304,26 @@ export const RecentVtoPacks = () => {
     }
   };
 
+  const handleRequeuePending = async (pack: PackSummary) => {
+    if (!session?.user) return;
+    setIsRequeuing(pack.pack_id);
+    const toastId = showLoading(`Re-queueing ${pack.pending_jobs} pending jobs...`);
+    try {
+        const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-requeue-pending-in-pack', {
+            body: { pack_id: pack.pack_id, user_id: session.user.id }
+        });
+        if (error) throw error;
+        dismissToast(toastId);
+        showSuccess(data.message);
+        queryClient.invalidateQueries({ queryKey: ['vtoPackSummaries', session.user.id] });
+    } catch (err: any) {
+        dismissToast(toastId);
+        showError(`Failed to re-queue jobs: ${err.message}`);
+    } finally {
+        setIsRequeuing(null);
+    }
+  };
+
   if (isLoading) {
     return <div className="space-y-4"><Skeleton className="h-20 w-full" /><Skeleton className="h-20 w-full" /></div>;
   }
@@ -308,7 +333,18 @@ export const RecentVtoPacks = () => {
   }
 
   if (packSummaries.length === 0) {
-    return <p className="text-center text-muted-foreground py-8">No recent batch jobs found.</p>;
+    return (
+      <div className="p-4 md:p-8 h-screen overflow-y-auto">
+        <header className="pb-4 mb-8 border-b">
+          <h1 className="text-3xl font-bold">{t('vtoAnalysisReports')}</h1>
+          <p className="text-muted-foreground">{t('vtoAnalysisReportsDescription')}</p>
+        </header>
+        <div className="text-center py-16">
+          <h2 className="mt-4 text-xl font-semibold">{t('noReportsGenerated')}</h2>
+          <p className="mt-2 text-muted-foreground">{t('noReportsGeneratedDescription')}</p>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -337,6 +373,12 @@ export const RecentVtoPacks = () => {
                   </div>
                 </AccordionTrigger>
                 <div className="flex items-center gap-2 pl-4">
+                  {pack.pending_jobs > 0 && (
+                    <Button variant="outline" size="sm" onClick={() => handleRequeuePending(pack)} disabled={isRequeuing === pack.pack_id}>
+                      {isRequeuing === pack.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+                      Re-queue Pending ({pack.pending_jobs})
+                    </Button>
+                  )}
                   {pack.failed_jobs > 0 && (
                     <Button variant="outline" size="sm" onClick={() => handleRetryFailed(pack)} disabled={isRetrying === pack.pack_id}>
                       {isRetrying === pack.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
@@ -375,5 +417,3 @@ export const RecentVtoPacks = () => {
     </>
   );
 };
-
-export default RecentVtoPacks;

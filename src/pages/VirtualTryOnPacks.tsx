@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useEffect } from "react";
+import React, { useState, useMemo, useRef, useEffect } from "react";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { useLanguage } from "@/context/LanguageContext";
 import { Button } from "@/components/ui/button";
