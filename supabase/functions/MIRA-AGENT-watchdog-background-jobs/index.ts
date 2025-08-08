@@ -1,4 +1,4 @@
-import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
+import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
@@ -93,56 +93,18 @@ serve(async (req)=>{
         console.log(`[Watchdog-BG][${requestId}] No stalled jobs found in ${tableName}.`);
       }
     };
+    
     // --- Each task is now wrapped in its own try/catch block for maximum resilience ---
     try {
-      console.log(`[Watchdog-BG][${requestId}] === Task 1: Recovering BitStudio Pollers ===`);
-      const threshold = new Date(Date.now() - STALLED_POLLER_THRESHOLD_SECONDS * 1000).toISOString();
-      
-      const { data: stalledJobs, error } = await supabase
-        .from('mira-agent-bitstudio-jobs')
-        .select('id')
-        .in('status', ['queued', 'processing'])
-        .not('bitstudio_task_id', 'is', null)
-        .or(`last_polled_at.lt.${threshold},last_polled_at.is.null`);
-
-      if (error) {
-        console.error(`[Watchdog-BG][${requestId}] Error querying stalled BitStudio jobs:`, error.message);
-      } else if (stalledJobs && stalledJobs.length > 0) {
-        console.log(`[Watchdog-BG][${requestId}] Found ${stalledJobs.length} stalled BitStudio job(s). Attempting recovery...`);
-        
-        const recoveryPromises = stalledJobs.map(async (job)=>{
-          const jobId = job.id;
-          const { count, error: updateError } = await supabase
-            .from('mira-agent-bitstudio-jobs')
-            .update({ last_polled_at: new Date().toISOString() })
-            .eq('id', jobId)
-            .or(`last_polled_at.lt.${threshold},last_polled_at.is.null`);
-
-          if (updateError) {
-            console.error(`[Watchdog-BG][${requestId}] Error touching stalled BitStudio job ${jobId}:`, updateError.message);
-            return;
-          }
-
-          if (count && count > 0) {
-            console.log(`[Watchdog-BG][${requestId}] Claimed stalled BitStudio job ${jobId}. Invoking MIRA-AGENT-poller-bitstudio.`);
-            await supabase.functions.invoke('MIRA-AGENT-poller-bitstudio', {
-              body: {
-                job_id: jobId
-              }
-            });
-          } else {
-            console.log(`[Watchdog-BG][${requestId}] Stalled BitStudio job ${jobId} was already handled. Skipping.`);
-          }
-        });
-        
-        await Promise.allSettled(recoveryPromises);
-        actionsTaken.push(`Attempted recovery for ${stalledJobs.length} stalled BitStudio jobs.`);
-      } else {
-        console.log(`[Watchdog-BG][${requestId}] No stalled BitStudio jobs found.`);
-      }
+      console.log(`[Watchdog-BG][${requestId}] === Task 1: Triggering Self-Sufficient BitStudio Poller ===`);
+      const { error: invokeError } = await supabase.functions.invoke('MIRA-AGENT-poller-bitstudio', { body: {} });
+      if (invokeError) throw invokeError;
+      console.log(`[Watchdog-BG][${requestId}] Task 1: Successfully invoked self-sufficient BitStudio poller.`);
+      actionsTaken.push(`Triggered self-sufficient BitStudio poller.`);
     } catch (e) {
-      console.error(`[Watchdog-BG][${requestId}] Task 1 (BitStudio Pollers) failed:`, e.message);
+      console.error(`[Watchdog-BG][${requestId}] Task 1 (Self-Sufficient Poller) failed:`, e.message);
     }
+
     try {
       console.log(`[Watchdog-BG][${requestId}] === Task 2: Triggering Batch Inpaint Worker ===`);
       const { error: invokeError } = await supabase.functions.invoke('MIRA-AGENT-worker-batch-inpaint', {
