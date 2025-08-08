@@ -284,9 +284,33 @@ serve(async (req)=>{
         }
       }
     }
-    throw lastError || new Error("VTO Prompt Helper failed after all retries.");
+    
+    const errorMessage = lastError ? lastError.message : "VTO Prompt Helper failed after all retries.";
+    
+    if (errorMessage.includes("empty or whitespace-only response") || 
+        errorMessage.includes("could not be parsed as JSON") ||
+        errorMessage.includes("did not return a final prompt")) {
+        
+        console.warn(`[VTO-PromptHelper] All retries failed with a recoverable error: "${errorMessage}". Using a generic fallback prompt.`);
+        
+        const fallbackPrompt = "a photorealistic image of the garment on the person";
+        
+        return new Response(JSON.stringify({
+          final_prompt: fallbackPrompt
+        }), {
+          headers: {
+            ...corsHeaders,
+            'Content-Type': 'application/json'
+          },
+          status: 200
+        });
+    } else {
+        // For unrecoverable errors, re-throw to fail the job.
+        throw lastError || new Error("VTO Prompt Helper failed after all retries.");
+    }
+
   } catch (error) {
-    console.error("[VTO-PromptHelper] Error:", error);
+    console.error("[VTO-PromptHelper] Unrecoverable Error:", error);
     return new Response(JSON.stringify({
       error: error.message
     }), {
