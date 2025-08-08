@@ -74,8 +74,6 @@ export const RecentVtoPacks = () => {
   const [packToDownload, setPackToDownload] = useState<PackSummary | null>(null);
   const [isStartingRefinement, setIsStartingRefinement] = useState<string | null>(null);
   const [packToRefine, setPackToRefine] = useState<PackSummary | null>(null);
-  const [isRetrying, setIsRetrying] = useState<string | null>(null);
-  const [isResetting, setIsResetting] = useState<string | null>(null);
   const [isCorrecting, setIsCorrecting] = useState<string | null>(null);
 
   const { data: queryData, isLoading, error } = useQuery<any>({
@@ -193,6 +191,7 @@ export const RecentVtoPacks = () => {
         
         summary.total_jobs = jobsForThisPack.length;
         summary.completed_jobs = jobsForThisPack.filter((j: any) => ['complete', 'done', 'failed', 'permanently_failed'].includes(j.status)).length;
+        summary.failed_jobs = jobsForThisPack.filter((j: any) => ['failed', 'permanently_failed'].includes(j.status)).length;
     }
 
     for (const report of reports) {
@@ -210,7 +209,6 @@ export const RecentVtoPacks = () => {
               summary.passed_perfect++;
           }
         } else {
-          summary.failed_jobs++;
           const reason = reportData.failure_category || "Unknown";
           summary.failure_summary[reason] = (summary.failure_summary[reason] || 0) + 1;
         }
@@ -278,59 +276,6 @@ export const RecentVtoPacks = () => {
         showError(`Failed to start refinement: ${err.message}`);
     } finally {
         setIsStartingRefinement(null);
-    }
-  };
-
-  const handleRetryAllFailed = async (pack: PackSummary) => {
-    if (!session?.user) return;
-    setIsRetrying(pack.pack_id);
-    const toastId = showLoading(`Re-queueing ${pack.failed_jobs} failed jobs...`);
-    try {
-        const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-retry-all-failed-in-pack', {
-            body: { pack_id: pack.pack_id, user_id: session.user.id }
-        });
-        if (error) throw error;
-        dismissToast(toastId);
-        showSuccess(data.message);
-        queryClient.invalidateQueries({ queryKey: ['vtoPackSummaries', session.user.id] });
-    } catch (err: any) {
-        dismissToast(toastId);
-        showError(`Operation failed: ${err.message}`);
-    } finally {
-        setIsRetrying(null);
-    }
-  };
-
-  const handleResetAndRetry = async (pack: PackSummary) => {
-    if (!session?.user) return;
-    setIsResetting(pack.pack_id);
-    const toastId = showLoading(`Resetting analysis for "${pack.metadata?.name || 'Untitled Pack'}"...`);
-
-    try {
-        const { data: resetData, error: resetError } = await supabase.rpc('MIRA-AGENT-admin-reset-vto-pack-analysis', {
-            p_pack_id: pack.pack_id,
-            p_user_id: session.user.id
-        });
-
-        if (resetError) throw resetError;
-        
-        dismissToast(toastId);
-        showSuccess(`Reset complete. Deleted ${resetData} old reports. Now re-queueing analysis...`);
-        
-        const { data: analyzeData, error: analyzeError } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-vto-reporter', {
-            body: { pack_id: pack.pack_id, user_id: session.user.id, analysis_scope: 'all_with_image' }
-        });
-
-        if (analyzeError) throw analyzeError;
-
-        showSuccess(analyzeData.message);
-        queryClient.invalidateQueries({ queryKey: ['vtoPackSummaries', session.user.id] });
-
-    } catch (err: any) {
-        dismissToast(toastId);
-        showError(`Operation failed: ${err.message}`);
-    } finally {
-        setIsResetting(null);
     }
   };
 
