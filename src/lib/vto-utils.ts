@@ -76,3 +76,58 @@ export const isPoseCompatible = (garment: AnalyzedGarment, pose: Pose, isStrict:
   console.log(`${logPrefix} COMPATIBLE.`);
   return { compatible: true, reason: "Compatible" };
 };
+
+export const logPackJobStatusSummary = (packName: string, packId: string, jobs: any[]) => {
+  if (!jobs || jobs.length === 0) {
+    console.log(`[VTO Pack Analysis] No jobs found for pack "${packName}" (${packId}).`);
+    return;
+  }
+
+  const successfulJobs: any[] = [];
+  const restartableJobs: any[] = [];
+
+  jobs.forEach(job => {
+    const isSuccessful = (job.status === 'complete' || job.status === 'done') && job.final_image_url;
+    if (isSuccessful) {
+      successfulJobs.push(job);
+    } else {
+      restartableJobs.push(job);
+    }
+  });
+
+  console.groupCollapsed(`[VTO Pack Analysis] Report for "${packName}" (ID: ${packId})`);
+
+  console.table({
+    'Total Jobs': jobs.length,
+    '✅ Successful': successfulJobs.length,
+    '🔄 To Be Restarted': restartableJobs.length,
+  });
+
+  if (successfulJobs.length > 0) {
+    console.groupCollapsed(`✅ Skipped Jobs (Already Successful) [${successfulJobs.length}]`);
+    successfulJobs.forEach(job => {
+      console.log(`- Job ${job.id}: Skipped because status is '${job.status}' and a final image exists.`);
+    });
+    console.groupEnd();
+  }
+
+  if (restartableJobs.length > 0) {
+    console.group(`🔄 Jobs To Be Restarted [${restartableJobs.length}]`);
+    restartableJobs.forEach(job => {
+      let reason = '';
+      if (job.status === 'failed' || job.status === 'permanently_failed') {
+        reason = `its status is '${job.status}'.`;
+      } else if (job.status === 'pending') {
+        reason = `it is still 'pending'.`;
+      } else if ((job.status === 'complete' || job.status === 'done') && !job.final_image_url) {
+        reason = `its status is '${job.status}' but it is missing a final image URL.`;
+      } else {
+        reason = `it appears to be stuck in the '${job.status}' state.`;
+      }
+      console.log(`- Job ${job.id}: To be restarted because ${reason}`);
+    });
+    console.groupEnd();
+  }
+
+  console.groupEnd();
+};

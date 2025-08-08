@@ -334,15 +334,9 @@ export const RecentVtoPacks = () => {
 
   if (packSummaries.length === 0) {
     return (
-      <div className="p-4 md:p-8 h-screen overflow-y-auto">
-        <header className="pb-4 mb-8 border-b">
-          <h1 className="text-3xl font-bold">{t('vtoAnalysisReports')}</h1>
-          <p className="text-muted-foreground">{t('vtoAnalysisReportsDescription')}</p>
-        </header>
-        <div className="text-center py-16">
-          <h2 className="mt-4 text-xl font-semibold">{t('noReportsGenerated')}</h2>
-          <p className="mt-2 text-muted-foreground">{t('noReportsGeneratedDescription')}</p>
-        </div>
+      <div className="text-center py-16">
+        <h2 className="mt-4 text-xl font-semibold">{t('noReportsGenerated')}</h2>
+        <p className="mt-2 text-muted-foreground">{t('noReportsGeneratedDescription')}</p>
       </div>
     );
   }
@@ -405,7 +399,11 @@ export const RecentVtoPacks = () => {
                 </div>
               </div>
               <AccordionContent className="p-4 pt-0">
-                <VtoPackDetailView packId={pack.pack_id} isOpen={openPackId === pack.pack_id} />
+                <VtoPackDetailView 
+                  packId={pack.pack_id} 
+                  packName={pack.metadata?.name || `Pack from ${new Date(pack.created_at).toLocaleString()}`}
+                  isOpen={openPackId === pack.pack_id} 
+                />
               </AccordionContent>
             </AccordionItem>
           )

@@ -2,15 +2,22 @@ import { useVtoPackJobs } from '@/hooks/useVtoPackJobs';
 import { Loader2, XCircle, CheckCircle, AlertTriangle, UserCheck2, BadgeAlert, FileText, RefreshCw, Wand2, Download, HardDriveDownload, Shirt, ArrowLeft, Copy } from "lucide-react";
 import { SecureImageDisplay } from './SecureImageDisplay';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { VtoJobDetailModal } from './VtoJobDetailModal';
 import { BitStudioJob } from '@/types/vto';
 import { Badge } from '@/components/ui/badge';
 import { BeforeAfterThumbnail } from './BeforeAfterThumbnail';
+import { logPackJobStatusSummary } from '@/lib/vto-utils';
 
-export const VtoPackDetailView = ({ packId, isOpen }: { packId: string, isOpen: boolean }) => {
+export const VtoPackDetailView = ({ packId, packName, isOpen }: { packId: string, packName: string, isOpen: boolean }) => {
   const { data: childJobs, isLoading } = useVtoPackJobs(packId, isOpen);
   const [selectedJob, setSelectedJob] = useState<BitStudioJob | null>(null);
+
+  useEffect(() => {
+    if (isOpen && childJobs && childJobs.length > 0) {
+      logPackJobStatusSummary(packName, packId, childJobs);
+    }
+  }, [isOpen, childJobs, packName, packId]);
 
   if (isLoading) {
     return <div className="flex justify-center p-4"><Loader2 className="h-6 w-6 animate-spin" /></div>;
