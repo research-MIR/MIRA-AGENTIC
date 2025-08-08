@@ -1,10 +1,10 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import JSZip from 'npm:jszip@3.10.1';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-const EXPORT_BUCKET = 'mira-agent-exports';
-const BATCH_SIZE = 50; // Process 50 jobs at a time to keep memory usage low
+const BATCH_SIZE = 50;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -65,6 +65,7 @@ serve(async (req) => {
 
     await supabase.from('mira-agent-export-jobs').update({ total_files: totalCount || 0 }).eq('id', export_job_id);
 
+    const zip = new JSZip();
     const csvData = [];
     let processedCount = 0;
 
@@ -100,8 +101,7 @@ serve(async (req) => {
 
             const imageBuffer = await downloadFromSupabase(supabase, job.final_image_url);
             if (imageBuffer) {
-                const finalPath = `${exportFolderName}/${folderPath}${filename}`;
-                await supabase.storage.from(EXPORT_BUCKET).upload(finalPath, imageBuffer, { contentType: 'image/jpeg', upsert: true });
+                zip.file(`${folderPath}${filename}`, imageBuffer);
             }
 
             if (export_structure === 'data_export') {
@@ -116,15 +116,21 @@ serve(async (req) => {
         const header = Object.keys(csvData[0] || {}).join(',');
         const rows = csvData.map(row => Object.values(row).map(val => `"${String(val).replace(/"/g, '""')}"`).join(','));
         const csvContent = [header, ...rows].join('\n');
-        const csvPath = `${exportFolderName}/report.csv`;
-        await supabase.storage.from(EXPORT_BUCKET).upload(csvPath, csvContent, { contentType: 'text/csv', upsert: true });
+        zip.file('report.csv', csvContent);
     }
 
-    const storageExplorerUrl = `${SUPABASE_URL}/project/${Deno.env.get('SUPABASE_PROJECT_ID')}/storage/buckets/${EXPORT_BUCKET}?path=${encodeURIComponent(exportFolderName)}`;
+    console.log(`${logPrefix} Generating zip file...`);
+    const zipBlob = await zip.generateAsync({ type: 'blob' });
+    
+    const zipPath = `${user_id}/exports/${exportFolderName}.zip`;
+    await supabase.storage.from('mira-agent-exports').upload(zipPath, zipBlob, { contentType: 'application/zip', upsert: true });
+    
+    const { data: signedUrlData, error: urlError } = await supabase.storage.from('mira-agent-exports').createSignedUrl(zipPath, 3600); // 1-hour expiry
+    if (urlError) throw urlError;
 
-    await supabase.from('mira-agent-export-jobs').update({ status: 'complete', download_url: storageExplorerUrl }).eq('id', export_job_id);
+    await supabase.from('mira-agent-export-jobs').update({ status: 'complete', download_url: signedUrlData.signedUrl }).eq('id', export_job_id);
 
-    console.log(`${logPrefix} Export complete. Folder URL: ${storageExplorerUrl}`);
+    console.log(`${logPrefix} Export complete. Signed URL created.`);
     return new Response(JSON.stringify({ success: true }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
