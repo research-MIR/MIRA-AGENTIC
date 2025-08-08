@@ -5,7 +5,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Progress } from "@/components/ui/progress";
-import { BarChart2, CheckCircle, XCircle, Loader2, AlertTriangle, UserCheck2, BadgeAlert, FileText, RefreshCw, Wand2, Download, HardDriveDownload, Shirt, ArrowLeft, Copy } from "lucide-react";
+import { BarChart2, CheckCircle, XCircle, Loader2, AlertTriangle, UserCheck2, BadgeAlert, FileText, RefreshCw, Wand2, Download, HardDriveDownload, Shirt, ArrowLeft } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -74,7 +74,7 @@ export const RecentVtoPacks = () => {
   const [packToDownload, setPackToDownload] = useState<PackSummary | null>(null);
   const [isStartingRefinement, setIsStartingRefinement] = useState<string | null>(null);
   const [packToRefine, setPackToRefine] = useState<PackSummary | null>(null);
-  const [isCorrecting, setIsCorrecting] = useState<string | null>(null);
+  const [isRetrying, setIsRetrying] = useState<string | null>(null);
 
   const { data: queryData, isLoading, error } = useQuery<any>({
     queryKey: ['vtoPackSummaries', session?.user?.id],
@@ -279,23 +279,23 @@ export const RecentVtoPacks = () => {
     }
   };
 
-  const handleCreateCorrectedBatch = async (pack: PackSummary) => {
+  const handleRetryFailed = async (pack: PackSummary) => {
     if (!session?.user) return;
-    setIsCorrecting(pack.pack_id);
-    const toastId = showLoading(`Creating corrected batch for "${pack.metadata?.name || 'Untitled Pack'}"...`);
+    setIsRetrying(pack.pack_id);
+    const toastId = showLoading(`Re-queueing ${pack.failed_jobs} failed jobs...`);
     try {
-        const { data: newPackId, error } = await supabase.rpc('MIRA-AGENT-create-corrected-vto-pack', {
-            p_source_pack_id: pack.pack_id
+        const { data, error } = await supabase.rpc('MIRA-AGENT-retry-failed-jobs-in-pack', {
+            p_pack_id: pack.pack_id
         });
         if (error) throw error;
         dismissToast(toastId);
-        showSuccess(`New corrected pack created. ID: ${newPackId}`);
+        showSuccess(`${data} jobs have been re-queued for processing.`);
         queryClient.invalidateQueries({ queryKey: ['vtoPackSummaries', session.user.id] });
     } catch (err: any) {
         dismissToast(toastId);
-        showError(`Failed to create corrected batch: ${err.message}`);
+        showError(`Failed to retry jobs: ${err.message}`);
     } finally {
-        setIsCorrecting(null);
+        setIsRetrying(null);
     }
   };
 
@@ -338,24 +338,10 @@ export const RecentVtoPacks = () => {
                 </AccordionTrigger>
                 <div className="flex items-center gap-2 pl-4">
                   {pack.failed_jobs > 0 && (
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button variant="outline" size="sm" disabled={isCorrecting === pack.pack_id}>
-                          {isCorrecting === pack.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Copy className="h-4 w-4 mr-2" />}
-                          {t('createCorrectedBatch')}
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>{t('createCorrectedBatch')}</AlertDialogTitle>
-                          <AlertDialogDescription>{t('createCorrectedBatchDesc')}</AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>Cancel</AlertDialogCancel>
-                          <AlertDialogAction onClick={() => handleCreateCorrectedBatch(pack)}>{t('createCorrectedBatchAction')}</AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
+                    <Button variant="outline" size="sm" onClick={() => handleRetryFailed(pack)} disabled={isRetrying === pack.pack_id}>
+                      {isRetrying === pack.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+                      Retry Failed ({pack.failed_jobs})
+                    </Button>
                   )}
                   <Button variant="outline" size="sm" onClick={() => setPackToDownload(pack)}>
                     <HardDriveDownload className="h-4 w-4 mr-2" />
