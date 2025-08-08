@@ -103,7 +103,7 @@ export const RecentVtoPacks = () => {
       };
 
       const packsPromise = supabase.from('mira-agent-vto-packs-jobs').select('id, created_at, metadata').eq('user_id', session.user.id);
-      const jobsPromise = fetchAll(supabase.from('mira-agent-bitstudio-jobs').select('id, vto_pack_job_id, status, batch_pair_job_id').eq('user_id', session.user.id).not('vto_pack_job_id', 'is', null));
+      const jobsPromise = fetchAll(supabase.from('mira-agent-bitstudio-jobs').select('id, vto_pack_job_id, status, batch_pair_job_id, final_image_url').eq('user_id', session.user.id).not('vto_pack_job_id', 'is', null));
       const batchPairJobsPromise = fetchAll(supabase.from('mira-agent-batch-inpaint-pair-jobs').select('id, metadata, status').eq('user_id', session.user.id).not('metadata->>vto_pack_job_id', 'is', null));
       const reportsPromise = supabase.rpc('get_vto_qa_reports_for_user', { p_user_id: session.user.id });
 
