@@ -10,7 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
-import { Loader2, Download, CheckCircle, ImageIcon } from "lucide-react";
+import { Loader2, Download, CheckCircle, ImageIcon, Shirt, Users, List } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
 import { useSession } from '@/components/Auth/SessionContextProvider';
 import { showError, showSuccess } from '@/utils/toast';
@@ -19,6 +19,7 @@ import JSZip from 'jszip';
 import { Progress } from '@/components/ui/progress';
 
 type ExportScope = 'all_with_image' | 'passed_qa';
+type ExportStructure = 'by_garment' | 'by_model' | 'flat';
 
 interface PackSummary {
   pack_id: string;
@@ -56,6 +57,7 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
   const { t } = useLanguage();
   const { supabase, session } = useSession();
   const [scope, setScope] = useState<ExportScope>('all_with_image');
+  const [structure, setStructure] = useState<ExportStructure>('by_garment');
   const [isDownloading, setIsDownloading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [progressMessage, setProgressMessage] = useState('');
@@ -122,13 +124,27 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
             const garmentUrlParts = (job.source_garment_image_url || '').split('/');
             garmentId = garmentUrlParts.pop()?.split('.')[0].substring(0, 8) || 'garment_unknown';
         }
+        
+        let filePathInZip = '';
         const filename = `Pose_${poseId}_Garment_${garmentId}.jpg`;
+
+        switch (structure) {
+          case 'by_garment':
+            filePathInZip = `By_Garment/${sanitize(garmentId)}/${filename}`;
+            break;
+          case 'by_model':
+            filePathInZip = `By_Model/${sanitize(poseId)}/${filename}`;
+            break;
+          case 'flat':
+            filePathInZip = filename;
+            break;
+        }
         
         try {
           const response = await fetch(job.final_image_url);
           if (!response.ok) continue;
           const blob = await response.blob();
-          zip.file(filename, blob);
+          zip.file(filePathInZip, blob);
         } catch (e) {
           console.error(`Failed to fetch ${job.final_image_url}`, e);
         }
@@ -155,18 +171,24 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
     }
   };
 
-  const options = [
+  const scopeOptions = [
     { value: 'all_with_image', title: t('downloadAllWithImage'), description: t('downloadAllWithImageDesc'), icon: <ImageIcon className="h-5 w-5" /> },
     { value: 'passed_qa', title: t('downloadPassedQa'), description: t('downloadPassedQaDesc'), icon: <CheckCircle className="h-5 w-5" /> },
   ];
 
+  const structureOptions = [
+    { value: 'by_garment', title: t('downloadByGarment'), description: t('downloadByGarmentDesc'), icon: <Shirt className="h-5 w-5" /> },
+    { value: 'by_model', title: t('downloadByModel'), description: t('downloadByModelDesc'), icon: <Users className="h-5 w-5" /> },
+    { value: 'flat', title: t('downloadFlat'), description: t('downloadFlatDesc'), icon: <List className="h-5 w-5" /> },
+  ];
+
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-3xl">
         <DialogHeader>
           <DialogTitle>{t('downloadOptions')}: {pack?.metadata?.name}</DialogTitle>
           <DialogDescription>
-            Choose which set of images you would like to include in your ZIP export.
+            Choose which images to include and how to organize them in the final ZIP file.
           </DialogDescription>
         </DialogHeader>
         <div className="py-4">
@@ -177,11 +199,24 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
               <Progress value={progress} className="w-full mt-2" />
             </div>
           ) : (
-            <RadioGroup value={scope} onValueChange={(value: ExportScope) => setScope(value)}>
-              <div className="space-y-2">
-                {options.map(opt => <ExportOption key={opt.value} {...opt} selected={scope} onSelect={setScope} />)}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <h3 className="font-semibold mb-2">1. Select Images to Include</h3>
+                <RadioGroup value={scope} onValueChange={(value: ExportScope) => setScope(value)}>
+                  <div className="space-y-2">
+                    {scopeOptions.map(opt => <ExportOption key={opt.value} {...opt} selected={scope} onSelect={setScope} />)}
+                  </div>
+                </RadioGroup>
               </div>
-            </RadioGroup>
+              <div>
+                <h3 className="font-semibold mb-2">2. Choose Folder Structure</h3>
+                <RadioGroup value={structure} onValueChange={(value: ExportStructure) => setStructure(value)}>
+                  <div className="space-y-2">
+                    {structureOptions.map(opt => <ExportOption key={opt.value} {...opt} selected={structure} onSelect={setStructure} />)}
+                  </div>
+                </RadioGroup>
+              </div>
+            </div>
           )}
         </div>
         <DialogFooter>
