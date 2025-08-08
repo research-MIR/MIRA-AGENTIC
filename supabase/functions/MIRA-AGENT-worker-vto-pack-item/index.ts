@@ -19,7 +19,7 @@ const GENERATED_IMAGES_BUCKET = 'mira-generations';
 const ENABLE_BITSTUDIO_FALLBACK = false; // FEATURE FLAG
 const FAIL_ON_OUTFIT_ANALYSIS_ERROR = true; // FEATURE FLAG: If true, job fails on analysis error. If false, it skips and proceeds.
 const OUTFIT_ANALYSIS_MAX_RETRIES = 3;
-const OUTFIT_ANALYSIS_RETRY_DELAY_MS = 1000;
+const OUTFIT_ANALYSIS_RETRY_DELAY_MS = 15000; // Increased delay
 const REFRAME_STALL_THRESHOLD_SECONDS = 55;
 const MAX_REFRAME_RETRIES = 2;
 
@@ -377,7 +377,7 @@ async function invokeWithRetry(supabase: SupabaseClient, functionName: string, p
       lastError = err instanceof Error ? err : new Error(String(err));
       console.warn(`${logPrefix} Invocation of '${functionName}' failed on attempt ${attempt}/${maxRetries}. Error: ${lastError.message}`);
       if (attempt < maxRetries) {
-        const delay = 15000 * attempt;
+        const delay = 15000 * attempt; // Exponential backoff
         console.warn(`${logPrefix} Waiting ${delay}ms before retrying...`);
         await new Promise((resolve)=>setTimeout(resolve, delay));
       }
@@ -506,7 +506,11 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
   }
   if (qaData.action === 'select') {
     console.log(`${logPrefix} QA selected an image. Proceeding to finalize.`);
-    const bestImageBase64 = variations[qaData.best_image_index].base64Image;
+    const bestImage = variations[qaData.best_image_index];
+    if (!bestImage || !bestImage.base64Image) {
+        throw new Error(`Defensive check failed: QA selected index ${qaData.best_image_index}, but the image data is missing.`);
+    }
+    const bestImageBase64 = bestImage.base64Image;
     const bestImageUrl = await uploadBase64ToStorage(supabase, bestImageBase64, job.user_id, 'qa_best.png');
     await supabase.from('mira-agent-bitstudio-jobs').update({
       metadata: {
