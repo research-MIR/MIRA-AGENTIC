@@ -3,13 +3,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Button } from "@/components/ui/button";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
-import { Loader2 } from "lucide-react";
+import { Loader2, List, Shirt, Users, PersonStanding, Database, Download } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
 import { useSession } from '@/components/Auth/SessionContextProvider';
 import { showError, showLoading, dismissToast, showSuccess } from '@/utils/toast';
-import JSZip from 'jszip';
+import { cn } from '@/lib/utils';
 
-type DownloadScope = 'all_completed' | 'passed_only';
+type ExportStructure = 'flat' | 'by_garment' | 'by_model' | 'by_pose' | 'data_export';
 
 interface PackSummary {
   pack_id: string;
@@ -22,57 +22,60 @@ interface DownloadPackModalProps {
   pack: PackSummary | null;
 }
 
+const ExportOption = ({ value, title, description, structure, icon, selected, onSelect }: any) => (
+  <div
+    className={cn(
+      "flex items-start space-x-3 p-4 border rounded-md cursor-pointer transition-colors",
+      selected === value && "border-primary bg-primary/5"
+    )}
+    onClick={() => onSelect(value)}
+  >
+    <RadioGroupItem value={value} id={value} className="mt-1" />
+    <div className="flex-1">
+      <Label htmlFor={value} className="font-semibold flex items-center gap-2 cursor-pointer">
+        {icon}
+        {title}
+      </Label>
+      <p className="text-sm text-muted-foreground mt-1">{description}</p>
+      <pre className="text-xs bg-muted p-2 rounded-md mt-2 whitespace-pre-wrap">{structure}</pre>
+    </div>
+  </div>
+);
+
 export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalProps) => {
   const { t } = useLanguage();
   const { supabase, session } = useSession();
-  const [scope, setScope] = useState<DownloadScope>('passed_only');
+  const [structure, setStructure] = useState<ExportStructure>('by_garment');
   const [isDownloading, setIsDownloading] = useState(false);
 
   const handleDownload = async () => {
     if (!pack || !session?.user) return;
     setIsDownloading(true);
-    const toastId = showLoading("Fetching image URLs...");
+    const toastId = showLoading("Preparing your download... This may take a while for large packs.");
 
     try {
-      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-get-pack-image-urls', {
-        body: { pack_id: pack.pack_id, scope, user_id: session.user.id }
-      });
-      if (error) throw error;
-      const urls = data.urls;
-      if (urls.length === 0) {
-        dismissToast(toastId);
-        showSuccess("No images found for the selected scope.");
-        return;
-      }
-
-      dismissToast(toastId);
-      showLoading(`Downloading and zipping ${urls.length} images...`);
-
-      const zip = new JSZip();
-      const imagePromises = urls.map(async (url: string) => {
-        try {
-          const response = await fetch(url);
-          if (!response.ok) return null;
-          const blob = await response.blob();
-          const filename = url.split('/').pop() || 'image.png';
-          zip.file(filename, blob);
-        } catch (e) {
-          console.error(`Failed to fetch ${url}`, e);
+      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-pack-exporter', {
+        body: {
+          pack_id: pack.pack_id,
+          user_id: session.user.id,
+          export_structure: structure,
         }
       });
-      await Promise.all(imagePromises);
 
-      const content = await zip.generateAsync({ type: "blob" });
+      if (error) throw error;
+
+      const downloadUrl = data.downloadUrl;
+      if (!downloadUrl) throw new Error("The export function did not return a download URL.");
+
       const link = document.createElement('a');
-      link.href = URL.createObjectURL(content);
-      link.download = `${pack.metadata?.name || pack.pack_id}.zip`;
+      link.href = downloadUrl;
+      link.setAttribute('download', `${pack.metadata?.name || pack.pack_id}.zip`);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      URL.revokeObjectURL(link.href);
 
       dismissToast(toastId);
-      showSuccess("Download started!");
+      showSuccess("Your download has started!");
       onClose();
     } catch (err: any) {
       dismissToast(toastId);
@@ -82,36 +85,35 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
     }
   };
 
+  const options = [
+    { value: 'by_garment', title: 'By Garment (for Product Analysis)', description: 'Creates a folder for each garment, containing all model images wearing it.', structure: `[Garment_ID]/\n  - [Model_ID]_[Pose].jpg\n  - ...`, icon: <Shirt className="h-5 w-5" /> },
+    { value: 'by_model', title: 'By Model (for Lookbooks)', description: 'Creates a folder for each model, containing all images of them wearing different garments.', structure: `[Model_ID]/\n  - [Garment_ID]_[Pose].jpg\n  - ...`, icon: <Users className="h-5 w-5" /> },
+    { value: 'by_pose', title: 'By Pose (for Technical Analysis)', description: 'Creates a folder for each pose, containing all models and garments in that pose.', structure: `[Pose_ID]/\n  - [Model_ID]_[Garment_ID].jpg\n  - ...`, icon: <PersonStanding className="h-5 w-5" /> },
+    { value: 'flat', title: 'Simple List (Quick Review)', description: 'All images in a single folder, named with their IDs.', structure: `[Model]_[Garment]_[Pose].jpg\n...`, icon: <List className="h-5 w-5" /> },
+    { value: 'data_export', title: 'Data Export (for Analysts)', description: 'Exports all images plus a CSV file with detailed metadata for each job.', structure: `images/\nreport.csv`, icon: <Database className="h-5 w-5" /> },
+  ];
+
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent>
+      <DialogContent className="max-w-3xl">
         <DialogHeader>
-          <DialogTitle>{t('downloadPack')}: {pack?.metadata?.name}</DialogTitle>
-          <DialogDescription>{t('downloadOptions')}</DialogDescription>
+          <DialogTitle>Advanced Export: {pack?.metadata?.name}</DialogTitle>
+          <DialogDescription>
+            Choose how to organize the generated images to facilitate analysis and review.
+          </DialogDescription>
         </DialogHeader>
-        <div className="py-4 space-y-2">
-          <RadioGroup value={scope} onValueChange={(value: DownloadScope) => setScope(value)}>
-            <div className="flex items-start space-x-3 p-4 border rounded-md has-[:checked]:border-primary">
-              <RadioGroupItem value="passed_only" id="passed_only" />
-              <Label htmlFor="passed_only" className="font-normal w-full cursor-pointer">
-                <span className="font-semibold block">{t('downloadPassedQa')}</span>
-                <span className="text-sm text-muted-foreground">{t('downloadPassedQaDesc')}</span>
-              </Label>
-            </div>
-            <div className="flex items-start space-x-3 p-4 border rounded-md has-[:checked]:border-primary">
-              <RadioGroupItem value="all_completed" id="all_completed" />
-              <Label htmlFor="all_completed" className="font-normal w-full cursor-pointer">
-                <span className="font-semibold block">{t('downloadSuccessfulOnly')}</span>
-                <span className="text-sm text-muted-foreground">{t('downloadSuccessfulOnlyDesc')}</span>
-              </Label>
+        <div className="py-4">
+          <RadioGroup value={structure} onValueChange={(value: ExportStructure) => setStructure(value)}>
+            <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-2">
+              {options.map(opt => <ExportOption key={opt.value} {...opt} selected={structure} onSelect={setStructure} />)}
             </div>
           </RadioGroup>
         </div>
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose} disabled={isDownloading}>{t('cancel')}</Button>
+          <Button variant="ghost" onClick={onClose} disabled={isDownloading}>Cancel</Button>
           <Button onClick={handleDownload} disabled={isDownloading}>
-            {isDownloading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {t('startDownload')}
+            {isDownloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+            Start Download
           </Button>
         </DialogFooter>
       </DialogContent>
