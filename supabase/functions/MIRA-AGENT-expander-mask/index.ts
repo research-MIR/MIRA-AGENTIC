@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { createCanvas, loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
+import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -40,7 +41,7 @@ async function invokeWithRetry(supabase: SupabaseClient, functionName: string, p
             lastError = err instanceof Error ? err : new Error(String(err));
             console.warn(`${logPrefix} Invocation of '${functionName}' failed on attempt ${attempt}/${maxRetries}. Error: ${lastError.message}`);
             if (attempt < maxRetries) {
-                const delay = 1000 * Math.pow(2, attempt - 1); // 1s, 2s, 4s...
+                const delay = 20000 * Math.pow(2, attempt - 1); // 20s, 40s, 80s...
                 console.warn(`${logPrefix} Waiting ${delay}ms before retrying...`);
                 await new Promise(resolve => setTimeout(resolve, delay));
             }
