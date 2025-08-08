@@ -1,7 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { createCanvas, loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
-import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -86,8 +85,20 @@ serve(async (req) => {
     const rawMaskBuffer = await response.arrayBuffer();
     const rawMaskImage = await loadImage(new Uint8Array(rawMaskBuffer));
 
-    const w = rawMaskImage.width();
-    const h = rawMaskImage.height();
+    const originalWidth = rawMaskImage.width();
+    const originalHeight = rawMaskImage.height();
+
+    // --- Down-scaling for large images ---
+    const MAX_DIMENSION = 5048;
+    let scale = 1;
+    let w = originalWidth;
+    let h = originalHeight;
+    if (Math.max(w, h) > MAX_DIMENSION) {
+      scale = MAX_DIMENSION / Math.max(w, h);
+      w = Math.round(w * scale);
+      h = Math.round(h * scale);
+      console.log(`[Expander][${requestId}] Image too large, down-scaling to ${w}x${h}`);
+    }
 
     const canvas = createCanvas(w, h);
     const ctx = canvas.getContext('2d');
@@ -102,6 +113,7 @@ serve(async (req) => {
     console.log(`[Expander][${requestId}] Expanding alpha mask by ${expansionPx}px.`);
     dilateAlpha(alphaChannel, w, h, expansionPx);
 
+    // Create the final black and white mask from the dilated alpha channel
     for (let i = 0; i < alphaChannel.length; i++) {
       const value = alphaChannel[i];
       imageData.data[i * 4] = value;
@@ -111,7 +123,17 @@ serve(async (req) => {
     }
     ctx.putImageData(imageData, 0, 0);
 
-    const finalMaskBuffer = canvas.toBuffer('image/png');
+    let finalCanvas = canvas;
+    if (scale < 1) {
+      console.log(`[Expander][${requestId}] Scaling mask back up to ${originalWidth}x${originalHeight}.`);
+      const upscaledCanvas = createCanvas(originalWidth, originalHeight);
+      const upscaledCtx = upscaledCanvas.getContext('2d');
+      upscaledCtx.imageSmoothingEnabled = false;
+      upscaledCtx.drawImage(canvas, 0, 0, originalWidth, originalHeight);
+      finalCanvas = upscaledCanvas;
+    }
+
+    const finalMaskBuffer = finalCanvas.toBuffer('image/png');
     const expandedMaskUrl = await uploadBufferToStorage(supabase, finalMaskBuffer, user_id, 'final_expanded_mask.png');
     if (!expandedMaskUrl) throw new Error("Failed to upload the final expanded mask.");
     console.log(`[Expander][${requestId}] Final expanded mask uploaded to: ${expandedMaskUrl}`);
@@ -134,15 +156,7 @@ serve(async (req) => {
       }
     }).eq('id', parent_pair_job_id);
 
-    console.log(`[Expander][${requestId}] Invoking next worker in chain: MIRA-AGENT-worker-batch-inpaint-step2`);
-    supabase.functions.invoke('MIRA-AGENT-worker-batch-inpaint-step2', {
-      body: {
-        pair_job_id: parent_pair_job_id,
-        final_mask_url: expandedMaskUrl
-      }
-    }).catch((err) => {
-      console.error(`[Expander][${requestId}] Non-critical error invoking next worker:`, err.message);
-    });
+    console.log(`[Expander][${requestId}] Job complete. The watchdog will now handle the next step.`);
 
     return new Response(JSON.stringify({
       success: true,
