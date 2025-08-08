@@ -163,14 +163,14 @@ serve(async (req) => {
         bitstudio_task_id: newTaskId,
         metadata: { ...jobToRetry.metadata, engine: 'bitstudio', prompt_used: retryPayload.prompt, retry_count: (jobToRetry.metadata.retry_count || 0) + 1 },
         error_message: null,
-        last_polled_at: new Date().toISOString(),
       }).eq('id', retry_job_id);
       if (updateError) throw updateError;
 
-      // --- FIX: Proactively invoke the poller on retry ---
-      supabase.functions.invoke('MIRA-AGENT-poller-bitstudio', { body: { job_id: retry_job_id } }).catch(console.error);
-
-      return new Response(JSON.stringify({ success: true, jobId: retry_job_id, message: "Job successfully retried." }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      // The watchdog will pick this up on its next run. No direct invocation needed.
+      return new Response(JSON.stringify({ success: true, jobId: retry_job_id, message: "Job successfully retried." }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 200
+      });
 
     } else {
       // --- NEW JOB LOGIC ---
@@ -347,7 +347,7 @@ serve(async (req) => {
         }
       }
 
-      // --- FIX: Proactively invoke the poller for all new jobs with retry ---
+      // --- Proactively invoke the poller for all new jobs with retry ---
       for (const newJobId of jobIds) {
         console.log(`[BitStudioProxy][${requestId}] Proactively invoking poller for new job ID: ${newJobId}`);
         let success = false;
