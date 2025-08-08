@@ -77,7 +77,6 @@ export const RecentVtoPacks = () => {
   const [packToRefine, setPackToRefine] = useState<PackSummary | null>(null);
   const [isRetrying, setIsRetrying] = useState<string | null>(null);
   const [isRequeuing, setIsRequeuing] = useState<string | null>(null);
-  const [isRepairing, setIsRepairing] = useState<string | null>(null);
 
   const { data: queryData, isLoading, error } = useQuery<any>({
     queryKey: ['vtoPackSummaries', session?.user?.id],
@@ -103,8 +102,8 @@ export const RecentVtoPacks = () => {
       };
 
       const packsPromise = supabase.from('mira-agent-vto-packs-jobs').select('id, created_at, metadata').eq('user_id', session.user.id);
-      const jobsPromise = fetchAll(supabase.from('mira-agent-bitstudio-jobs').select('id, vto_pack_job_id, status, batch_pair_job_id, final_image_url').eq('user_id', session.user.id).not('vto_pack_job_id', 'is', null));
-      const batchPairJobsPromise = fetchAll(supabase.from('mira-agent-batch-inpaint-pair-jobs').select('id, metadata, status, final_image_url').eq('user_id', session.user.id).not('metadata->>vto_pack_job_id', 'is', null));
+      const jobsPromise = fetchAll(supabase.from('mira-agent-bitstudio-jobs').select('id, vto_pack_job_id, status, batch_pair_job_id').eq('user_id', session.user.id).not('vto_pack_job_id', 'is', null));
+      const batchPairJobsPromise = fetchAll(supabase.from('mira-agent-batch-inpaint-pair-jobs').select('id, metadata, status').eq('user_id', session.user.id).not('metadata->>vto_pack_job_id', 'is', null));
       const reportsPromise = supabase.rpc('get_vto_qa_reports_for_user', { p_user_id: session.user.id });
 
       const [{ data: packs, error: packsError }, bitstudioJobs, batchPairJobs, { data: reports, error: reportsError }] = await Promise.all([packsPromise, jobsPromise, batchPairJobsPromise, reportsPromise]);
@@ -156,29 +155,47 @@ export const RecentVtoPacks = () => {
   const packSummaries = useMemo((): PackSummary[] => {
     if (!queryData?.packs) return [];
     const { packs, jobs: bitstudioJobs = [], batchPairJobs = [], reports = [] } = queryData;
-    
-    const allJobs = [
-      ...bitstudioJobs.map((j: any) => ({ ...j, pack_id: j.vto_pack_job_id })),
-      ...batchPairJobs.map((j: any) => ({ ...j, pack_id: j.metadata?.vto_pack_job_id }))
-    ];
-
     const packsMap = new Map<string, PackSummary>();
 
     for (const pack of packs) {
-        const jobsForThisPack = allJobs.filter(j => j.pack_id === pack.id);
-        
-        const summary: PackSummary = {
+        packsMap.set(pack.id, {
             pack_id: pack.id,
             created_at: pack.created_at,
             metadata: pack.metadata || {},
-            total_jobs: jobsForThisPack.length,
-            completed_jobs: jobsForThisPack.filter((j: any) => ['complete', 'done'].includes(j.status) && j.final_image_url).length,
-            failed_jobs: jobsForThisPack.filter((j: any) => ['failed', 'permanently_failed'].includes(j.status)).length,
-            pending_jobs: jobsForThisPack.filter((j: any) => j.status === 'pending').length,
+            total_jobs: 0,
+            completed_jobs: 0,
+            pending_jobs: 0,
             passed_perfect: 0, passed_pose_change: 0, passed_logo_issue: 0, passed_detail_issue: 0,
-            failure_summary: {}, shape_mismatches: 0, avg_body_preservation_score: null, has_refinement_pass: false,
-        };
-        packsMap.set(pack.id, summary);
+            failed_jobs: 0, failure_summary: {}, shape_mismatches: 0, avg_body_preservation_score: null, has_refinement_pass: false,
+        });
+    }
+
+    const allJobsForPack = new Map<string, any[]>();
+
+    bitstudioJobs.forEach((job: any) => {
+        if (job.vto_pack_job_id) {
+            if (!allJobsForPack.has(job.vto_pack_job_id)) allJobsForPack.set(job.vto_pack_job_id, []);
+            allJobsForPack.get(job.vto_pack_job_id)!.push(job);
+        }
+    });
+
+    const processedPairJobIds = new Set(bitstudioJobs.map((j: any) => j.batch_pair_job_id).filter(Boolean));
+    batchPairJobs.forEach((job: any) => {
+        const packId = job.metadata?.vto_pack_job_id;
+        if (packId && !processedPairJobIds.has(job.id)) {
+            if (!allJobsForPack.has(packId)) allJobsForPack.set(packId, []);
+            allJobsForPack.get(packId)!.push(job);
+        }
+    });
+
+    for (const pack of packs) {
+        const summary = packsMap.get(pack.id)!;
+        const jobsForThisPack = allJobsForPack.get(pack.id) || [];
+        
+        summary.total_jobs = jobsForThisPack.length;
+        summary.completed_jobs = jobsForThisPack.filter((j: any) => ['complete', 'done', 'failed', 'permanently_failed'].includes(j.status)).length;
+        summary.failed_jobs = jobsForThisPack.filter((j: any) => ['failed', 'permanently_failed'].includes(j.status)).length;
+        summary.pending_jobs = jobsForThisPack.filter((j: any) => j.status === 'pending').length;
     }
 
     for (const report of reports) {
@@ -195,6 +212,8 @@ export const RecentVtoPacks = () => {
           } else {
               summary.passed_perfect++;
           }
+        } else {
+          // This count is now derived from job status, not reports
         }
         const reason = reportData.failure_category || "Unknown";
         summary.failure_summary[reason] = (summary.failure_summary[reason] || 0) + 1;
@@ -305,27 +324,6 @@ export const RecentVtoPacks = () => {
     }
   };
 
-  const handleRepairPack = async (pack: PackSummary) => {
-    if (!session?.user) return;
-    setIsRepairing(pack.pack_id);
-    const jobsToRepair = pack.total_jobs - pack.completed_jobs;
-    const toastId = showLoading(`Repairing ${jobsToRepair} incomplete job(s)...`);
-    try {
-        const { data, error } = await supabase.rpc('MIRA-AGENT-retry-all-incomplete-in-pack', {
-            p_pack_id: pack.pack_id
-        });
-        if (error) throw error;
-        dismissToast(toastId);
-        showSuccess(`${data} jobs have been re-queued for processing.`);
-        queryClient.invalidateQueries({ queryKey: ['vtoPackSummaries', session.user.id] });
-    } catch (err: any) {
-        dismissToast(toastId);
-        showError(`Failed to repair pack: ${err.message}`);
-    } finally {
-        setIsRepairing(null);
-    }
-  };
-
   if (isLoading) {
     return <div className="space-y-4"><Skeleton className="h-20 w-full" /><Skeleton className="h-20 w-full" /></div>;
   }
@@ -356,7 +354,6 @@ export const RecentVtoPacks = () => {
           const totalReports = pack.passed_perfect + pack.passed_pose_change + pack.passed_logo_issue + pack.passed_detail_issue + pack.failed_jobs;
           const isReportReady = totalReports > 0;
           const isRefinementPack = !!pack.metadata?.refinement_of_pack_id;
-          const hasIncompleteJobs = pack.completed_jobs < pack.total_jobs;
 
           return (
             <AccordionItem key={pack.pack_id} value={pack.pack_id} className="border rounded-md">
@@ -376,27 +373,17 @@ export const RecentVtoPacks = () => {
                   </div>
                 </AccordionTrigger>
                 <div className="flex items-center gap-2 pl-4">
-                  {hasIncompleteJobs && (
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button variant="destructive" size="sm" disabled={isRepairing === pack.pack_id}>
-                          {isRepairing === pack.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
-                          Retry All Incomplete ({pack.total_jobs - pack.completed_jobs})
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>Are you sure you want to repair this pack?</AlertDialogTitle>
-                          <AlertDialogDescription>
-                            This will find all failed, stuck, or pending jobs in this pack and restart them from scratch. Successfully completed jobs will not be affected.
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>Cancel</AlertDialogCancel>
-                          <AlertDialogAction onClick={() => handleRepairPack(pack)}>Yes, Repair Pack</AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
+                  {pack.pending_jobs > 0 && (
+                    <Button variant="outline" size="sm" onClick={() => handleRequeuePending(pack)} disabled={isRequeuing === pack.pack_id}>
+                      {isRequeuing === pack.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+                      Re-queue Pending ({pack.pending_jobs})
+                    </Button>
+                  )}
+                  {pack.failed_jobs > 0 && (
+                    <Button variant="outline" size="sm" onClick={() => handleRetryFailed(pack)} disabled={isRetrying === pack.pack_id}>
+                      {isRetrying === pack.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+                      Retry Failed ({pack.failed_jobs})
+                    </Button>
                   )}
                   <Button variant="outline" size="sm" onClick={() => setPackToDownload(pack)}>
                     <HardDriveDownload className="h-4 w-4 mr-2" />
