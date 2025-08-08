@@ -385,7 +385,7 @@ const VtoReports = () => {
           <h1 className="text-3xl font-bold">{t('vtoAnalysisReports')}</h1>
           <p className="text-muted-foreground">{t('vtoAnalysisReportsDescription')}</p>
         </header>
-        <div className="space-y-4">
+        <Accordion type="single" collapsible className="w-full space-y-4" onValueChange={setOpenPackId}>
           {packSummaries.map(pack => {
             const totalReports = pack.passed_perfect + pack.passed_pose_change + pack.passed_logo_issue + pack.passed_detail_issue + pack.failed_jobs;
             const isReportReady = totalReports > 0;
@@ -454,7 +454,7 @@ const VtoReports = () => {
               </AccordionItem>
             )
           })}
-        </div>
+        </Accordion>
       </div>
       <AnalyzePackModal isOpen={!!packToAnalyze} onClose={() => setPackToAnalyze(null)} onAnalyze={handleAnalyze} isLoading={!!isAnalyzing} packName={packToAnalyze?.metadata?.name || ''} />
       <DownloadPackModal isOpen={!!packToDownload} onClose={() => setPackToDownload(null)} pack={packToDownload} />

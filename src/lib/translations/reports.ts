@@ -28,7 +28,7 @@ export const reportsTranslations = {
     downloadSuccessfulOnly: "Scarica solo le immagini dei job riusciti",
     downloadSuccessfulOnlyDesc: "Include tutte le immagini dei job che hanno completato con successo, anche quelle con difetti minori segnalati dalla QA. Utile per una revisione più ampia.",
     downloadPassedQa: "Scarica solo le immagini che hanno superato la QA",
-    downloadPassedQaDesc: "Include solo le immagini che hanno superato il controllo Qualità automatico. Ideale per asset finali di alta qualità.",
+    downloadPassedQaDesc: "Include solo le immagini che hanno passato il controllo Qualità automatico. Ideale per asset finali di alta qualità.",
     startDownload: "Avvia Download",
     refineFailedJobs: "Affina Job Falliti",
     refineFailedJobsTitle: "Creare un Pass di Affinamento?",
