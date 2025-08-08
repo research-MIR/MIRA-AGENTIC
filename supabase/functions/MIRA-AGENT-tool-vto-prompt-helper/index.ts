@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { GoogleGenAI, Content, Part, HarmCategory, HarmBlockThreshold } from 'https://esm.sh/@google/genai@0.15.0';
+import { GoogleGenAI, Content, Part, HarmCategory, HarmBlockThreshold, GenerationResult } from 'https://esm.sh/@google/genai@0.15.0';
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
@@ -8,7 +8,7 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const MODEL_NAME = "gemini-2.5-flash-lite-preview-06-17";
 const MAX_RETRIES = 3;
-const RETRY_DELAY_MS = 1000;
+const RETRY_DELAYS_MS = [7000, 10000, 15000]; // 7s, 10s, 15s
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -96,178 +96,205 @@ Your entire response MUST be a single, valid JSON object with ONE key, "final_pr
 `;
 
 async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
-    if (publicUrl.includes('/sign/')) {
-        const response = await fetch(publicUrl);
-        if (!response.ok) {
-            throw new Error(`Failed to download from signed URL: ${response.statusText}`);
-        }
-        return await response.blob();
+  if (publicUrl.includes('/sign/')) {
+    const response = await fetch(publicUrl);
+    if (!response.ok) {
+      throw new Error(`Failed to download from signed URL: ${response.statusText}`);
     }
-
-    const url = new URL(publicUrl);
-    const pathSegments = url.pathname.split('/');
-    
-    const publicSegmentIndex = pathSegments.indexOf('public');
-    if (publicSegmentIndex === -1 || publicSegmentIndex + 1 >= pathSegments.length) {
-        throw new Error(`Could not parse bucket name from public Supabase URL: ${publicUrl}`);
-    }
-    
-    const bucketName = pathSegments[publicSegmentIndex + 1];
-    const filePath = decodeURIComponent(pathSegments.slice(publicSegmentIndex + 2).join('/'));
-
-    if (!bucketName || !filePath) {
-        throw new Error(`Could not parse bucket or path from public Supabase URL: ${publicUrl}`);
-    }
-
-    const { data, error } = await supabase.storage.from(bucketName).download(filePath);
-    if (error) {
-        throw new Error(`Failed to download from Supabase storage (${filePath}): ${error.message}`);
-    }
-    return data;
+    return await response.blob();
+  }
+  const url = new URL(publicUrl);
+  const pathSegments = url.pathname.split('/');
+  const publicSegmentIndex = pathSegments.indexOf('public');
+  if (publicSegmentIndex === -1 || publicSegmentIndex + 1 >= pathSegments.length) {
+    throw new Error(`Could not parse bucket name from public Supabase URL: ${publicUrl}`);
+  }
+  const bucketName = pathSegments[publicSegmentIndex + 1];
+  const filePath = decodeURIComponent(pathSegments.slice(publicSegmentIndex + 2).join('/'));
+  if (!bucketName || !filePath) {
+    throw new Error(`Could not parse bucket or path from public Supabase URL: ${publicUrl}`);
+  }
+  const { data, error } = await supabase.storage.from(bucketName).download(filePath);
+  if (error) {
+    throw new Error(`Failed to download from Supabase storage (${filePath}): ${error.message}`);
+  }
+  return data;
 }
 
 async function downloadImageAsPart(imageUrl: string, label: string): Promise<Part[]> {
-    const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-    const fileBlob = await downloadFromSupabase(supabase, imageUrl);
-
-    const mimeType = fileBlob.type;
-    const buffer = await fileBlob.arrayBuffer();
-    const base64 = encodeBase64(buffer);
-
-    return [
-        { text: `--- ${label} ---` },
-        { inlineData: { mimeType, data: base64 } }
-    ];
+  const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
+  const fileBlob = await downloadFromSupabase(supabase, imageUrl);
+  const mimeType = fileBlob.type;
+  const buffer = await fileBlob.arrayBuffer();
+  const base64 = encodeBase64(buffer);
+  return [
+    { text: `--- ${label} ---` },
+    { inlineData: { mimeType, data: base64 } }
+  ];
 }
 
 function extractJson(text: string): any {
-    // Attempt 1: Parse the whole string as JSON
+  if (!text || text.trim() === "") {
+    throw new Error("The model returned an empty or whitespace-only response.");
+  }
+  // Attempt 1: Parse the whole string as JSON
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+  // Not a valid JSON object, proceed to next attempt
+  }
+  // Attempt 2: Look for a JSON markdown block
+  const markdownMatch = text.match(/```json\s*([\s\S]*?)\s*```/);
+  if (markdownMatch && markdownMatch[1]) {
     try {
-        return JSON.parse(text);
+      return JSON.parse(markdownMatch[1]);
     } catch (e) {
-        // Not a valid JSON object, proceed to next attempt
+    // Invalid JSON inside markdown, proceed to next attempt
     }
-
-    // Attempt 2: Look for a JSON markdown block
-    const markdownMatch = text.match(/```json\s*([\s\S]*?)\s*```/);
-    if (markdownMatch && markdownMatch[1]) {
-        try {
-            return JSON.parse(markdownMatch[1]);
-        } catch (e) {
-            // Invalid JSON inside markdown, proceed to next attempt
-        }
+  }
+  // Attempt 3: Look for the "--- FINAL PROMPT ---" marker
+  const finalPromptMarker = "--- FINAL PROMPT ---";
+  const markerIndex = text.indexOf(finalPromptMarker);
+  if (markerIndex !== -1) {
+    const promptText = text.substring(markerIndex + finalPromptMarker.length).trim();
+    if (promptText) {
+      return {
+        final_prompt: promptText
+      };
     }
-
-    // Attempt 3: Look for the "--- FINAL PROMPT ---" marker
-    const finalPromptMarker = "--- FINAL PROMPT ---";
-    const markerIndex = text.indexOf(finalPromptMarker);
-    if (markerIndex !== -1) {
-        const promptText = text.substring(markerIndex + finalPromptMarker.length).trim();
-        if (promptText) {
-            return { final_prompt: promptText };
-        }
-    }
-
-    // If all attempts fail, throw an error
-    console.error("Failed to parse JSON from model response:", text);
-    throw new Error("The model returned a response that could not be parsed as JSON.");
+  }
+  // If all attempts fail, throw an error
+  console.error("Failed to parse JSON from model response:", text);
+  throw new Error("The model returned a response that could not be parsed as JSON.");
 }
 
-serve(async (req) => {
-  if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
-
+serve(async (req)=>{
+  if (req.method === 'OPTIONS') {
+    return new Response(null, {
+      headers: corsHeaders
+    });
+  }
   try {
-    const { 
-        person_image_url, garment_image_url,
-        person_image_base64, person_image_mime_type,
-        garment_image_base64, garment_image_mime_type,
-        prompt_appendix,
-        is_garment_mode,
-        is_helper_enabled
-    } = await req.json();
-
+    const { person_image_url, garment_image_url, person_image_base64, person_image_mime_type, garment_image_base64, garment_image_mime_type, prompt_appendix, is_garment_mode, is_helper_enabled } = await req.json();
     const useHelper = is_helper_enabled !== false; // Default to true
-    const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+    const ai = new GoogleGenAI({
+      apiKey: GEMINI_API_KEY!
+    });
     const finalParts: Part[] = [];
-    const systemPrompt = (is_garment_mode !== false) ? garmentSystemPrompt : generalSystemPrompt;
-    const personLabel = (is_garment_mode !== false) ? "PERSON IMAGE" : "SOURCE IMAGE";
-    const garmentLabel = (is_garment_mode !== false) ? "GARMENT IMAGE" : "REFERENCE IMAGE";
-
+    const systemPrompt = is_garment_mode !== false ? garmentSystemPrompt : generalSystemPrompt;
+    const personLabel = is_garment_mode !== false ? "PERSON IMAGE" : "SOURCE IMAGE";
+    const garmentLabel = is_garment_mode !== false ? "GARMENT IMAGE" : "REFERENCE IMAGE";
     console.log(`[VTO-PromptHelper] Mode: ${is_garment_mode ? 'Garment' : 'General'}. Helper Enabled: ${useHelper}`);
-
     if (useHelper) {
-        console.log("[VTO-PromptHelper] AI Helper is ON. Analyzing images to synthesize final prompt.");
-        let personParts: Part[], garmentParts: Part[];
-        
-        if (person_image_base64 && garment_image_base64) {
-            console.log("[VTO-PromptHelper] Using provided base64 data.");
-            personParts = [
-                { text: `--- ${personLabel} ---` },
-                { inlineData: { mimeType: person_image_mime_type || 'image/png', data: person_image_base64 } }
-            ];
-            garmentParts = [
-                { text: `--- ${garmentLabel} ---` },
-                { inlineData: { mimeType: garment_image_mime_type || 'image/png', data: garment_image_base64 } }
-            ];
-        } else if (person_image_url && garment_image_url) {
-            console.log("[VTO-PromptHelper] Using provided URLs. Downloading images...");
-            [personParts, garmentParts] = await Promise.all([
-                downloadImageAsPart(person_image_url, personLabel),
-                downloadImageAsPart(garment_image_url, garmentLabel)
-            ]);
-        } else {
-            throw new Error("When AI Helper is enabled, either image URLs or base64 data for both images are required.");
-        }
-        
-        finalParts.push(...personParts, ...garmentParts);
+      console.log("[VTO-PromptHelper] AI Helper is ON. Analyzing images to synthesize final prompt.");
+      let personParts: Part[], garmentParts: Part[];
+      if (person_image_base64 && garment_image_base64) {
+        console.log("[VTO-PromptHelper] Using provided base64 data.");
+        personParts = [
+          {
+            text: `--- ${personLabel} ---`
+          },
+          {
+            inlineData: {
+              mimeType: person_image_mime_type || 'image/png',
+              data: person_image_base64
+            }
+          }
+        ];
+        garmentParts = [
+          {
+            text: `--- ${garmentLabel} ---`
+          },
+          {
+            inlineData: {
+              mimeType: garment_image_mime_type || 'image/png',
+              data: garment_image_base64
+            }
+          }
+        ];
+      } else if (person_image_url && garment_image_url) {
+        console.log("[VTO-PromptHelper] Using provided URLs. Downloading images...");
+        [personParts, garmentParts] = await Promise.all([
+          downloadImageAsPart(person_image_url, personLabel),
+          downloadImageAsPart(garment_image_url, garmentLabel)
+        ]);
+      } else {
+        throw new Error("When AI Helper is enabled, either image URLs or base64 data for both images are required.");
+      }
+      finalParts.push(...personParts, ...garmentParts);
     } else {
-        console.log("[VTO-PromptHelper] AI Helper is OFF. Using appendix only.");
+      console.log("[VTO-PromptHelper] AI Helper is OFF. Using appendix only.");
     }
-
     if (prompt_appendix && typeof prompt_appendix === 'string' && prompt_appendix.trim() !== "") {
-        finalParts.push({ text: `--- PROMPT APPENDIX (HIGH PRIORITY) ---\n${prompt_appendix.trim()}` });
+      finalParts.push({
+        text: `--- PROMPT APPENDIX (HIGH PRIORITY) ---\n${prompt_appendix.trim()}`
+      });
     }
-    finalParts.push({ text: `--- METADATA ---\nIS_HELPER_ENABLED: ${useHelper}` });
-
+    finalParts.push({
+      text: `--- METADATA ---\nIS_HELPER_ENABLED: ${useHelper}`
+    });
     let lastError: Error | null = null;
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-        try {
-            console.log(`[VTO-PromptHelper] Attempt ${attempt}/${MAX_RETRIES}...`);
-            const result = await ai.models.generateContent({
-                model: MODEL_NAME,
-                contents: [{ role: 'user', parts: finalParts }],
-                generationConfig: { responseMimeType: "application/json" },
-                safetySettings,
-                config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
-            });
-
-            const responseJson = extractJson(result.text);
-            const finalPrompt = responseJson.final_prompt;
-
-            if (!finalPrompt) {
-                throw new Error("AI Helper did not return a final prompt in the expected format.");
+    for(let attempt = 1; attempt <= MAX_RETRIES; attempt++){
+      try {
+        console.log(`[VTO-PromptHelper] Attempt ${attempt}/${MAX_RETRIES}...`);
+        const result = await ai.models.generateContent({
+          model: MODEL_NAME,
+          contents: [
+            {
+              role: 'user',
+              parts: finalParts
             }
-
-            return new Response(JSON.stringify({ final_prompt: finalPrompt }), {
-              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-              status: 200,
-            });
-        } catch (error) {
-            lastError = error;
-            console.warn(`[VTO-PromptHelper] Attempt ${attempt} failed:`, error.message);
-            if (attempt < MAX_RETRIES) {
-                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS * attempt)); // Exponential backoff
+          ],
+          generationConfig: {
+            responseMimeType: "application/json"
+          },
+          safetySettings,
+          config: {
+            systemInstruction: {
+              role: "system",
+              parts: [
+                {
+                  text: systemPrompt
+                }
+              ]
             }
+          }
+        });
+        const responseJson = extractJson(result.text);
+        const finalPrompt = responseJson.final_prompt;
+        if (!finalPrompt) {
+          throw new Error("AI Helper did not return a final prompt in the expected format.");
         }
+        return new Response(JSON.stringify({
+          final_prompt: finalPrompt
+        }), {
+          headers: {
+            ...corsHeaders,
+            'Content-Type': 'application/json'
+          },
+          status: 200
+        });
+      } catch (error) {
+        lastError = error;
+        console.warn(`[VTO-PromptHelper] Attempt ${attempt} failed:`, error.message);
+        if (attempt < MAX_RETRIES) {
+          const delay = RETRY_DELAYS_MS[attempt - 1] || 15000;
+          console.log(`[VTO-PromptHelper] Retrying in ${delay}ms...`);
+          await new Promise((resolve)=>setTimeout(resolve, delay));
+        }
+      }
     }
-
     throw lastError || new Error("VTO Prompt Helper failed after all retries.");
-
   } catch (error) {
     console.error("[VTO-PromptHelper] Error:", error);
-    return new Response(JSON.stringify({ error: error.message }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 500,
+    return new Response(JSON.stringify({
+      error: error.message
+    }), {
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/json'
+      },
+      status: 500
     });
   }
 });
