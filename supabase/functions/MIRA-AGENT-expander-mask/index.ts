@@ -1,7 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { createCanvas, loadImage } from 'https://deno.land/x/canvas@v1.4.1/mod.ts';
-import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -25,43 +24,6 @@ async function uploadBufferToStorage(supabase: SupabaseClient, buffer: Uint8Arra
   }
   const { data: { publicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
   return publicUrl;
-}
-
-/**
- * Performs a fast, linear-time dilation on an alpha channel mask.
- * This is highly memory and CPU efficient.
- */
-function dilateAlpha(alpha: Uint8ClampedArray, w: number, h: number, r: number) {
-  const inf = 1e9;
-  const dist = new Float32Array(w * h);
-
-  for (let y = 0; y < h; y++) {
-    let d = inf;
-    for (let x = 0; x < w; x++) {
-      if (alpha[y * w + x]) d = 0;
-      dist[y * w + x] = d = Math.min(d + 1, inf);
-    }
-    d = inf;
-    for (let x = w - 1; x >= 0; x--) {
-      if (alpha[y * w + x]) d = 0;
-      dist[y * w + x] = Math.min(dist[y * w + x], (d = Math.min(d + 1, inf)));
-    }
-  }
-
-  for (let x = 0; x < w; x++) {
-    let d = inf;
-    for (let y = 0; y < h; y++) {
-      d = Math.min(d + 1, dist[y * w + x]);
-      dist[y * w + x] = d;
-    }
-    d = inf;
-    for (let y = h - 1; y >= 0; y--) {
-      d = Math.min(d + 1, dist[y * w + x]);
-      const idx = y * w + x;
-      if (Math.min(d, dist[idx]) <= r) alpha[idx] = 255;
-      else alpha[idx] = 0;
-    }
-  }
 }
 
 async function invokeWithRetry(supabase: SupabaseClient, functionName: string, payload: object, maxRetries = 3, logPrefix = "") {
@@ -88,6 +50,49 @@ async function invokeWithRetry(supabase: SupabaseClient, functionName: string, p
     throw lastError || new Error(`Function ${functionName} failed after all retries without a specific error.`);
 }
 
+function dilateRoiUsingSAT(alphaWhole: Uint8ClampedArray, w: number, h: number,
+                           x0: number, y0: number, roiW: number, roiH: number, r: number) {
+  // Build a binary ROI (0/1) from alpha
+  const bin = new Uint8Array(roiW * roiH);
+  for (let yy = 0; yy < roiH; yy++) {
+    const srcRow = (y0 + yy) * w;
+    const dstRow = yy * roiW;
+    for (let xx = 0; xx < roiW; xx++) {
+      bin[dstRow + xx] = alphaWhole[srcRow + (x0 + xx)] ? 1 : 0;
+    }
+  }
+
+  // Summed Area Table of size (roiW+1)*(roiH+1)
+  const satW = roiW + 1;
+  const sat = new Uint32Array(satW * (roiH + 1));
+  for (let yy = 1; yy <= roiH; yy++) {
+    let rowSum = 0;
+    const base = (yy - 1) * roiW;
+    for (let xx = 1; xx <= roiW; xx++) {
+      rowSum += bin[base + (xx - 1)];
+      sat[yy * satW + xx] = sat[(yy - 1) * satW + xx] + rowSum;
+    }
+  }
+
+  // Output dilated ROI (0/255)
+  const out = new Uint8ClampedArray(roiW * roiH);
+  // We expanded the ROI by r; still guard edges
+  for (let yy = 0; yy < roiH; yy++) {
+    const y1 = Math.max(1, yy + 1 - r);
+    const y2 = Math.min(roiH, yy + 1 + r);
+    for (let xx = 0; xx < roiW; xx++) {
+      const x1 = Math.max(1, xx + 1 - r);
+      const x2 = Math.min(roiW, xx + 1 + r);
+      const sum = sat[y2 * satW + x2]
+                - sat[(y1 - 1) * satW + x2]
+                - sat[y2 * satW + (x1 - 1)]
+                + sat[(y1 - 1) * satW + (x1 - 1)];
+      out[yy * roiW + xx] = sum > 0 ? 255 : 0;
+    }
+  }
+  return out;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', {
@@ -110,32 +115,101 @@ serve(async (req) => {
     const rawMaskBuffer = await response.arrayBuffer();
     const rawMaskImage = await loadImage(new Uint8Array(rawMaskBuffer));
 
-    const w = rawMaskImage.width();
-    const h = rawMaskImage.height();
+    const originalWidth = rawMaskImage.width();
+    const originalHeight = rawMaskImage.height();
+
+    // --- New Scaling Logic ---
+    const LONG_SIDE_MIN = 1440;
+    const LONG_SIDE_CAP = 3072;
+    const MAX_PIXELS = 22_000_000;
+
+    let scale = 1;
+    let w = originalWidth;
+    let h = originalHeight;
+    const longSide = Math.max(w, h);
+
+    if (longSide > LONG_SIDE_CAP) {
+        const target = Math.max(LONG_SIDE_MIN, LONG_SIDE_CAP);
+        scale = target / longSide;
+        w = Math.round(w * scale);
+        h = Math.round(h * scale);
+        console.log(`[Expander][${requestId}] Downscaling to ${w}x${h} (long side ≥ ${LONG_SIDE_MIN}).`);
+    }
+
+    if (w * h > MAX_PIXELS) {
+        throw new Error(`Image too large for mask expansion at ${w}x${h}.`);
+    }
+    // --- End Scaling Logic ---
 
     const canvas = createCanvas(w, h);
     const ctx = canvas.getContext('2d');
     ctx.drawImage(rawMaskImage, 0, 0, w, h);
     const imageData = ctx.getImageData(0, 0, w, h);
+    const data = imageData.data;
+
+    // --- New BBox Calculation while Thresholding ---
+    let minX = w, minY = h, maxX = -1, maxY = -1;
     const alphaChannel = new Uint8ClampedArray(w * h);
-    for (let i = 0; i < imageData.data.length; i += 4) {
-      alphaChannel[i / 4] = imageData.data[i] > 128 ? 255 : 0;
+
+    for (let i = 0, p = 0, y = 0, x = 0; i < data.length; i += 4, p++) {
+        const on = data[i] > 128 ? 255 : 0;
+        alphaChannel[p] = on;
+        if (on) {
+            if (x < minX) minX = x;
+            if (y < minY) minY = y;
+            if (x > maxX) maxX = x;
+            if (y > maxY) maxY = y;
+        }
+        x++;
+        if (x === w) { x = 0; y++; }
     }
 
-    const expansionPx = Math.max(1, Math.round(Math.min(w, h) * 0.03));
-    console.log(`[Expander][${requestId}] Expanding alpha mask by ${expansionPx}px.`);
-    dilateAlpha(alphaChannel, w, h, expansionPx);
+    if (maxX === -1) { // Mask is empty
+        console.warn(`[Expander][${requestId}] Mask is empty. Returning a black mask.`);
+        ctx.fillStyle = 'black';
+        ctx.fillRect(0, 0, w, h);
+    } else {
+        const expansionPx = Math.max(1, Math.round(Math.min(w, h) * 0.03));
+        console.log(`[Expander][${requestId}] Expanding alpha mask by ${expansionPx}px.`);
 
-    for (let i = 0; i < alphaChannel.length; i++) {
-      const value = alphaChannel[i];
-      imageData.data[i * 4] = value;
-      imageData.data[i * 4 + 1] = value;
-      imageData.data[i * 4 + 2] = value;
-      imageData.data[i * 4 + 3] = 255;
+        // --- ROI Calculation ---
+        const x0 = Math.max(0, minX - expansionPx);
+        const y0 = Math.max(0, minY - expansionPx);
+        const x1 = Math.min(w - 1, maxX + expansionPx);
+        const y1 = Math.min(h - 1, maxY + expansionPx);
+        const roiW = x1 - x0 + 1;
+        const roiH = y1 - y0 + 1;
+        // --- End ROI Calculation ---
+
+        // --- SAT Dilation on ROI ---
+        const dilatedRoi = dilateRoiUsingSAT(alphaChannel, w, h, x0, y0, roiW, roiH, expansionPx);
+        
+        // Create an empty black frame once and paint only the ROI
+        ctx.fillStyle = 'black';
+        ctx.fillRect(0, 0, w, h);
+        const roiImageData = ctx.createImageData(roiW, roiH);
+        for (let i = 0, j = 0; i < dilatedRoi.length; i++, j += 4) {
+            const v = dilatedRoi[i];
+            roiImageData.data[j] = v;
+            roiImageData.data[j + 1] = v;
+            roiImageData.data[j + 2] = v;
+            roiImageData.data[j + 3] = 255;
+        }
+        ctx.putImageData(roiImageData, x0, y0);
+        // --- End SAT Dilation ---
     }
-    ctx.putImageData(imageData, 0, 0);
 
-    const finalMaskBuffer = canvas.toBuffer('image/png');
+    let finalCanvas = canvas;
+    if (scale < 1) {
+      console.log(`[Expander][${requestId}] Scaling mask back up to ${originalWidth}x${originalHeight}.`);
+      const upscaledCanvas = createCanvas(originalWidth, originalHeight);
+      const upscaledCtx = upscaledCanvas.getContext('2d');
+      upscaledCtx.imageSmoothingEnabled = false; // Use nearest-neighbor for sharp edges
+      upscaledCtx.drawImage(canvas, 0, 0, originalWidth, originalHeight);
+      finalCanvas = upscaledCanvas;
+    }
+
+    const finalMaskBuffer = finalCanvas.toBuffer('image/png');
     const expandedMaskUrl = await uploadBufferToStorage(supabase, finalMaskBuffer, user_id, 'final_expanded_mask.png');
     if (!expandedMaskUrl) throw new Error("Failed to upload the final expanded mask.");
     console.log(`[Expander][${requestId}] Final expanded mask uploaded to: ${expandedMaskUrl}`);
