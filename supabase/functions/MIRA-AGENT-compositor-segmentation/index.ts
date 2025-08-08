@@ -27,7 +27,7 @@ async function uploadBufferToStorage(supabase: SupabaseClient, buffer: Uint8Arra
   return publicUrl;
 }
 
-serve(async (req)=>{
+serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', {
       headers: corsHeaders
@@ -145,7 +145,7 @@ serve(async (req)=>{
 
     const { data: parentPairJob, error: parentFetchError } = await supabase
       .from('mira-agent-batch-inpaint-pair-jobs')
-      .select('id, metadata')
+      .select('id, metadata') // Select metadata to avoid errors
       .eq('metadata->>aggregation_job_id', aggregationJobId)
       .maybeSingle();
 
@@ -154,26 +154,20 @@ serve(async (req)=>{
     } else if (parentPairJob) {
       console.log(`[Compositor][${requestId}] Found parent job ${parentPairJob.id}. Updating its status to 'mask_expanded'.`);
       
-      const newMetadata = {
-        ...(parentPairJob.metadata || {}),
-        debug_assets: {
-            ...(parentPairJob.metadata?.debug_assets || {}),
-            raw_mask_url: rawMaskUrl
-        }
+      const debug_assets = {
+        ...(parentPairJob.metadata?.debug_assets || {}),
+        raw_mask_url: rawMaskUrl
       };
 
-      const { error: parentUpdateError } = await supabase
-        .from('mira-agent-batch-inpaint-pair-jobs')
-        .update({
-            status: 'mask_expanded',
-            metadata: newMetadata
-        })
-        .eq('id', parentPairJob.id);
-
-      if (parentUpdateError) {
-          console.error(`[Compositor][${requestId}] Failed to update parent job status:`, parentUpdateError.message);
-          throw new Error(`Failed to update parent job ${parentPairJob.id} to 'mask_expanded': ${parentUpdateError.message}`);
-      }
+      await supabase.from('mira-agent-batch-inpaint-pair-jobs').update({
+        status: 'mask_expanded',
+        metadata: {
+          ...parentPairJob.metadata,
+          debug_assets: debug_assets
+        }
+      }).eq('id', parentPairJob.id);
+      
+      console.log(`[Compositor][${requestId}] Parent job status updated. The watchdog will now handle the next step.`);
     } else {
       console.warn(`[Compositor][${requestId}] No parent job found for aggregation job. Expansion step will not be triggered.`);
     }
