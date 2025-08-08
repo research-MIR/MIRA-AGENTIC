@@ -64,6 +64,30 @@ function dilateAlpha(alpha: Uint8ClampedArray, w: number, h: number, r: number) 
   }
 }
 
+async function invokeWithRetry(supabase: SupabaseClient, functionName: string, payload: object, maxRetries = 3, logPrefix = "") {
+    let lastError: Error | null = null;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            const { error } = await supabase.functions.invoke(functionName, payload);
+            if (error) {
+                throw new Error(error.message || 'Function invocation failed with an unknown error.');
+            }
+            console.log(`${logPrefix} Successfully invoked ${functionName} on attempt ${attempt}.`);
+            return; // Success
+        } catch (err) {
+            lastError = err instanceof Error ? err : new Error(String(err));
+            console.warn(`${logPrefix} Invocation of '${functionName}' failed on attempt ${attempt}/${maxRetries}. Error: ${lastError.message}`);
+            if (attempt < maxRetries) {
+                const delay = 1000 * Math.pow(2, attempt - 1); // 1s, 2s, 4s...
+                console.warn(`${logPrefix} Waiting ${delay}ms before retrying...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+        }
+    }
+    // If all retries fail, throw the last error
+    throw lastError || new Error(`Function ${functionName} failed after all retries without a specific error.`);
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', {
@@ -125,9 +149,9 @@ serve(async (req) => {
       expanded_mask_url: expandedMaskUrl
     };
 
-    console.log(`[Expander][${requestId}] Updating parent job ${parent_pair_job_id} to 'processing_step_2' status.`);
+    console.log(`[Expander][${requestId}] Updating parent job ${parent_pair_job_id} to 'mask_expanded' status.`);
     await supabase.from('mira-agent-batch-inpaint-pair-jobs').update({
-      status: 'processing_step_2',
+      status: 'mask_expanded',
       metadata: {
         ...parentPairJob.metadata,
         debug_assets: debug_assets
@@ -135,14 +159,13 @@ serve(async (req) => {
     }).eq('id', parent_pair_job_id);
 
     console.log(`[Expander][${requestId}] Invoking next worker in chain: MIRA-AGENT-worker-batch-inpaint-step2`);
-    supabase.functions.invoke('MIRA-AGENT-worker-batch-inpaint-step2', {
-      body: {
-        pair_job_id: parent_pair_job_id,
-        final_mask_url: expandedMaskUrl
-      }
-    }).catch((err) => {
-      console.error(`[Expander][${requestId}] Non-critical error invoking next worker:`, err.message);
-    });
+    await invokeWithRetry(
+        supabase,
+        'MIRA-AGENT-worker-batch-inpaint-step2',
+        { body: { pair_job_id: parent_pair_job_id, final_mask_url: expandedMaskUrl } },
+        3, // maxRetries
+        `[Expander][${requestId}]`
+    );
 
     return new Response(JSON.stringify({
       success: true,
