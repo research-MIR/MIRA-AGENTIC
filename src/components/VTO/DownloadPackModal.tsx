@@ -66,17 +66,35 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
     if (!pack || !session?.user) return;
     setIsDownloading(true);
     setProgress(0);
-    setProgressMessage("Fetching job list...");
+    setProgressMessage("Preparing...");
     console.log(`[DownloadPack] Starting download for pack: ${pack.pack_id}`);
     console.log(`[DownloadPack] Scope: ${scope}, Structure: ${structure}`);
 
     try {
+      // --- TIER 1 PRE-COMPUTATION ---
+      setProgressMessage("Loading wardrobe...");
+      const { data: wardrobeGarments, error: wardrobeError } = await supabase
+        .from('mira-agent-garments')
+        .select('id, storage_path, image_hash')
+        .eq('user_id', session!.user.id);
+      if (wardrobeError) throw wardrobeError;
+
+      const storagePathToIdMap = new Map<string, string>();
+      const hashToIdMap = new Map<string, string>();
+      wardrobeGarments.forEach(g => {
+          if (g.storage_path) storagePathToIdMap.set(g.storage_path, g.id);
+          if (g.image_hash) hashToIdMap.set(g.image_hash, g.id);
+      });
+      console.log(`[DownloadPack] Pre-loaded ${wardrobeGarments.length} garments into lookup maps.`);
+      // --- END PRE-COMPUTATION ---
+
+      setProgressMessage("Fetching job list...");
       let jobsToDownload: any[] = [];
 
       if (scope === 'all_with_image') {
         const { data, error } = await supabase
           .from('mira-agent-bitstudio-jobs')
-          .select('id, final_image_url, source_person_image_url, source_garment_image_url, metadata, batch_pair_job_id')
+          .select('id, final_image_url, source_person_image_url, source_garment_image_url, metadata')
           .eq('vto_pack_job_id', pack.pack_id)
           .eq('user_id', session.user.id)
           .not('final_image_url', 'is', null);
@@ -96,19 +114,13 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
         const jobIds = reports.map(r => r.source_vto_job_id);
         const { data, error } = await supabase
           .from('mira-agent-bitstudio-jobs')
-          .select('id, final_image_url, source_person_image_url, source_garment_image_url, metadata, batch_pair_job_id')
+          .select('id, final_image_url, source_person_image_url, source_garment_image_url, metadata')
           .in('id', jobIds);
         if (error) throw error;
         jobsToDownload = data;
       }
 
-      console.log(`[DownloadPack] Found ${jobsToDownload.length} total jobs to process.`);
-      console.log(`[DownloadPack] First job data sample:`, jobsToDownload[0]);
-
-
-      if (jobsToDownload.length === 0) {
-        throw new Error("No images found for the selected criteria.");
-      }
+      if (jobsToDownload.length === 0) throw new Error("No images found for the selected criteria.");
 
       const zip = new JSZip();
       const totalFiles = jobsToDownload.length;
@@ -117,18 +129,45 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
       for (const job of jobsToDownload) {
         processedCount++;
         setProgress((processedCount / totalFiles) * 100);
-        const progressMsg = `Downloading ${processedCount}/${totalFiles}...`;
-        setProgressMessage(progressMsg);
+        setProgressMessage(`Downloading ${processedCount}/${totalFiles}...`);
         
-        if (!job.final_image_url) {
-            console.warn(`[DownloadPack] Job ${job.id} has no final_image_url. Skipping.`);
-            continue;
+        if (!job.final_image_url) continue;
+
+        // --- GARMENT ID WATERFALL LOGIC ---
+        let garmentId = 'garment_unknown';
+        let garmentIdSource = 'unknown';
+
+        if (job.source_garment_image_url && storagePathToIdMap.has(job.source_garment_image_url)) {
+            garmentId = storagePathToIdMap.get(job.source_garment_image_url)!;
+            garmentIdSource = 'wardrobe_lookup_by_url';
+        } else if (job.metadata?.garment_analysis?.hash && hashToIdMap.has(job.metadata.garment_analysis.hash)) {
+            garmentId = hashToIdMap.get(job.metadata.garment_analysis.hash)!;
+            garmentIdSource = 'wardrobe_lookup_by_hash';
+        } else if (job.metadata?.garment_analysis?.hash) {
+            garmentId = job.metadata.garment_analysis.hash;
+            garmentIdSource = 'metadata_hash';
+        } else if (job.source_garment_image_url) {
+            const urlParts = job.source_garment_image_url.split('/');
+            const filename = urlParts.pop()?.split('.')[0] || '';
+            const uuidMatch = filename.match(/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/i);
+            if (uuidMatch) {
+                garmentId = uuidMatch[0];
+                garmentIdSource = 'filename_parsing (UUID)';
+            } else {
+                const timestampMatch = filename.match(/\d{13}/);
+                if (timestampMatch) {
+                    garmentId = timestampMatch[0];
+                    garmentIdSource = 'filename_parsing (Timestamp)';
+                } else {
+                    garmentId = filename.substring(0, 20);
+                    garmentIdSource = 'filename_parsing (Fallback)';
+                }
+            }
         }
 
-        // --- HIERARCHICAL ID LOGIC ---
+        // --- POSE ID LOGIC ---
         let poseIdSource = 'unknown';
         let poseId = 'model_unknown';
-
         if (job.metadata?.original_vto_job_id) {
             poseId = job.metadata.original_vto_job_id.substring(0, 8);
             poseIdSource = 'metadata.original_vto_job_id (Refinement Pass)';
@@ -147,68 +186,25 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
                 poseIdSource = 'source_person_image_url (fallback parsing)';
             }
         }
-
-        let garmentIdSource = 'unknown';
-        let garmentId = 'garment_unknown';
-
-        if (job.metadata?.garment_analysis?.hash) {
-            garmentId = job.metadata.garment_analysis.hash.substring(0, 8);
-            garmentIdSource = 'metadata.garment_analysis.hash';
-        } else if (job.source_garment_image_url) {
-            const urlParts = job.source_garment_image_url.split('/');
-            const filename = urlParts.pop()?.split('.')[0] || '';
-            const uuidMatch = filename.match(/[a-f0-9]{8}-[a-f0-9]{4}/i);
-            if (uuidMatch) {
-                garmentId = uuidMatch[0];
-                garmentIdSource = 'source_garment_image_url (UUID parsing)';
-            } else {
-                const timestampMatch = filename.match(/\d{13}/);
-                if (timestampMatch) {
-                    garmentId = timestampMatch[0].substring(7);
-                    garmentIdSource = 'source_garment_image_url (timestamp parsing)';
-                } else {
-                    garmentId = filename.substring(0, 20);
-                    garmentIdSource = 'source_garment_image_url (fallback parsing)';
-                }
-            }
-        }
-        // --- END OF HIERARCHICAL LOGIC ---
         
         const filename = `Pose_${poseId}_Garment_${garmentId}.jpg`;
         let filePathInZip = '';
 
         switch (structure) {
-          case 'by_garment':
-            filePathInZip = `By_Garment/${sanitize(garmentId)}/${filename}`;
-            break;
-          case 'by_model':
-            filePathInZip = `By_Model/${sanitize(poseId)}/${filename}`;
-            break;
-          case 'flat':
-            filePathInZip = filename;
-            break;
+          case 'by_garment': filePathInZip = `By_Garment/${sanitize(garmentId)}/${filename}`; break;
+          case 'by_model': filePathInZip = `By_Model/${sanitize(poseId)}/${filename}`; break;
+          case 'flat': filePathInZip = filename; break;
         }
 
-        console.log(`[DownloadPack] Processing Job ${processedCount}/${totalFiles}:`, {
-            jobId: job.id,
-            poseId: poseId,
-            poseIdSource: poseIdSource,
-            garmentId: garmentId,
-            garmentIdSource: garmentIdSource,
-            finalFilename: filename,
-            finalPathInZip: filePathInZip,
-        });
+        console.log(`[DownloadPack] Job ${processedCount}/${totalFiles}:`, { jobId: job.id, poseId, poseIdSource, garmentId, garmentIdSource, finalFilename: filename });
         
         try {
           const response = await fetch(job.final_image_url);
-          if (!response.ok) {
-              console.warn(`[DownloadPack] Failed to fetch ${job.final_image_url}. Status: ${response.status}. Skipping.`);
-              continue;
-          }
+          if (!response.ok) continue;
           const blob = await response.blob();
           zip.file(filePathInZip, blob);
         } catch (e) {
-          console.error(`[DownloadPack] Exception while fetching ${job.final_image_url}:`, e);
+          console.error(`Failed to fetch ${job.final_image_url}`, e);
         }
       }
 
