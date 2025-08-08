@@ -49,6 +49,7 @@ export const useVTOJobs = () => {
           error_message: job.error_message,
           mode: 'inpaint',
           created_at: job.created_at,
+          updated_at: job.updated_at,
           metadata: {
             prompt_used: job.prompt_appendix
           }

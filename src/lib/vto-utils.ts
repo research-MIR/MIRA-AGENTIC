@@ -1,4 +1,5 @@
 import { AnalyzedGarment, Pose } from '@/types/vto';
+import { formatDistanceToNowStrict } from 'date-fns';
 
 /**
  * Determines if a given garment is compatible with a given model pose.
@@ -114,15 +115,14 @@ export const logPackJobStatusSummary = (packName: string, packId: string, jobs: 
   if (restartableJobs.length > 0) {
     console.group(`🔄 Jobs To Be Restarted [${restartableJobs.length}]`);
     restartableJobs.forEach(job => {
+      const timeSinceUpdate = job.updated_at ? `for ${formatDistanceToNowStrict(new Date(job.updated_at))}` : 'at an unknown time';
       let reason = '';
       if (job.status === 'failed' || job.status === 'permanently_failed') {
         reason = `its status is '${job.status}'.`;
-      } else if (job.status === 'pending') {
-        reason = `it is still 'pending'.`;
       } else if ((job.status === 'complete' || job.status === 'done') && !job.final_image_url) {
         reason = `its status is '${job.status}' but it is missing a final image URL.`;
       } else {
-        reason = `it appears to be stuck in the '${job.status}' state.`;
+        reason = `it appears to be stuck in the '${job.status}' state ${timeSinceUpdate}.`;
       }
       console.log(`- Job ${job.id}: To be restarted because ${reason}`);
     });

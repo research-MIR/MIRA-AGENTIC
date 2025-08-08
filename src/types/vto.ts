@@ -7,6 +7,7 @@ export interface BitStudioJob {
   error_message?: string;
   mode: 'base' | 'inpaint';
   created_at: string;
+  updated_at: string;
   batch_pair_job_id?: string;
   metadata?: {
     debug_assets?: any;
@@ -50,6 +51,7 @@ export interface Pose {
   pose_prompt: string;
   jobId: string;
   analysis?: PoseAnalysis;
+  comfyui_prompt_id?: string;
 }
 
 export interface AnalyzedGarment {
