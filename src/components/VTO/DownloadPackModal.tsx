@@ -67,6 +67,8 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
     setIsDownloading(true);
     setProgress(0);
     setProgressMessage("Fetching job list...");
+    console.log(`[DownloadPack] Starting download for pack: ${pack.pack_id}`);
+    console.log(`[DownloadPack] Scope: ${scope}, Structure: ${structure}`);
 
     try {
       let jobsToDownload: any[] = [];
@@ -100,6 +102,10 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
         jobsToDownload = data;
       }
 
+      console.log(`[DownloadPack] Found ${jobsToDownload.length} total jobs to process.`);
+      console.log(`[DownloadPack] First job data sample:`, jobsToDownload[0]);
+
+
       if (jobsToDownload.length === 0) {
         throw new Error("No images found for the selected criteria.");
       }
@@ -111,22 +117,31 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
       for (const job of jobsToDownload) {
         processedCount++;
         setProgress((processedCount / totalFiles) * 100);
-        setProgressMessage(`Downloading ${processedCount}/${totalFiles}...`);
+        const progressMsg = `Downloading ${processedCount}/${totalFiles}...`;
+        setProgressMessage(progressMsg);
+        
+        if (!job.final_image_url) {
+            console.warn(`[DownloadPack] Job ${job.id} has no final_image_url. Skipping.`);
+            continue;
+        }
 
-        if (!job.final_image_url) continue;
-
+        // --- DETAILED LOGGING ---
         const poseId = job.metadata?.model_generation_job_id?.substring(0, 8) || 'model_unknown';
         const garmentHash = job.metadata?.garment_analysis?.hash?.substring(0, 8);
         let garmentId;
+        let garmentIdSource = '';
+
         if (garmentHash) {
             garmentId = garmentHash;
+            garmentIdSource = 'garment_analysis.hash';
         } else {
             const garmentUrlParts = (job.source_garment_image_url || '').split('/');
             garmentId = garmentUrlParts.pop()?.split('.')[0].substring(0, 8) || 'garment_unknown';
+            garmentIdSource = 'source_garment_image_url parsing';
         }
         
-        let filePathInZip = '';
         const filename = `Pose_${poseId}_Garment_${garmentId}.jpg`;
+        let filePathInZip = '';
 
         switch (structure) {
           case 'by_garment':
@@ -139,14 +154,28 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
             filePathInZip = filename;
             break;
         }
+
+        console.log(`[DownloadPack] Processing Job ${processedCount}/${totalFiles}:`, {
+            jobId: job.id,
+            poseId: poseId,
+            poseIdSource: 'job.metadata?.model_generation_job_id',
+            garmentId: garmentId,
+            garmentIdSource: garmentIdSource,
+            finalFilename: filename,
+            finalPathInZip: filePathInZip,
+        });
+        // --- END LOGGING ---
         
         try {
           const response = await fetch(job.final_image_url);
-          if (!response.ok) continue;
+          if (!response.ok) {
+              console.warn(`[DownloadPack] Failed to fetch ${job.final_image_url}. Status: ${response.status}. Skipping.`);
+              continue;
+          }
           const blob = await response.blob();
           zip.file(filePathInZip, blob);
         } catch (e) {
-          console.error(`Failed to fetch ${job.final_image_url}`, e);
+          console.error(`[DownloadPack] Exception while fetching ${job.final_image_url}:`, e);
         }
       }
 
