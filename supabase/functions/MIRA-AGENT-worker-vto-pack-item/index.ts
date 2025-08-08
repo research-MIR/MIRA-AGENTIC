@@ -22,6 +22,7 @@ const OUTFIT_ANALYSIS_MAX_RETRIES = 3;
 const OUTFIT_ANALYSIS_RETRY_DELAY_MS = 15000; // Increased delay
 const REFRAME_STALL_THRESHOLD_SECONDS = 55;
 const MAX_REFRAME_RETRIES = 2;
+const QA_MAX_RETRIES = 2; // New constant for QA handoff retries
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -377,7 +378,7 @@ async function invokeWithRetry(supabase: SupabaseClient, functionName: string, p
       lastError = err instanceof Error ? err : new Error(String(err));
       console.warn(`${logPrefix} Invocation of '${functionName}' failed on attempt ${attempt}/${maxRetries}. Error: ${lastError.message}`);
       if (attempt < maxRetries) {
-        const delay = 15000 * attempt; // Exponential backoff
+        const delay = 15000 * attempt;
         console.warn(`${logPrefix} Waiting ${delay}ms before retrying...`);
         await new Promise((resolve)=>setTimeout(resolve, delay));
       }
@@ -482,6 +483,40 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
     ...qaData
   };
   qa_history.push(newHistoryEntry);
+
+  // --- Defensive Validation & Recovery Block ---
+  const bestImage = variations[qaData.best_image_index];
+  if (!bestImage || !bestImage.base64Image) {
+    console.warn(`${logPrefix} DATA INTEGRITY FAIL: QA selected index ${qaData.best_image_index}, but the image data is missing or corrupt.`);
+    
+    const currentRetryCount = metadata.qa_retry_count || 0;
+    if (currentRetryCount >= QA_MAX_RETRIES) {
+      throw new Error(`Job failed after ${QA_MAX_RETRIES} recovery attempts at the QA handoff stage due to missing image data.`);
+    }
+
+    console.log(`${logPrefix} RECOVERY ACTION: Attempting to re-run the previous generation step. Attempt ${currentRetryCount + 1}/${QA_MAX_RETRIES}.`);
+    
+    const previousGenerationStep = `generate_step_${currentRetryCount + 1}`;
+    
+    await supabase.from('mira-agent-bitstudio-jobs').update({
+      status: 'processing', // Set back to a generic processing state
+      metadata: {
+        ...metadata,
+        google_vto_step: previousGenerationStep, // Rewind to the generation step
+        generated_variations: [], // CRITICAL: Clear the corrupt variations
+        qa_retry_count: currentRetryCount + 1, // Increment retry count
+        qa_history: qa_history, // Persist the history of the failed QA
+      }
+    }).eq('id', pair_job_id);
+
+    // Re-invoke the worker to re-run the generation step
+    await invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
+    
+    // Stop execution of this current function instance
+    return; 
+  }
+  // --- END of Defensive Validation & Recovery Block ---
+
   if (qaData.action === 'retry') {
     if (is_escalation_check) {
       console.warn(`[VTO-Pack-Worker-QA][${job.id}] QA requested a retry on a final attempt. Overriding to 'select' the best available image (index ${qaData.best_image_index}) to prevent job failure.`);
@@ -506,10 +541,6 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
   }
   if (qaData.action === 'select') {
     console.log(`${logPrefix} QA selected an image. Proceeding to finalize.`);
-    const bestImage = variations[qaData.best_image_index];
-    if (!bestImage || !bestImage.base64Image) {
-        throw new Error(`Defensive check failed: QA selected index ${qaData.best_image_index}, but the image data is missing.`);
-    }
     const bestImageBase64 = bestImage.base64Image;
     const bestImageUrl = await uploadBase64ToStorage(supabase, bestImageBase64, job.user_id, 'qa_best.png');
     await supabase.from('mira-agent-bitstudio-jobs').update({
