@@ -53,6 +53,7 @@ interface PackSummary {
   };
   total_jobs: number;
   completed_jobs: number;
+  incomplete_jobs: number;
   pending_jobs: number;
   passed_perfect: number;
   passed_pose_change: number;
@@ -102,7 +103,7 @@ export const RecentVtoPacks = () => {
       };
 
       const packsPromise = supabase.from('mira-agent-vto-packs-jobs').select('id, created_at, metadata').eq('user_id', session.user.id);
-      const jobsPromise = fetchAll(supabase.from('mira-agent-bitstudio-jobs').select('id, vto_pack_job_id, status, batch_pair_job_id').eq('user_id', session.user.id).not('vto_pack_job_id', 'is', null));
+      const jobsPromise = fetchAll(supabase.from('mira-agent-bitstudio-jobs').select('id, vto_pack_job_id, status, batch_pair_job_id, final_image_url').eq('user_id', session.user.id).not('vto_pack_job_id', 'is', null));
       const batchPairJobsPromise = fetchAll(supabase.from('mira-agent-batch-inpaint-pair-jobs').select('id, metadata, status').eq('user_id', session.user.id).not('metadata->>vto_pack_job_id', 'is', null));
       const reportsPromise = supabase.rpc('get_vto_qa_reports_for_user', { p_user_id: session.user.id });
 
@@ -164,6 +165,7 @@ export const RecentVtoPacks = () => {
             metadata: pack.metadata || {},
             total_jobs: 0,
             completed_jobs: 0,
+            incomplete_jobs: 0,
             pending_jobs: 0,
             passed_perfect: 0, passed_pose_change: 0, passed_logo_issue: 0, passed_detail_issue: 0,
             failed_jobs: 0, failure_summary: {}, shape_mismatches: 0, avg_body_preservation_score: null, has_refinement_pass: false,
@@ -193,9 +195,10 @@ export const RecentVtoPacks = () => {
         const jobsForThisPack = allJobsForPack.get(pack.id) || [];
         
         summary.total_jobs = jobsForThisPack.length;
-        summary.completed_jobs = jobsForThisPack.filter((j: any) => ['complete', 'done', 'failed', 'permanently_failed'].includes(j.status)).length;
+        summary.completed_jobs = jobsForThisPack.filter((j: any) => (j.status === 'complete' || j.status === 'done') && j.final_image_url).length;
         summary.failed_jobs = jobsForThisPack.filter((j: any) => ['failed', 'permanently_failed'].includes(j.status)).length;
         summary.pending_jobs = jobsForThisPack.filter((j: any) => j.status === 'pending').length;
+        summary.incomplete_jobs = summary.total_jobs - summary.completed_jobs;
     }
 
     for (const report of reports) {
@@ -212,8 +215,6 @@ export const RecentVtoPacks = () => {
           } else {
               summary.passed_perfect++;
           }
-        } else {
-          // This count is now derived from job status, not reports
         }
         const reason = reportData.failure_category || "Unknown";
         summary.failure_summary[reason] = (summary.failure_summary[reason] || 0) + 1;
@@ -304,17 +305,17 @@ export const RecentVtoPacks = () => {
     }
   };
 
-  const handleRequeuePending = async (pack: PackSummary) => {
+  const handleRequeueIncomplete = async (pack: PackSummary) => {
     if (!session?.user) return;
     setIsRequeuing(pack.pack_id);
-    const toastId = showLoading(`Re-queueing ${pack.pending_jobs} pending jobs...`);
+    const toastId = showLoading(`Re-queueing ${pack.incomplete_jobs} incomplete jobs...`);
     try {
-        const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-requeue-pending-in-pack', {
-            body: { pack_id: pack.pack_id, user_id: session.user.id }
+        const { data, error } = await supabase.rpc('MIRA-AGENT-retry-all-incomplete-in-pack', {
+            p_pack_id: pack.pack_id
         });
         if (error) throw error;
         dismissToast(toastId);
-        showSuccess(data.message);
+        showSuccess(`${data} jobs have been re-queued for processing.`);
         queryClient.invalidateQueries({ queryKey: ['vtoPackSummaries', session.user.id] });
     } catch (err: any) {
         dismissToast(toastId);
@@ -367,11 +368,19 @@ export const RecentVtoPacks = () => {
                   </div>
                 </AccordionTrigger>
                 <div className="flex items-center gap-2 pl-4">
-                  {pack.pending_jobs > 0 && (
-                    <Button variant="outline" size="sm" onClick={() => handleRequeuePending(pack)} disabled={isRequeuing === pack.pack_id}>
-                      {isRequeuing === pack.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
-                      Re-queue Pending ({pack.pending_jobs})
-                    </Button>
+                  {pack.incomplete_jobs > 0 && (
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button variant="destructive" size="sm" disabled={isRequeuing === pack.pack_id}>
+                          {isRequeuing === pack.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+                          Restart Incomplete ({pack.incomplete_jobs})
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader><AlertDialogTitle>Restart all incomplete jobs?</AlertDialogTitle><AlertDialogDescription>This will re-queue all {pack.incomplete_jobs} jobs that are pending, processing, or failed. Already completed jobs will not be affected. This action cannot be undone.</AlertDialogDescription></AlertDialogHeader>
+                        <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={() => handleRequeueIncomplete(pack)}>Yes, Restart</AlertDialogAction></AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
                   )}
                   {pack.failed_jobs > 0 && (
                     <Button variant="outline" size="sm" onClick={() => handleRetryFailed(pack)} disabled={isRetrying === pack.pack_id}>
