@@ -125,20 +125,28 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
             continue;
         }
 
-        // --- DETAILED LOGGING ---
-        const poseId = job.metadata?.model_generation_job_id?.substring(0, 8) || 'model_unknown';
-        const garmentHash = job.metadata?.garment_analysis?.hash?.substring(0, 8);
-        let garmentId;
-        let garmentIdSource = '';
-
-        if (garmentHash) {
-            garmentId = garmentHash;
-            garmentIdSource = 'garment_analysis.hash';
+        // --- NEW, MORE ROBUST ID LOGIC ---
+        let poseIdSource = 'unknown';
+        let poseId = job.metadata?.model_generation_job_id?.substring(0, 8);
+        if (!poseId) {
+            const personUrlParts = (job.source_person_image_url || '').split('/');
+            poseId = personUrlParts.pop()?.split('.')[0].substring(0, 8) || 'model_unknown';
+            poseIdSource = 'source_person_image_url parsing';
         } else {
-            const garmentUrlParts = (job.source_garment_image_url || '').split('/');
-            garmentId = garmentUrlParts.pop()?.split('.')[0].substring(0, 8) || 'garment_unknown';
-            garmentIdSource = 'source_garment_image_url parsing';
+            poseIdSource = 'job.metadata.model_generation_job_id';
         }
+
+        let garmentIdSource = 'unknown';
+        let garmentId = job.metadata?.garment_analysis?.hash?.substring(0, 8);
+        if (!garmentId) {
+            const garmentUrlParts = (job.source_garment_image_url || '').split('/');
+            const filename = garmentUrlParts.pop()?.split('.')[0] || '';
+            garmentId = filename.substring(0, 20) || 'garment_unknown';
+            garmentIdSource = 'source_garment_image_url parsing';
+        } else {
+            garmentIdSource = 'job.metadata.garment_analysis.hash';
+        }
+        // --- END OF NEW LOGIC ---
         
         const filename = `Pose_${poseId}_Garment_${garmentId}.jpg`;
         let filePathInZip = '';
@@ -158,13 +166,12 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
         console.log(`[DownloadPack] Processing Job ${processedCount}/${totalFiles}:`, {
             jobId: job.id,
             poseId: poseId,
-            poseIdSource: 'job.metadata?.model_generation_job_id',
+            poseIdSource: poseIdSource,
             garmentId: garmentId,
             garmentIdSource: garmentIdSource,
             finalFilename: filename,
             finalPathInZip: filePathInZip,
         });
-        // --- END LOGGING ---
         
         try {
           const response = await fetch(job.final_image_url);
