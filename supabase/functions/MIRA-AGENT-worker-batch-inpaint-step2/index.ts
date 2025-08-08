@@ -21,10 +21,7 @@ function parseStorageURL(url: string) {
   }
   const bucket = pathSegments[objectSegmentIndex + 2];
   const path = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
-  return {
-    bucket,
-    path
-  };
+  return { bucket, path };
 }
 
 async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
@@ -36,9 +33,7 @@ async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string)
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
-    return new Response(null, {
-      headers: corsHeaders
-    });
+    return new Response(null, { headers: corsHeaders });
   }
 
   const { pair_job_id } = await req.json();
@@ -47,12 +42,7 @@ serve(async (req) => {
 
   if (!pair_job_id) {
     console.error(`${logPrefix} Missing required parameter: pair_job_id.`);
-    return new Response(JSON.stringify({
-      error: "pair_job_id is required."
-    }), {
-      status: 400,
-      headers: corsHeaders
-    });
+    return new Response(JSON.stringify({ error: "pair_job_id is required." }), { status: 400, headers: corsHeaders });
   }
 
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
