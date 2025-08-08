@@ -183,31 +183,41 @@ serve(async (req)=>{
     const finalPrompt = promptData.final_prompt;
     console.log(`${logPrefix} Prompt generated successfully.`);
 
-    const proxyData = await invokeWithRetry(supabase, 'MIRA-AGENT-proxy-bitstudio', {
-      body: {
-        mode: 'inpaint',
-        user_id: user_id,
-        source_cropped_url: source_cropped_url,
-        mask_url: final_mask_url,
-        prompt: finalPrompt,
-        reference_image_url: source_garment_image_url,
-        denoise: metadata?.denoise || 0.95,
-        resolution: 'standard',
-        num_images: 1,
-        batch_pair_job_id: pair_job_id,
-        vto_pack_job_id: metadata?.vto_pack_job_id,
-        metadata: {
-          ...metadata,
-          bbox: bbox,
-          full_source_image_url: source_person_image_url,
-          final_mask_url: final_mask_url
-        }
-      }
-    }, 3, logPrefix);
+    // --- NEW: Check for existing BitStudio job before invoking proxy ---
+    const { data: existingBitstudioJob, error: checkError } = await supabase
+      .from('mira-agent-bitstudio-jobs')
+      .select('id')
+      .eq('batch_pair_job_id', pair_job_id)
+      .maybeSingle();
+    if (checkError) throw checkError;
 
+    const proxyPayload = {
+      mode: 'inpaint',
+      user_id: user_id,
+      source_cropped_url: source_cropped_url,
+      mask_url: final_mask_url,
+      prompt: finalPrompt,
+      reference_image_url: source_garment_image_url,
+      denoise: metadata?.denoise || 0.95,
+      resolution: 'standard',
+      num_images: 1,
+      batch_pair_job_id: pair_job_id,
+      vto_pack_job_id: metadata?.vto_pack_job_id,
+      metadata: {
+        ...metadata,
+        bbox: bbox,
+        full_source_image_url: source_person_image_url,
+        final_mask_url: final_mask_url
+      },
+      retry_job_id: existingBitstudioJob ? existingBitstudioJob.id : null // Pass the ID if it's a retry
+    };
+
+    const proxyData = await invokeWithRetry(supabase, 'MIRA-AGENT-proxy-bitstudio', { body: proxyPayload }, 3, logPrefix);
+    
     console.log(`${logPrefix} BitStudio proxy invoked successfully.`);
-    const inpaintingJobId = proxyData?.jobIds?.[0];
+    const inpaintingJobId = proxyData?.jobId;
     if (!inpaintingJobId) throw new Error('Delegation failed: Proxy did not return a valid job ID.');
+    
     await supabase.from('mira-agent-batch-inpaint-pair-jobs').update({
       status: 'delegated',
       inpainting_job_id: inpaintingJobId,
