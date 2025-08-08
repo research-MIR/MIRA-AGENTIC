@@ -125,26 +125,39 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
             continue;
         }
 
-        // --- NEW, MORE ROBUST ID LOGIC ---
+        // --- NEW HIERARCHICAL ID LOGIC ---
         let poseIdSource = 'unknown';
-        let poseId = job.metadata?.model_generation_job_id?.substring(0, 8);
-        if (!poseId) {
-            const personUrlParts = (job.source_person_image_url || '').split('/');
-            poseId = personUrlParts.pop()?.split('.')[0].substring(0, 8) || 'model_unknown';
-            poseIdSource = 'source_person_image_url parsing';
-        } else {
-            poseIdSource = 'job.metadata.model_generation_job_id';
+        let poseId = 'model_unknown';
+
+        if (job.metadata?.original_vto_job_id) {
+            poseId = job.metadata.original_vto_job_id.substring(0, 8);
+            poseIdSource = 'metadata.original_vto_job_id (Refinement Pass)';
+        } else if (job.metadata?.model_generation_job_id) {
+            poseId = job.metadata.model_generation_job_id.substring(0, 8);
+            poseIdSource = 'metadata.model_generation_job_id (First Pass)';
+        } else if (job.source_person_image_url) {
+            const urlParts = job.source_person_image_url.split('/');
+            poseId = urlParts.pop()?.split('.')[0].substring(0, 8) || 'model_unknown_fallback';
+            poseIdSource = 'source_person_image_url parsing (Fallback)';
         }
 
         let garmentIdSource = 'unknown';
-        let garmentId = job.metadata?.garment_analysis?.hash?.substring(0, 8);
-        if (!garmentId) {
-            const garmentUrlParts = (job.source_garment_image_url || '').split('/');
-            const filename = garmentUrlParts.pop()?.split('.')[0] || '';
-            garmentId = filename.substring(0, 20) || 'garment_unknown';
-            garmentIdSource = 'source_garment_image_url parsing';
-        } else {
-            garmentIdSource = 'job.metadata.garment_analysis.hash';
+        let garmentId = 'garment_unknown';
+
+        if (job.metadata?.garment_analysis?.hash) {
+            garmentId = job.metadata.garment_analysis.hash.substring(0, 8);
+            garmentIdSource = 'metadata.garment_analysis.hash';
+        } else if (job.source_garment_image_url) {
+            const urlParts = job.source_garment_image_url.split('/');
+            const filename = urlParts.pop()?.split('.')[0] || '';
+            // Try to find a UUID-like structure in the filename
+            const uuidMatch = filename.match(/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/i);
+            if (uuidMatch) {
+                garmentId = uuidMatch[0].substring(0, 8);
+            } else {
+                garmentId = filename.substring(0, 20);
+            }
+            garmentIdSource = 'source_garment_image_url parsing (Fallback)';
         }
         // --- END OF NEW LOGIC ---
         
