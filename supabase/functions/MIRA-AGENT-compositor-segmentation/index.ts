@@ -5,7 +5,7 @@ import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
 };
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
@@ -13,22 +13,25 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
 
 async function uploadBufferToStorage(supabase: SupabaseClient, buffer: Uint8Array | null, userId: string, filename: string): Promise<string | null> {
-    if (!buffer) return null;
-    const filePath = `${userId}/vto-debug/${Date.now()}-${filename}`;
-    const { error } = await supabase.storage
-      .from(GENERATED_IMAGES_BUCKET)
-      .upload(filePath, buffer, { contentType: 'image/png', upsert: true });
-    if (error) {
-        console.error(`Storage upload failed for ${filename}: ${error.message}`);
-        throw new Error(`Storage upload failed for ${filename}: ${error.message}`);
-    }
-    const { data: { publicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
-    return publicUrl;
+  if (!buffer) return null;
+  const filePath = `${userId}/vto-debug/${Date.now()}-${filename}`;
+  const { error } = await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(filePath, buffer, {
+    contentType: 'image/png',
+    upsert: true
+  });
+  if (error) {
+    console.error(`Storage upload failed for ${filename}: ${error.message}`);
+    throw new Error(`Storage upload failed for ${filename}: ${error.message}`);
+  }
+  const { data: { publicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
+  return publicUrl;
 }
 
-serve(async (req) => {
+serve(async (req)=>{
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
+    return new Response('ok', {
+      headers: corsHeaders
+    });
   }
 
   let aggregationJobId: string | null = null;
@@ -52,16 +55,22 @@ serve(async (req) => {
       .eq('status', 'aggregating');
 
     if (updateError) {
-        console.error(`[Compositor][${requestId}] Error trying to claim job:`, updateError.message);
-        throw updateError;
+      console.error(`[Compositor][${requestId}] Error trying to claim job:`, updateError.message);
+      throw updateError;
     }
 
     if (count === 0) {
-        console.log(`[Compositor][${requestId}] Job was already claimed by another instance or is not in 'aggregating' state. Exiting gracefully.`);
-        return new Response(JSON.stringify({ success: true, message: "Job already claimed or not in a valid state for composition." }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            status: 200,
-        });
+      console.log(`[Compositor][${requestId}] Job was already claimed by another instance or is not in 'aggregating' state. Exiting gracefully.`);
+      return new Response(JSON.stringify({
+        success: true,
+        message: "Job already claimed or not in a valid state for composition."
+      }), {
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json'
+        },
+        status: 200
+      });
     }
     // --- END OF ATOMIC UPDATE ---
 
@@ -80,7 +89,7 @@ serve(async (req) => {
     // --- VALIDATION STEP ---
     const allMasks = (job.results || []).flat().filter((item: any) => item && item.mask && item.box_2d);
     if (allMasks.length === 0) {
-        throw new Error("Segmentation failed: No valid masks were produced by any of the analysis workers.");
+      throw new Error("Segmentation failed: No valid masks were produced by any of the analysis workers.");
     }
     console.log(`[Compositor][${requestId}] Validation passed. Found ${allMasks.length} valid mask segments to composite.`);
     // --- END VALIDATION ---
@@ -102,15 +111,15 @@ serve(async (req) => {
     rawMaskCtx.fillStyle = 'black';
     rawMaskCtx.fillRect(0, 0, width, height);
 
-    for (const maskData of allMasks) {
+    for (const maskData of allMasks){
       try {
         const maskBase64 = maskData.mask.startsWith('data:image/png;base64,') 
             ? maskData.mask.split(',')[1] 
             : maskData.mask;
         
         if (!maskBase64) {
-            console.warn(`[Compositor][${requestId}] Skipping a mask because its base64 data was empty.`);
-            continue;
+          console.warn(`[Compositor][${requestId}] Skipping a mask because its base64 data was empty.`);
+          continue;
         }
 
         const maskImageBuffer = decodeBase64(maskBase64);
@@ -123,10 +132,10 @@ serve(async (req) => {
         const bboxHeight = Math.ceil(((y1 - y0) / 1000) * height);
 
         if (bboxWidth > 0 && bboxHeight > 0) {
-            rawMaskCtx.drawImage(maskImage, absX0, absY0, bboxWidth, bboxHeight);
+          rawMaskCtx.drawImage(maskImage, absX0, absY0, bboxWidth, bboxHeight);
         }
       } catch (e) {
-          console.warn(`[Compositor][${requestId}] Could not process a single mask from a worker. Error: ${e.message}. Skipping it and continuing.`);
+        console.warn(`[Compositor][${requestId}] Could not process a single mask from a worker. Error: ${e.message}. Skipping it and continuing.`);
       }
     }
 
@@ -135,43 +144,74 @@ serve(async (req) => {
     console.log(`[Compositor][${requestId}] Raw mask uploaded to: ${rawMaskUrl}`);
 
     const { data: parentPairJob, error: parentFetchError } = await supabase
-        .from('mira-agent-batch-inpaint-pair-jobs')
-        .select('id')
-        .eq('metadata->>aggregation_job_id', aggregationJobId)
-        .maybeSingle();
+      .from('mira-agent-batch-inpaint-pair-jobs')
+      .select('id, metadata')
+      .eq('metadata->>aggregation_job_id', aggregationJobId)
+      .maybeSingle();
 
     if (parentFetchError) {
-        console.warn(`[Compositor][${requestId}] Could not check for parent job: ${parentFetchError.message}`);
+      console.warn(`[Compositor][${requestId}] Could not check for parent job: ${parentFetchError.message}`);
     } else if (parentPairJob) {
-        console.log(`[Compositor][${requestId}] Found parent job ${parentPairJob.id}. Invoking expander function...`);
-        await supabase.functions.invoke('MIRA-AGENT-expander-mask', {
-            body: { 
-                raw_mask_url: rawMaskUrl, 
-                user_id: job.user_id,
-                parent_pair_job_id: parentPairJob.id
-            }
-        });
+      console.log(`[Compositor][${requestId}] Found parent job ${parentPairJob.id}. Updating its status to 'mask_expanded'.`);
+      
+      const newMetadata = {
+        ...(parentPairJob.metadata || {}),
+        debug_assets: {
+            ...(parentPairJob.metadata?.debug_assets || {}),
+            raw_mask_url: rawMaskUrl
+        }
+      };
+
+      const { error: parentUpdateError } = await supabase
+        .from('mira-agent-batch-inpaint-pair-jobs')
+        .update({
+            status: 'mask_expanded',
+            metadata: newMetadata
+        })
+        .eq('id', parentPairJob.id);
+
+      if (parentUpdateError) {
+          console.error(`[Compositor][${requestId}] Failed to update parent job status:`, parentUpdateError.message);
+          throw new Error(`Failed to update parent job ${parentPairJob.id} to 'mask_expanded': ${parentUpdateError.message}`);
+      }
     } else {
-        console.warn(`[Compositor][${requestId}] No parent job found for aggregation job. Expansion step will not be triggered.`);
+      console.warn(`[Compositor][${requestId}] No parent job found for aggregation job. Expansion step will not be triggered.`);
     }
 
-    await supabase.from('mira-agent-mask-aggregation-jobs')
-      .update({ status: 'complete', metadata: { ...job.metadata, raw_mask_url: rawMaskUrl } })
-      .eq('id', aggregationJobId);
+    await supabase.from('mira-agent-mask-aggregation-jobs').update({
+      status: 'complete',
+      metadata: {
+        ...job.metadata,
+        raw_mask_url: rawMaskUrl
+      }
+    }).eq('id', aggregationJobId);
     
-    return new Response(JSON.stringify({ success: true, rawMaskUrl }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 200,
+    return new Response(JSON.stringify({
+      success: true,
+      rawMaskUrl
+    }), {
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/json'
+      },
+      status: 200
     });
-
   } catch (error) {
     console.error(`[Compositor][${aggregationJobId || 'unknown'}] Error:`, error);
     if (aggregationJobId) {
-        await supabase.from('mira-agent-mask-aggregation-jobs').update({ status: 'failed', error_message: error.message }).eq('id', aggregationJobId);
+      await supabase.from('mira-agent-mask-aggregation-jobs').update({
+        status: 'failed',
+        error_message: error.message
+      }).eq('id', aggregationJobId);
     }
-    return new Response(JSON.stringify({ error: error.message }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 500,
+    return new Response(JSON.stringify({
+      error: error.message
+    }), {
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/json'
+      },
+      status: 500
     });
   }
 });
