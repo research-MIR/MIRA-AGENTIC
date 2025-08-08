@@ -362,38 +362,39 @@ serve(async (req)=>{
       console.error(`[Watchdog-BG][${requestId}] Task 13 (New QA Jobs) failed:`, e.message);
     }
     try {
-      console.log(`[Watchdog-BG][${requestId}] === Task 14: Triggering Step 2 for Expanded Masks ===`);
+      console.log(`[Watchdog-BG][${requestId}] === Task 14: Triggering Mask Expansion ===`);
       // --- ATOMIC CLAIM AND INVOKE ---
-      const { data: readyForStep2Jobs, error: updateError } = await supabase
+      const { data: readyForExpansionJobs, error: updateError } = await supabase
         .from('mira-agent-batch-inpaint-pair-jobs')
-        .update({ status: 'processing_step_2' })
+        .update({ status: 'expanding_mask' }) // New status to claim the job
         .eq('status', 'mask_expanded')
-        .select('id, metadata');
+        .select('id, user_id, metadata');
 
       if (updateError) throw updateError;
 
-      if (readyForStep2Jobs && readyForStep2Jobs.length > 0) {
-        console.log(`[Watchdog-BG][${requestId}] Claimed ${readyForStep2Jobs.length} jobs for Step 2. Invoking workers...`);
-        const step2Promises = readyForStep2Jobs.map((job)=>{
-          const finalMaskUrl = job.metadata?.debug_assets?.expanded_mask_url;
-          if (!finalMaskUrl) {
-            console.error(`[Watchdog-BG][${requestId}] Job ${job.id} is ready for step 2 but is missing the expanded_mask_url. Skipping.`);
+      if (readyForExpansionJobs && readyForExpansionJobs.length > 0) {
+        console.log(`[Watchdog-BG][${requestId}] Claimed ${readyForExpansionJobs.length} jobs for mask expansion. Invoking expander workers...`);
+        const expanderPromises = readyForExpansionJobs.map((job)=>{
+          const rawMaskUrl = job.metadata?.debug_assets?.raw_mask_url;
+          if (!rawMaskUrl) {
+            console.error(`[Watchdog-BG][${requestId}] Job ${job.id} is ready for expansion but is missing the raw_mask_url. Skipping.`);
             return Promise.resolve();
           }
-          return supabase.functions.invoke('MIRA-AGENT-worker-batch-inpaint-step2', {
+          return supabase.functions.invoke('MIRA-AGENT-expander-mask', {
             body: {
-              pair_job_id: job.id,
-              final_mask_url: finalMaskUrl
+              parent_pair_job_id: job.id,
+              raw_mask_url: rawMaskUrl,
+              user_id: job.user_id
             }
           });
         });
-        await Promise.allSettled(step2Promises);
-        actionsTaken.push(`Triggered Step 2 worker for ${readyForStep2Jobs.length} jobs.`);
+        await Promise.allSettled(expanderPromises);
+        actionsTaken.push(`Triggered expander worker for ${readyForExpansionJobs.length} jobs.`);
       } else {
-        console.log(`[Watchdog-BG][${requestId}] No jobs ready for Step 2.`);
+        console.log(`[Watchdog-BG][${requestId}] No jobs ready for mask expansion.`);
       }
     } catch (e) {
-      console.error(`[Watchdog-BG][${requestId}] Task 14 (Step 2 Jobs) failed:`, e.message);
+      console.error(`[Watchdog-BG][${requestId}] Task 14 (Mask Expansion) failed:`, e.message);
     }
     try {
       console.log(`[Watchdog-BG][${requestId}] === Task 15: Triggering Report Chunk Workers ===`);
