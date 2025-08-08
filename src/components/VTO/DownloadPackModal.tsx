@@ -6,9 +6,10 @@ import { Label } from "@/components/ui/label";
 import { Loader2, List, Shirt, Users, PersonStanding, Database, Download } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
 import { useSession } from '@/components/Auth/SessionContextProvider';
-import { showError, showLoading, dismissToast, showSuccess } from '@/utils/toast';
+import { showError, showSuccess } from '@/utils/toast';
 import { cn } from '@/lib/utils';
-import { useQueryClient } from '@tanstack/react-query';
+import JSZip from 'jszip';
+import { Progress } from '@/components/ui/progress';
 
 type ExportStructure = 'flat' | 'by_garment' | 'by_model' | 'by_pose' | 'data_export';
 
@@ -22,6 +23,8 @@ interface DownloadPackModalProps {
   onClose: () => void;
   pack: PackSummary | null;
 }
+
+const sanitize = (str: string) => str.replace(/[^a-z0-9_.-]/gi, '_').substring(0, 50);
 
 const ExportOption = ({ value, title, description, structure, icon, selected, onSelect }: any) => (
   <div
@@ -46,35 +49,86 @@ const ExportOption = ({ value, title, description, structure, icon, selected, on
 export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalProps) => {
   const { t } = useLanguage();
   const { supabase, session } = useSession();
-  const queryClient = useQueryClient();
   const [structure, setStructure] = useState<ExportStructure>('by_garment');
-  const [isStarting, setIsStarting] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [progressMessage, setProgressMessage] = useState('');
 
-  const handleStartExport = async () => {
+  const handleDownload = async () => {
     if (!pack || !session?.user) return;
-    setIsStarting(true);
-    const toastId = showLoading("Initiating export job...");
+    setIsDownloading(true);
+    setProgress(0);
+    setProgressMessage("Fetching job list...");
 
     try {
-      const { error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-pack-export', {
-        body: {
-          pack_id: pack.pack_id,
-          user_id: session.user.id,
-          export_structure: structure,
+      // Step 1: Fetch all job details for the pack
+      const { data: jobs, error: jobsError } = await supabase
+        .from('mira-agent-bitstudio-jobs')
+        .select('id, status, final_image_url, source_person_image_url, source_garment_image_url, metadata')
+        .eq('vto_pack_job_id', pack.pack_id)
+        .eq('user_id', session.user.id)
+        .in('status', ['complete', 'done']);
+      
+      if (jobsError) throw jobsError;
+      if (!jobs || jobs.length === 0) throw new Error("No completed jobs found to export.");
+
+      const zip = new JSZip();
+      const totalFiles = jobs.length;
+      let processedCount = 0;
+
+      // Step 2: Download and add files to zip one by one
+      for (const job of jobs) {
+        processedCount++;
+        setProgress((processedCount / totalFiles) * 100);
+        setProgressMessage(`Downloading ${processedCount}/${totalFiles}...`);
+
+        if (!job.final_image_url) continue;
+
+        const modelId = job.metadata?.model_generation_job_id || 'unknown_model';
+        const garmentUrl = job.source_garment_image_url || 'unknown_garment';
+        const garmentId = garmentUrl.split('/').pop()?.split('.')[0] || 'unknown_garment';
+        const posePrompt = job.metadata?.prompt_used || 'unknown_pose';
+        const poseId = sanitize(posePrompt);
+        const filename = `${sanitize(modelId)}_${sanitize(garmentId)}_${poseId}.jpg`;
+        let folderPath = '';
+
+        switch (structure) {
+            case 'by_garment': folderPath = `By_Garment/${sanitize(garmentId)}/`; break;
+            case 'by_model': folderPath = `By_Model/${sanitize(modelId)}/`; break;
+            case 'by_pose': folderPath = `By_Pose/${poseId}/`; break;
+            case 'data_export': folderPath = 'images/'; break;
+            case 'flat': default: folderPath = ''; break;
         }
-      });
 
-      if (error) throw error;
+        try {
+          const response = await fetch(job.final_image_url);
+          if (!response.ok) continue;
+          const blob = await response.blob();
+          zip.file(`${folderPath}${filename}`, blob);
+        } catch (e) {
+          console.error(`Failed to fetch ${job.final_image_url}`, e);
+        }
+      }
 
-      dismissToast(toastId);
-      showSuccess("Export started! You can track its progress in the sidebar.");
-      queryClient.invalidateQueries({ queryKey: ['activeJobs', session.user.id] });
+      // Step 3: Generate and trigger download
+      setProgressMessage("Zipping files...");
+      const content = await zip.generateAsync({ type: "blob" });
+      
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(content);
+      link.download = `${pack.metadata?.name || pack.pack_id}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(link.href);
+
+      showSuccess("Download started!");
       onClose();
+
     } catch (err: any) {
-      dismissToast(toastId);
-      showError(`Failed to start export: ${err.message}`);
+      showError(`Download failed: ${err.message}`);
     } finally {
-      setIsStarting(false);
+      setIsDownloading(false);
     }
   };
 
@@ -96,17 +150,25 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
           </DialogDescription>
         </DialogHeader>
         <div className="py-4">
-          <RadioGroup value={structure} onValueChange={(value: ExportStructure) => setStructure(value)}>
-            <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-2">
-              {options.map(opt => <ExportOption key={opt.value} {...opt} selected={structure} onSelect={setStructure} />)}
+          {isDownloading ? (
+            <div className="flex flex-col items-center justify-center h-64">
+              <Loader2 className="h-12 w-12 animate-spin text-primary" />
+              <p className="mt-4 text-muted-foreground">{progressMessage}</p>
+              <Progress value={progress} className="w-full mt-2" />
             </div>
-          </RadioGroup>
+          ) : (
+            <RadioGroup value={structure} onValueChange={(value: ExportStructure) => setStructure(value)}>
+              <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-2">
+                {options.map(opt => <ExportOption key={opt.value} {...opt} selected={structure} onSelect={setStructure} />)}
+              </div>
+            </RadioGroup>
+          )}
         </div>
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose} disabled={isStarting}>Cancel</Button>
-          <Button onClick={handleStartExport} disabled={isStarting}>
-            {isStarting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-            Start Export
+          <Button variant="ghost" onClick={onClose} disabled={isDownloading}>Cancel</Button>
+          <Button onClick={handleDownload} disabled={isDownloading}>
+            {isDownloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+            Start Download
           </Button>
         </DialogFooter>
       </DialogContent>

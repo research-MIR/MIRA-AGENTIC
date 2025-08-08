@@ -20,34 +20,30 @@ serve(async (req) => {
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
     const logPrefix = `[PackExportOrchestrator][${pack_id}]`;
-    console.log(`${logPrefix} Starting export job.`);
+    console.log(`${logPrefix} Creating export job record.`);
 
-    // Create a new job in the export table
+    // Create a new job in the export table. This is the function's only job now.
     const { data: newJob, error: insertError } = await supabase
       .from('mira-agent-export-jobs')
       .insert({
         user_id,
         pack_id,
         export_structure,
-        status: 'pending'
+        status: 'pending' // The client will update this as it works
       })
       .select('id')
       .single();
 
     if (insertError) throw insertError;
 
-    // Asynchronously invoke the worker
-    supabase.functions.invoke('MIRA-AGENT-worker-pack-export', {
-      body: { export_job_id: newJob.id }
-    }).catch(console.error);
-
-    console.log(`${logPrefix} Export job ${newJob.id} created and worker invoked.`);
+    console.log(`${logPrefix} Export job ${newJob.id} created. Returning to client for processing.`);
     return new Response(JSON.stringify({ success: true, jobId: newJob.id }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });
 
-  } catch (error) {
+  } catch (error)
+  {
     console.error("[PackExportOrchestrator] Error:", error);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
