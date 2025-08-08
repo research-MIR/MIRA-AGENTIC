@@ -102,21 +102,21 @@ serve(async (req)=>{
         .from('mira-agent-bitstudio-jobs')
         .select('id')
         .in('status', ['queued', 'processing'])
-        .not('bitstudio_task_id', 'is', null) // CORRECTED FILTER
-        .lt('last_polled_at', threshold);
+        .not('bitstudio_task_id', 'is', null)
+        .or(`last_polled_at.lt.${threshold},last_polled_at.is.null`);
 
       if (error) {
         console.error(`[Watchdog-BG][${requestId}] Error querying stalled BitStudio jobs:`, error.message);
       } else if (stalledJobs && stalledJobs.length > 0) {
         console.log(`[Watchdog-BG][${requestId}] Found ${stalledJobs.length} stalled BitStudio job(s). Attempting recovery...`);
         
-        const recoveryPromises = stalledJobs.map(async (job) => {
+        const recoveryPromises = stalledJobs.map(async (job)=>{
           const jobId = job.id;
           const { count, error: updateError } = await supabase
             .from('mira-agent-bitstudio-jobs')
             .update({ last_polled_at: new Date().toISOString() })
             .eq('id', jobId)
-            .lt('last_polled_at', threshold);
+            .or(`last_polled_at.lt.${threshold},last_polled_at.is.null`);
 
           if (updateError) {
             console.error(`[Watchdog-BG][${requestId}] Error touching stalled BitStudio job ${jobId}:`, updateError.message);
@@ -126,7 +126,9 @@ serve(async (req)=>{
           if (count && count > 0) {
             console.log(`[Watchdog-BG][${requestId}] Claimed stalled BitStudio job ${jobId}. Invoking MIRA-AGENT-poller-bitstudio.`);
             await supabase.functions.invoke('MIRA-AGENT-poller-bitstudio', {
-              body: { job_id: jobId }
+              body: {
+                job_id: jobId
+              }
             });
           } else {
             console.log(`[Watchdog-BG][${requestId}] Stalled BitStudio job ${jobId} was already handled. Skipping.`);
