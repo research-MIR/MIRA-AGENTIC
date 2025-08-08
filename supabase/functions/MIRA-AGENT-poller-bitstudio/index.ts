@@ -10,7 +10,7 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const BITSTUDIO_API_KEY = Deno.env.get('BITSTUDIO_API_KEY');
 const BITSTUDIO_API_BASE = 'https://api.bitstudio.ai';
-const POLLING_LOCK_SECONDS = 5; // How long a poller "claims" a job
+const POLLING_INTERVAL_MS = 5000; // Check every 5 seconds
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
@@ -23,25 +23,11 @@ serve(async (req) => {
   console.log(`[BitStudioPoller][${job_id}] Invoked to check status.`);
 
   try {
-    // --- ATOMIC CLAIMING LOGIC ---
-    const threshold = new Date(Date.now() - POLLING_LOCK_SECONDS * 1000).toISOString();
-    const { count, error: claimError } = await supabase
+    // Update the last_polled_at timestamp to act as a lock/heartbeat
+    await supabase
       .from('mira-agent-bitstudio-jobs')
       .update({ last_polled_at: new Date().toISOString() })
-      .eq('id', job_id)
-      .lt('last_polled_at', threshold);
-
-    if (claimError) {
-      console.error(`[BitStudioPoller][${job_id}] Error trying to claim job:`, claimError.message);
-      throw claimError;
-    }
-
-    if (count === 0) {
-      console.log(`[BitStudioPoller][${job_id}] Job is already being polled by another instance (lock is fresh). Exiting gracefully.`);
-      return new Response(JSON.stringify({ success: true, message: "Job already being polled." }), { headers: corsHeaders });
-    }
-    console.log(`[BitStudioPoller][${job_id}] Successfully claimed job. Proceeding with status check.`);
-    // --- END OF CLAIMING LOGIC ---
+      .eq('id', job_id);
 
     const { data: job, error: fetchError } = await supabase
       .from('mira-agent-bitstudio-jobs')
@@ -53,7 +39,7 @@ serve(async (req) => {
     console.log(`[BitStudioPoller][${job_id}] Fetched job from DB. Current status: ${job.status}, mode: ${job.mode}`);
     
     if (job.status === 'complete' || job.status === 'failed' || job.status === 'compositing') {
-        console.log(`[BitStudioPoller][${job_id}] Job already resolved or being composited. Halting polling.`);
+        console.log(`[BitStudioPoller][${job.id}] Job already resolved or being composited. Halting polling.`);
         return new Response(JSON.stringify({ success: true, message: "Job already resolved or being composited." }), { headers: corsHeaders });
     }
 
@@ -133,8 +119,14 @@ serve(async (req) => {
           .eq('id', job.batch_pair_job_id);
       }
     } else {
-      console.log(`[BitStudioPoller][${job_id}] Status is '${jobStatus}'. Updating status to 'processing'. Polling will continue on next watchdog cycle.`);
+      console.log(`[BitStudioPoller][${job_id}] Status is '${jobStatus}'. Updating status to 'processing'. Re-invoking poller after a delay.`);
       await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'processing' }).eq('id', job_id);
+      
+      // --- FIX: Self-perpetuating poller ---
+      setTimeout(() => {
+        supabase.functions.invoke('MIRA-AGENT-poller-bitstudio', { body: { job_id: job.id } })
+            .catch(err => console.error(`[BitStudioPoller][${job.id}] CRITICAL: Failed to re-invoke self. Polling will stop. Error:`, err));
+      }, POLLING_INTERVAL_MS);
     }
 
     return new Response(JSON.stringify({ success: true, status: jobStatus }), { headers: corsHeaders });
