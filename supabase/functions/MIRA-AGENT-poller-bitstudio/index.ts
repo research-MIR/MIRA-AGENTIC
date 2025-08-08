@@ -20,17 +20,12 @@ serve(async (req) => {
   console.log(`${logPrefix} Poller invoked. Attempting to claim a batch of jobs.`);
 
   try {
-    // Atomically claim a batch of jobs to process by updating their timestamp and returning them.
+    // Atomically claim a batch of jobs to process using the new RPC function
     const { data: jobsToProcess, error: claimError } = await supabase
-      .from('mira-agent-bitstudio-jobs')
-      .update({ last_polled_at: new Date().toISOString() })
-      .in('status', ['queued', 'processing'])
-      .not('bitstudio_task_id', 'is', null)
-      .select('*')
-      .limit(BATCH_SIZE);
+      .rpc('claim_bitstudio_jobs_to_poll', { p_limit: BATCH_SIZE });
 
     if (claimError) {
-      console.error(`${logPrefix} Error claiming jobs:`, claimError);
+      console.error(`${logPrefix} Error claiming jobs via RPC:`, claimError);
       throw claimError;
     }
 
@@ -41,7 +36,7 @@ serve(async (req) => {
 
     console.log(`${logPrefix} Claimed ${jobsToProcess.length} job(s). Processing batch...`);
 
-    const processingPromises = jobsToProcess.map(async (job) => {
+    const processingPromises = jobsToProcess.map(async (job: any) => {
       const jobLogPrefix = `[BitStudioPoller][${job.id}]`;
       try {
         let statusUrl;
@@ -96,6 +91,8 @@ serve(async (req) => {
             await supabase.from('mira-agent-batch-inpaint-pair-jobs').update({ status: 'failed', error_message: errorMessage }).eq('id', job.batch_pair_job_id);
           }
         } else {
+          // If still processing, the last_polled_at timestamp is already updated by the RPC.
+          // No need for another update here unless we want to change the status.
           await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'processing' }).eq('id', job.id);
         }
       } catch (error) {
