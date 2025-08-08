@@ -46,15 +46,15 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
   const { t } = useLanguage();
   const { supabase, session } = useSession();
   const [structure, setStructure] = useState<ExportStructure>('by_garment');
-  const [isDownloading, setIsDownloading] = useState(false);
+  const [isStarting, setIsStarting] = useState(false);
 
-  const handleDownload = async () => {
+  const handleStartExport = async () => {
     if (!pack || !session?.user) return;
-    setIsDownloading(true);
-    const toastId = showLoading("Preparing your download... This may take a while for large packs.");
+    setIsStarting(true);
+    const toastId = showLoading("Initiating export job...");
 
     try {
-      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-pack-exporter', {
+      const { error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-pack-export', {
         body: {
           pack_id: pack.pack_id,
           user_id: session.user.id,
@@ -64,24 +64,14 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
 
       if (error) throw error;
 
-      const downloadUrl = data.downloadUrl;
-      if (!downloadUrl) throw new Error("The export function did not return a download URL.");
-
-      const link = document.createElement('a');
-      link.href = downloadUrl;
-      link.setAttribute('download', `${pack.metadata?.name || pack.pack_id}.zip`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-
       dismissToast(toastId);
-      showSuccess("Your download has started!");
+      showSuccess("Export started! You will be notified when your download is ready.");
       onClose();
     } catch (err: any) {
       dismissToast(toastId);
-      showError(`Download failed: ${err.message}`);
+      showError(`Failed to start export: ${err.message}`);
     } finally {
-      setIsDownloading(false);
+      setIsStarting(false);
     }
   };
 
@@ -110,10 +100,10 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
           </RadioGroup>
         </div>
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose} disabled={isDownloading}>Cancel</Button>
-          <Button onClick={handleDownload} disabled={isDownloading}>
-            {isDownloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-            Start Download
+          <Button variant="ghost" onClick={onClose} disabled={isStarting}>Cancel</Button>
+          <Button onClick={handleStartExport} disabled={isStarting}>
+            {isStarting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+            Start Export
           </Button>
         </DialogFooter>
       </DialogContent>
