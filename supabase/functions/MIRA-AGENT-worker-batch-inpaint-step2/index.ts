@@ -1,15 +1,42 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { Image as ISImage } from "https://deno.land/x/imagescript@1.2.15/mod.ts";
+
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const TMP_BUCKET = 'mira-agent-user-uploads';
 const BBOX_PADDING_PERCENTAGE = 0.10; // 10% padding
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
 };
-function parseStorageURL(url: any) {
+
+async function invokeWithRetry(supabase: SupabaseClient, functionName: string, payload: object, maxRetries = 3, logPrefix = "") {
+    let lastError: Error | null = null;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            const { data, error } = await supabase.functions.invoke(functionName, payload);
+            if (error) {
+                throw new Error(error.message || 'Function invocation failed with an unknown error.');
+            }
+            console.log(`${logPrefix} Successfully invoked ${functionName} on attempt ${attempt}.`);
+            return data; // Success, return data
+        } catch (err) {
+            lastError = err instanceof Error ? err : new Error(String(err));
+            console.warn(`${logPrefix} Invocation of '${functionName}' failed on attempt ${attempt}/${maxRetries}. Error: ${lastError.message}`);
+            if (attempt < maxRetries) {
+                const delay = 20000 * Math.pow(2, attempt - 1); // 20s, 40s, 80s...
+                console.warn(`${logPrefix} Waiting ${delay}ms before retrying...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+        }
+    }
+    // If all retries fail, throw the last error
+    throw lastError || new Error(`Function ${functionName} failed after all retries without a specific error.`);
+}
+
+function parseStorageURL(url: string) {
   const u = new URL(url);
   const pathSegments = u.pathname.split('/');
   const objectSegmentIndex = pathSegments.indexOf('object');
@@ -23,13 +50,15 @@ function parseStorageURL(url: any) {
     path
   };
 }
-async function downloadFromSupabase(supabase: any, publicUrl: any) {
+
+async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string) {
   const { bucket, path } = parseStorageURL(publicUrl);
   const { data, error } = await supabase.storage.from(bucket).download(path);
   if (error) throw new Error(`Failed to download from Supabase storage (${path}): ${error.message}`);
   return data;
 }
-async function uploadBuffer(buffer: any, supabase: any) {
+
+async function uploadBuffer(buffer: Uint8Array, supabase: SupabaseClient) {
   const path = `tmp/${crypto.randomUUID()}.png`;
   const { error } = await supabase.storage.from(TMP_BUCKET).upload(path, buffer, {
     contentType: "image/png"
@@ -39,6 +68,7 @@ async function uploadBuffer(buffer: any, supabase: any) {
   if (!data || !data.signedUrl) throw new Error("Failed to create signed URL for temporary file.");
   return data.signedUrl;
 }
+
 serve(async (req)=>{
   if (req.method === 'OPTIONS') {
     return new Response(null, {
@@ -139,7 +169,8 @@ serve(async (req)=>{
     });
     const { data: { publicUrl: source_cropped_url } } = supabase.storage.from(TMP_BUCKET).getPublicUrl(tempPersonPath);
     console.log(`${logPrefix} Cropped person image uploaded to temp storage.`);
-    const { data: promptData, error: promptError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-prompt-helper', {
+    
+    const promptData = await invokeWithRetry(supabase, 'MIRA-AGENT-tool-vto-prompt-helper', {
       body: {
         person_image_url: source_cropped_url,
         garment_image_url: source_garment_image_url,
@@ -147,11 +178,12 @@ serve(async (req)=>{
         is_helper_enabled: metadata?.is_helper_enabled !== false,
         is_garment_mode: true
       }
-    });
-    if (promptError) throw new Error(`Prompt generation failed: ${promptError.message}`);
+    }, 3, logPrefix);
+
     const finalPrompt = promptData.final_prompt;
     console.log(`${logPrefix} Prompt generated successfully.`);
-    const { data: proxyData, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
+
+    const proxyData = await invokeWithRetry(supabase, 'MIRA-AGENT-proxy-bitstudio', {
       body: {
         mode: 'inpaint',
         user_id: user_id,
@@ -171,8 +203,8 @@ serve(async (req)=>{
           final_mask_url: final_mask_url
         }
       }
-    });
-    if (proxyError) throw proxyError;
+    }, 3, logPrefix);
+
     console.log(`${logPrefix} BitStudio proxy invoked successfully.`);
     const inpaintingJobId = proxyData?.jobIds?.[0];
     if (!inpaintingJobId) throw new Error('Delegation failed: Proxy did not return a valid job ID.');
