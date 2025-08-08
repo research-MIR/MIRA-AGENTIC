@@ -77,6 +77,7 @@ export const RecentVtoPacks = () => {
   const [packToRefine, setPackToRefine] = useState<PackSummary | null>(null);
   const [isRetrying, setIsRetrying] = useState<string | null>(null);
   const [isRequeuing, setIsRequeuing] = useState<string | null>(null);
+  const [isRepairing, setIsRepairing] = useState<string | null>(null);
 
   const { data: queryData, isLoading, error } = useQuery<any>({
     queryKey: ['vtoPackSummaries', session?.user?.id],
@@ -193,7 +194,7 @@ export const RecentVtoPacks = () => {
         const jobsForThisPack = allJobsForPack.get(pack.id) || [];
         
         summary.total_jobs = jobsForThisPack.length;
-        summary.completed_jobs = jobsForThisPack.filter((j: any) => ['complete', 'done', 'failed', 'permanently_failed'].includes(j.status)).length;
+        summary.completed_jobs = jobsForThisPack.filter((j: any) => ['complete', 'done'].includes(j.status) && j.final_image_url).length;
         summary.failed_jobs = jobsForThisPack.filter((j: any) => ['failed', 'permanently_failed'].includes(j.status)).length;
         summary.pending_jobs = jobsForThisPack.filter((j: any) => j.status === 'pending').length;
     }
@@ -212,8 +213,6 @@ export const RecentVtoPacks = () => {
           } else {
               summary.passed_perfect++;
           }
-        } else {
-          // This count is now derived from job status, not reports
         }
         const reason = reportData.failure_category || "Unknown";
         summary.failure_summary[reason] = (summary.failure_summary[reason] || 0) + 1;
@@ -324,6 +323,27 @@ export const RecentVtoPacks = () => {
     }
   };
 
+  const handleRepairPack = async (pack: PackSummary) => {
+    if (!session?.user) return;
+    setIsRepairing(pack.pack_id);
+    const jobsToRepair = pack.total_jobs - pack.completed_jobs;
+    const toastId = showLoading(`Repairing ${jobsToRepair} incomplete job(s)...`);
+    try {
+        const { data, error } = await supabase.rpc('MIRA-AGENT-retry-all-incomplete-in-pack', {
+            p_pack_id: pack.pack_id
+        });
+        if (error) throw error;
+        dismissToast(toastId);
+        showSuccess(`${data} jobs have been re-queued for processing.`);
+        queryClient.invalidateQueries({ queryKey: ['vtoPackSummaries', session.user.id] });
+    } catch (err: any) {
+        dismissToast(toastId);
+        showError(`Failed to repair pack: ${err.message}`);
+    } finally {
+        setIsRepairing(null);
+    }
+  };
+
   if (isLoading) {
     return <div className="space-y-4"><Skeleton className="h-20 w-full" /><Skeleton className="h-20 w-full" /></div>;
   }
@@ -354,6 +374,7 @@ export const RecentVtoPacks = () => {
           const totalReports = pack.passed_perfect + pack.passed_pose_change + pack.passed_logo_issue + pack.passed_detail_issue + pack.failed_jobs;
           const isReportReady = totalReports > 0;
           const isRefinementPack = !!pack.metadata?.refinement_of_pack_id;
+          const hasIncompleteJobs = pack.completed_jobs < pack.total_jobs;
 
           return (
             <AccordionItem key={pack.pack_id} value={pack.pack_id} className="border rounded-md">
@@ -373,17 +394,27 @@ export const RecentVtoPacks = () => {
                   </div>
                 </AccordionTrigger>
                 <div className="flex items-center gap-2 pl-4">
-                  {pack.pending_jobs > 0 && (
-                    <Button variant="outline" size="sm" onClick={() => handleRequeuePending(pack)} disabled={isRequeuing === pack.pack_id}>
-                      {isRequeuing === pack.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
-                      Re-queue Pending ({pack.pending_jobs})
-                    </Button>
-                  )}
-                  {pack.failed_jobs > 0 && (
-                    <Button variant="outline" size="sm" onClick={() => handleRetryFailed(pack)} disabled={isRetrying === pack.pack_id}>
-                      {isRetrying === pack.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
-                      Retry Failed ({pack.failed_jobs})
-                    </Button>
+                  {hasIncompleteJobs && (
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button variant="destructive" size="sm" disabled={isRepairing === pack.pack_id}>
+                          {isRepairing === pack.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+                          Retry All Incomplete ({pack.total_jobs - pack.completed_jobs})
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Are you sure you want to repair this pack?</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            This will find all failed, stuck, or pending jobs in this pack and restart them from scratch. Successfully completed jobs will not be affected.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction onClick={() => handleRepairPack(pack)}>Yes, Repair Pack</AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
                   )}
                   <Button variant="outline" size="sm" onClick={() => setPackToDownload(pack)}>
                     <HardDriveDownload className="h-4 w-4 mr-2" />
