@@ -48,6 +48,10 @@ export const reportsTranslations = {
     downloadByModelDesc: "Crea una cartella per ogni modello, contenente tutte le immagini di quel modello con i vari capi.",
     downloadFlat: "Lista Semplice",
     downloadFlatDesc: "Esporta tutte le immagini in un'unica cartella senza sottocartelle.",
+    restartIncomplete: "Riavvia Incompleti",
+    restartIncompleteConfirmationTitle: "Riavviare i Job Incompleti?",
+    restartIncompleteConfirmationDescription: "Questo rimetterà in coda tutti i {count} job in sospeso, in elaborazione e falliti in questo pack. I job completati con successo non saranno interessati. Vuoi continuare?",
+    restartIncompleteAction: "Sì, Riavvia Job",
   },
   en: {
     vtoAnalysisReports: "VTO Analysis Reports",
@@ -98,5 +102,9 @@ export const reportsTranslations = {
     downloadByModelDesc: "Creates a folder for each model, containing all images of that model in various garments.",
     downloadFlat: "Simple List",
     downloadFlatDesc: "Exports all images into a single folder with no subdirectories.",
+    restartIncomplete: "Restart Incomplete",
+    restartIncompleteConfirmationTitle: "Restart Incomplete Jobs?",
+    restartIncompleteConfirmationDescription: "This will re-queue all {count} pending, processing, and failed jobs in this pack. Successfully completed jobs will not be affected. Do you want to continue?",
+    restartIncompleteAction: "Yes, Restart Jobs",
   },
 };

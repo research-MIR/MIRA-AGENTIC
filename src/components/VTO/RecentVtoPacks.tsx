@@ -77,6 +77,7 @@ export const RecentVtoPacks = () => {
   const [packToRefine, setPackToRefine] = useState<PackSummary | null>(null);
   const [isRetrying, setIsRetrying] = useState<string | null>(null);
   const [isRequeuing, setIsRequeuing] = useState<string | null>(null);
+  const [isRetryingIncomplete, setIsRetryingIncomplete] = useState<string | null>(null);
 
   const { data: queryData, isLoading, error } = useQuery<any>({
     queryKey: ['vtoPackSummaries', session?.user?.id],
@@ -102,7 +103,7 @@ export const RecentVtoPacks = () => {
       };
 
       const packsPromise = supabase.from('mira-agent-vto-packs-jobs').select('id, created_at, metadata').eq('user_id', session.user.id);
-      const jobsPromise = fetchAll(supabase.from('mira-agent-bitstudio-jobs').select('id, vto_pack_job_id, status, batch_pair_job_id').eq('user_id', session.user.id).not('vto_pack_job_id', 'is', null));
+      const jobsPromise = fetchAll(supabase.from('mira-agent-bitstudio-jobs').select('id, vto_pack_job_id, status, batch_pair_job_id, final_image_url').eq('user_id', session.user.id).not('vto_pack_job_id', 'is', null));
       const batchPairJobsPromise = fetchAll(supabase.from('mira-agent-batch-inpaint-pair-jobs').select('id, metadata, status').eq('user_id', session.user.id).not('metadata->>vto_pack_job_id', 'is', null));
       const reportsPromise = supabase.rpc('get_vto_qa_reports_for_user', { p_user_id: session.user.id });
 
@@ -193,7 +194,7 @@ export const RecentVtoPacks = () => {
         const jobsForThisPack = allJobsForPack.get(pack.id) || [];
         
         summary.total_jobs = jobsForThisPack.length;
-        summary.completed_jobs = jobsForThisPack.filter((j: any) => ['complete', 'done', 'failed', 'permanently_failed'].includes(j.status)).length;
+        summary.completed_jobs = jobsForThisPack.filter((j: any) => (j.status === 'complete' || j.status === 'done') && j.final_image_url).length;
         summary.failed_jobs = jobsForThisPack.filter((j: any) => ['failed', 'permanently_failed'].includes(j.status)).length;
         summary.pending_jobs = jobsForThisPack.filter((j: any) => j.status === 'pending').length;
     }
@@ -212,8 +213,6 @@ export const RecentVtoPacks = () => {
           } else {
               summary.passed_perfect++;
           }
-        } else {
-          // This count is now derived from job status, not reports
         }
         const reason = reportData.failure_category || "Unknown";
         summary.failure_summary[reason] = (summary.failure_summary[reason] || 0) + 1;
@@ -304,6 +303,27 @@ export const RecentVtoPacks = () => {
     }
   };
 
+  const handleRetryIncomplete = async (pack: PackSummary) => {
+    if (!session?.user) return;
+    setIsRetryingIncomplete(pack.pack_id);
+    const incompleteCount = pack.total_jobs - pack.completed_jobs;
+    const toastId = showLoading(`Re-queueing ${incompleteCount} incomplete jobs...`);
+    try {
+        const { data, error } = await supabase.rpc('MIRA-AGENT-retry-all-incomplete-in-pack', {
+            p_pack_id: pack.pack_id
+        });
+        if (error) throw error;
+        dismissToast(toastId);
+        showSuccess(`${data} jobs have been re-queued for processing.`);
+        queryClient.invalidateQueries({ queryKey: ['vtoPackSummaries', session.user.id] });
+    } catch (err: any) {
+        dismissToast(toastId);
+        showError(`Failed to re-queue jobs: ${err.message}`);
+    } finally {
+        setIsRetryingIncomplete(null);
+    }
+  };
+
   const handleRequeuePending = async (pack: PackSummary) => {
     if (!session?.user) return;
     setIsRequeuing(pack.pack_id);
@@ -348,6 +368,7 @@ export const RecentVtoPacks = () => {
           const totalReports = pack.passed_perfect + pack.passed_pose_change + pack.passed_logo_issue + pack.passed_detail_issue + pack.failed_jobs;
           const isReportReady = totalReports > 0;
           const isRefinementPack = !!pack.metadata?.refinement_of_pack_id;
+          const incompleteCount = pack.total_jobs - pack.completed_jobs;
 
           return (
             <AccordionItem key={pack.pack_id} value={pack.pack_id} className="border rounded-md">
@@ -367,17 +388,29 @@ export const RecentVtoPacks = () => {
                   </div>
                 </AccordionTrigger>
                 <div className="flex items-center gap-2 pl-4">
-                  {pack.pending_jobs > 0 && (
-                    <Button variant="outline" size="sm" onClick={() => handleRequeuePending(pack)} disabled={isRequeuing === pack.pack_id}>
-                      {isRequeuing === pack.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
-                      Re-queue Pending ({pack.pending_jobs})
-                    </Button>
-                  )}
-                  {pack.failed_jobs > 0 && (
-                    <Button variant="outline" size="sm" onClick={() => handleRetryFailed(pack)} disabled={isRetrying === pack.pack_id}>
-                      {isRetrying === pack.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
-                      Retry Failed ({pack.failed_jobs})
-                    </Button>
+                  {incompleteCount > 0 && (
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button variant="outline" size="sm" disabled={isRetryingIncomplete === pack.pack_id}>
+                          {isRetryingIncomplete === pack.pack_id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+                          {t('restartIncomplete')} ({incompleteCount})
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>{t('restartIncompleteConfirmationTitle')}</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            {t('restartIncompleteConfirmationDescription', { count: incompleteCount })}
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>{t('cancel')}</AlertDialogCancel>
+                          <AlertDialogAction onClick={() => handleRetryIncomplete(pack)}>
+                            {t('restartIncompleteAction')}
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
                   )}
                   <Button variant="outline" size="sm" onClick={() => setPackToDownload(pack)}>
                     <HardDriveDownload className="h-4 w-4 mr-2" />
