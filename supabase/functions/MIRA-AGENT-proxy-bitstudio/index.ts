@@ -1,4 +1,4 @@
-import { serve } from "https://deno.land/std@0.224/http/server.ts";
+import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 import { Image as ISImage } from "https://deno.land/x/imagescript@1.2.15/mod.ts";
