@@ -42,29 +42,28 @@ async function uploadToBitStudio(fileBlob: Blob, type: BitStudioImageType, filen
 }
 
 async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
-    const url = new URL(publicUrl);
-    const pathSegments = url.pathname.split('/');
-    
-    const publicSegmentIndex = pathSegments.indexOf('public');
-    
-    if (publicSegmentIndex === -1 || publicSegmentIndex + 1 >= pathSegments.length) {
-        throw new Error(`Could not parse bucket name from URL: ${publicUrl}`);
-    }
+  const url = new URL(publicUrl);
+  const pathSegments = url.pathname.split('/');
+  
+  const publicSegmentIndex = pathSegments.indexOf('public');
+  if (publicSegmentIndex === -1 || publicSegmentIndex + 1 >= pathSegments.length) {
+      throw new Error(`Could not parse bucket name from URL: ${publicUrl}`);
+  }
+  
+  const bucketName = pathSegments[publicSegmentIndex + 1];
+  const filePath = decodeURIComponent(pathSegments.slice(publicSegmentIndex + 2).join('/'));
 
-    const bucketName = pathSegments[publicSegmentIndex + 1];
-    const filePath = decodeURIComponent(pathSegments.slice(publicSegmentIndex + 2).join('/'));
+  if (!bucketName || !filePath) {
+      throw new Error(`Could not parse bucket or path from Supabase URL: ${publicUrl}`);
+  }
 
-    if (!bucketName || !filePath) {
-        throw new Error(`Could not parse bucket or path from Supabase URL: ${publicUrl}`);
-    }
+  console.log(`[Downloader] Attempting to download from bucket: '${bucketName}', path: '${filePath}'`);
 
-    console.log(`[Downloader] Attempting to download from bucket: '${bucketName}', path: '${filePath}'`);
-
-    const { data, error } = await supabase.storage.from(bucketName).download(filePath);
-    if (error) {
-        throw new Error(`Failed to download from Supabase storage: ${error.message}`);
-    }
-    return data;
+  const { data, error } = await supabase.storage.from(bucketName).download(filePath);
+  if (error) {
+      throw new Error(`Failed to download from Supabase storage: ${error.message}`);
+  }
+  return data;
 }
 
 serve(async (req) => {
@@ -77,7 +76,7 @@ serve(async (req) => {
     let body;
     let imageFile = null;
     let originalFilename = 'image.png';
-    let sourceImageUrlForCheck: string | null = null;
+    let sourceImageUrlForCheck = null;
 
     const contentType = req.headers.get('content-type');
     if (contentType && contentType.includes('multipart/form-data')) {
