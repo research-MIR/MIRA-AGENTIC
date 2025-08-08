@@ -97,15 +97,14 @@ serve(async (req)=>{
     // --- Each task is now wrapped in its own try/catch block for maximum resilience ---
     try {
       console.log(`[Watchdog-BG][${requestId}] === Task 1: Triggering Self-Sufficient BitStudio Poller ===`);
-      const { error: invokeError } = await supabase.functions.invoke('MIRA-AGENT-poller-bitstudio', {
-        body: {}
-      });
+      const { error: invokeError } = await supabase.functions.invoke('MIRA-AGENT-poller-bitstudio', { body: {} });
       if (invokeError) throw invokeError;
       console.log(`[Watchdog-BG][${requestId}] Task 1: Successfully invoked self-sufficient BitStudio poller.`);
       actionsTaken.push(`Triggered self-sufficient BitStudio poller.`);
     } catch (e) {
       console.error(`[Watchdog-BG][${requestId}] Task 1 (Self-Sufficient Poller) failed:`, e.message);
     }
+
     try {
       console.log(`[Watchdog-BG][${requestId}] === Task 2: Triggering Batch Inpaint Worker ===`);
       const { error: invokeError } = await supabase.functions.invoke('MIRA-AGENT-worker-batch-inpaint', {
@@ -157,8 +156,7 @@ serve(async (req)=>{
       const { data: stalledPairJobs, error: stalledPairError } = await supabase.from('mira-agent-batch-inpaint-pair-jobs').select('id, status, metadata').in('status', [
         'segmenting',
         'delegated',
-        'processing_step_2',
-        'pending_step_2' // Added new state to recovery
+        'processing_step_2'
       ]).lt('updated_at', pairJobThreshold);
       if (stalledPairError) throw stalledPairError;
       if (stalledPairJobs && stalledPairJobs.length > 0) {
@@ -174,7 +172,7 @@ serve(async (req)=>{
                 pair_job_id: job.id
               }
             });
-          } else if ((job.status === 'delegated' || job.status === 'processing_step_2' || job.status === 'pending_step_2') && job.metadata?.debug_assets?.expanded_mask_url) {
+          } else if ((job.status === 'delegated' || job.status === 'processing_step_2') && job.metadata?.debug_assets?.expanded_mask_url) {
             await supabase.functions.invoke('MIRA-AGENT-worker-batch-inpaint-step2', {
               body: {
                 pair_job_id: job.id,
@@ -364,49 +362,39 @@ serve(async (req)=>{
       console.error(`[Watchdog-BG][${requestId}] Task 13 (New QA Jobs) failed:`, e.message);
     }
     try {
-      console.log(`[Watchdog-BG][${requestId}] === Task 14a: Transitioning Expanded Masks to Pending Step 2 ===`);
-      const { count, error } = await supabase
-          .from('mira-agent-batch-inpaint-pair-jobs')
-          .update({ status: 'pending_step_2' })
-          .eq('status', 'mask_expanded');
-      if (error) throw error;
-      if (count && count > 0) {
-          console.log(`[Watchdog-BG][${requestId}] Transitioned ${count} jobs to 'pending_step_2'.`);
-          actionsTaken.push(`Transitioned ${count} jobs to pending step 2.`);
+      console.log(`[Watchdog-BG][${requestId}] === Task 14: Triggering Mask Expansion ===`);
+      // --- ATOMIC CLAIM AND INVOKE ---
+      const { data: readyForExpansionJobs, error: updateError } = await supabase
+        .from('mira-agent-batch-inpaint-pair-jobs')
+        .update({ status: 'expanding_mask' }) // New status to claim the job
+        .eq('status', 'mask_expanded')
+        .select('id, user_id, metadata');
+
+      if (updateError) throw updateError;
+
+      if (readyForExpansionJobs && readyForExpansionJobs.length > 0) {
+        console.log(`[Watchdog-BG][${requestId}] Claimed ${readyForExpansionJobs.length} jobs for mask expansion. Invoking expander workers...`);
+        const expanderPromises = readyForExpansionJobs.map((job)=>{
+          const rawMaskUrl = job.metadata?.debug_assets?.raw_mask_url;
+          if (!rawMaskUrl) {
+            console.error(`[Watchdog-BG][${requestId}] Job ${job.id} is ready for expansion but is missing the raw_mask_url. Skipping.`);
+            return Promise.resolve();
+          }
+          return supabase.functions.invoke('MIRA-AGENT-expander-mask', {
+            body: {
+              parent_pair_job_id: job.id,
+              raw_mask_url: rawMaskUrl,
+              user_id: job.user_id
+            }
+          });
+        });
+        await Promise.allSettled(expanderPromises);
+        actionsTaken.push(`Triggered expander worker for ${readyForExpansionJobs.length} jobs.`);
+      } else {
+        console.log(`[Watchdog-BG][${requestId}] No jobs ready for mask expansion.`);
       }
     } catch (e) {
-        console.error(`[Watchdog-BG][${requestId}] Task 14a (Transition) failed:`, e.message);
-    }
-    try {
-        console.log(`[Watchdog-BG][${requestId}] === Task 14b: Triggering Step 2 Worker for Pending Jobs ===`);
-        const { data: readyForStep2Jobs, error: updateError } = await supabase
-            .from('mira-agent-batch-inpaint-pair-jobs')
-            .update({ status: 'processing_step_2' })
-            .eq('status', 'pending_step_2')
-            .select('id, metadata');
-        if (updateError) throw updateError;
-        if (readyForStep2Jobs && readyForStep2Jobs.length > 0) {
-            console.log(`[Watchdog-BG][${requestId}] Claimed ${readyForStep2Jobs.length} jobs for Step 2. Invoking workers...`);
-            const step2Promises = readyForStep2Jobs.map((job)=>{
-                const finalMaskUrl = job.metadata?.debug_assets?.expanded_mask_url;
-                if (!finalMaskUrl) {
-                    console.error(`[Watchdog-BG][${requestId}] Job ${job.id} is ready for step 2 but is missing the expanded_mask_url. Skipping.`);
-                    return Promise.resolve();
-                }
-                return supabase.functions.invoke('MIRA-AGENT-worker-batch-inpaint-step2', {
-                    body: {
-                        pair_job_id: job.id,
-                        final_mask_url: finalMaskUrl
-                    }
-                });
-            });
-            await Promise.allSettled(step2Promises);
-            actionsTaken.push(`Triggered Step 2 worker for ${readyForStep2Jobs.length} jobs.`);
-        } else {
-            console.log(`[Watchdog-BG][${requestId}] No jobs ready for Step 2.`);
-        }
-    } catch (e) {
-        console.error(`[Watchdog-BG][${requestId}] Task 14b (Invocation) failed:`, e.message);
+      console.error(`[Watchdog-BG][${requestId}] Task 14 (Mask Expansion) failed:`, e.message);
     }
     try {
       console.log(`[Watchdog-BG][${requestId}] === Task 15: Triggering Report Chunk Workers ===`);
