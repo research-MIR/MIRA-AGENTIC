@@ -167,7 +167,9 @@ serve(async (req) => {
       }).eq('id', retry_job_id);
       if (updateError) throw updateError;
 
-      // The watchdog will pick this up on its next run. No direct invocation needed.
+      // --- FIX: Proactively invoke the poller on retry ---
+      supabase.functions.invoke('MIRA-AGENT-poller-bitstudio', { body: { job_id: retry_job_id } }).catch(console.error);
+
       return new Response(JSON.stringify({ success: true, jobId: retry_job_id, message: "Job successfully retried." }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
     } else {
@@ -345,7 +347,11 @@ serve(async (req) => {
         }
       }
 
-      // The watchdog will pick up the new 'queued' job(s). No direct invocation needed.
+      // --- FIX: Proactively invoke the poller for all new jobs ---
+      for (const newJobId of jobIds) {
+        console.log(`[BitStudioProxy][${requestId}] Proactively invoking poller for new job ID: ${newJobId}`);
+        supabase.functions.invoke('MIRA-AGENT-poller-bitstudio', { body: { job_id: newJobId } }).catch(console.error);
+      }
 
       return new Response(JSON.stringify({ success: true, jobIds }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
