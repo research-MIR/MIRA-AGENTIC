@@ -21,17 +21,43 @@ type BitStudioImageType =
   | 'inpaint-mask'
   | 'inpaint-reference';
 
-async function uploadToBitStudio(fileBlob: Blob, type: BitStudioImageType, filename: string): Promise<string> {
+const fetchWithRetry = async (url: string, options: any, maxRetries = 3, delay = 1500, requestId: string) => {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            const response = await fetch(url, options);
+            if (response.ok) {
+                return response;
+            }
+            console.warn(`[FetchRetry][${requestId}] Attempt ${attempt}/${maxRetries} failed for ${url}. Status: ${response.status}.`);
+            if (response.status >= 500 && attempt < maxRetries) {
+                // Retry on server errors
+                await new Promise(resolve => setTimeout(resolve, delay * attempt));
+                continue;
+            }
+            // Don't retry on client errors (4xx) or after max retries
+            throw new Error(`API call failed with status ${response.status} after ${attempt} attempts: ${await response.text()}`);
+        } catch (error) {
+            console.warn(`[FetchRetry][${requestId}] Attempt ${attempt}/${maxRetries} failed for ${url} with network error: ${error.message}`);
+            if (attempt === maxRetries) {
+                throw new Error(`Network request failed after ${maxRetries} attempts: ${error.message}`);
+            }
+            await new Promise(resolve => setTimeout(resolve, delay * attempt));
+        }
+    }
+    throw new Error("Fetch with retry failed unexpectedly.");
+};
+
+async function uploadToBitStudio(fileBlob: Blob, type: BitStudioImageType, filename: string, requestId: string): Promise<string> {
   const formData = new FormData();
   formData.append('file', fileBlob, filename);
   formData.append('type', type);
-
-  const response = await fetch(`${BITSTUDIO_API_BASE}/images`, {
+  const uploadUrl = `${BITSTUDIO_API_BASE}/images`;
+  const response = await fetchWithRetry(uploadUrl, {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}` },
     body: formData,
-  });
-
+  }, 3, 1500, requestId);
+  
   if (!response.ok) {
     const errorText = await response.text();
     throw new Error(`BitStudio upload failed for type ${type}: ${errorText}`);
@@ -42,28 +68,28 @@ async function uploadToBitStudio(fileBlob: Blob, type: BitStudioImageType, filen
 }
 
 async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
-  const url = new URL(publicUrl);
-  const pathSegments = url.pathname.split('/');
-  
-  const publicSegmentIndex = pathSegments.indexOf('public');
-  if (publicSegmentIndex === -1 || publicSegmentIndex + 1 >= pathSegments.length) {
-      throw new Error(`Could not parse bucket name from URL: ${publicUrl}`);
-  }
-  
-  const bucketName = pathSegments[publicSegmentIndex + 1];
-  const filePath = decodeURIComponent(pathSegments.slice(publicSegmentIndex + 2).join('/'));
+    const url = new URL(publicUrl);
+    const pathSegments = url.pathname.split('/');
+    
+    const publicSegmentIndex = pathSegments.indexOf('public');
+    if (publicSegmentIndex === -1 || publicSegmentIndex + 1 >= pathSegments.length) {
+        throw new Error(`Could not parse bucket name from URL: ${publicUrl}`);
+    }
+    
+    const bucketName = pathSegments[publicSegmentIndex + 1];
+    const filePath = decodeURIComponent(pathSegments.slice(publicSegmentIndex + 2).join('/'));
 
-  if (!bucketName || !filePath) {
-      throw new Error(`Could not parse bucket or path from Supabase URL: ${publicUrl}`);
-  }
+    if (!bucketName || !filePath) {
+        throw new Error(`Could not parse bucket or path from Supabase URL: ${publicUrl}`);
+    }
 
-  console.log(`[Downloader] Attempting to download from bucket: '${bucketName}', path: '${filePath}'`);
+    console.log(`[Downloader] Attempting to download from bucket: '${bucketName}', path: '${filePath}'`);
 
-  const { data, error } = await supabase.storage.from(bucketName).download(filePath);
-  if (error) {
-      throw new Error(`Failed to download from Supabase storage (${filePath}): ${error.message}`);
-  }
-  return data;
+    const { data, error } = await supabase.storage.from(bucketName).download(filePath);
+    if (error) {
+        throw new Error(`Failed to download from Supabase storage (${filePath}): ${error.message}`);
+    }
+    return data;
 }
 
 serve(async (req) => {
@@ -144,22 +170,22 @@ serve(async (req) => {
         }
 
         const inpaintUrl = `${BITSTUDIO_API_BASE}/images/${sourceIdForInpaint}/inpaint`;
-        apiResponse = await fetch(inpaintUrl, {
+        apiResponse = await fetchWithRetry(inpaintUrl, {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}`, 'Content-Type': 'application/json' },
             body: JSON.stringify(finalPayload)
-        });
+        }, 3, 1500, requestId);
         if (!apiResponse.ok) throw new Error(`BitStudio inpaint retry request failed: ${await apiResponse.text()}`);
         const inpaintResult = await apiResponse.json();
         newTaskId = inpaintResult.versions?.[0]?.id;
         if (!newTaskId) throw new Error("BitStudio did not return a new task ID on inpaint retry.");
       } else { // Default to 'base' VTO
         console.log(`[BitStudioProxy][${requestId}] Executing BASE VTO retry logic.`);
-        const vtoResponse = await fetch(`${BITSTUDIO_API_BASE}/images/virtual-try-on`, {
+        const vtoResponse = await fetchWithRetry(`${BITSTUDIO_API_BASE}/images/virtual-try-on`, {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}`, 'Content-Type': 'application/json' },
             body: JSON.stringify(retryPayload)
-        });
+        }, 3, 1500, requestId);
         if (!vtoResponse.ok) throw new Error(`BitStudio VTO retry request failed: ${await vtoResponse.text()}`);
         const vtoResult = await vtoResponse.json();
         newTaskId = vtoResult[0]?.id;
@@ -237,8 +263,8 @@ serve(async (req) => {
         console.log(`[BitStudioProxy][${requestId}] Assets downloaded. Uploading to BitStudio...`);
 
         const [sourceImageId, maskImageId] = await Promise.all([
-          uploadToBitStudio(sourceBlob, 'inpaint-base', 'source.png'),
-          uploadToBitStudio(maskBlob, 'inpaint-mask', 'mask.png')
+          uploadToBitStudio(sourceBlob, 'inpaint-base', 'source.png', requestId),
+          uploadToBitStudio(maskBlob, 'inpaint-mask', 'mask.png', requestId)
         ]);
         console.log(`[BitStudioProxy][${requestId}] Source and mask uploaded. Source ID: ${sourceImageId}, Mask ID: ${maskImageId}`);
 
@@ -254,18 +280,18 @@ serve(async (req) => {
         if (reference_image_url) {
           console.log(`[BitStudioProxy][${requestId}] Reference image provided. Uploading...`);
           const referenceBlob = await downloadFromSupabase(supabase, reference_image_url);
-          referenceImageId = await uploadToBitStudio(referenceBlob, 'inpaint-reference', 'reference.png');
+          referenceImageId = await uploadToBitStudio(referenceBlob, 'inpaint-reference', 'reference.png', requestId);
           inpaintPayload.reference_image_id = referenceImageId;
           console.log(`[BitStudioProxy][${requestId}] Reference image uploaded. ID: ${referenceImageId}`);
         }
 
         const inpaintUrl = `${BITSTUDIO_API_BASE}/images/${sourceImageId}/inpaint`;
         console.log(`[BitStudioProxy][${requestId}] Submitting inpaint job to BitStudio...`);
-        const inpaintResponse = await fetch(inpaintUrl, {
+        const inpaintResponse = await fetchWithRetry(inpaintUrl, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}`, 'Content-Type': 'application/json' },
           body: JSON.stringify(inpaintPayload)
-        });
+        }, 3, 1500, requestId);
         if (!inpaintResponse.ok) throw new Error(`BitStudio inpaint request failed: ${await inpaintResponse.text()}`);
         
         const inpaintResult = await inpaintResponse.json();
@@ -303,8 +329,8 @@ serve(async (req) => {
         ]);
 
         const [personImageId, outfitImageId] = await Promise.all([
-          uploadToBitStudio(personBlob, 'virtual-try-on-person', 'person.webp'),
-          uploadToBitStudio(garmentBlob, 'virtual-try-on-outfit', 'garment.webp')
+          uploadToBitStudio(personBlob, 'virtual-try-on-person', 'person.webp', requestId),
+          uploadToBitStudio(garmentBlob, 'virtual-try-on-outfit', 'garment.webp', requestId)
         ]);
 
         const vtoUrl = `${BITSTUDIO_API_BASE}/images/virtual-try-on`;
@@ -317,11 +343,11 @@ serve(async (req) => {
         if (prompt) vtoPayload.prompt = prompt;
         if (prompt_appendix) vtoPayload.prompt_appendix = prompt_appendix;
 
-        const vtoResponse = await fetch(vtoUrl, {
+        const vtoResponse = await fetchWithRetry(vtoUrl, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}`, 'Content-Type': 'application/json' },
           body: JSON.stringify(vtoPayload)
-        });
+        }, 3, 1500, requestId);
         if (!vtoResponse.ok) throw new Error(`BitStudio VTO retry request failed: ${await vtoResponse.text()}`);
         const vtoResult = await vtoResponse.json();
         const taskId = vtoResult[0]?.id;
