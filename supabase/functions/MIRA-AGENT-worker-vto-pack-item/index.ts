@@ -262,10 +262,11 @@ serve(async (req)=>{
     }
   }
 });
-
 async function handleStart_GetBbox(supabase: SupabaseClient, job: any, logPrefix: string) {
   console.log(`${logPrefix} Step 1: Getting bounding box.`);
-  await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'processing' }).eq('id', job.id);
+  await supabase.from('mira-agent-bitstudio-jobs').update({
+    status: 'processing'
+  }).eq('id', job.id);
   const { data: bboxData, error: bboxError } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-bbox', {
     body: {
       image_url: job.source_person_image_url,
@@ -274,7 +275,7 @@ async function handleStart_GetBbox(supabase: SupabaseClient, job: any, logPrefix
   });
   if (bboxError) throw new Error(bboxError.message || 'BBox orchestrator failed.');
   const personBox = bboxData?.person;
-  if (!personBox || !Array.isArray(personBox) || personBox.length !== 4 || personBox.some((v: any) => typeof v !== 'number')) {
+  if (!personBox || !Array.isArray(personBox) || personBox.length !== 4 || personBox.some((v: any)=>typeof v !== 'number')) {
     throw new Error("Orchestrator did not return a valid bounding box array.");
   }
   console.log(`${logPrefix} Bounding box received.`);
@@ -291,10 +292,11 @@ async function handleStart_GetBbox(supabase: SupabaseClient, job: any, logPrefix
     pair_job_id: job.id
   });
 }
-
 async function handlePrepareAssets(supabase: SupabaseClient, job: any, logPrefix: string) {
   console.log(`${logPrefix} Step 2: Preparing and optimizing image assets.`);
-  await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'prepare_assets' }).eq('id', job.id);
+  await supabase.from('mira-agent-bitstudio-jobs').update({
+    status: 'prepare_assets'
+  }).eq('id', job.id);
   const { source_person_image_url, source_garment_image_url, metadata } = job;
   const personBox = metadata.bbox_person;
   if (!personBox) throw new Error("Cannot prepare assets: bbox_person is missing from metadata.");
@@ -342,7 +344,9 @@ async function handlePrepareAssets(supabase: SupabaseClient, job: any, logPrefix
     type: 'image/jpeg'
   });
   const tempGarmentPath = `tmp/${job.user_id}/${Date.now()}-optimized_garment.jpeg`;
-  await safeUpload(supabase, TEMP_UPLOAD_BUCKET, tempGarmentPath, optimizedGarmentBlob, { contentType: "image/jpeg" });
+  await safeUpload(supabase, TEMP_UPLOAD_BUCKET, tempGarmentPath, optimizedGarmentBlob, {
+    contentType: "image/jpeg"
+  });
   const optimizedGarmentUrl = await safeGetPublicUrl(supabase, TEMP_UPLOAD_BUCKET, tempGarmentPath);
   console.log(`${logPrefix} Optimized garment image uploaded to temp storage.`);
   await supabase.from('mira-agent-bitstudio-jobs').update({
@@ -360,7 +364,6 @@ async function handlePrepareAssets(supabase: SupabaseClient, job: any, logPrefix
     pair_job_id: job.id
   });
 }
-
 async function invokeWithRetry(supabase: SupabaseClient, functionName: string, payload: object, maxRetries: number, logPrefix: string) {
   let lastError: Error | null = null;
   for(let attempt = 1; attempt <= maxRetries; attempt++){
@@ -374,7 +377,7 @@ async function invokeWithRetry(supabase: SupabaseClient, functionName: string, p
       lastError = err instanceof Error ? err : new Error(String(err));
       console.warn(`${logPrefix} Invocation of '${functionName}' failed on attempt ${attempt}/${maxRetries}. Error: ${lastError.message}`);
       if (attempt < maxRetries) {
-        const delay = 1500 * attempt;
+        const delay = 15000 * attempt;
         console.warn(`${logPrefix} Waiting ${delay}ms before retrying...`);
         await new Promise((resolve)=>setTimeout(resolve, delay));
       }
@@ -382,7 +385,6 @@ async function invokeWithRetry(supabase: SupabaseClient, functionName: string, p
   }
   throw lastError || new Error("Function failed after all retries without a specific error.");
 }
-
 async function handleGenerateStep(supabase: SupabaseClient, job: any, sampleStep: number, nextStep: string, logPrefix: string) {
   console.log(`${logPrefix} Generating variation with ${sampleStep} steps.`);
   const data = await invokeWithRetry(supabase, 'MIRA-AGENT-tool-virtual-try-on', {
@@ -414,9 +416,10 @@ async function handleGenerateStep(supabase: SupabaseClient, job: any, sampleStep
     pair_job_id: job.id
   });
 }
-
 async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix: string, bitstudio_result_url?: string) {
-  await supabase.from('mira-agent-bitstudio-jobs').update({ status: `quality_check_${(job.metadata.qa_retry_count || 0) + 1}` }).eq('id', job.id);
+  await supabase.from('mira-agent-bitstudio-jobs').update({
+    status: `quality_check_${(job.metadata.qa_retry_count || 0) + 1}`
+  }).eq('id', job.id);
   console.log(`${logPrefix} Performing quality check.`);
   const { metadata, id: pair_job_id } = job;
   const variations = metadata.generated_variations || [];
@@ -520,9 +523,10 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
     });
   }
 }
-
 async function handleOutfitCompletenessCheck(supabase: SupabaseClient, job: any, logPrefix: string) {
-  await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'outfit_completeness_check' }).eq('id', job.id);
+  await supabase.from('mira-agent-bitstudio-jobs').update({
+    status: 'outfit_completeness_check'
+  }).eq('id', job.id);
   console.log(`${logPrefix} Performing outfit completeness check.`);
   const { metadata, id: pair_job_id } = job;
   const { qa_best_image_base64, garment_analysis, auto_complete_outfit } = metadata;
@@ -621,13 +625,14 @@ async function handleOutfitCompletenessCheck(supabase: SupabaseClient, job: any,
     console.log(`${logPrefix} Stylist invoked. Worker is now paused for this job.`);
   }
 }
-
 async function handleAutoComplete(supabase: SupabaseClient, job: any, logPrefix: string) {
-  await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'awaiting_auto_complete' }).eq('id', job.id);
+  await supabase.from('mira-agent-bitstudio-jobs').update({
+    status: 'awaiting_auto_complete'
+  }).eq('id', job.id);
   console.log(`${logPrefix} Handling auto-complete step.`);
   const { metadata, user_id, id: parent_job_id } = job;
   const { chosen_completion_garment, qa_best_image_base64, qa_best_image_url } = metadata;
-  if (!chosen_completion_garment || (!qa_best_image_base64 && !qa_best_image_url)) {
+  if (!chosen_completion_garment || !qa_best_image_base64 && !qa_best_image_url) {
     throw new Error("Job is in auto-complete state but is missing chosen garment or the base image data/URL.");
   }
   let personImageUrl = qa_best_image_url;
@@ -647,92 +652,103 @@ async function handleAutoComplete(supabase: SupabaseClient, job: any, logPrefix:
   if (vtoError) throw new Error(`Auto-complete VTO generation failed: ${vtoError.message}`);
   const finalImageBase64 = vtoResult?.generatedImages?.[0]?.base64Image;
   if (!finalImageBase64) throw new Error("Auto-complete VTO did not return a valid image.");
-  
   if (job.metadata.skip_reframe === true) {
-      console.log(`${logPrefix} Auto-complete finished. 'skip_reframe' is true. Finalizing job with 1:1 image.`);
-      const finalImage = await uploadBase64ToStorage(supabase, finalImageBase64, user_id, 'final_vto_pack_autocomplete.png');
-      await supabase.from('mira-agent-bitstudio-jobs').update({
-          status: 'complete',
-          final_image_url: finalImage.publicUrl,
-          metadata: { ...metadata, qa_best_image_base64: null, google_vto_step: 'done' }
-      }).eq('id', parent_job_id);
-      console.log(`${logPrefix} Job finalized with auto-completed 1:1 image at ${finalImage.publicUrl}.`);
+    console.log(`${logPrefix} Auto-complete finished. 'skip_reframe' is true. Finalizing job with 1:1 image.`);
+    const finalImage = await uploadBase64ToStorage(supabase, finalImageBase64, user_id, 'final_vto_pack_autocomplete.png');
+    await supabase.from('mira-agent-bitstudio-jobs').update({
+      status: 'complete',
+      final_image_url: finalImage.publicUrl,
+      metadata: {
+        ...metadata,
+        qa_best_image_base64: null,
+        google_vto_step: 'done'
+      }
+    }).eq('id', parent_job_id);
+    console.log(`${logPrefix} Job finalized with auto-completed 1:1 image at ${finalImage.publicUrl}.`);
   } else {
-      console.log(`${logPrefix} Auto-complete generation successful. Invoking reframe proxy.`);
-      const { data: reframeJobData, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-reframe', {
-        body: {
-          user_id: user_id,
-          base_image_base64: finalImageBase64,
-          prompt: metadata.prompt_appendix || "",
-          aspect_ratio: metadata.final_aspect_ratio,
-          source: 'reframe_from_vto',
-          parent_vto_job_id: parent_job_id
-        }
-      });
-      if (proxyError) throw new Error(`Failed to invoke reframe proxy: ${proxyError.message}`);
-      await supabase.from('mira-agent-bitstudio-jobs').update({
-        status: 'awaiting_reframe',
-        metadata: {
-          ...metadata,
-          google_vto_step: 'awaiting_reframe',
-          delegated_reframe_job_id: reframeJobData.jobId,
-          qa_best_image_base64: null // Clear the old base64 data
-        }
-      }).eq('id', parent_job_id);
-      console.log(`${logPrefix} Auto-complete finished. Handed off to reframe job ${reframeJobData.jobId}.`);
+    console.log(`${logPrefix} Auto-complete generation successful. Invoking reframe proxy.`);
+    const { data: reframeJobData, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-reframe', {
+      body: {
+        user_id: user_id,
+        base_image_base64: finalImageBase64,
+        prompt: metadata.prompt_appendix || "",
+        aspect_ratio: metadata.final_aspect_ratio,
+        source: 'reframe_from_vto',
+        parent_vto_job_id: parent_job_id
+      }
+    });
+    if (proxyError) throw new Error(`Failed to invoke reframe proxy: ${proxyError.message}`);
+    await supabase.from('mira-agent-bitstudio-jobs').update({
+      status: 'awaiting_reframe',
+      metadata: {
+        ...metadata,
+        google_vto_step: 'awaiting_reframe',
+        delegated_reframe_job_id: reframeJobData.jobId,
+        qa_best_image_base64: null // Clear the old base64 data
+      }
+    }).eq('id', parent_job_id);
+    console.log(`${logPrefix} Auto-complete finished. Handed off to reframe job ${reframeJobData.jobId}.`);
   }
 }
-
 async function handleReframe(supabase: SupabaseClient, job: any, logPrefix: string) {
   console.log(`${logPrefix} Final step: Reframe.`);
   const { qa_best_image_base64, final_aspect_ratio, prompt_appendix, skip_reframe } = job.metadata;
   if (!qa_best_image_base64) throw new Error("Missing best VTO image for reframe step.");
-
-  const finalizeAsIs = async (errorMessage?: string) => {
+  const finalizeAsIs = async (errorMessage?: string)=>{
     console.log(`${logPrefix} Finalizing job with 1:1 image. Reason: ${errorMessage ? `Reframe failed (${errorMessage})` : 'Reframe skipped'}`);
     const finalImage = await uploadBase64ToStorage(supabase, qa_best_image_base64, job.user_id, 'final_vto_pack.png');
     await supabase.from('mira-agent-bitstudio-jobs').update({
       status: 'complete',
       final_image_url: finalImage.publicUrl,
       error_message: errorMessage || null,
-      metadata: { ...job.metadata, qa_best_image_base64: null, google_vto_step: 'done' }
+      metadata: {
+        ...job.metadata,
+        qa_best_image_base64: null,
+        google_vto_step: 'done'
+      }
     }).eq('id', job.id);
     console.log(`${logPrefix} Job finalized with 1:1 image at ${finalImage.publicUrl}.`);
   };
-
   if (job.metadata.skip_reframe === true || job.metadata.final_aspect_ratio === '1:1') {
     await finalizeAsIs();
   } else {
     try {
-      const { data: reframeJobData, error: reframeError } = await supabase.functions.invoke('MIRA-AGENT-proxy-reframe', { 
-        body: { 
-          user_id: job.user_id, 
-          base_image_base64: qa_best_image_base64, 
-          prompt: prompt_appendix || "", 
-          aspect_ratio: final_aspect_ratio, 
-          source: 'reframe_from_vto', 
-          parent_vto_job_id: job.id 
-        } 
+      const { data: reframeJobData, error: reframeError } = await supabase.functions.invoke('MIRA-AGENT-proxy-reframe', {
+        body: {
+          user_id: job.user_id,
+          base_image_base64: qa_best_image_base64,
+          prompt: prompt_appendix || "",
+          aspect_ratio: final_aspect_ratio,
+          source: 'reframe_from_vto',
+          parent_vto_job_id: job.id
+        }
       });
       if (reframeError) throw new Error(reframeError.message || 'Reframe proxy failed.');
-      
       await supabase.from('mira-agent-bitstudio-jobs').update({
         status: 'awaiting_reframe',
-        metadata: { ...job.metadata, google_vto_step: 'awaiting_reframe', delegated_reframe_job_id: reframeJobData.jobId, qa_best_image_base64: null }
+        metadata: {
+          ...job.metadata,
+          google_vto_step: 'awaiting_reframe',
+          delegated_reframe_job_id: reframeJobData.jobId,
+          qa_best_image_base64: null
+        }
       }).eq('id', job.id);
       console.log(`${logPrefix} Handed off to reframe job ${reframeJobData.jobId}. This VTO job is now awaiting the final result.`);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error(`${logPrefix} Reframe step failed:`, errorMessage);
-      
       const reframe_retry_count = (job.metadata.reframe_retry_count || 0) + 1;
-
       if (reframe_retry_count < MAX_REFRAME_RETRIES) {
         console.log(`${logPrefix} Attempting retry ${reframe_retry_count}/${MAX_REFRAME_RETRIES}...`);
         await supabase.from('mira-agent-bitstudio-jobs').update({
-          metadata: { ...job.metadata, reframe_retry_count }
+          metadata: {
+            ...job.metadata,
+            reframe_retry_count
+          }
         }).eq('id', job.id);
-        await invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
+        await invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', {
+          pair_job_id: job.id
+        });
       } else {
         console.error(`${logPrefix} Reframe failed after ${MAX_REFRAME_RETRIES} retries. Falling back to 1:1 image.`);
         await finalizeAsIs(`Reframe failed after ${MAX_REFRAME_RETRIES} attempts: ${errorMessage}`);
@@ -740,26 +756,24 @@ async function handleReframe(supabase: SupabaseClient, job: any, logPrefix: stri
     }
   }
 }
-
 async function handleAwaitingReframe(supabase: SupabaseClient, job: any, logPrefix: string) {
   console.log(`${logPrefix} Step: AWAITING_REFRAME. Checking on delegated job.`);
   const reframeJobId = job.metadata?.delegated_reframe_job_id;
   if (!reframeJobId) {
     throw new Error("Job is in 'awaiting_reframe' state but is missing the 'delegated_reframe_job_id' in metadata.");
   }
-
   const { data: reframeJob, error: fetchError } = await supabase
     .from('mira-agent-jobs')
     .select('status, final_result, error_message, updated_at')
     .eq('id', reframeJobId)
     .single();
-
   if (fetchError) {
     console.warn(`${logPrefix} Could not fetch status of reframe job ${reframeJobId}. Will retry on next watchdog cycle. Error: ${fetchError.message}`);
-    await supabase.from('mira-agent-bitstudio-jobs').update({ updated_at: new Date().toISOString() }).eq('id', job.id);
+    await supabase.from('mira-agent-bitstudio-jobs').update({
+      updated_at: new Date().toISOString()
+    }).eq('id', job.id);
     return;
   }
-
   if (reframeJob.status === 'complete') {
     console.log(`${logPrefix} Delegated reframe job ${reframeJobId} is complete. Finalizing VTO job.`);
     const finalImageUrl = reframeJob.final_result?.images?.[0]?.publicUrl;
@@ -769,12 +783,14 @@ async function handleAwaitingReframe(supabase: SupabaseClient, job: any, logPref
     await supabase.from('mira-agent-bitstudio-jobs').update({
       status: 'complete',
       final_image_url: finalImageUrl,
-      metadata: { ...job.metadata, google_vto_step: 'done' }
+      metadata: {
+        ...job.metadata,
+        google_vto_step: 'done'
+      }
     }).eq('id', job.id);
     console.log(`${logPrefix} VTO job successfully finalized.`);
     return;
   }
-  
   if (reframeJob.status === 'failed') {
     console.error(`${logPrefix} Delegated reframe job ${reframeJobId} has failed. Failing parent VTO job.`);
     await supabase.from('mira-agent-bitstudio-jobs').update({
@@ -783,16 +799,12 @@ async function handleAwaitingReframe(supabase: SupabaseClient, job: any, logPref
     }).eq('id', job.id);
     return;
   }
-
   const lastUpdate = new Date(reframeJob.updated_at).getTime();
   const now = Date.now();
   const secondsSinceUpdate = (now - lastUpdate) / 1000;
-
   if (secondsSinceUpdate > REFRAME_STALL_THRESHOLD_SECONDS) {
     console.warn(`${logPrefix} STALL DETECTED! Reframe job ${reframeJobId} has not been updated for ${secondsSinceUpdate.toFixed(0)} seconds (threshold is ${REFRAME_STALL_THRESHOLD_SECONDS}s).`);
-    
     const reframeRetryCount = (job.metadata.reframe_retry_count || 0) + 1;
-
     if (reframeRetryCount > MAX_REFRAME_RETRIES) {
       const errorMessage = `Reframe job stalled and failed after ${MAX_REFRAME_RETRIES} restart attempts.`;
       console.error(`${logPrefix} STALL FAILED: ${errorMessage}`);
@@ -802,37 +814,33 @@ async function handleAwaitingReframe(supabase: SupabaseClient, job: any, logPref
       }).eq('id', job.id);
       return;
     }
-
     console.log(`${logPrefix} STALL ACTION: Deleting stalled reframe job ${reframeJobId}.`);
     await supabase.from('mira-agent-jobs').delete().eq('id', reframeJobId);
-
     console.log(`${logPrefix} STALL ACTION: Restarting reframe process (Attempt ${reframeRetryCount}/${MAX_REFRAME_RETRIES}).`);
-    
-    const { data: newReframeJobData, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-reframe', { 
-      body: { 
-        user_id: job.user_id, 
-        base_image_base64: job.metadata.qa_best_image_base64, 
-        prompt: job.metadata.prompt_appendix || "", 
-        aspect_ratio: job.metadata.final_aspect_ratio, 
-        source: 'reframe_from_vto', 
-        parent_vto_job_id: job.id 
-      } 
+    const { data: newReframeJobData, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-reframe', {
+      body: {
+        user_id: job.user_id,
+        base_image_base64: job.metadata.qa_best_image_base64,
+        prompt: job.metadata.prompt_appendix || "",
+        aspect_ratio: job.metadata.final_aspect_ratio,
+        source: 'reframe_from_vto',
+        parent_vto_job_id: job.id
+      }
     });
     if (proxyError) throw new Error(`Failed to re-invoke reframe proxy: ${proxyError.message}`);
-
     console.log(`${logPrefix} STALL ACTION: New reframe job ${newReframeJobData.jobId} created. Updating parent VTO job with new link.`);
     await supabase.from('mira-agent-bitstudio-jobs').update({
-      metadata: { 
-        ...job.metadata, 
+      metadata: {
+        ...job.metadata,
         delegated_reframe_job_id: newReframeJobData.jobId,
         reframe_retry_count: reframeRetryCount
       }
     }).eq('id', job.id);
-
     console.log(`${logPrefix} New reframe job ${newReframeJobData.jobId} created. Worker will check again on next cycle.`);
-
   } else {
     console.log(`${logPrefix} Reframe job ${reframeJobId} is still in progress (status: ${reframeJob.status}, last update ${secondsSinceUpdate.toFixed(0)}s ago). This is within the ${REFRAME_STALL_THRESHOLD_SECONDS}s threshold. Waiting for next watchdog cycle.`);
-    await supabase.from('mira-agent-bitstudio-jobs').update({ updated_at: new Date().toISOString() }).eq('id', job.id);
+    await supabase.from('mira-agent-bitstudio-jobs').update({
+      updated_at: new Date().toISOString()
+    }).eq('id', job.id);
   }
 }
