@@ -285,8 +285,7 @@ export const RecentVtoPacks = () => {
     const toastId = showLoading(`Creating corrected batch for "${pack.metadata?.name || 'Untitled Pack'}"...`);
     try {
         const { data: newPackId, error } = await supabase.rpc('MIRA-AGENT-create-corrected-vto-pack', {
-            p_source_pack_id: pack.pack_id,
-            p_user_id: session.user.id
+            p_source_pack_id: pack.pack_id
         });
         if (error) throw error;
         dismissToast(toastId);
