@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Loader2, Download, CheckCircle, ImageIcon, Shirt, Users, List } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
 import { useSession } from '@/components/Auth/SessionContextProvider';
-import { showError, showSuccess } from '@/utils/toast';
+import { showError, showSuccess, showLoading, dismissToast } from '@/utils/toast';
 import { cn } from '@/lib/utils';
 import JSZip from 'jszip';
 import { Progress } from '@/components/ui/progress';
@@ -71,7 +71,6 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
     console.log(`[DownloadPack] Scope: ${scope}, Structure: ${structure}`);
 
     try {
-      // --- TIER 1 PRE-COMPUTATION ---
       setProgressMessage("Loading wardrobe...");
       const { data: wardrobeGarments, error: wardrobeError } = await supabase
         .from('mira-agent-garments')
@@ -86,7 +85,6 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
           if (g.image_hash) hashToIdMap.set(g.image_hash, g.id);
       });
       console.log(`[DownloadPack] Pre-loaded ${wardrobeGarments.length} garments into lookup maps.`);
-      // --- END PRE-COMPUTATION ---
 
       setProgressMessage("Fetching job list...");
       let jobsToDownload: any[] = [];
@@ -100,7 +98,7 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
           .not('final_image_url', 'is', null);
         if (error) throw error;
         jobsToDownload = data;
-      } else { // passed_qa
+      } else {
         const { data: reports, error: reportsError } = await supabase
           .from('mira-agent-vto-qa-reports')
           .select('source_vto_job_id')
@@ -108,9 +106,7 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
           .eq('user_id', session.user.id)
           .eq('comparative_report->>overall_pass', 'true');
         if (reportsError) throw reportsError;
-        if (!reports || reports.length === 0) {
-          throw new Error("No QA-passed jobs found to export.");
-        }
+        if (!reports || reports.length === 0) throw new Error("No QA-passed jobs found to export.");
         const jobIds = reports.map(r => r.source_vto_job_id);
         const { data, error } = await supabase
           .from('mira-agent-bitstudio-jobs')
@@ -125,86 +121,77 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
       const zip = new JSZip();
       const totalFiles = jobsToDownload.length;
       let processedCount = 0;
+      let skippedCount = 0;
 
       for (const job of jobsToDownload) {
         processedCount++;
         setProgress((processedCount / totalFiles) * 100);
-        setProgressMessage(`Downloading ${processedCount}/${totalFiles}...`);
-        
-        if (!job.final_image_url) continue;
-
-        // --- GARMENT ID WATERFALL LOGIC ---
-        let garmentId = 'garment_unknown';
-        let garmentIdSource = 'unknown';
-
-        if (job.source_garment_image_url && storagePathToIdMap.has(job.source_garment_image_url)) {
-            garmentId = storagePathToIdMap.get(job.source_garment_image_url)!;
-            garmentIdSource = 'wardrobe_lookup_by_url';
-        } else if (job.metadata?.garment_analysis?.hash && hashToIdMap.has(job.metadata.garment_analysis.hash)) {
-            garmentId = hashToIdMap.get(job.metadata.garment_analysis.hash)!;
-            garmentIdSource = 'wardrobe_lookup_by_hash';
-        } else if (job.metadata?.garment_analysis?.hash) {
-            garmentId = job.metadata.garment_analysis.hash;
-            garmentIdSource = 'metadata_hash';
-        } else if (job.source_garment_image_url) {
-            const urlParts = job.source_garment_image_url.split('/');
-            const filename = urlParts.pop()?.split('.')[0] || '';
-            const uuidMatch = filename.match(/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/i);
-            if (uuidMatch) {
-                garmentId = uuidMatch[0];
-                garmentIdSource = 'filename_parsing (UUID)';
-            } else {
-                const timestampMatch = filename.match(/\d{13}/);
-                if (timestampMatch) {
-                    garmentId = timestampMatch[0];
-                    garmentIdSource = 'filename_parsing (Timestamp)';
-                } else {
-                    garmentId = filename.substring(0, 20);
-                    garmentIdSource = 'filename_parsing (Fallback)';
-                }
-            }
-        }
-
-        // --- POSE ID LOGIC ---
-        let poseIdSource = 'unknown';
-        let poseId = 'model_unknown';
-        if (job.metadata?.original_vto_job_id) {
-            poseId = job.metadata.original_vto_job_id.substring(0, 8);
-            poseIdSource = 'metadata.original_vto_job_id (Refinement Pass)';
-        } else if (job.metadata?.model_generation_job_id) {
-            poseId = job.metadata.model_generation_job_id.substring(0, 8);
-            poseIdSource = 'metadata.model_generation_job_id (First Pass)';
-        } else if (job.source_person_image_url) {
-            const urlParts = job.source_person_image_url.split('/');
-            const filename = urlParts.pop()?.split('.')[0] || '';
-            const timestampMatch = filename.match(/\d{13}/);
-            if (timestampMatch) {
-                poseId = timestampMatch[0].substring(7);
-                poseIdSource = 'source_person_image_url (timestamp parsing)';
-            } else {
-                poseId = filename.substring(0, 8);
-                poseIdSource = 'source_person_image_url (fallback parsing)';
-            }
-        }
-        
-        const filename = `Pose_${poseId}_Garment_${garmentId}.jpg`;
-        let filePathInZip = '';
-
-        switch (structure) {
-          case 'by_garment': filePathInZip = `By_Garment/${sanitize(garmentId)}/${filename}`; break;
-          case 'by_model': filePathInZip = `By_Model/${sanitize(poseId)}/${filename}`; break;
-          case 'flat': filePathInZip = filename; break;
-        }
-
-        console.log(`[DownloadPack] Job ${processedCount}/${totalFiles}:`, { jobId: job.id, poseId, poseIdSource, garmentId, garmentIdSource, finalFilename: filename });
+        setProgressMessage(`Processing ${processedCount}/${totalFiles}...`);
         
         try {
+          if (!job.final_image_url) {
+            console.warn(`[DownloadPack] Skipping job ${job.id} because final_image_url is null.`);
+            skippedCount++;
+            continue;
+          }
+
+          // --- POSE ID WATERFALL LOGIC ---
+          let poseId = 'model_unknown';
+          if (job.metadata?.model_generation_job_id) {
+              poseId = job.metadata.model_generation_job_id.substring(0, 8);
+          } else if (job.metadata?.original_vto_job_id) {
+              poseId = job.metadata.original_vto_job_id.substring(0, 8);
+          } else if (job.source_person_image_url) {
+              const urlParts = job.source_person_image_url.split('/');
+              const filename = urlParts.pop()?.split('.')[0] || '';
+              const timestampMatch = filename.match(/\d{13}/);
+              if (timestampMatch) poseId = timestampMatch[0].substring(7);
+              else poseId = filename.substring(0, 8);
+          } else {
+              poseId = job.id.substring(0, 8);
+          }
+
+          // --- GARMENT ID WATERFALL LOGIC ---
+          let garmentId = 'garment_unknown';
+          if (job.metadata?.garment_analysis?.hash) {
+              garmentId = hashToIdMap.get(job.metadata.garment_analysis.hash) || job.metadata.garment_analysis.hash;
+          } else if (job.source_garment_image_url && storagePathToIdMap.has(job.source_garment_image_url)) {
+              garmentId = storagePathToIdMap.get(job.source_garment_image_url)!;
+          } else if (job.source_garment_image_url) {
+              const urlParts = job.source_garment_image_url.split('/');
+              const filename = urlParts.pop()?.split('.')[0] || '';
+              const uuidMatch = filename.match(/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/i);
+              if (uuidMatch) garmentId = uuidMatch[0];
+              else {
+                  const timestampMatch = filename.match(/\d{13}/);
+                  if (timestampMatch) garmentId = timestampMatch[0];
+                  else garmentId = filename.substring(0, 20);
+              }
+          } else {
+              garmentId = job.id.substring(0, 8);
+          }
+          
+          const filename = `Pose_${poseId}_Garment_${garmentId}.jpg`;
+          let filePathInZip = '';
+
+          switch (structure) {
+            case 'by_garment': filePathInZip = `By_Garment/${sanitize(garmentId)}/${filename}`; break;
+            case 'by_model': filePathInZip = `By_Model/${sanitize(poseId)}/${filename}`; break;
+            case 'flat': filePathInZip = filename; break;
+          }
+
           const response = await fetch(job.final_image_url);
-          if (!response.ok) continue;
+          if (!response.ok) {
+            console.warn(`[DownloadPack] Failed to fetch image for job ${job.id}. Status: ${response.status}`);
+            skippedCount++;
+            continue;
+          }
           const blob = await response.blob();
           zip.file(filePathInZip, blob);
+
         } catch (e) {
-          console.error(`Failed to fetch ${job.final_image_url}`, e);
+          console.error(`[DownloadPack] Critical error processing job ${job.id}. Skipping. Error:`, e);
+          skippedCount++;
         }
       }
 
@@ -219,7 +206,11 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
       document.body.removeChild(link);
       URL.revokeObjectURL(link.href);
 
-      showSuccess("Download started!");
+      let successMessage = "Download started!";
+      if (skippedCount > 0) {
+        successMessage += ` (${skippedCount} files were skipped due to errors.)`;
+      }
+      showSuccess(successMessage);
       onClose();
 
     } catch (err: any) {
