@@ -24,7 +24,7 @@ import SegmentationTool from "./pages/Developer/Segmentation.tsx";
 import BoundingBoxTester from "./pages/Developer/BoundingBoxTester.tsx";
 import ModelPacks from "./pages/ModelPacks.tsx";
 import ModelPackDetail from "./pages/ModelPackDetail.tsx";
-import VirtualTryOnPacks from "./pages/VirtualTryOnPacks/index.tsx"; // Updated import
+import VirtualTryOnPacks from "./pages/VirtualTryOnPacks.tsx";
 import EditWithWords from "./pages/EditWithWords.tsx";
 import Experimental from "./pages/Experimental.tsx";
 import ProductRecontext from "./pages/ProductRecontext.tsx";
