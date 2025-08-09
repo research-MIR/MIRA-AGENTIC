@@ -71,7 +71,6 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
     console.log(`[DownloadPack] Scope: ${scope}, Structure: ${structure}`);
 
     try {
-      // Step 1: Get the pack's creation date to create a time window
       setProgressMessage("Fetching pack details...");
       const { data: packData, error: packError } = await supabase
         .from('mira-agent-vto-packs-jobs')
@@ -103,46 +102,66 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
 
       setProgressMessage("Fetching job list...");
       let jobsToDownload: any[] = [];
+      let page = 0;
+      const pageSize = 1000;
 
-      if (scope === 'all_with_image') {
-        const { data, error } = await supabase
-          .from('mira-agent-bitstudio-jobs')
-          .select('id, final_image_url, source_person_image_url, source_garment_image_url, metadata')
-          .eq('vto_pack_job_id', pack.pack_id)
-          .eq('user_id', session.user.id)
-          .not('final_image_url', 'is', null)
-          .gte('created_at', startTime.toISOString())
-          .lte('created_at', endTime.toISOString());
+      while (true) {
+        const from = page * pageSize;
+        const to = from + pageSize - 1;
+        let query;
+
+        if (scope === 'all_with_image') {
+          query = supabase
+            .from('mira-agent-bitstudio-jobs')
+            .select('id, final_image_url, source_person_image_url, source_garment_image_url, metadata')
+            .eq('vto_pack_job_id', pack.pack_id)
+            .eq('user_id', session.user.id)
+            .not('final_image_url', 'is', null)
+            .gte('created_at', startTime.toISOString())
+            .lte('created_at', endTime.toISOString())
+            .range(from, to);
+        } else {
+          const { data: reports, error: reportsError } = await supabase
+            .from('mira-agent-vto-qa-reports')
+            .select('source_vto_job_id')
+            .eq('vto_pack_job_id', pack.pack_id)
+            .eq('user_id', session.user.id)
+            .eq('comparative_report->>overall_pass', 'true')
+            .gte('created_at', startTime.toISOString())
+            .lte('created_at', endTime.toISOString());
+          if (reportsError) throw reportsError;
+          if (!reports || reports.length === 0) break;
+          const jobIds = reports.map(r => r.source_vto_job_id);
+          
+          query = supabase
+            .from('mira-agent-bitstudio-jobs')
+            .select('id, final_image_url, source_person_image_url, source_garment_image_url, metadata')
+            .in('id', jobIds)
+            .range(from, to);
+        }
+
+        const { data, error } = await query;
         if (error) throw error;
-        jobsToDownload = data;
-      } else {
-        const { data: reports, error: reportsError } = await supabase
-          .from('mira-agent-vto-qa-reports')
-          .select('source_vto_job_id')
-          .eq('vto_pack_job_id', pack.pack_id)
-          .eq('user_id', session.user.id)
-          .eq('comparative_report->>overall_pass', 'true')
-          .gte('created_at', startTime.toISOString())
-          .lte('created_at', endTime.toISOString());
-        if (reportsError) throw reportsError;
-        if (!reports || reports.length === 0) throw new Error("No QA-passed jobs found to export.");
-        const jobIds = reports.map(r => r.source_vto_job_id);
-        const { data, error } = await supabase
-          .from('mira-agent-bitstudio-jobs')
-          .select('id, final_image_url, source_person_image_url, source_garment_image_url, metadata')
-          .in('id', jobIds)
-          .gte('created_at', startTime.toISOString())
-          .lte('created_at', endTime.toISOString());
-        if (error) throw error;
-        jobsToDownload = data;
+        
+        if (data) {
+          jobsToDownload.push(...data);
+        }
+
+        if (!data || data.length < pageSize) {
+          break;
+        }
+        page++;
       }
 
+      console.log(`[DownloadPack] Total jobs fetched: ${jobsToDownload.length}`);
       if (jobsToDownload.length === 0) throw new Error("No images found for the selected criteria.");
 
       const zip = new JSZip();
       const totalFiles = jobsToDownload.length;
       let processedCount = 0;
       let skippedCount = 0;
+      let duplicateCount = 0;
+      const filenames = new Set<string>();
 
       for (const job of jobsToDownload) {
         processedCount++;
@@ -156,7 +175,6 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
             continue;
           }
 
-          // --- POSE ID WATERFALL LOGIC ---
           let poseId = 'model_unknown';
           if (job.metadata?.model_generation_job_id) {
               poseId = job.metadata.model_generation_job_id.substring(0, 8);
@@ -172,7 +190,6 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
               poseId = job.id.substring(0, 8);
           }
 
-          // --- GARMENT ID WATERFALL LOGIC ---
           let garmentId = 'garment_unknown';
           if (job.metadata?.garment_analysis?.hash) {
               garmentId = hashToIdMap.get(job.metadata.garment_analysis.hash) || job.metadata.garment_analysis.hash;
@@ -193,8 +210,15 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
           }
           
           const filename = `Pose_${poseId}_Garment_${garmentId}.jpg`;
-          let filePathInZip = '';
+          console.log(`[DownloadPack] Processing Job ID ${job.id}: PoseID='${poseId}', GarmentID='${garmentId}', Final Filename='${filename}'`);
 
+          if (filenames.has(filename)) {
+            console.warn(`[DownloadPack] WARNING: Duplicate filename detected: '${filename}'. This will overwrite a previous file in the zip.`);
+            duplicateCount++;
+          }
+          filenames.add(filename);
+
+          let filePathInZip = '';
           switch (structure) {
             case 'by_garment': filePathInZip = `By_Garment/${sanitize(garmentId)}/${filename}`; break;
             case 'by_model': filePathInZip = `By_Model/${sanitize(poseId)}/${filename}`; break;
@@ -216,6 +240,13 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
         }
       }
 
+      console.log(`[DownloadPack] --- FINAL SUMMARY ---`);
+      console.log(`[DownloadPack] Total jobs found: ${jobsToDownload.length}`);
+      console.log(`[DownloadPack] Files added to zip: ${filenames.size}`);
+      console.log(`[DownloadPack] Duplicate filenames detected (overwrites): ${duplicateCount}`);
+      console.log(`[DownloadPack] Files skipped due to errors: ${skippedCount}`);
+      console.log(`[DownloadPack] ---------------------`);
+
       setProgressMessage("Zipping files...");
       const content = await zip.generateAsync({ type: "blob" });
       
@@ -230,6 +261,9 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
       let successMessage = "Download started!";
       if (skippedCount > 0) {
         successMessage += ` (${skippedCount} files were skipped due to errors.)`;
+      }
+      if (duplicateCount > 0) {
+        successMessage += ` Warning: ${duplicateCount} files were overwritten due to duplicate names.`;
       }
       showSuccess(successMessage);
       onClose();
