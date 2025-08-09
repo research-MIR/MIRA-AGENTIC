@@ -205,8 +205,17 @@ const RecentPacksView = () => {
         
         summary.total_jobs = jobsForThisPack.length;
         summary.completed_jobs = jobsForThisPack.filter((j: any) => (j.status === 'complete' || j.status === 'done') && j.final_image_url).length;
-        summary.failed_jobs = jobsForThisPack.filter((j: any) => ['failed', 'permanently_failed'].includes(j.status)).length;
         summary.pending_jobs = jobsForThisPack.filter((j: any) => j.status === 'pending').length;
+        
+        // Reset report-based counts before recalculating from reports
+        summary.passed_perfect = 0;
+        summary.passed_pose_change = 0;
+        summary.passed_logo_issue = 0;
+        summary.passed_detail_issue = 0;
+        summary.failed_jobs = 0;
+        summary.failure_summary = {};
+        summary.shape_mismatches = 0;
+        summary.avg_body_preservation_score = null;
     }
 
     for (const report of reports) {
@@ -223,6 +232,8 @@ const RecentPacksView = () => {
           } else {
               summary.passed_perfect++;
           }
+        } else {
+            summary.failed_jobs++;
         }
         const reason = reportData.failure_category || "Unknown";
         summary.failure_summary[reason] = (summary.failure_summary[reason] || 0) + 1;
