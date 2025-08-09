@@ -37,7 +37,12 @@ const VtoReports = () => {
   });
 
   const getOverallPassRate = (report: string) => {
-    const match = report.match(/Overall Pass Rate: (\d+\.\d+)%/);
+    if (!report) return null;
+    // Check for English first, then Italian to handle reports in either language.
+    let match = report.match(/Overall Pass Rate: (\d+\.\d+)%/);
+    if (!match) {
+      match = report.match(/Tasso di Successo Complessivo: (\d+\.\d+)%/);
+    }
     return match ? parseFloat(match[1]) : null;
   };
 
