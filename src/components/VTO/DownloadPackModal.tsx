@@ -209,7 +209,7 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
               garmentId = job.id.substring(0, 8);
           }
           
-          const filename = `Pose_${poseId}_Garment_${garmentId}.jpg`;
+          const filename = `Pose_${poseId}_Garment_${garmentId}_JobID_${job.id.substring(0, 8)}.jpg`;
           console.log(`[DownloadPack] Processing Job ID ${job.id}: PoseID='${poseId}', GarmentID='${garmentId}', Final Filename='${filename}'`);
 
           if (filenames.has(filename)) {
