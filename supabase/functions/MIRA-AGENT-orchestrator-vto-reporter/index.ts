@@ -83,7 +83,19 @@ serve(async (req) => {
 
     if (insertError) throw new Error(`Failed to create QA jobs: ${insertError.message}`);
 
-    // 5. Asynchronously invoke the watchdog to start processing immediately
+    // 5. UPDATE THE PARENT PACK STATUS to show it's in progress
+    console.log(`${logPrefix} Updating parent pack status to 'Analysis in progress...'`);
+    const { error: updatePackError } = await supabase
+      .from('mira-agent-vto-packs-jobs')
+      .update({ synthesis_report: 'Analysis in progress...' })
+      .eq('id', pack_id);
+    
+    if (updatePackError) {
+        // This is not a fatal error, but we should log it.
+        console.warn(`${logPrefix} Failed to update parent pack status: ${updatePackError.message}`);
+    }
+
+    // 6. Asynchronously invoke the watchdog to start processing immediately
     supabase.functions.invoke('MIRA-AGENT-watchdog-background-jobs').catch(console.error);
 
     const message = `Successfully queued all ${jobsToAnalyze.length} remaining jobs for analysis.`;
