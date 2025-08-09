@@ -71,6 +71,21 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
     console.log(`[DownloadPack] Scope: ${scope}, Structure: ${structure}`);
 
     try {
+      // Step 1: Get the pack's creation date to create a time window
+      setProgressMessage("Fetching pack details...");
+      const { data: packData, error: packError } = await supabase
+        .from('mira-agent-vto-packs-jobs')
+        .select('created_at')
+        .eq('id', pack.pack_id)
+        .single();
+
+      if (packError) throw packError;
+      if (!packData) throw new Error("Pack data not found.");
+
+      const startTime = new Date(packData.created_at);
+      const endTime = new Date(startTime.getTime() + 48 * 60 * 60 * 1000);
+      console.log(`[DownloadPack] Querying between ${startTime.toISOString()} and ${endTime.toISOString()}`);
+
       setProgressMessage("Loading wardrobe...");
       const { data: wardrobeGarments, error: wardrobeError } = await supabase
         .from('mira-agent-garments')
@@ -95,7 +110,9 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
           .select('id, final_image_url, source_person_image_url, source_garment_image_url, metadata')
           .eq('vto_pack_job_id', pack.pack_id)
           .eq('user_id', session.user.id)
-          .not('final_image_url', 'is', null);
+          .not('final_image_url', 'is', null)
+          .gte('created_at', startTime.toISOString())
+          .lte('created_at', endTime.toISOString());
         if (error) throw error;
         jobsToDownload = data;
       } else {
@@ -104,14 +121,18 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
           .select('source_vto_job_id')
           .eq('vto_pack_job_id', pack.pack_id)
           .eq('user_id', session.user.id)
-          .eq('comparative_report->>overall_pass', 'true');
+          .eq('comparative_report->>overall_pass', 'true')
+          .gte('created_at', startTime.toISOString())
+          .lte('created_at', endTime.toISOString());
         if (reportsError) throw reportsError;
         if (!reports || reports.length === 0) throw new Error("No QA-passed jobs found to export.");
         const jobIds = reports.map(r => r.source_vto_job_id);
         const { data, error } = await supabase
           .from('mira-agent-bitstudio-jobs')
           .select('id, final_image_url, source_person_image_url, source_garment_image_url, metadata')
-          .in('id', jobIds);
+          .in('id', jobIds)
+          .gte('created_at', startTime.toISOString())
+          .lte('created_at', endTime.toISOString());
         if (error) throw error;
         jobsToDownload = data;
       }
