@@ -28,6 +28,8 @@ import { AnalyzePackModal, AnalysisScope } from '@/components/VTO/AnalyzePackMod
 import { DownloadPackModal } from "@/components/VTO/DownloadPackModal";
 import { RefinePackModal, RefineScope } from "@/components/VTO/RefinePackModal";
 
+const aspectRatioOptions = ["1:1", "9:16", "16:9", "4:3", "3:4", "21:9", "3:2", "2:3", "4:5", "5:4"];
+
 interface QaReport {
   id: string;
   vto_pack_job_id: string;
@@ -330,7 +332,7 @@ const RecentPacksView = () => {
   }
 
   if (error) {
-    return <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Error</AlertTitle><AlertDescription>{error.message}</AlertDescription></Alert>;
+    return <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Error</AlertTitle><AlertDescription>{(error as Error).message}</AlertDescription></Alert>;
   }
 
   if (packSummaries.length === 0) {
