@@ -102,28 +102,6 @@ const blobToBase64 = async (blob: Blob)=>{
   return encodeBase64(new Uint8Array(buffer));
 };
 
-async function invokeWithRetry(supabase: SupabaseClient, functionName: string, payload: object, maxRetries: number, logPrefix: string) {
-  let lastError: Error | null = null;
-  for(let attempt = 1; attempt <= maxRetries; attempt++){
-    try {
-      const { data, error } = await supabase.functions.invoke(functionName, payload);
-      if (error) {
-        throw new Error(error.message || 'Function invocation failed with an unknown error.');
-      }
-      return data;
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err));
-      console.warn(`${logPrefix} Invocation of '${functionName}' failed on attempt ${attempt}/${maxRetries}. Error: ${lastError.message}`);
-      if (attempt < maxRetries) {
-        const delay = 15000 * attempt;
-        console.warn(`${logPrefix} Waiting ${delay}ms before retrying...`);
-        await new Promise((resolve)=>setTimeout(resolve, delay));
-      }
-    }
-  }
-  throw lastError || new Error("Function failed after all retries without a specific error.");
-}
-
 // --- State Machine Logic ---
 serve(async (req)=>{
   if (req.method === 'OPTIONS') {
@@ -169,16 +147,13 @@ serve(async (req)=>{
           await handlePrepareAssets(supabase, job, logPrefix);
           break;
         case 'generate_step_1':
-          await handleQueueGenerationTasks(supabase, job, [{ sample_step: 30 }, { sample_step: 50 }], 'awaiting_generation_results', logPrefix);
+          await handleGenerateStep(supabase, job, 15, 'quality_check', logPrefix);
           break;
         case 'generate_step_2':
-          await handleQueueGenerationTasks(supabase, job, [{ sample_step: 50 }, { sample_step: 80 }], 'awaiting_generation_results', logPrefix);
+          await handleGenerateStep(supabase, job, 30, 'quality_check', logPrefix);
           break;
         case 'generate_step_3':
-          await handleQueueGenerationTasks(supabase, job, [{ sample_step: 80 }], 'awaiting_generation_results', logPrefix);
-          break;
-        case 'awaiting_generation_results':
-          await handleAwaitGeneration(supabase, job, logPrefix);
+          await handleGenerateStep(supabase, job, 50, 'quality_check', logPrefix);
           break;
         case 'quality_check':
           await handleQualityCheck(supabase, job, logPrefix);
@@ -390,59 +365,57 @@ async function handlePrepareAssets(supabase: SupabaseClient, job: any, logPrefix
     pair_job_id: job.id
   });
 }
-async function handleQueueGenerationTasks(supabase: SupabaseClient, job: any, steps: { sample_step: number }[], nextStep: string, logPrefix: string) {
-  console.log(`${logPrefix} Queuing ${steps.length * 2} generation tasks.`);
-  const tasksToInsert = steps.map(step => ({
-    vto_job_id: job.id,
-    sample_step: step.sample_step,
-  }));
-
-  const { error } = await supabase.from('mira-agent-vto-generation-tasks').insert(tasksToInsert);
-  if (error) throw new Error(`Failed to insert generation tasks: ${error.message}`);
-
-  await supabase.from('mira-agent-bitstudio-jobs').update({
-    status: nextStep,
-    metadata: { ...job.metadata, google_vto_step: nextStep }
-  }).eq('id', job.id);
-
-  console.log(`${logPrefix} All tasks queued. Advancing to ${nextStep}. The watchdog will now trigger the individual generator workers.`);
+async function invokeWithRetry(supabase: SupabaseClient, functionName: string, payload: object, maxRetries: number, logPrefix: string) {
+  let lastError: Error | null = null;
+  for(let attempt = 1; attempt <= maxRetries; attempt++){
+    try {
+      const { data, error } = await supabase.functions.invoke(functionName, payload);
+      if (error) {
+        throw new Error(error.message || 'Function invocation failed with an unknown error.');
+      }
+      return data;
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      console.warn(`${logPrefix} Invocation of '${functionName}' failed on attempt ${attempt}/${maxRetries}. Error: ${lastError.message}`);
+      if (attempt < maxRetries) {
+        const delay = 15000 * attempt;
+        console.warn(`${logPrefix} Waiting ${delay}ms before retrying...`);
+        await new Promise((resolve)=>setTimeout(resolve, delay));
+      }
+    }
+  }
+  throw lastError || new Error("Function failed after all retries without a specific error.");
 }
-async function handleAwaitGeneration(supabase: SupabaseClient, job: any, logPrefix: string) {
-  console.log(`${logPrefix} Awaiting generation results...`);
-  const { data: tasks, error } = await supabase
-    .from('mira-agent-vto-generation-tasks')
-    .select('status, result_data')
-    .eq('vto_job_id', job.id);
-
-  if (error) throw error;
-
-  const pendingTasks = tasks.filter(t => t.status === 'pending' || t.status === 'processing');
-  if (pendingTasks.length > 0) {
-    console.log(`${logPrefix} ${pendingTasks.length} generation tasks still in progress. Waiting for next watchdog cycle.`);
-    return;
+async function handleGenerateStep(supabase: SupabaseClient, job: any, sampleStep: number, nextStep: string, logPrefix: string) {
+  console.log(`${logPrefix} Generating variation with ${sampleStep} steps.`);
+  const data = await invokeWithRetry(supabase, 'MIRA-AGENT-tool-virtual-try-on', {
+    body: {
+      person_image_url: job.metadata.cropped_person_url,
+      garment_image_url: job.metadata.optimized_garment_url,
+      sample_count: 3,
+      sample_step: sampleStep
+    }
+  }, 3, logPrefix);
+  const generatedImages = data?.generatedImages;
+  if (!generatedImages || !Array.isArray(generatedImages) || generatedImages.length === 0 || !generatedImages[0]?.base64Image) {
+    throw new Error(`VTO tool did not return a valid image for step ${sampleStep}`);
   }
-
-  const failedTasks = tasks.filter(t => t.status === 'failed');
-  if (failedTasks.length > 0) {
-    console.warn(`${logPrefix} ${failedTasks.length} generation tasks failed.`);
-  }
-
-  const successfulImages = tasks
-    .filter(t => t.status === 'complete' && t.result_data?.images)
-    .flatMap((t: any) => t.result_data.images);
-
-  if (successfulImages.length === 0) {
-    throw new Error("All generation tasks completed, but none produced a valid image.");
-  }
-
   const currentVariations = job.metadata.generated_variations || [];
   await supabase.from('mira-agent-bitstudio-jobs').update({
-    metadata: { ...job.metadata, generated_variations: [...currentVariations, ...successfulImages], google_vto_step: 'quality_check' },
-    status: 'quality_check'
+    metadata: {
+      ...job.metadata,
+      generated_variations: [
+        ...currentVariations,
+        ...generatedImages
+      ],
+      google_vto_step: nextStep
+    },
+    status: nextStep
   }).eq('id', job.id);
-
-  console.log(`${logPrefix} All generation tasks complete. Collected ${successfulImages.length} images. Advancing to quality_check.`);
-  await invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
+  console.log(`${logPrefix} Step ${sampleStep} complete. Advancing to ${nextStep}.`);
+  await invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', {
+    pair_job_id: job.id
+  });
 }
 async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix: string, bitstudio_result_url?: string) {
   await supabase.from('mira-agent-bitstudio-jobs').update({

@@ -326,11 +326,11 @@ const RecentPacksView = () => {
   };
 
   if (isLoading) {
-    return <div className="space-y-4"><Skeleton className="h-20 w-full" /><Skeleton className="h-20 w-full" /><Skeleton className="h-20 w-full" /></div>;
+    return <div className="space-y-4"><Skeleton className="h-20 w-full" /><Skeleton className="h-20 w-full" /></div>;
   }
 
   if (error) {
-    return <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Error</AlertTitle><AlertDescription>{(error as Error).message}</AlertDescription></Alert>;
+    return <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Error</AlertTitle><AlertDescription>{error.message}</AlertDescription></Alert>;
   }
 
   if (packSummaries.length === 0) {
@@ -438,8 +438,6 @@ interface GarmentPack {
   id: string;
   name: string;
 }
-
-const aspectRatioOptions = ["1:1", "16:9", "9:16", "4:3", "3:4", "21:9", "3:2", "2:3", "4:5", "5:4"];
 
 const VirtualTryOnPacks = () => {
   const { supabase, session } = useSession();
