@@ -79,21 +79,21 @@ async function safeGetPublicUrl(supabase: SupabaseClient, bucket: string, path: 
 }
 
 async function uploadBase64ToStorage(supabase: SupabaseClient, base64: string, userId: string, filename: string) {
-  const buffer = decodeBase64(base64);
-  const filePath = `${userId}/vto-pack-results/${Date.now()}-${filename}`;
-  await safeUpload(supabase, GENERATED_IMAGES_BUCKET, filePath, new Blob([
-    buffer
-  ], {
-    type: 'image/png'
-  }), {
-    contentType: 'image/png',
-    upsert: true
-  });
-  const publicUrl = await safeGetPublicUrl(supabase, GENERATED_IMAGES_BUCKET, filePath);
-  return {
-    publicUrl,
-    storagePath: filePath
-  };
+    const buffer = decodeBase64(base64);
+    const filePath = `${userId}/vto-pack-results/${Date.now()}-${filename}`;
+    await safeUpload(supabase, GENERATED_IMAGES_BUCKET, filePath, new Blob([
+      buffer
+    ], {
+      type: 'image/png'
+    }), {
+      contentType: 'image/png',
+      upsert: true
+    });
+    const publicUrl = await safeGetPublicUrl(supabase, GENERATED_IMAGES_BUCKET, filePath);
+    return {
+      publicUrl,
+      storagePath: filePath
+    };
 }
 
 // --- Utility Functions ---
