@@ -96,18 +96,24 @@ export const VtoJobDetailModal = ({ job, isOpen, onClose }: VtoJobDetailModalPro
   return (
     <>
       <Dialog open={isOpen} onOpenChange={onClose}>
-        <DialogContent className={cn("transition-all duration-300", (isRefinementJob || isAutoCompleteJob) ? "max-w-6xl" : "max-w-4xl")}>
+        <DialogContent className={cn("transition-all duration-300", "max-w-6xl")}>
           <DialogHeader>
             <DialogTitle>Job Details</DialogTitle>
             <DialogDescription>
               Job ID: {job.id}
             </DialogDescription>
           </DialogHeader>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 py-4">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 py-4">
             <div className="space-y-2">
               <h3 className="text-sm font-semibold text-center">Source Person</h3>
               <div className="aspect-square bg-muted rounded-md">
                 <SecureImageDisplay imageUrl={job.source_person_image_url || null} alt="Source Person" />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold text-center">Reference Garment</h3>
+              <div className="aspect-square bg-muted rounded-md">
+                <SecureImageDisplay imageUrl={job.source_garment_image_url || null} alt="Reference Garment" />
               </div>
             </div>
             <div className="space-y-2">
