@@ -11,7 +11,6 @@ import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { ImageCompareModal } from "@/components/ImageCompareModal";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
-import { Label } from "../ui/label";
 
 interface VtoJobDetailModalProps {
   job: BitStudioJob | null;
@@ -85,7 +84,6 @@ export const VtoJobDetailModal = ({ job, isOpen, onClose }: VtoJobDetailModalPro
   
   const wasOutfitCheckSkipped = job.metadata?.outfit_analysis_skipped === true;
   const outfitCheckError = job.metadata?.outfit_analysis_error;
-  const outfitAnalysis = job.metadata?.outfit_completeness_analysis;
   const verification = job.metadata?.verification_result;
 
   const beforeImageUrl = job.source_person_image_url;
