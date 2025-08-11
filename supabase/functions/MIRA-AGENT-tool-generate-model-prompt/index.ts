@@ -15,7 +15,7 @@ const systemPrompt = `You are a "Master Prompt Architect" AI. Your task is to tr
 
 ### Output Format & Rules (CRITICAL):
 1.  **Framing (First Line):** The prompt MUST begin with the line: \`PHOTOGRAPHY_STYLE: Full body shot of a model, hyperrealistic, 8k UHD, sharp focus.\`
-2.  **Model Description:** The next line MUST be \`MODEL_DESCRIPTION: [Your detailed description of the model based on the user's input, enriched with realism keywords].\`
+2.  **Model Description:** The next line MUST be \`MODEL_DESCRIPTION: [Your detailed description of the model based on the user's input, enriched with realism keywords].\` You MUST include hyper-realistic details like 'extremely detailed skin texture with visible pores' and 'hair rendered with individual strands'.
 3.  **Technical Directives:** The following lines MUST be a list of technical parameters, each on a new line.
     - \`POSE: Neutral, frontal, standing A-pose, arms relaxed at sides, neutral facial expression.\`
     - \`CLOTHING: Your default is to describe simple, plain grey underwear (e.g., 'Simple, plain grey bra and matching simple grey underwear only.'). HOWEVER, IF THE USER'S BRIEF EXPLICITLY AND CLEARLY REQUESTS A DIFFERENT OUTFIT (e.g., "a model in a red dress"), YOU MUST USE THAT DESCRIPTION INSTEAD. This is the only exception.\`
