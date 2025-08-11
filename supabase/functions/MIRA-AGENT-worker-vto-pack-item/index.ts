@@ -125,6 +125,17 @@ async function invokeWithRetry(supabase: SupabaseClient, functionName: string, p
 }
 
 async function generateMixedPortfolio(supabase: SupabaseClient, job: any, steps: any[], logPrefix: string) {
+    // --- NEW LOGIC START ---
+    try {
+        console.log(`${logPrefix} Verifying dimensions of garment image before generation...`);
+        const garmentBlob = await safeDownload(supabase, job.metadata.optimized_garment_url, logPrefix);
+        const garmentImage = await ISImage.decode(await garmentBlob.arrayBuffer());
+        console.log(`${logPrefix} VERIFIED: Garment image dimensions sent to VTO tool are ${garmentImage.width}x${garmentImage.height}.`);
+    } catch (e) {
+        console.warn(`${logPrefix} Could not verify garment image dimensions before generation. This is non-fatal. Error: ${e.message}`);
+    }
+    // --- NEW LOGIC END ---
+
     const generationPromises = steps.map(stepConfig => 
         invokeWithRetry(
             supabase,
@@ -496,6 +507,7 @@ async function handlePrepareAssets(supabase: SupabaseClient, job: any, logPrefix
   await safeUpload(supabase, TEMP_UPLOAD_BUCKET, tempGarmentPath, optimizedGarmentBlob, { contentType: "image/jpeg" });
   const optimizedGarmentUrl = await safeGetPublicUrl(supabase, TEMP_UPLOAD_BUCKET, tempGarmentPath);
   console.log(`${logPrefix} Optimized, padded, and squared garment image uploaded to temp storage.`);
+  console.log(`${logPrefix} Saved processed garment URL to metadata.debug_assets: ${optimizedGarmentUrl}`);
 
   // --- Update Job and Continue ---
   await supabase.from('mira-agent-bitstudio-jobs').update({
