@@ -102,6 +102,61 @@ const blobToBase64 = async (blob: Blob)=>{
   return encodeBase64(new Uint8Array(buffer));
 };
 
+async function invokeWithRetry(supabase: SupabaseClient, functionName: string, payload: object, maxRetries: number, logPrefix: string) {
+  let lastError: Error | null = null;
+  for(let attempt = 1; attempt <= maxRetries; attempt++){
+    try {
+      const { data, error } = await supabase.functions.invoke(functionName, payload);
+      if (error) {
+        throw new Error(error.message || 'Function invocation failed with an unknown error.');
+      }
+      return data;
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      console.warn(`${logPrefix} Invocation of '${functionName}' failed on attempt ${attempt}/${maxRetries}. Error: ${lastError.message}`);
+      if (attempt < maxRetries) {
+        const delay = 15000 * attempt;
+        console.warn(`${logPrefix} Waiting ${delay}ms before retrying...`);
+        await new Promise((resolve)=>setTimeout(resolve, delay));
+      }
+    }
+  }
+  throw lastError || new Error("Function failed after all retries without a specific error.");
+}
+
+async function generateMixedPortfolio(
+  supabase: SupabaseClient,
+  job: any,
+  steps: { sample_step: number, sample_count: number }[],
+  logPrefix: string
+): Promise<any[]> {
+  const generationPromises = steps.map(stepConfig => 
+    invokeWithRetry(supabase, 'MIRA-AGENT-tool-virtual-try-on', {
+      body: {
+        person_image_url: job.metadata.cropped_person_url,
+        garment_image_url: job.metadata.optimized_garment_url,
+        ...stepConfig
+      }
+    }, 3, logPrefix)
+  );
+
+  const results = await Promise.allSettled(generationPromises);
+  
+  const successfulImages = results
+    .filter(r => r.status === 'fulfilled' && r.value?.generatedImages)
+    .flatMap((r: any) => r.value.generatedImages);
+
+  if (successfulImages.length === 0) {
+    const firstRejection = results.find(r => r.status === 'rejected') as PromiseRejectedResult | undefined;
+    if (firstRejection) {
+      throw firstRejection.reason;
+    }
+    throw new Error("VTO tool did not return any valid images for this generation step.");
+  }
+  
+  return successfulImages;
+}
+
 // --- State Machine Logic ---
 serve(async (req)=>{
   if (req.method === 'OPTIONS') {
@@ -146,15 +201,49 @@ serve(async (req)=>{
         case 'prepare_assets':
           await handlePrepareAssets(supabase, job, logPrefix);
           break;
-        case 'generate_step_1':
-          await handleGenerateStep(supabase, job, 15, 'quality_check', logPrefix);
+        case 'generate_step_1': {
+          console.log(`${logPrefix} Generating Round 1 portfolio (2x30, 2x50 steps).`);
+          const generatedImages = await generateMixedPortfolio(supabase, job, [
+            { sample_step: 30, sample_count: 2 },
+            { sample_step: 50, sample_count: 2 }
+          ], logPrefix);
+          await supabase.from('mira-agent-bitstudio-jobs').update({
+            metadata: { ...job.metadata, generated_variations: generatedImages, google_vto_step: 'quality_check' },
+            status: 'quality_check'
+          }).eq('id', job.id);
+          console.log(`${logPrefix} Round 1 complete. Advancing to quality_check.`);
+          await invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
           break;
-        case 'generate_step_2':
-          await handleGenerateStep(supabase, job, 30, 'quality_check', logPrefix);
+        }
+        case 'generate_step_2': {
+          console.log(`${logPrefix} Generating Round 2 portfolio (2x50, 2x80 steps).`);
+          const newImages = await generateMixedPortfolio(supabase, job, [
+            { sample_step: 50, sample_count: 2 },
+            { sample_step: 80, sample_count: 2 }
+          ], logPrefix);
+          const currentVariations = job.metadata.generated_variations || [];
+          await supabase.from('mira-agent-bitstudio-jobs').update({
+            metadata: { ...job.metadata, generated_variations: [...currentVariations, ...newImages], google_vto_step: 'quality_check' },
+            status: 'quality_check'
+          }).eq('id', job.id);
+          console.log(`${logPrefix} Round 2 complete. Advancing to quality_check.`);
+          await invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
           break;
-        case 'generate_step_3':
-          await handleGenerateStep(supabase, job, 50, 'quality_check', logPrefix);
+        }
+        case 'generate_step_3': {
+          console.log(`${logPrefix} Generating Round 3 portfolio (2x80 steps).`);
+          const newImages = await generateMixedPortfolio(supabase, job, [
+            { sample_step: 80, sample_count: 2 }
+          ], logPrefix);
+          const currentVariations = job.metadata.generated_variations || [];
+          await supabase.from('mira-agent-bitstudio-jobs').update({
+            metadata: { ...job.metadata, generated_variations: [...currentVariations, ...newImages], google_vto_step: 'quality_check' },
+            status: 'quality_check'
+          }).eq('id', job.id);
+          console.log(`${logPrefix} Round 3 complete. Advancing to final quality_check.`);
+          await invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
           break;
+        }
         case 'quality_check':
           await handleQualityCheck(supabase, job, logPrefix);
           break;
@@ -361,58 +450,6 @@ async function handlePrepareAssets(supabase: SupabaseClient, job: any, logPrefix
     status: 'generate_step_1'
   }).eq('id', job.id);
   console.log(`${logPrefix} All assets prepared. Advancing to 'generate_step_1'.`);
-  await invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', {
-    pair_job_id: job.id
-  });
-}
-async function invokeWithRetry(supabase: SupabaseClient, functionName: string, payload: object, maxRetries: number, logPrefix: string) {
-  let lastError: Error | null = null;
-  for(let attempt = 1; attempt <= maxRetries; attempt++){
-    try {
-      const { data, error } = await supabase.functions.invoke(functionName, payload);
-      if (error) {
-        throw new Error(error.message || 'Function invocation failed with an unknown error.');
-      }
-      return data;
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err));
-      console.warn(`${logPrefix} Invocation of '${functionName}' failed on attempt ${attempt}/${maxRetries}. Error: ${lastError.message}`);
-      if (attempt < maxRetries) {
-        const delay = 15000 * attempt;
-        console.warn(`${logPrefix} Waiting ${delay}ms before retrying...`);
-        await new Promise((resolve)=>setTimeout(resolve, delay));
-      }
-    }
-  }
-  throw lastError || new Error("Function failed after all retries without a specific error.");
-}
-async function handleGenerateStep(supabase: SupabaseClient, job: any, sampleStep: number, nextStep: string, logPrefix: string) {
-  console.log(`${logPrefix} Generating variation with ${sampleStep} steps.`);
-  const data = await invokeWithRetry(supabase, 'MIRA-AGENT-tool-virtual-try-on', {
-    body: {
-      person_image_url: job.metadata.cropped_person_url,
-      garment_image_url: job.metadata.optimized_garment_url,
-      sample_count: 3,
-      sample_step: sampleStep
-    }
-  }, 3, logPrefix);
-  const generatedImages = data?.generatedImages;
-  if (!generatedImages || !Array.isArray(generatedImages) || generatedImages.length === 0 || !generatedImages[0]?.base64Image) {
-    throw new Error(`VTO tool did not return a valid image for step ${sampleStep}`);
-  }
-  const currentVariations = job.metadata.generated_variations || [];
-  await supabase.from('mira-agent-bitstudio-jobs').update({
-    metadata: {
-      ...job.metadata,
-      generated_variations: [
-        ...currentVariations,
-        ...generatedImages
-      ],
-      google_vto_step: nextStep
-    },
-    status: nextStep
-  }).eq('id', job.id);
-  console.log(`${logPrefix} Step ${sampleStep} complete. Advancing to ${nextStep}.`);
   await invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', {
     pair_job_id: job.id
   });
