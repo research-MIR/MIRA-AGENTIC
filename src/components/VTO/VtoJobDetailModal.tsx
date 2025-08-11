@@ -10,7 +10,7 @@ import { FixHistoryModal } from "./FixHistoryModal";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { ImageCompareModal } from "@/components/ImageCompareModal";
-import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../ui/card";
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel";
 
 interface VtoJobDetailModalProps {
