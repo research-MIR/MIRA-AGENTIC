@@ -28,7 +28,7 @@ serve(async (req) => {
     const { data: jobsToProcess, error: selectError } = await supabase
       .from('mira-agent-bitstudio-jobs')
       .select('*')
-      .filter('bitstudio_task_id', 'isnot', null)
+      .not('bitstudio_task_id', 'is', null) // CORRECTED SYNTAX
       .or(`status.eq.queued,and(status.in.("processing","delegated"),last_polled_at.lt.${threshold})`)
       .limit(BATCH_SIZE);
 
