@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { ImageCompareModal } from "@/components/ImageCompareModal";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
+import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel";
 
 interface VtoJobDetailModalProps {
   job: BitStudioJob | null;
@@ -89,6 +90,9 @@ export const VtoJobDetailModal = ({ job, isOpen, onClose }: VtoJobDetailModalPro
   const beforeImageUrl = job.source_person_image_url;
   const afterImageUrl = job.final_image_url;
 
+  const lastQaReport = job.metadata?.qa_history?.[job.metadata.qa_history.length - 1];
+  const variations = job.metadata?.generated_variations;
+
   return (
     <>
       <Dialog open={isOpen} onOpenChange={onClose}>
@@ -139,6 +143,49 @@ export const VtoJobDetailModal = ({ job, isOpen, onClose }: VtoJobDetailModalPro
                 )}
             </CardContent>
           </Card>
+
+          {variations && variations.length > 1 && lastQaReport && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">AI Quality Check Candidates</CardTitle>
+                <CardDescription>
+                  The AI generated {variations.length} options and selected the best one based on its analysis.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <p className="text-xs italic text-muted-foreground mb-2">
+                  <strong>AI Reasoning:</strong> {lastQaReport.reasoning}
+                </p>
+                <Carousel>
+                  <CarouselContent className="-ml-2">
+                    {variations.map((image: any, index: number) => {
+                      const isSelected = index === lastQaReport.best_image_index;
+                      return (
+                        <CarouselItem key={index} className="pl-2 basis-1/3 md:basis-1/4 lg:basis-1/5">
+                          <div className={cn("p-1", isSelected && "border-2 border-green-500 rounded-md")}>
+                            <div className="relative aspect-square">
+                              <img 
+                                src={`data:image/jpeg;base64,${image.base64Image}`} 
+                                alt={`Candidate ${index + 1}`}
+                                className="w-full h-full object-cover rounded-md"
+                              />
+                              {isSelected && (
+                                <div className="absolute top-1 right-1 bg-green-500 text-white rounded-full p-1">
+                                  <CheckCircle className="h-4 w-4" />
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </CarouselItem>
+                      );
+                    })}
+                  </CarouselContent>
+                  <CarouselPrevious className="absolute -left-4 top-1/2 -translate-y-1/2" />
+                  <CarouselNext className="absolute -right-4 top-1/2 -translate-y-1/2" />
+                </Carousel>
+              </CardContent>
+            </Card>
+          )}
 
           {wasOutfitCheckSkipped && (
             <Alert variant="default">
