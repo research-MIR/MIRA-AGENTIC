@@ -504,6 +504,10 @@ async function handlePrepareAssets(supabase: SupabaseClient, job: any, logPrefix
       bbox: bbox,
       cropped_person_url: croppedPersonUrl,
       optimized_garment_url: optimizedGarmentUrl,
+      debug_assets: {
+        ...(metadata.debug_assets || {}),
+        processed_garment_url: optimizedGarmentUrl
+      },
       google_vto_step: 'generate_step_1'
     },
     status: 'generate_step_1'
