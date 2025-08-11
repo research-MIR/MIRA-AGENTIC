@@ -516,7 +516,7 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
                 safeDownload(supabase, job.source_person_image_url, logPrefix),
                 safeDownload(supabase, job.source_garment_image_url, logPrefix)
             ]);
-            const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-quality-checker', {
+            const { data, error: analysisError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-quality-checker', {
                 body: {
                     original_person_image_base64: await blobToBase64(personBlob),
                     reference_garment_image_base64: await blobToBase64(garmentBlob),
@@ -527,7 +527,7 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
             });
             personBlob = null; // GC
             garmentBlob = null; // GC
-            if (error) throw error;
+            if (analysisError) throw analysisError;
             if (data.error) {
                 throw new Error(`QA tool reported an internal failure: ${data.error}`);
             }
