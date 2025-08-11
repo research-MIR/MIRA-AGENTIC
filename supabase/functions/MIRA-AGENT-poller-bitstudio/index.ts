@@ -11,29 +11,45 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const BITSTUDIO_API_KEY = Deno.env.get('BITSTUDIO_API_KEY');
 const BITSTUDIO_API_BASE = 'https://api.bitstudio.ai';
 const BATCH_SIZE = 10; // Process up to 10 jobs per invocation
+const STALLED_THRESHOLD_SECONDS = 60; // A job is stalled if not polled for this long
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
 
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-  const logPrefix = `[BitStudioPoller-Batch]`;
-  console.log(`${logPrefix} Poller invoked. Attempting to claim a batch of jobs.`);
+  const logPrefix = `[BitStudioPoller-Autonomous]`;
+  console.log(`${logPrefix} Poller invoked.`);
 
   try {
-    const { data: jobsToProcess, error: claimError } = await supabase
-      .rpc('claim_bitstudio_jobs_to_poll', { p_limit: BATCH_SIZE });
+    const threshold = new Date(Date.now() - STALLED_THRESHOLD_SECONDS * 1000).toISOString();
 
-    if (claimError) {
-      console.error(`${logPrefix} Error claiming jobs via RPC:`, claimError);
-      throw claimError;
+    // Step 1: Find candidate jobs directly.
+    // A job is a candidate if it's new ('queued') OR if it's been processing for too long.
+    const { data: jobsToProcess, error: selectError } = await supabase
+      .from('mira-agent-bitstudio-jobs')
+      .select('*')
+      .filter('bitstudio_task_id', 'isnot', null)
+      .or(`status.eq.queued,and(status.in.("processing","delegated"),last_polled_at.lt.${threshold})`)
+      .limit(BATCH_SIZE);
+
+    if (selectError) {
+      console.error(`${logPrefix} Error selecting jobs to process:`, selectError);
+      throw selectError;
     }
 
     if (!jobsToProcess || jobsToProcess.length === 0) {
-      console.log(`${logPrefix} No active jobs to process. Exiting.`);
+      console.log(`${logPrefix} No active or stalled jobs to process. Exiting.`);
       return new Response(JSON.stringify({ success: true, message: "No active jobs found." }), { headers: corsHeaders });
     }
 
-    console.log(`${logPrefix} Claimed ${jobsToProcess.length} job(s). Processing batch...`);
+    console.log(`${logPrefix} Found ${jobsToProcess.length} job(s) to process. Processing batch...`);
+
+    // Step 2: Update timestamps for all claimed jobs AT ONCE before processing.
+    const jobIds = jobsToProcess.map(j => j.id);
+    await supabase
+        .from('mira-agent-bitstudio-jobs')
+        .update({ last_polled_at: new Date().toISOString() })
+        .in('id', jobIds);
 
     const processingPromises = jobsToProcess.map(async (job: any) => {
       const jobLogPrefix = `[BitStudioPoller][${job.id}]`;
@@ -89,12 +105,9 @@ serve(async (req) => {
             await supabase.from('mira-agent-batch-inpaint-pair-jobs').update({ status: 'failed', error_message: errorMessage }).eq('id', job.batch_pair_job_id);
           }
         } else if (jobStatus === 'processing') {
-            // The job is actively being worked on by BitStudio. Update our status to reflect this.
             await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'processing' }).eq('id', job.id);
         } else if (jobStatus === 'pending') {
-            // The job is still in BitStudio's queue. Do nothing to the database status.
-            // This leaves our internal status as 'queued', so the watchdog will pick it up again.
-            console.log(`${jobLogPrefix} Job is still pending in BitStudio's queue. No status change needed.`);
+            console.log(`${jobLogPrefix} Job is still pending in BitStudio's queue. No status change needed. Watchdog will re-check.`);
         }
       } catch (error) {
         console.error(`${jobLogPrefix} Error processing job:`, error);
