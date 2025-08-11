@@ -11,45 +11,30 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const BITSTUDIO_API_KEY = Deno.env.get('BITSTUDIO_API_KEY');
 const BITSTUDIO_API_BASE = 'https://api.bitstudio.ai';
 const BATCH_SIZE = 10; // Process up to 10 jobs per invocation
-const STALLED_THRESHOLD_SECONDS = 60; // A job is stalled if not polled for this long
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
 
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-  const logPrefix = `[BitStudioPoller-Autonomous]`;
-  console.log(`${logPrefix} Poller invoked.`);
+  const logPrefix = `[BitStudioPoller-Batch]`;
+  console.log(`${logPrefix} Poller invoked. Attempting to claim a batch of jobs.`);
 
   try {
-    const threshold = new Date(Date.now() - STALLED_THRESHOLD_SECONDS * 1000).toISOString();
+    // Atomically claim a batch of jobs to process using the new RPC function
+    const { data: jobsToProcess, error: claimError } = await supabase
+      .rpc('claim_bitstudio_jobs_to_poll', { p_limit: BATCH_SIZE });
 
-    // Step 1: Find candidate jobs directly.
-    // A job is a candidate if it's new ('queued') OR if it's been processing for too long.
-    const { data: jobsToProcess, error: selectError } = await supabase
-      .from('mira-agent-bitstudio-jobs')
-      .select('*')
-      .not('bitstudio_task_id', 'is', null) // CORRECTED SYNTAX
-      .or(`status.eq.queued,and(status.in.("processing","delegated"),last_polled_at.lt.${threshold})`)
-      .limit(BATCH_SIZE);
-
-    if (selectError) {
-      console.error(`${logPrefix} Error selecting jobs to process:`, selectError);
-      throw selectError;
+    if (claimError) {
+      console.error(`${logPrefix} Error claiming jobs via RPC:`, claimError);
+      throw claimError;
     }
 
     if (!jobsToProcess || jobsToProcess.length === 0) {
-      console.log(`${logPrefix} No active or stalled jobs to process. Exiting.`);
+      console.log(`${logPrefix} No active jobs to process. Exiting.`);
       return new Response(JSON.stringify({ success: true, message: "No active jobs found." }), { headers: corsHeaders });
     }
 
-    console.log(`${logPrefix} Found ${jobsToProcess.length} job(s) to process. Processing batch...`);
-
-    // Step 2: Update timestamps for all claimed jobs AT ONCE before processing.
-    const jobIds = jobsToProcess.map(j => j.id);
-    await supabase
-        .from('mira-agent-bitstudio-jobs')
-        .update({ last_polled_at: new Date().toISOString() })
-        .in('id', jobIds);
+    console.log(`${logPrefix} Claimed ${jobsToProcess.length} job(s). Processing batch...`);
 
     const processingPromises = jobsToProcess.map(async (job: any) => {
       const jobLogPrefix = `[BitStudioPoller][${job.id}]`;
@@ -64,6 +49,7 @@ serve(async (req) => {
             if (!taskId) throw new Error("Job is missing the task ID (bitstudio_task_id).");
             statusUrl = `${BITSTUDIO_API_BASE}/images/${taskId}`;
         }
+
         const statusResponse = await fetch(statusUrl, {
           headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}` }
         });
@@ -104,16 +90,17 @@ serve(async (req) => {
           if (job.batch_pair_job_id) {
             await supabase.from('mira-agent-batch-inpaint-pair-jobs').update({ status: 'failed', error_message: errorMessage }).eq('id', job.batch_pair_job_id);
           }
-        } else if (jobStatus === 'processing') {
-            await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'processing' }).eq('id', job.id);
-        } else if (jobStatus === 'pending') {
-            console.log(`${jobLogPrefix} Job is still pending in BitStudio's queue. No status change needed. Watchdog will re-check.`);
+        } else {
+          // If still processing, the last_polled_at timestamp is already updated by the RPC.
+          // No need for another update here unless we want to change the status.
+          await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'processing' }).eq('id', job.id);
         }
       } catch (error) {
         console.error(`${jobLogPrefix} Error processing job:`, error);
         await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'failed', error_message: error.message }).eq('id', job.id);
       }
     });
+
     await Promise.allSettled(processingPromises);
     console.log(`${logPrefix} Batch processing complete.`);
 
