@@ -124,39 +124,6 @@ async function invokeWithRetry(supabase: SupabaseClient, functionName: string, p
   throw lastError || new Error("Function failed after all retries without a specific error.");
 }
 
-async function generateMixedPortfolio(
-  supabase: SupabaseClient,
-  job: any,
-  steps: { sample_step: number, sample_count: number }[],
-  logPrefix: string
-): Promise<any[]> {
-  const generationPromises = steps.map(stepConfig => 
-    invokeWithRetry(supabase, 'MIRA-AGENT-tool-virtual-try-on', {
-      body: {
-        person_image_url: job.metadata.cropped_person_url,
-        garment_image_url: job.metadata.optimized_garment_url,
-        ...stepConfig
-      }
-    }, 3, logPrefix)
-  );
-
-  const results = await Promise.allSettled(generationPromises);
-  
-  const successfulImages = results
-    .filter(r => r.status === 'fulfilled' && r.value?.generatedImages)
-    .flatMap((r: any) => r.value.generatedImages);
-
-  if (successfulImages.length === 0) {
-    const firstRejection = results.find(r => r.status === 'rejected') as PromiseRejectedResult | undefined;
-    if (firstRejection) {
-      throw firstRejection.reason;
-    }
-    throw new Error("VTO tool did not return any valid images for this generation step.");
-  }
-  
-  return successfulImages;
-}
-
 // --- State Machine Logic ---
 serve(async (req)=>{
   if (req.method === 'OPTIONS') {
@@ -201,49 +168,18 @@ serve(async (req)=>{
         case 'prepare_assets':
           await handlePrepareAssets(supabase, job, logPrefix);
           break;
-        case 'generate_step_1': {
-          console.log(`${logPrefix} Generating Round 1 portfolio (2x30, 2x50 steps).`);
-          const generatedImages = await generateMixedPortfolio(supabase, job, [
-            { sample_step: 30, sample_count: 2 },
-            { sample_step: 50, sample_count: 2 }
-          ], logPrefix);
-          await supabase.from('mira-agent-bitstudio-jobs').update({
-            metadata: { ...job.metadata, generated_variations: generatedImages, google_vto_step: 'quality_check' },
-            status: 'quality_check'
-          }).eq('id', job.id);
-          console.log(`${logPrefix} Round 1 complete. Advancing to quality_check.`);
-          await invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
+        case 'generate_step_1':
+          await handleQueueGenerationTasks(supabase, job, [{ sample_step: 30 }, { sample_step: 50 }], 'awaiting_generation_results', logPrefix);
           break;
-        }
-        case 'generate_step_2': {
-          console.log(`${logPrefix} Generating Round 2 portfolio (2x50, 2x80 steps).`);
-          const newImages = await generateMixedPortfolio(supabase, job, [
-            { sample_step: 50, sample_count: 2 },
-            { sample_step: 80, sample_count: 2 }
-          ], logPrefix);
-          const currentVariations = job.metadata.generated_variations || [];
-          await supabase.from('mira-agent-bitstudio-jobs').update({
-            metadata: { ...job.metadata, generated_variations: [...currentVariations, ...newImages], google_vto_step: 'quality_check' },
-            status: 'quality_check'
-          }).eq('id', job.id);
-          console.log(`${logPrefix} Round 2 complete. Advancing to quality_check.`);
-          await invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
+        case 'generate_step_2':
+          await handleQueueGenerationTasks(supabase, job, [{ sample_step: 50 }, { sample_step: 80 }], 'awaiting_generation_results', logPrefix);
           break;
-        }
-        case 'generate_step_3': {
-          console.log(`${logPrefix} Generating Round 3 portfolio (2x80 steps).`);
-          const newImages = await generateMixedPortfolio(supabase, job, [
-            { sample_step: 80, sample_count: 2 }
-          ], logPrefix);
-          const currentVariations = job.metadata.generated_variations || [];
-          await supabase.from('mira-agent-bitstudio-jobs').update({
-            metadata: { ...job.metadata, generated_variations: [...currentVariations, ...newImages], google_vto_step: 'quality_check' },
-            status: 'quality_check'
-          }).eq('id', job.id);
-          console.log(`${logPrefix} Round 3 complete. Advancing to final quality_check.`);
-          await invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
+        case 'generate_step_3':
+          await handleQueueGenerationTasks(supabase, job, [{ sample_step: 80 }], 'awaiting_generation_results', logPrefix);
           break;
-        }
+        case 'awaiting_generation_results':
+          await handleAwaitGeneration(supabase, job, logPrefix);
+          break;
         case 'quality_check':
           await handleQualityCheck(supabase, job, logPrefix);
           break;
@@ -453,6 +389,60 @@ async function handlePrepareAssets(supabase: SupabaseClient, job: any, logPrefix
   await invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', {
     pair_job_id: job.id
   });
+}
+async function handleQueueGenerationTasks(supabase: SupabaseClient, job: any, steps: { sample_step: number }[], nextStep: string, logPrefix: string) {
+  console.log(`${logPrefix} Queuing ${steps.length * 2} generation tasks.`);
+  const tasksToInsert = steps.map(step => ({
+    vto_job_id: job.id,
+    sample_step: step.sample_step,
+  }));
+
+  const { error } = await supabase.from('mira-agent-vto-generation-tasks').insert(tasksToInsert);
+  if (error) throw new Error(`Failed to insert generation tasks: ${error.message}`);
+
+  await supabase.from('mira-agent-bitstudio-jobs').update({
+    status: nextStep,
+    metadata: { ...job.metadata, google_vto_step: nextStep }
+  }).eq('id', job.id);
+
+  console.log(`${logPrefix} All tasks queued. Advancing to ${nextStep}. The watchdog will now trigger the individual generator workers.`);
+}
+async function handleAwaitGeneration(supabase: SupabaseClient, job: any, logPrefix: string) {
+  console.log(`${logPrefix} Awaiting generation results...`);
+  const { data: tasks, error } = await supabase
+    .from('mira-agent-vto-generation-tasks')
+    .select('status, result_data')
+    .eq('vto_job_id', job.id);
+
+  if (error) throw error;
+
+  const pendingTasks = tasks.filter(t => t.status === 'pending' || t.status === 'processing');
+  if (pendingTasks.length > 0) {
+    console.log(`${logPrefix} ${pendingTasks.length} generation tasks still in progress. Waiting for next watchdog cycle.`);
+    return;
+  }
+
+  const failedTasks = tasks.filter(t => t.status === 'failed');
+  if (failedTasks.length > 0) {
+    console.warn(`${logPrefix} ${failedTasks.length} generation tasks failed.`);
+  }
+
+  const successfulImages = tasks
+    .filter(t => t.status === 'complete' && t.result_data?.images)
+    .flatMap((t: any) => t.result_data.images);
+
+  if (successfulImages.length === 0) {
+    throw new Error("All generation tasks completed, but none produced a valid image.");
+  }
+
+  const currentVariations = job.metadata.generated_variations || [];
+  await supabase.from('mira-agent-bitstudio-jobs').update({
+    metadata: { ...job.metadata, generated_variations: [...currentVariations, ...successfulImages], google_vto_step: 'quality_check' },
+    status: 'quality_check'
+  }).eq('id', job.id);
+
+  console.log(`${logPrefix} All generation tasks complete. Collected ${successfulImages.length} images. Advancing to quality_check.`);
+  await invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
 }
 async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix: string, bitstudio_result_url?: string) {
   await supabase.from('mira-agent-bitstudio-jobs').update({
