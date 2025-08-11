@@ -22,7 +22,7 @@ const OUTFIT_ANALYSIS_MAX_RETRIES = 3;
 const OUTFIT_ANALYSIS_RETRY_DELAY_MS = 15000; // Increased delay
 const REFRAME_STALL_THRESHOLD_SECONDS = 55;
 const MAX_REFRAME_RETRIES = 2;
-const QA_MAX_RETRIES = 2; // New constant for QA handoff retries
+const QA_MAX_RETRIES = 3; // Updated to 3 retries
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -115,7 +115,7 @@ async function invokeWithRetry(supabase: SupabaseClient, functionName: string, p
       lastError = err instanceof Error ? err : new Error(String(err));
       console.warn(`${logPrefix} Invocation of '${functionName}' failed on attempt ${attempt}/${maxRetries}. Error: ${lastError.message}`);
       if (attempt < maxRetries) {
-        const delay = 15000 * attempt;
+        const delay = 15000 * Math.pow(2, attempt - 1); // Exponential backoff: 15s, 30s, 60s...
         console.warn(`${logPrefix} Waiting ${delay}ms before retrying...`);
         await new Promise((resolve)=>setTimeout(resolve, delay));
       }
@@ -538,7 +538,8 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
             lastQaError = err instanceof Error ? err : new Error(String(err));
             console.warn(`${logPrefix} Quality check tool failed on attempt ${attempt}: ${lastQaError.message}`);
             if (attempt < QA_MAX_RETRIES) {
-                await new Promise(resolve => setTimeout(resolve, 15000 * attempt));
+                const delay = 15000 * Math.pow(2, attempt - 1); // Exponential backoff: 15s, 30s, 60s
+                await new Promise(resolve => setTimeout(resolve, delay));
             }
         }
     }
