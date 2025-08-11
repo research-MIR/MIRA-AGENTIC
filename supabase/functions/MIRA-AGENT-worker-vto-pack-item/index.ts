@@ -16,7 +16,7 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const TEMP_UPLOAD_BUCKET = 'mira-agent-user-uploads';
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
-const ENABLE_BITSTUDIO_FALLBACK = false; // FEATURE FLAG
+const ENABLE_BITSTUDIO_FALLBACK = true; // FEATURE FLAG
 const FAIL_ON_OUTFIT_ANALYSIS_ERROR = true; // FEATURE FLAG: If true, job fails on analysis error. If false, it skips and proceeds.
 const OUTFIT_ANALYSIS_MAX_RETRIES = 3;
 const OUTFIT_ANALYSIS_RETRY_DELAY_MS = 15000; // Increased delay
@@ -309,79 +309,19 @@ serve(async (req)=>{
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`${logPrefix} Error:`, errorMessage);
-    const currentStep = job?.metadata?.google_vto_step;
-    if (job && (currentStep?.startsWith('generate_step') || currentStep?.startsWith('quality_check')) && ENABLE_BITSTUDIO_FALLBACK) {
-      console.warn(`[BITSTUDIO_FALLBACK][${job.id}] A Google VTO generation or quality check step failed. Escalating to BitStudio. Triggering reason: ${errorMessage}`);
-      try {
-        await supabase.from('mira-agent-bitstudio-jobs').update({
-          metadata: {
-            ...job.metadata,
-            google_vto_step: 'fallback_to_bitstudio',
-            engine: 'bitstudio_fallback'
-          }
-        }).eq('id', pair_job_id);
-        const { data: proxyData, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
-          body: {
-            existing_job_id: pair_job_id,
-            mode: 'base',
-            user_id: job.user_id,
-            person_image_url: job.source_person_image_url,
-            garment_image_url: job.source_garment_image_url,
-            prompt: job.metadata.prompt_appendix,
-            num_images: 1,
-            resolution: 'high'
-          }
-        });
-        if (proxyError) throw new Error(proxyError.message || 'Proxy invocation failed.');
-        console.log(`${logPrefix} BitStudio fallback job created with ID ${proxyData.jobIds[0]}. The BitStudio poller will now take over.`);
-        await supabase.from('mira-agent-bitstudio-jobs').update({
-          status: 'awaiting_bitstudio_fallback',
-          metadata: {
-            ...job.metadata,
-            delegated_bitstudio_job_id: proxyData.jobIds[0]
-          }
-        }).eq('id', pair_job_id);
-        return new Response(JSON.stringify({
-          success: true,
-          message: "Escalated to BitStudio fallback."
-        }), {
-          headers: corsHeaders
-        });
-      } catch (fallbackError) {
-        const fallbackErrorMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
-        console.error(`${logPrefix} CRITICAL: BitStudio fallback attempt also failed:`, fallbackErrorMessage);
-        await supabase.from('mira-agent-bitstudio-jobs').update({
-          status: 'failed',
-          error_message: `Google VTO failed and BitStudio fallback also failed: ${fallbackErrorMessage}`
-        }).eq('id', pair_job_id);
-        return new Response(JSON.stringify({
-          error: fallbackErrorMessage
-        }), {
-          headers: {
-            ...corsHeaders,
-            'Content-Type': 'application/json'
-          },
-          status: 500
-        });
-      }
-    } else {
-      if (job && (currentStep?.startsWith('generate_step') || currentStep?.startsWith('quality_check'))) {
-        console.warn(`[BITSTUDIO_FALLBACK][${job.id}] Fallback is disabled. Job will fail.`);
-      }
-      await supabase.from('mira-agent-bitstudio-jobs').update({
-        status: 'failed',
-        error_message: errorMessage
-      }).eq('id', pair_job_id);
-      return new Response(JSON.stringify({
-        error: errorMessage
-      }), {
-        headers: {
-          ...corsHeaders,
-          'Content-Type': 'application/json'
-        },
-        status: 500
-      });
-    }
+    await supabase.from('mira-agent-bitstudio-jobs').update({
+      status: 'failed',
+      error_message: errorMessage
+    }).eq('id', pair_job_id);
+    return new Response(JSON.stringify({
+      error: errorMessage
+    }), {
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/json'
+      },
+      status: 500
+    });
   }
 });
 async function handleStart_GetBbox(supabase: SupabaseClient, job: any, logPrefix: string) {
@@ -568,8 +508,36 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
     }
 
     if (qaData.action === 'retry') {
-        if (is_escalation_check) {
-            console.warn(`[VTO-Pack-Worker-QA][${job.id}] QA requested a retry on a final attempt. Overriding to 'select' the best available image (index ${qaData.best_image_index}) to prevent job failure.`);
+        if (ENABLE_BITSTUDIO_FALLBACK) {
+            console.warn(`[BITSTUDIO_FALLBACK][${job.id}] QA check failed. Escalating to BitStudio as per feature flag.`);
+            await supabase.from('mira-agent-bitstudio-jobs').update({
+                metadata: { ...job.metadata, qa_history: qa_history, google_vto_step: 'fallback_to_bitstudio', engine: 'bitstudio_fallback' }
+            }).eq('id', pair_job_id);
+            
+            const { data: proxyData, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-bitstudio', {
+                body: {
+                    existing_job_id: pair_job_id,
+                    mode: 'base',
+                    user_id: job.user_id,
+                    person_image_url: job.source_person_image_url,
+                    garment_image_url: job.source_garment_image_url,
+                    prompt: job.metadata.prompt_appendix,
+                    num_images: 1,
+                    resolution: 'high'
+                }
+            });
+            if (proxyError) throw new Error(proxyError.message || 'Proxy invocation failed.');
+            
+            console.log(`${logPrefix} BitStudio fallback job created with ID ${proxyData.jobIds[0]}. The BitStudio poller will now take over.`);
+            await supabase.from('mira-agent-bitstudio-jobs').update({
+                status: 'awaiting_bitstudio_fallback',
+                metadata: { ...job.metadata, delegated_bitstudio_job_id: proxyData.jobIds[0] }
+            }).eq('id', pair_job_id);
+            return;
+        }
+
+        if (qa_retry_count >= QA_MAX_RETRIES) {
+            console.error(`${logPrefix} QA failed after max retries and fallback is disabled. Forcing selection of best available image.`);
             qaData.action = 'select';
         } else {
             console.log(`${logPrefix} QA requested a retry. Incrementing retry count and starting next generation pass.`);
