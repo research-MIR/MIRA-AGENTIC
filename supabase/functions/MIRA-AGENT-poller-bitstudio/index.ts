@@ -20,7 +20,6 @@ serve(async (req) => {
   console.log(`${logPrefix} Poller invoked. Attempting to claim a batch of jobs.`);
 
   try {
-    // Atomically claim a batch of jobs to process using the new RPC function
     const { data: jobsToProcess, error: claimError } = await supabase
       .rpc('claim_bitstudio_jobs_to_poll', { p_limit: BATCH_SIZE });
 

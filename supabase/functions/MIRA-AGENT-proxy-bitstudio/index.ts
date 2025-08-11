@@ -199,7 +199,7 @@ serve(async (req)=>{
         last_polled_at: null // CRITICAL: Reset the poll timestamp
       }).eq('id', jobToRetry.id);
       if (updateError) throw updateError;
-      // The watchdog will pick this up on its next run. No direct invocation needed.
+      
       return new Response(JSON.stringify({
         success: true,
         jobId: jobToRetry.id,
@@ -385,30 +385,7 @@ serve(async (req)=>{
           jobIds.push(newJob.id);
         }
       }
-      // --- Proactively invoke the poller for all new jobs with retry ---
-      for (const newJobId of jobIds){
-        console.log(`[BitStudioProxy][${requestId}] Proactively invoking poller for new job ID: ${newJobId}`);
-        let success = false;
-        for(let attempt = 1; attempt <= 3; attempt++){
-          const { error: invokeError } = await supabase.functions.invoke('MIRA-AGENT-poller-bitstudio', {
-            body: {}
-          });
-          if (!invokeError) {
-            console.log(`[BitStudioProxy][${requestId}] Poller for job ${newJobId} invoked successfully on attempt ${attempt}.`);
-            success = true;
-            break;
-          }
-          console.warn(`[BitStudioProxy][${requestId}] Failed to invoke poller for job ${newJobId} on attempt ${attempt}:`, invokeError.message);
-          if (attempt < 3) {
-            const delay = 1000 * Math.pow(2, attempt - 1); // 1s, 2s
-            console.log(`[BitStudioProxy][${requestId}] Retrying in ${delay}ms...`);
-            await new Promise((resolve)=>setTimeout(resolve, delay));
-          }
-        }
-        if (!success) {
-          console.error(`[BitStudioProxy][${requestId}] CRITICAL: Failed to invoke poller for job ${newJobId} after 3 attempts. The watchdog will have to recover it.`);
-        }
-      }
+      
       return new Response(JSON.stringify({
         success: true,
         jobIds
