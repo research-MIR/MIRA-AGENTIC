@@ -49,7 +49,6 @@ serve(async (req) => {
             if (!taskId) throw new Error("Job is missing the task ID (bitstudio_task_id).");
             statusUrl = `${BITSTUDIO_API_BASE}/images/${taskId}`;
         }
-
         const statusResponse = await fetch(statusUrl, {
           headers: { 'Authorization': `Bearer ${BITSTUDIO_API_KEY}` }
         });
@@ -90,17 +89,19 @@ serve(async (req) => {
           if (job.batch_pair_job_id) {
             await supabase.from('mira-agent-batch-inpaint-pair-jobs').update({ status: 'failed', error_message: errorMessage }).eq('id', job.batch_pair_job_id);
           }
-        } else {
-          // If still processing, the last_polled_at timestamp is already updated by the RPC.
-          // No need for another update here unless we want to change the status.
-          await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'processing' }).eq('id', job.id);
+        } else if (jobStatus === 'processing') {
+            // The job is actively being worked on by BitStudio. Update our status to reflect this.
+            await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'processing' }).eq('id', job.id);
+        } else if (jobStatus === 'pending') {
+            // The job is still in BitStudio's queue. Do nothing to the database status.
+            // This leaves our internal status as 'queued', so the watchdog will pick it up again.
+            console.log(`${jobLogPrefix} Job is still pending in BitStudio's queue. No status change needed.`);
         }
       } catch (error) {
         console.error(`${jobLogPrefix} Error processing job:`, error);
         await supabase.from('mira-agent-bitstudio-jobs').update({ status: 'failed', error_message: error.message }).eq('id', job.id);
       }
     });
-
     await Promise.allSettled(processingPromises);
     console.log(`${logPrefix} Batch processing complete.`);
 
