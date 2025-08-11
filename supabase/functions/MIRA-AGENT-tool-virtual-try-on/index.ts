@@ -12,7 +12,7 @@ const corsHeaders = {
 const GOOGLE_VERTEX_AI_SA_KEY_JSON = Deno.env.get('GOOGLE_VERTEX_AI_SA_KEY_JSON');
 const GOOGLE_PROJECT_ID = Deno.env.get('GOOGLE_PROJECT_ID');
 const REGION = 'us-central1';
-const MODEL_ID = 'virtual-try-on-exp-05-31';
+const MODEL_ID = 'virtual-try-on-preview-08-04';
 const MAX_RETRIES = 6;
 const RETRY_DELAY_MS = 50000;
 
