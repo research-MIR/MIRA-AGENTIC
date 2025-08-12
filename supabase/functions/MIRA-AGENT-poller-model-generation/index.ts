@@ -86,7 +86,6 @@ async function uploadImageToComfyUI(comfyUiUrl: string, imageBlob: Blob, filenam
 
 async function findOutputImage(historyOutputs: any, primaryNodeId: string, fallbackNodeIds: string[]): Promise<any | null> {
     if (!historyOutputs) return null;
-    // First, check the preferred nodes for efficiency
     const nodesToCheck = [primaryNodeId, ...fallbackNodeIds];
     for (const nodeId of nodesToCheck) {
         const nodeOutput = historyOutputs[nodeId];
@@ -94,14 +93,13 @@ async function findOutputImage(historyOutputs: any, primaryNodeId: string, fallb
             return nodeOutput.images[0];
         }
     }
-    // If not found, do a full scan of all outputs as a fallback
     for (const nodeId in historyOutputs) {
         const outputData = historyOutputs[nodeId];
         if (outputData.images && Array.isArray(outputData.images) && outputData.images.length > 0) {
             return outputData.images[0];
         }
     }
-    return null; // Truly no image found
+    return null;
 }
 
 async function createGalleryEntry(supabase: any, job: any, finalResult: any) {
@@ -252,9 +250,10 @@ async function handlePendingState(supabase: any, job: any) {
 }
 
 async function handleBaseGenerationCompleteState(supabase: any, job: any) {
-    console.log(`[ModelGenPoller][${job.id}] State: BASE_GENERATION_COMPLETE.`);
+    const logPrefix = `[ModelGenPoller][${job.id}]`;
+    console.log(`${logPrefix} State: BASE_GENERATION_COMPLETE.`);
     if (job.auto_approve) {
-        console.log(`[ModelGenPoller][${job.id}] Auto-approving best image...`);
+        console.log(`${logPrefix} Auto-approving best image...`);
         const { data: qaData, error: qaError } = await supabase.functions.invoke('MIRA-AGENT-tool-quality-assurance-model', {
             body: { 
                 image_urls: job.base_generation_results.map((img: any) => img.url),
@@ -267,15 +266,23 @@ async function handleBaseGenerationCompleteState(supabase: any, job: any) {
         
         const bestImage = job.base_generation_results[qaData.best_image_index];
         await supabase.from('mira-agent-model-generation-jobs').update({
-            status: 'generating_poses',
+            status: 'generating_poses', // This will be the next state
             base_model_image_url: bestImage.url,
             gender: qaData.gender
         }).eq('id', job.id);
         
-        console.log(`[ModelGenPoller][${job.id}] AI selected image and tagged gender as '${qaData.gender}'. Re-invoking poller to generate poses.`);
+        console.log(`${logPrefix} AI selected image and tagged gender as '${qaData.gender}'. Invoking analyzer to create Identity Passport.`);
+        
+        // Create the Identity Passport
+        supabase.functions.invoke('MIRA-AGENT-analyzer-pose-image', {
+            body: { job_id: job.id, base_model_image_url: bestImage.url }
+        }).catch(err => console.error(`${logPrefix} Failed to invoke Identity Passport creation:`, err));
+
+        console.log(`${logPrefix} Re-invoking poller to proceed to 'generating_poses' state.`);
         supabase.functions.invoke('MIRA-AGENT-poller-model-generation', { body: { job_id: job.id } }).catch(console.error);
+
     } else {
-        console.log(`[ModelGenPoller][${job.id}] Awaiting manual user approval.`);
+        console.log(`${logPrefix} Awaiting manual user approval.`);
         await supabase.from('mira-agent-model-generation-jobs').update({ status: 'awaiting_approval' }).eq('id', job.id);
     }
 }
@@ -286,10 +293,12 @@ async function handleGeneratingPosesState(supabase: any, job: any) {
     const basePose = {
         pose_prompt: "Neutral A-pose, frontal",
         comfyui_prompt_id: null,
-        status: 'analyzing',
+        status: 'analyzing', // Base pose is immediately ready for analysis
         final_url: job.base_model_image_url,
         is_upscaled: false,
         analysis_started_at: new Date().toISOString(),
+        retry_count: 0,
+        qa_history: []
     };
 
     const newPosePlaceholders = job.pose_prompts.map((pose: any) => ({
@@ -298,16 +307,18 @@ async function handleGeneratingPosesState(supabase: any, job: any) {
         status: 'pending',
         final_url: null,
         is_upscaled: false,
+        retry_count: 0,
+        qa_history: []
     }));
 
     const finalPoseArray = [basePose, ...newPosePlaceholders];
 
     await supabase.from('mira-agent-model-generation-jobs').update({ 
-        status: 'generating_poses', // Keep this status for now
+        status: 'generating_poses',
         final_posed_images: finalPoseArray 
     }).eq('id', job.id);
 
-    // Now dispatch all jobs
+    // Dispatch analysis for the base pose
     supabase.functions.invoke('MIRA-AGENT-analyzer-pose-image', {
         body: {
             job_id: job.id,
@@ -317,6 +328,7 @@ async function handleGeneratingPosesState(supabase: any, job: any) {
         }
     }).catch(err => console.error(`[ModelGenPoller][${job.id}] ERROR: Failed to invoke analyzer for base pose:`, err));
 
+    // Dispatch generation for all other poses
     const poseGenerationPromises = job.pose_prompts.map((pose: any) => {
         const payload = {
             job_id: job.id,
@@ -334,7 +346,7 @@ async function handleGeneratingPosesState(supabase: any, job: any) {
         } else {
             console.log(`[ModelGenPoller][${job.id}] All ${job.pose_prompts.length} pose generation jobs dispatched successfully.`);
         }
-        // Finally, update the status to polling
+        
         supabase.from('mira-agent-model-generation-jobs').update({ status: 'polling_poses' })
             .eq('id', job.id)
             .then(() => {
@@ -346,7 +358,7 @@ async function handleGeneratingPosesState(supabase: any, job: any) {
 
 async function handlePollingPosesState(supabase: any, job: any) {
     const logPrefix = `[ModelGenPoller][${job.id}]`;
-    console.log(`${logPrefix} State: POLLING_POSES. Current poses status:`, job.final_posed_images.map((p: any) => ({ prompt: p.pose_prompt.substring(0, 20), status: p.status, id: p.comfyui_prompt_id })));
+    console.log(`${logPrefix} State: POLLING_POSES.`);
     
     let hasChanged = false;
     const updatedPoseJobs = [...job.final_posed_images];
@@ -356,79 +368,71 @@ async function handlePollingPosesState(supabase: any, job: any) {
     const queueData = await queueResponse.json();
 
     for (const [index, poseJob] of updatedPoseJobs.entries()) {
-        if (['complete', 'failed'].includes(poseJob.status)) {
+        // Skip already finished or failed poses that have exhausted retries
+        if (poseJob.status === 'complete' || (poseJob.status === 'failed' && (poseJob.retry_count || 0) >= MAX_RETRIES)) {
             continue;
         }
 
-        if (poseJob.status === 'analyzing') {
-            if (poseJob.analysis) {
-                console.log(`${logPrefix} Found completed analysis for a pose stuck in 'analyzing' state. Correcting status to 'complete'.`);
-                updatedPoseJobs[index].status = 'complete';
-                hasChanged = true;
-                continue;
-            }
+        // --- Handle Failed Poses (Retry Logic) ---
+        if (poseJob.status === 'failed' && (poseJob.retry_count || 0) < MAX_RETRIES) {
+            const newRetryCount = (poseJob.retry_count || 0) + 1;
+            console.log(`${logPrefix} Retrying failed pose "${poseJob.pose_prompt}" (Attempt ${newRetryCount}/${MAX_RETRIES}).`);
+            updatedPoseJobs[index].status = 'pending';
+            updatedPoseJobs[index].retry_count = newRetryCount;
+            hasChanged = true;
+            
+            supabase.functions.invoke('MIRA-AGENT-tool-comfyui-pose-generator', {
+                body: {
+                    job_id: job.id,
+                    base_model_url: job.base_model_image_url,
+                    pose_prompt: poseJob.pose_prompt,
+                    pose_image_url: null, // Assuming retry doesn't use an image ref for now
+                }
+            }).catch(err => console.error(`${logPrefix} ERROR: Failed to re-invoke generator for retry:`, err));
+            continue;
+        }
 
+        // --- Handle Analyzing Poses (Stall Detection) ---
+        if (poseJob.status === 'analyzing') {
             const analysisStartedAt = poseJob.analysis_started_at ? new Date(poseJob.analysis_started_at).getTime() : 0;
             const now = Date.now();
             const secondsSinceStart = (now - analysisStartedAt) / 1000;
 
             if (secondsSinceStart > ANALYSIS_STALLED_THRESHOLD_SECONDS) {
-                const retryCount = (poseJob.analysis_retry_count || 0) + 1;
-                if (retryCount > MAX_RETRIES) {
-                    console.error(`${logPrefix} ERROR: Pose analysis for "${poseJob.pose_prompt}" failed after max retries. Marking as failed.`);
-                    updatedPoseJobs[index].status = 'failed';
-                    updatedPoseJobs[index].error_message = `Analysis stalled and failed after ${MAX_RETRIES} retries.`;
-                    hasChanged = true;
-                } else {
-                    console.warn(`${logPrefix} STALL DETECTED: Pose analysis for "${poseJob.pose_prompt}" has been running for over ${ANALYSIS_STALLED_THRESHOLD_SECONDS}s. Re-triggering analyzer (Attempt ${retryCount}/${MAX_RETRIES}).`);
-                    updatedPoseJobs[index].analysis_retry_count = retryCount;
-                    updatedPoseJobs[index].analysis_started_at = new Date().toISOString();
-                    hasChanged = true;
-                    
-                    supabase.functions.invoke('MIRA-AGENT-analyzer-pose-image', {
-                        body: {
-                            job_id: job.id,
-                            image_url: poseJob.final_url,
-                            base_model_image_url: job.base_model_image_url,
-                            pose_prompt: updatedPoseJobs[index].pose_prompt
-                        }
-                    }).catch(err => {
-                        console.error(`${logPrefix} ERROR: Failed to re-invoke analyzer for stalled pose ${index}:`, err);
-                    });
-                }
+                console.warn(`${logPrefix} STALL DETECTED: Pose analysis for "${poseJob.pose_prompt}" has been running for over ${ANALYSIS_STALLED_THRESHOLD_SECONDS}s. Re-triggering analyzer.`);
+                updatedPoseJobs[index].analysis_started_at = new Date().toISOString();
+                hasChanged = true;
+                
+                supabase.functions.invoke('MIRA-AGENT-analyzer-pose-image', {
+                    body: {
+                        job_id: job.id,
+                        image_url: poseJob.final_url,
+                        base_model_image_url: job.base_model_image_url,
+                        pose_prompt: poseJob.pose_prompt
+                    }
+                }).catch(err => console.error(`${logPrefix} ERROR: Failed to re-invoke analyzer for stalled pose:`, err));
             }
             continue;
         }
 
+        // --- Handle Processing Poses (Polling ComfyUI) ---
         if (poseJob.status === 'processing' && poseJob.comfyui_prompt_id) {
             const isJobInQueue = queueData.queue_running.some((item: any) => item[1] === poseJob.comfyui_prompt_id) || 
                                  queueData.queue_pending.some((item: any) => item[1] === poseJob.comfyui_prompt_id);
 
-            if (isJobInQueue) {
-                console.log(`${logPrefix} Pose job ${poseJob.comfyui_prompt_id} is still in queue. Continuing to poll.`);
-                continue;
-            }
+            if (isJobInQueue) continue;
 
-            let promptHistory = null;
-            for (let i = 0; i < 3; i++) {
-                const historyUrl = `${comfyUiAddress}/history/${poseJob.comfyui_prompt_id}`;
-                const historyResponse = await fetch(historyUrl);
-                if (historyResponse.ok) {
-                    const historyData = await historyResponse.json();
-                    promptHistory = historyData[poseJob.comfyui_prompt_id];
-                    if (promptHistory) break;
-                }
-                console.log(`${logPrefix} Pose job ${poseJob.comfyui_prompt_id} not in history yet. Waiting 1.5s... (Attempt ${i+1}/3)`);
-                await new Promise(resolve => setTimeout(resolve, 1500));
-            }
+            const historyUrl = `${comfyUiAddress}/history/${poseJob.comfyui_prompt_id}`;
+            const historyResponse = await fetch(historyUrl);
+            
+            if (historyResponse.ok) {
+                const historyData = await historyResponse.json();
+                const promptHistory = historyData[poseJob.comfyui_prompt_id];
+                const outputNode = await findOutputImage(promptHistory?.outputs, FINAL_OUTPUT_NODE_ID_POSE, FALLBACK_NODE_IDS_POSE);
 
-            if (promptHistory) {
-                const outputNode = await findOutputImage(promptHistory.outputs, FINAL_OUTPUT_NODE_ID_POSE, FALLBACK_NODE_IDS_POSE);
                 if (outputNode) {
                     const image = outputNode;
                     const tempImageUrl = `${comfyUiAddress}/view?filename=${encodeURIComponent(image.filename)}&subfolder=${encodeURIComponent(image.subfolder)}&type=${image.type}`;
-                    
-                    console.log(`${logPrefix} Pose job ${poseJob.comfyui_prompt_id} is complete. Downloading from ComfyUI...`);
                     const imageResponse = await fetch(tempImageUrl);
                     if (!imageResponse.ok) throw new Error(`Failed to download final pose image from ComfyUI: ${imageResponse.statusText}`);
                     const imageBuffer = await imageResponse.arrayBuffer();
@@ -439,42 +443,34 @@ async function handlePollingPosesState(supabase: any, job: any) {
 
                     updatedPoseJobs[index].status = 'analyzing';
                     updatedPoseJobs[index].final_url = publicUrl;
-                    updatedPoseJobs[index].is_upscaled = false;
                     updatedPoseJobs[index].analysis_started_at = new Date().toISOString();
                     hasChanged = true;
-                    console.log(`${logPrefix} Pose job generated. Stored at Supabase URL: ${publicUrl}. Triggering analysis.`);
 
                     supabase.functions.invoke('MIRA-AGENT-analyzer-pose-image', {
                         body: {
                             job_id: job.id,
                             image_url: publicUrl,
                             base_model_image_url: job.base_model_image_url,
-                            pose_prompt: updatedPoseJobs[index].pose_prompt
+                            pose_prompt: poseJob.pose_prompt
                         }
-                    }).catch(err => {
-                        console.error(`${logPrefix} ERROR: Failed to invoke analyzer for pose ${index}:`, err);
-                    });
+                    }).catch(err => console.error(`${logPrefix} ERROR: Failed to invoke analyzer for new pose:`, err));
                 } else {
-                    console.warn(`${logPrefix} Pose job ${poseJob.comfyui_prompt_id} finished with no output. Marking as failed.`);
                     updatedPoseJobs[index].status = 'failed';
                     updatedPoseJobs[index].error_message = 'Job finished with no output.';
                     hasChanged = true;
                 }
             } else {
-                console.error(`${logPrefix} ERROR: Pose job ${poseJob.comfyui_prompt_id} not found in queue or history after retries. Marking as failed.`);
                 updatedPoseJobs[index].status = 'failed';
-                updatedPoseJobs[index].error_message = 'Job not found in ComfyUI history after retries.';
+                updatedPoseJobs[index].error_message = 'Job not found in ComfyUI history.';
                 hasChanged = true;
             }
         }
     }
 
-    const isFullyFinished = updatedPoseJobs.every(p => p.status === 'complete' || p.status === 'failed');
+    const isFullyFinished = updatedPoseJobs.every(p => p.status === 'complete' || (p.status === 'failed' && p.retry_count >= MAX_RETRIES));
 
     if (hasChanged || (isFullyFinished && job.status !== 'complete')) {
         const finalStatus = isFullyFinished ? 'complete' : job.status;
-        console.log(`${logPrefix} Changes detected or job is finished. Updating DB with status: ${finalStatus}.`);
-        
         await supabase.from('mira-agent-model-generation-jobs').update({ 
             final_posed_images: updatedPoseJobs,
             status: finalStatus 
@@ -482,14 +478,12 @@ async function handlePollingPosesState(supabase: any, job: any) {
 
         if (finalStatus === 'complete') {
             console.log(`${logPrefix} All pose jobs are complete. Main job finalized.`);
+        } else {
+            console.log(`${logPrefix} DB updated. Re-invoking poller to continue.`);
+            supabase.functions.invoke('MIRA-AGENT-poller-model-generation', { body: { job_id: job.id } }).catch(console.error);
         }
     } else {
-        const isStillWorking = updatedPoseJobs.some(p => p.status === 'processing' || p.status === 'analyzing');
-        if (isStillWorking) {
-            console.log(`${logPrefix} Not all pose jobs are complete (some may be processing or analyzing). Polling will continue on next watchdog cycle.`);
-        } else {
-            console.log(`${logPrefix} All poses generated. Handed off to analyzers. Poller will now idle for this job.`);
-        }
+        console.log(`${logPrefix} No changes detected in this polling cycle.`);
     }
 }
 
@@ -557,18 +551,15 @@ async function pollUpscalingPoses(supabase: any, job: any) {
 async function handleUpscalingPosesState(supabase: any, job: any) {
     console.log(`[ModelGenPoller][${job.id}] State: UPSCALING_POSES.`);
     
-    // 1. Poll for completed jobs and get the potential new state
     const { hasChanged: pollHasChanged, updatedPoseJobs: polledPoseData } = await pollUpscalingPoses(supabase, job);
     let currentPoseData = polledPoseData;
     let hasChanged = pollHasChanged;
 
-    // 2. Find any new pending jobs in the potentially updated data
     const posesToProcess = currentPoseData.filter((p: any) => p.upscale_status === 'pending');
 
     if (posesToProcess.length > 0) {
         console.log(`[ModelGenPoller][${job.id}] Found ${posesToProcess.length} poses pending upscale. Dispatching all.`);
 
-        // Mark them as processing in our local copy
         currentPoseData = currentPoseData.map((p: any) => {
             if (posesToProcess.some((ptp: any) => ptp.final_url === p.final_url)) {
                 return { ...p, upscale_status: 'processing' };
@@ -613,7 +604,6 @@ async function handleUpscalingPosesState(supabase: any, job: any) {
 
         const results = await Promise.allSettled(upscalePromises);
 
-        // Update our local copy with the results of the dispatch
         results.forEach(result => {
             if (result.status === 'fulfilled' && result.value) {
                 const poseIndex = currentPoseData.findIndex((p: any) => p.final_url === result.value.final_url);
@@ -629,7 +619,6 @@ async function handleUpscalingPosesState(supabase: any, job: any) {
         });
     }
 
-    // 3. Check if the overall job is done
     const isStillWorking = currentPoseData.some((p: any) => p.upscale_status === 'processing' || p.upscale_status === 'pending');
     
     let finalStatus = job.status;
@@ -638,7 +627,6 @@ async function handleUpscalingPosesState(supabase: any, job: any) {
         console.log(`[ModelGenPoller][${job.id}] All upscaling jobs are complete or failed. Setting main job status to complete.`);
     }
 
-    // 4. Perform a single update to the database if anything changed
     if (hasChanged || finalStatus !== job.status) {
         await supabase.from('mira-agent-model-generation-jobs').update({ 
             final_posed_images: currentPoseData,
@@ -646,7 +634,6 @@ async function handleUpscalingPosesState(supabase: any, job: any) {
         }).eq('id', job.id);
     }
     
-    // 5. Re-poll if necessary
     if (isStillWorking) {
         console.log(`[ModelGenPoller][${job.id}] Still waiting for upscaling jobs to complete. Polling will continue on next watchdog cycle.`);
     }
