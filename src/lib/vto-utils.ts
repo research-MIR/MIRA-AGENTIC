@@ -13,37 +13,47 @@ export const isPoseCompatible = (garment: AnalyzedGarment, pose: Pose, isStrict:
     return { compatible: true, reason: "Strict filtering disabled by user." };
   }
 
-  const logPrefix = `[isPoseCompatible] Garment fit: ${garment.analysis?.type_of_fit} | Pose focus: ${pose.analysis?.shoot_focus} | Pose garment coverage: ${pose.analysis?.garment.coverage} | Pose is base: ${pose.analysis?.garment.is_identical_to_base_garment} ->`;
+  const poseAnalysis = pose.analysis as any; // Use any to handle different shapes
+  const poseGarmentAnalysis = poseAnalysis?.garment_analysis || poseAnalysis?.garment;
+  const shootFocus = poseAnalysis?.shoot_focus;
 
-  if (!garment.analysis || !pose.analysis) {
+  const logPrefix = `[isPoseCompatible] Garment fit: ${garment.analysis?.type_of_fit} | Pose focus: ${shootFocus} | Pose garment coverage: ${poseGarmentAnalysis?.coverage} | Pose is base: ${poseGarmentAnalysis?.is_identical_to_base_garment} ->`;
+
+  if (!garment.analysis || !poseGarmentAnalysis) {
     console.log(`${logPrefix} INCOMPATIBLE: Missing analysis data for garment or pose.`);
     return { compatible: false, reason: "Missing analysis data for garment or pose." };
+  }
+  
+  if (!shootFocus) {
+    console.warn(`${logPrefix} WARNING: 'shoot_focus' is missing from pose analysis. Compatibility check will be less accurate.`);
   }
 
   // Normalize values to be safe against spaces vs underscores
   const garmentFit = garment.analysis.type_of_fit.replace(/ /g, '_');
-  const shootFocus = pose.analysis.shoot_focus.replace(/ /g, '_');
   const poseGarment = {
-      ...pose.analysis.garment,
-      coverage: pose.analysis.garment.coverage.replace(/ /g, '_'),
+      ...poseGarmentAnalysis,
+      coverage: poseGarmentAnalysis.coverage?.replace(/ /g, '_'),
   };
 
-  // Rule 1: Primary Framing Check
-  if (garmentFit === 'upper_body' && !['upper_body', 'full_body'].includes(shootFocus)) {
-    console.log(`${logPrefix} INCOMPATIBLE: Upper body garment cannot be placed on a lower body shot.`);
-    return { compatible: false, reason: `Cannot place an upper body garment on a ${shootFocus} shot.` };
-  }
-  if (garmentFit === 'lower_body' && !['lower_body', 'full_body'].includes(shootFocus)) {
-    console.log(`${logPrefix} INCOMPATIBLE: Lower body garment cannot be placed on an upper body shot.`);
-    return { compatible: false, reason: `Cannot place a lower body garment on an ${shootFocus} shot.` };
-  }
-  if (garmentFit === 'full_body' && shootFocus !== 'full_body') {
-    console.log(`${logPrefix} INCOMPATIBLE: Full body garment requires a full body shot.`);
-    return { compatible: false, reason: `Cannot place a full body garment on a ${shootFocus} shot.` };
-  }
-  if (garmentFit === 'shoes' && shootFocus !== 'full_body') {
-    console.log(`${logPrefix} INCOMPATIBLE: Shoes require a full body shot.`);
-    return { compatible: false, reason: `Cannot place shoes on a ${shootFocus} shot.` };
+  // Rule 1: Primary Framing Check (only if shootFocus is available)
+  if (shootFocus) {
+    const normalizedShootFocus = shootFocus.replace(/ /g, '_');
+    if (garmentFit === 'upper_body' && !['upper_body', 'full_body'].includes(normalizedShootFocus)) {
+      console.log(`${logPrefix} INCOMPATIBLE: Upper body garment cannot be placed on a lower body shot.`);
+      return { compatible: false, reason: `Cannot place an upper body garment on a ${shootFocus} shot.` };
+    }
+    if (garmentFit === 'lower_body' && !['lower_body', 'full_body'].includes(normalizedShootFocus)) {
+      console.log(`${logPrefix} INCOMPATIBLE: Lower body garment cannot be placed on an upper body shot.`);
+      return { compatible: false, reason: `Cannot place a lower body garment on a ${shootFocus} shot.` };
+    }
+    if (garmentFit === 'full_body' && normalizedShootFocus !== 'full_body') {
+      console.log(`${logPrefix} INCOMPATIBLE: Full body garment requires a full body shot.`);
+      return { compatible: false, reason: `Cannot place a full body garment on a ${shootFocus} shot.` };
+    }
+    if (garmentFit === 'shoes' && normalizedShootFocus !== 'full_body') {
+      console.log(`${logPrefix} INCOMPATIBLE: Shoes require a full body shot.`);
+      return { compatible: false, reason: `Cannot place shoes on a ${shootFocus} shot.` };
+    }
   }
 
   // Rule 2: Garment Conflict & Context Check

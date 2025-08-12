@@ -16,6 +16,7 @@ interface PoseAnalysis {
     coverage: 'upper_body' | 'lower_body' | 'full_body';
     is_identical_to_base_garment: boolean;
   };
+  garment_analysis?: any; // For backward compatibility
 }
 
 interface Pose {
@@ -122,25 +123,31 @@ export const JobPoseDisplay = ({ job, onViewHistory }: JobPoseDisplayProps) => {
         </CardHeader>
         <CardContent>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-            {poses.map((pose, index) => (
+            {poses.map((pose, index) => {
+              const analysis = pose.analysis as any;
+              const garmentInfo = analysis?.garment_analysis || analysis?.garment;
+
+              return (
                 <div key={`${job.id}-${index}`} className="space-y-2">
                 <div 
                     className="relative group aspect-square cursor-pointer"
                     onClick={() => showImage({ images: poses.map(p => ({ url: p.final_url, jobId: job.id })), currentIndex: index })}
                 >
                     <SecureImageDisplay imageUrl={pose.final_url} alt={pose.pose_prompt} />
-                    {pose.analysis && (
+                    {analysis && (
                       <>
-                        <Badge variant="secondary" className="absolute top-1 left-1 z-10 capitalize">{pose.analysis.shoot_focus.replace('_', ' ')}</Badge>
-                        {pose.analysis.garment.is_identical_to_base_garment ? (
-                          <Badge variant="outline" className="absolute top-1 right-1 z-10 capitalize bg-green-100 text-green-800 border-green-300 dark:bg-green-900/50 dark:text-green-300 dark:border-green-700">
-                            Base Underwear
-                          </Badge>
-                        ) : (
-                          <Badge variant="default" className="absolute top-1 right-1 z-10 capitalize">
-                            {pose.analysis.garment.coverage.replace('_', ' ')}
-                          </Badge>
+                        {analysis.shoot_focus && (
+                          <Badge variant="secondary" className="absolute top-1 left-1 z-10 capitalize">{analysis.shoot_focus.replace('_', ' ')}</Badge>
                         )}
+                        {garmentInfo ? (
+                          garmentInfo.is_identical_to_base_garment ? (
+                            <Badge variant="outline" className="absolute top-1 right-1 z-10 capitalize bg-green-100 text-green-800 border-green-300 dark:bg-green-900/50 dark:text-green-300 dark:border-green-700">
+                              Base Underwear
+                            </Badge>
+                          ) : (
+                            <Badge variant="default" className="absolute top-1 right-1 z-10 capitalize">{garmentInfo.coverage?.replace(/_/g, ' ') || 'Unknown'}</Badge>
+                          )
+                        ) : null}
                       </>
                     )}
                     <PoseStatusIcon pose={pose} />
@@ -164,7 +171,8 @@ export const JobPoseDisplay = ({ job, onViewHistory }: JobPoseDisplayProps) => {
                 </div>
                 <p className="text-xs text-muted-foreground truncate">{pose.pose_prompt}</p>
                 </div>
-            ))}
+              )
+            })}
             </div>
         </CardContent>
     </Card>
