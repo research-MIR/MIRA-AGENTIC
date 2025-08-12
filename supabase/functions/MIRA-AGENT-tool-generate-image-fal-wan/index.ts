@@ -12,6 +12,16 @@ const corsHeaders = {
 const FAL_KEY = Deno.env.get('FAL_KEY');
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
 
+// Define the hardcoded LoRAs as a constant
+const hardcodedLoras = [{
+  path: "https://civitai.com/api/download/models/2079658?type=Model&format=SafeTensor",
+  transformer: "high",
+  weight_name: undefined
+}, {
+  transformer: "low",
+  path: "https://civitai.com/api/download/models/2079614?type=Model&format=SafeTensor"
+}];
+
 const sizeToQwenEnum: { [key: string]: string } = {
     '1:1': 'square',
     '1024x1024': 'square_hd',
@@ -112,8 +122,10 @@ serve(async (req) => {
             seed: seed ? Number(seed) + i : undefined,
             enable_safety_checker: false,
             image_size: mapToQwenImageSize(size),
+            loras: hardcodedLoras // Add the hardcoded LoRAs here
         };
-        return fal.subscribe("fal-ai/wan/v2.2-a14b/text-to-image", {
+        // Update the model identifier to the new LoRA endpoint
+        return fal.subscribe("fal-ai/wan/v2.2-a14b/text-to-image/lora", {
             input: falInput,
             logs: true,
         });
