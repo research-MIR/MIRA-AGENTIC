@@ -12,6 +12,7 @@ import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
+import { AddCreditsCard } from "@/components/Developer/AddCreditsCard";
 
 const AdminChatDashboard = () => {
   const { supabase } = useSession();
@@ -227,6 +228,7 @@ const Developer = () => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         <AdminChatDashboard />
         <div className="space-y-4">
+          <AddCreditsCard />
           <Card>
             <CardHeader>
               <CardTitle>Admin Site-Wide Actions</CardTitle>
