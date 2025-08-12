@@ -25,6 +25,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { PackDashboard } from "@/components/GenerateModels/PackDashboard";
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel";
+import { PoseHistoryModal } from "@/components/GenerateModels/PoseHistoryModal";
 
 interface PoseAnalysis {
   shoot_focus: 'upper_body' | 'lower_body' | 'full_body';
@@ -43,6 +44,8 @@ interface Pose {
   jobId: string;
   analysis?: PoseAnalysis;
   comfyui_prompt_id?: string;
+  prompt_context_for_gemini?: string;
+  qa_history?: any[];
 }
 
 interface Job {
@@ -67,6 +70,7 @@ const ModelPackDetail = () => {
   const [selectedBaseModelId, setSelectedBaseModelId] = useState<string | null>(null);
   const [selectedGender, setSelectedGender] = useState<'male' | 'female' | null>(null);
   const [jobToRemove, setJobToRemove] = useState<string | null>(null);
+  const [viewingPoseHistory, setViewingPoseHistory] = useState<Pose | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
 
   const { data: pack, isLoading: isLoadingPack, error: packError } = useQuery({
@@ -416,7 +420,7 @@ const ModelPackDetail = () => {
                       </CardContent>
                     </Card>
                   )}
-                  <JobPoseDisplay job={selectedJob} />
+                  <JobPoseDisplay job={selectedJob} onViewHistory={setViewingPoseHistory} />
                 </div>
               </TabsContent>
               <TabsContent value="upscaled" className="mt-4">
@@ -444,6 +448,11 @@ const ModelPackDetail = () => {
           <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={handleRemoveModelFromPack}>Remove</AlertDialogAction></AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <PoseHistoryModal 
+        isOpen={!!viewingPoseHistory}
+        onClose={() => setViewingPoseHistory(null)}
+        pose={viewingPoseHistory}
+      />
     </>
   );
 };
