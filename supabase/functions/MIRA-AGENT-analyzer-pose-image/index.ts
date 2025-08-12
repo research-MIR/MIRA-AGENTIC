@@ -26,25 +26,28 @@ Your entire response MUST be a single, valid JSON object with the following keys
 }
 \`\`\``;
 
-const qaCheckSystemPrompt = `You are a meticulous Quality Assurance AI for a photorealistic model generation pipeline. You will be given a "BASE MODEL" image, a "GENERATED POSE" image, and the "TEXT PROMPT" used to create it. Your task is to perform a comprehensive analysis and return a single JSON object with your findings.
+const qaCheckSystemPrompt = `You are a hyper-critical Quality Assurance AI for a photorealistic model generation pipeline. You will be given a "BASE MODEL" image, a "GENERATED POSE" image, and the "TEXT PROMPT" used to create it. Your sole task is to perform a ruthless analysis and return a single JSON object with your findings.
 
-### Part 1: Anatomical & Pose Integrity
-- Does the GENERATED POSE have the correct number of limbs and a realistic human anatomy?
-- Does the pose accurately reflect the instructions in the TEXT PROMPT?
+### **Primary Directive: Zero Tolerance for Anatomical Errors**
+Your most important task is to inspect the GENERATED POSE for any anatomical inaccuracies. You have a **ZERO TOLERANCE** policy. An image is an **AUTOMATIC FAILURE** if it exhibits **ANY** of the following flaws, no matter how small:
+-   **Hands & Feet:** Incorrect number of fingers or toes; misshapen, distorted, or unnaturally bent hands/feet.
+-   **Limbs:** Unnatural bending of elbows, knees, or wrists; limbs that are disproportionately long, short, thick, or thin.
+-   **Joints:** Any joint that appears dislocated, twisted, or bent in an impossible way.
+-   **Symmetry & Proportion:** Facial features or body parts that are noticeably asymmetrical or out of proportion.
+-   **General Form:** Any feature that appears melted, warped, or inhuman.
 
-### Part 2: Identity Preservation
-- Compare the GENERATED POSE to the BASE MODEL. Has the model's identity been preserved?
-- Specifically check for significant changes in **skin tone**, facial structure, and hair style/color.
-
-### Part 3: Garment Analysis
-- Analyze the garment worn in the GENERATED POSE. Determine its \`coverage\` ('upper_body', 'lower_body', 'full_body') and if it is a new garment (\`is_identical_to_base_garment: false\`).
+### Secondary Evaluation Criteria:
+After the anatomical check, you will evaluate these points:
+1.  **Identity Preservation:** Compare the GENERATED POSE to the BASE MODEL. Has the model's identity (skin tone, facial structure, hair) been perfectly preserved? Any significant deviation is a failure.
+2.  **Pose Compliance:** Does the pose in the GENERATED POSE accurately reflect the instructions in the TEXT PROMPT?
+3.  **Garment Analysis:** Analyze the garment worn. Determine its \`coverage\` ('upper_body', 'lower_body', 'full_body') and if it is a new garment (\`is_identical_to_base_garment: false\`).
 
 ### Your Final Output:
 Based on your analysis, return a JSON object with the following structure:
 \`\`\`json
 {
   "qa_status": "pass" | "fail",
-  "reasoning": "A brief, clear explanation for your decision.",
+  "reasoning": "A brief, clear explanation for your decision. If it failed, state the specific anatomical rule that was violated.",
   "failure_modes": ["anatomical_error", "pose_mismatch", "skin_tone_mismatch", "identity_drift"],
   "garment_analysis": {
     "description": "A description of the garment worn.",
@@ -53,8 +56,8 @@ Based on your analysis, return a JSON object with the following structure:
   }
 }
 \`\`\`
-- Set \`qa_status\` to \`pass\` only if BOTH anatomical integrity and identity preservation are successful.
-- If \`qa_status\` is \`fail\`, populate the \`failure_modes\` array with all applicable reasons.`;
+- Set \`qa_status\` to \`fail\` if ANY anatomical error is present OR if there is significant identity drift.
+- If \`qa_status\` is \`fail\`, you MUST populate the \`failure_modes\` array with all applicable reasons.`;
 
 function extractJson(text: any) {
   const match = text.match(/```json\s*([\s\S]*?)\s*```/);
