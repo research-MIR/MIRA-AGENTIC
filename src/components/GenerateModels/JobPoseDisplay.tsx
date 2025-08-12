@@ -16,7 +16,6 @@ interface PoseAnalysis {
     coverage: 'upper_body' | 'lower_body' | 'full_body';
     is_identical_to_base_garment: boolean;
   };
-  garment_analysis?: any; // For backward compatibility
 }
 
 interface Pose {
@@ -29,6 +28,7 @@ interface Pose {
   comfyui_prompt_id?: string;
   prompt_context_for_gemini?: string;
   qa_history?: any[];
+  retry_count?: number;
 }
 
 interface Job {
@@ -41,6 +41,23 @@ interface JobPoseDisplayProps {
   job: Job | null;
   onViewHistory: (pose: Pose) => void;
 }
+
+const getPassBadgeInfo = (pose: Pose) => {
+  if (pose.status !== 'complete') return null;
+  
+  const retryCount = pose.retry_count || 0;
+  
+  if (retryCount === 0) {
+    return { text: 'Original Pass', variant: 'success' as const };
+  }
+  if (retryCount === 1) {
+    return { text: '1st Retry Pass', variant: 'warning' as const };
+  }
+  if (retryCount === 2) {
+    return { text: '2nd Retry Pass', variant: 'warning' as const };
+  }
+  return { text: `${retryCount}th Retry Pass`, variant: 'warning' as const };
+};
 
 const PoseStatusIcon = ({ pose }: { pose: Pose }) => {
   let statusIcon = null;
@@ -124,9 +141,7 @@ export const JobPoseDisplay = ({ job, onViewHistory }: JobPoseDisplayProps) => {
         <CardContent>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             {poses.map((pose, index) => {
-              const analysis = pose.analysis as any;
-              const garmentInfo = analysis?.garment_analysis || analysis?.garment;
-
+              const passBadge = getPassBadgeInfo(pose);
               return (
                 <div key={`${job.id}-${index}`} className="space-y-2">
                 <div 
@@ -134,21 +149,14 @@ export const JobPoseDisplay = ({ job, onViewHistory }: JobPoseDisplayProps) => {
                     onClick={() => showImage({ images: poses.map(p => ({ url: p.final_url, jobId: job.id })), currentIndex: index })}
                 >
                     <SecureImageDisplay imageUrl={pose.final_url} alt={pose.pose_prompt} />
-                    {analysis && (
-                      <>
-                        {analysis.shoot_focus && (
-                          <Badge variant="secondary" className="absolute top-1 left-1 z-10 capitalize">{analysis.shoot_focus.replace('_', ' ')}</Badge>
-                        )}
-                        {garmentInfo ? (
-                          garmentInfo.is_identical_to_base_garment ? (
-                            <Badge variant="outline" className="absolute top-1 right-1 z-10 capitalize bg-green-100 text-green-800 border-green-300 dark:bg-green-900/50 dark:text-green-300 dark:border-green-700">
-                              Base Underwear
-                            </Badge>
-                          ) : (
-                            <Badge variant="default" className="absolute top-1 right-1 z-10 capitalize">{garmentInfo.coverage?.replace(/_/g, ' ') || 'Unknown'}</Badge>
-                          )
-                        ) : null}
-                      </>
+                    {passBadge && (
+                      <Badge className={cn(
+                        "absolute top-1 left-1 z-10",
+                        passBadge.variant === 'success' && "bg-green-600 text-white hover:bg-green-700",
+                        passBadge.variant === 'warning' && "bg-yellow-500 text-black hover:bg-yellow-600"
+                      )}>
+                        {passBadge.text}
+                      </Badge>
                     )}
                     <PoseStatusIcon pose={pose} />
                     <TooltipProvider>
