@@ -267,58 +267,74 @@ serve(async (req) => {
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
 
-    // --- Step 1: Triage the user's request ---
-    console.log(`[PoseGenerator][${requestId}] INFO: Step 1: Classifying user intent...`);
+    // --- Step 1: Fetch Job and Identity Passport ---
+    console.log(`[PoseGenerator][${requestId}] INFO: Step 1: Fetching job data and Identity Passport...`);
+    const { data: job, error: fetchError } = await supabase
+      .from('mira-agent-model-generation-jobs')
+      .select('metadata, final_posed_images')
+      .eq('id', job_id)
+      .single();
+    if (fetchError) throw fetchError;
+    const identityPassport = job.metadata?.identity_passport;
+
+    // --- Step 2: Triage the user's request ---
+    console.log(`[PoseGenerator][${requestId}] INFO: Step 2: Classifying user intent...`);
     const triageResult = await ai.models.generateContent({
         model: "gemini-2.5-flash-lite-preview-06-17",
         contents: [{ role: 'user', parts: [{ text: pose_prompt }] }],
         generationConfig: { responseMimeType: "application/json" },
         config: { systemInstruction: { role: "system", parts: [{ text: TRIAGE_SYSTEM_PROMPT }] } }
     });
-    console.warn(`[PoseGenerator][${requestId}] DEBUG: Raw triage response from Gemini:`, triageResult.text);
     const { task_type, garment_description } = extractJson(triageResult.text);
     console.log(`[PoseGenerator][${requestId}] INFO: Intent classified as: '${task_type}'. Garment: '${garment_description || 'N/A'}'`);
 
-    // --- Step 2: Select workflow and configure prompts ---
+    // --- Step 3: Select workflow and construct enriched prompt ---
     let finalWorkflowString: string;
     let selectedSystemPrompt: string;
-    let editingTask: string;
+    let baseEditingTask: string;
 
     if (task_type === 'both') {
         finalWorkflowString = twoPassWorkflowTemplate;
-        selectedSystemPrompt = POSE_CHANGE_SYSTEM_PROMPT; // Pass 1 is always pose
-        editingTask = pose_prompt; // Use the full original prompt for the pose pass
+        selectedSystemPrompt = POSE_CHANGE_SYSTEM_PROMPT;
+        baseEditingTask = pose_prompt;
     } else {
         finalWorkflowString = singlePassWorkflowTemplate;
         if (task_type === 'garment') {
             selectedSystemPrompt = GARMENT_SWAP_SYSTEM_PROMPT;
-            editingTask = `change their garment to match my reference (it being a prompt or a textual prompt), keep everything else the same - do nto add unrequested additions otuside the only excplicit garment requested - ex. frontale veste una giacca - still just asks for a jacket so no pants or shoes are being asked for so you'll need to specify in the istruction to NOT change the underware as it is, DO NOT TRY TO FINISH OUTFITS OR CLOTHING SETS, DO NOT - JUST DESCRIBE THE SWAP TO ADD ESCLUSIVELY THE REQUESTED GARMENT AND LEAVIN THE REST UNTOUCHED - AND REMEMBER TO CLARIFY THAT COLOR CORRECTION, COLOR OF THE SKIN, COLOR OF THE scene HAVE TO CONTINUE BEING THE SMAE AS THE ORIGINAL - here the reference requested that has to be completely inserted realsitically in the scene (if you ask to change the bra for another upper body garment remeber it must be closed not opened (the garment) and you have to explain instead of the bra and telling it what body area would it cover (a jacket would not just cover the area a bra would), just request the addition:: ${garment_description}`;
+            baseEditingTask = `change their garment to match my reference (it being a prompt or a textual prompt), keep everything else the same - do nto add unrequested additions otuside the only excplicit garment requested - ex. frontale veste una giacca - still just asks for a jacket so no pants or shoes are being asked for so you'll need to specify in the istruction to NOT change the underware as it is, DO NOT TRY TO FINISH OUTFITS OR CLOTHING SETS, DO NOT - JUST DESCRIBE THE SWAP TO ADD ESCLUSIVELY THE REQUESTED GARMENT AND LEAVIN THE REST UNTOUCHED - AND REMEMBER TO CLARIFY THAT COLOR CORRECTION, COLOR OF THE SKIN, COLOR OF THE scene HAVE TO CONTINUE BEING THE SMAE AS THE ORIGINAL - here the reference requested that has to be completely inserted realsitically in the scene (if you ask to change the bra for another upper body garment remeber it must be closed not opened (the garment) and you have to explain instead of the bra and telling it what body area would it cover (a jacket would not just cover the area a bra would), just request the addition:: ${garment_description}`;
         } else { // 'pose'
             selectedSystemPrompt = POSE_CHANGE_SYSTEM_PROMPT;
-            editingTask = pose_prompt;
+            baseEditingTask = pose_prompt;
         }
     }
-    console.log(`[PoseGenerator][${requestId}] INFO: Workflow selected. Type: ${task_type}. Editing Task: "${editingTask}"`);
 
+    let enrichedEditingTask = `User Request: "${baseEditingTask}"`;
+    if (identityPassport) {
+        const passportText = `Identity Constraints: The model MUST have ${identityPassport.skin_tone}, ${identityPassport.hair_style}, and ${identityPassport.eye_color}. These features must be preserved perfectly.`;
+        enrichedEditingTask = `${passportText}\n\n${enrichedEditingTask}`;
+        console.log(`[PoseGenerator][${requestId}] INFO: Identity Passport injected into prompt context.`);
+    }
+
+    console.log(`[PoseGenerator][${requestId}] INFO: Workflow selected. Type: ${task_type}. Final Editing Task: "${enrichedEditingTask}"`);
     const finalWorkflow = JSON.parse(finalWorkflowString);
 
-    // --- CONDITIONAL OVERRIDE FOR GARMENT TASKS ---
-    if (task_type === 'garment') {
-        console.log(`[PoseGenerator][${requestId}] INFO: Applying specific overrides for 'garment' task type.`);
-        if (finalWorkflow['196']) {
-            finalWorkflow['196'].inputs.nag_scale = 5.0;
-            console.log(`[PoseGenerator][${requestId}] INFO: Node 196 'nag_scale' updated to 5.0.`);
+    // --- Step 4: Log the context before generation ---
+    console.log(`[PoseGenerator][${requestId}] INFO: Step 4: Logging prompt context to database...`);
+    const updatedPoses = (job.final_posed_images || []).map((pose: any) => {
+        if (pose.pose_prompt === pose_prompt) {
+            return { ...pose, prompt_context_for_gemini: enrichedEditingTask };
         }
-        if (finalWorkflow['204']) {
-            finalWorkflow['204'].inputs.steps = 25;
-            finalWorkflow['204'].inputs.denoise = 0.6500000000000002;
-            console.log(`[PoseGenerator][${requestId}] INFO: Node 204 'steps' updated to 25 and 'denoise' updated to 0.9...`);
-        }
+        return pose;
+    });
+    const { error: logError } = await supabase.from('mira-agent-model-generation-jobs').update({ final_posed_images: updatedPoses }).eq('id', job_id);
+    if (logError) {
+        console.warn(`[PoseGenerator][${requestId}] WARNING: Failed to log prompt context: ${logError.message}`);
+    } else {
+        console.log(`[PoseGenerator][${requestId}] INFO: Prompt context logged successfully.`);
     }
-    // --- END OF CONDITIONAL OVERRIDE ---
 
-    // --- Step 3: Populate workflow with assets and prompts ---
-    console.log(`[PoseGenerator][${requestId}] INFO: Step 3: Downloading base model from: ${base_model_url}`);
+    // --- Step 5: Populate workflow with assets and prompts ---
+    console.log(`[PoseGenerator][${requestId}] INFO: Step 5: Downloading and uploading assets...`);
     const baseModelBlob = await downloadFromSupabase(supabase, base_model_url);
     const uniqueBaseModelFilename = `base_model_${requestId}.png`;
     const baseModelFilename = await uploadToComfyUI(sanitizedAddress, baseModelBlob, uniqueBaseModelFilename);
@@ -334,13 +350,13 @@ serve(async (req) => {
       const poseImageFilename = await uploadToComfyUI(sanitizedAddress, poseImageBlob, uniquePoseRefFilename);
       
       finalWorkflow['215'].inputs.image = poseImageFilename;
-      finalWorkflow['230'].inputs.Number = "2"; // Use image reference
-      finalWorkflow['193'].inputs.String = editingTask; // The task is the same, but the model will see the reference
+      finalWorkflow['230'].inputs.Number = "2";
+      finalWorkflow['193'].inputs.String = enrichedEditingTask;
       console.log(`[PoseGenerator][${requestId}] INFO: Pose reference uploaded as: ${poseImageFilename}.`);
     } else {
       console.log(`[PoseGenerator][${requestId}] INFO: No pose reference image provided. Using text prompt.`);
-      finalWorkflow['230'].inputs.Number = "1"; // Use text reference
-      finalWorkflow['193'].inputs.String = editingTask;
+      finalWorkflow['230'].inputs.Number = "1";
+      finalWorkflow['193'].inputs.String = enrichedEditingTask;
     }
 
     if (task_type === 'both') {
@@ -351,8 +367,7 @@ serve(async (req) => {
     const queueUrl = `${sanitizedAddress}/prompt`;
     const payload = { prompt: finalWorkflow };
     
-    console.log(`[PoseGenerator][${requestId}] INFO: Step 4: Sending final payload to ComfyUI...`);
-    console.warn(`[PoseGenerator][${requestId}] DEBUG: Final ComfyUI Payload:`, JSON.stringify(payload, null, 2));
+    console.log(`[PoseGenerator][${requestId}] INFO: Step 6: Sending final payload to ComfyUI...`);
     const response = await fetch(queueUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -365,7 +380,7 @@ serve(async (req) => {
     const comfyui_prompt_id = data.prompt_id;
     console.log(`[PoseGenerator][${requestId}] INFO: Job queued successfully with prompt_id: ${comfyui_prompt_id}`);
 
-    // --- ATOMIC DATABASE UPDATE ---
+    // --- Step 7: Atomically update job with prompt_id ---
     console.log(`[PoseGenerator][${requestId}] INFO: Atomically updating main job ${job_id} with new pose...`);
     const { error: rpcError } = await supabase.rpc('update_pose_with_prompt_id', {
         p_job_id: job_id,
@@ -378,7 +393,6 @@ serve(async (req) => {
     }
     
     console.log(`[PoseGenerator][${requestId}] INFO: Main job ${job_id} updated successfully via RPC.`);
-    // --- END OF ATOMIC UPDATE ---
 
     return new Response(JSON.stringify({ comfyui_prompt_id: comfyui_prompt_id }), {
       headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type' },
