@@ -122,7 +122,7 @@ const ModelPacks = () => {
     }
   };
 
-  const handleDownloadPack = async (pack: ModelPack) => {
+  const handleDownloadPack = async (pack: ModelPack, downloadType: 'all' | 'original_only') => {
     if (!session?.user) return;
     setIsDownloading(pack.id);
     const toastId = showLoading(`Preparing download for "${pack.name}"...`);
@@ -143,7 +143,7 @@ const ModelPacks = () => {
                     type: 'base'
                 });
             }
-            if (job.final_posed_images) {
+            if (downloadType === 'all' && job.final_posed_images) {
                 for (const pose of job.final_posed_images) {
                     if (pose.final_url && pose.pose_prompt) {
                         itemsToDownload.push({
@@ -188,7 +188,7 @@ const ModelPacks = () => {
         const zipBlob = await zip.generateAsync({ type: "blob" });
         const link = document.createElement("a");
         link.href = URL.createObjectURL(zipBlob);
-        link.download = `${pack.name.replace(/\s+/g, '_')}_poses.zip`;
+        link.download = `${pack.name.replace(/\s+/g, '_')}_${downloadType}.zip`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -244,9 +244,13 @@ const ModelPacks = () => {
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => handleDownloadPack(pack)} disabled={isDownloading === pack.id}>
+                      <DropdownMenuItem onClick={() => handleDownloadPack(pack, 'all')} disabled={isDownloading === pack.id}>
                         <Download className="mr-2 h-4 w-4" />
                         Download All Poses
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => handleDownloadPack(pack, 'original_only')} disabled={isDownloading === pack.id}>
+                        <Download className="mr-2 h-4 w-4" />
+                        Download Originals Only
                       </DropdownMenuItem>
                       <DropdownMenuItem onClick={() => handleEditPack(pack)}><Pencil className="mr-2 h-4 w-4" />Edit</DropdownMenuItem>
                       <AlertDialog>
