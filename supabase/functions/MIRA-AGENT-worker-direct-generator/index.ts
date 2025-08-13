@@ -47,26 +47,31 @@ serve(async (req) => {
     };
 
     // --- REFACTORED ROUTING LOGIC ---
-    if (modelId === 'fal-ai/wan/v2.2-a14b/text-to-image') {
-        toolToInvoke = 'MIRA-AGENT-tool-generate-image-fal-wan';
-    } else {
-        // For all other models, we need to fetch the provider
-        const { data: modelDetails, error: modelError } = await supabase
-            .from('mira-agent-models')
-            .select('provider')
-            .eq('model_id_string', modelId)
-            .single();
+    switch (modelId) {
+        case 'fal-ai/wan/v2.2-a14b/text-to-image':
+            toolToInvoke = 'MIRA-AGENT-tool-generate-image-fal-wan';
+            break;
+        case 'fal-ai/flux/krea':
+            toolToInvoke = 'MIRA-AGENT-tool-generate-image-fal-krea';
+            break;
+        default: {
+            const { data: modelDetails, error: modelError } = await supabase
+                .from('mira-agent-models')
+                .select('provider')
+                .eq('model_id_string', modelId)
+                .single();
 
-        if (modelError) throw new Error(`Could not find details for model ${modelId}: ${modelError.message}`);
-        
-        const provider = modelDetails.provider.toLowerCase().replace(/[^a-z0-9.-]/g, '');
+            if (modelError) throw new Error(`Could not find details for model ${modelId}: ${modelError.message}`);
+            
+            const provider = modelDetails.provider.toLowerCase().replace(/[^a-z0-9.-]/g, '');
 
-        if (provider === 'fal.ai') {
-            toolToInvoke = 'MIRA-AGENT-tool-generate-image-fal-seedream';
-        } else if (provider === 'google') {
-            toolToInvoke = 'MIRA-AGENT-tool-generate-image-google';
-        } else {
-            throw new Error(`Unsupported provider '${provider}' for direct generation.`);
+            if (provider === 'fal.ai') {
+                toolToInvoke = 'MIRA-AGENT-tool-generate-image-fal-seedream';
+            } else if (provider === 'google') {
+                toolToInvoke = 'MIRA-AGENT-tool-generate-image-google';
+            } else {
+                throw new Error(`Unsupported provider '${provider}' for direct generation.`);
+            }
         }
     }
     // --- END OF REFACTORED LOGIC ---
