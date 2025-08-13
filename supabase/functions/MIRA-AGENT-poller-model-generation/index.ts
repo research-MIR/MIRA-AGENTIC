@@ -184,6 +184,7 @@ serve(async (req) => {
 async function handlePendingState(supabase: any, job: any) {
     const logPrefix = `[ModelGenPoller][${job.id}]`;
     console.log(`${logPrefix} State: PENDING. Generating base model candidates...`);
+    console.log(`${logPrefix} Full job context:`, JSON.stringify(job.context, null, 2));
 
     const selectedModelId = job.context?.selectedModelId;
     if (!selectedModelId) throw new Error("No model selected in job context.");
@@ -212,6 +213,7 @@ async function handlePendingState(supabase: any, job: any) {
     }
 
     const aspectRatio = job.context?.aspect_ratio || '1024x1024';
+    console.log(`${logPrefix} Aspect ratio from context: ${aspectRatio}`);
     
     let toolToInvoke = '';
     let payload: { [key: string]: any } = {
@@ -248,6 +250,8 @@ async function handlePendingState(supabase: any, job: any) {
     }
 
     console.log(`${logPrefix} Using provider '${provider}', invoking tool '${toolToInvoke}' for one image.`);
+    console.log(`${logPrefix} Final payload being sent to tool:`, JSON.stringify(payload, null, 2));
+
     const { data: generationResult, error: generationError } = await supabase.functions.invoke(toolToInvoke, {
         body: payload
     });
