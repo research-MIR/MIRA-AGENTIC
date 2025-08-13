@@ -105,7 +105,7 @@ serve(async (req) => {
       },
     });
 
-    const generatedImages = result?.images;
+    const generatedImages = result?.data?.images;
     if (!generatedImages || generatedImages.length === 0) {
       throw new Error("Krea tool failed to generate any images.");
     }
