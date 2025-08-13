@@ -137,7 +137,7 @@ serve(async (req) => {
   if (!job_id) { throw new Error("job_id is required."); }
 
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-  console.log(`[ModelGenPoller][${job_id}] Poller v1.1.0 invoked.`);
+  console.log(`[ModelGenPoller][${job_id}] Poller v1.2.0 invoked.`);
   let job: any = null;
 
   try {
@@ -191,7 +191,13 @@ async function handlePendingState(supabase: any, job: any) {
     const { data: modelDetails } = await supabase.from('mira-agent-models').select('provider').eq('model_id_string', selectedModelId).single();
     const provider = modelDetails?.provider.toLowerCase().replace(/[^a-z0-9.-]/g, '') || 'google';
 
-    const totalNeededImages = provider === 'google' ? 4 : 2;
+    let totalNeededImages = 2; // Default for fal.ai
+    if (provider === 'google') {
+        totalNeededImages = 4;
+    } else if (selectedModelId === 'fal-ai/flux/krea') {
+        totalNeededImages = 4;
+    }
+    
     const existingImages = job.base_generation_results || [];
     const neededImages = totalNeededImages - existingImages.length;
 
