@@ -214,14 +214,21 @@ async function handlePendingState(supabase: any, job: any) {
     const aspectRatio = job.context?.aspect_ratio || '1024x1024';
     
     let toolToInvoke = '';
-    if (selectedModelId === 'fal-ai/wan/v2.2-a14b/text-to-image') {
-        toolToInvoke = 'MIRA-AGENT-tool-generate-image-fal-wan';
-    } else if (provider === 'fal.ai') {
-        toolToInvoke = 'MIRA-AGENT-tool-generate-image-fal-seedream';
-    } else if (provider === 'google') {
-        toolToInvoke = 'MIRA-AGENT-tool-generate-image-google';
-    } else {
-        throw new Error(`Unsupported provider '${provider}' for model generation.`);
+    switch (selectedModelId) {
+        case 'fal-ai/wan/v2.2-a14b/text-to-image':
+            toolToInvoke = 'MIRA-AGENT-tool-generate-image-fal-wan';
+            break;
+        case 'fal-ai/flux/krea':
+            toolToInvoke = 'MIRA-AGENT-tool-generate-image-fal-krea';
+            break;
+        default:
+            if (provider === 'fal.ai') {
+                toolToInvoke = 'MIRA-AGENT-tool-generate-image-fal-seedream';
+            } else if (provider === 'google') {
+                toolToInvoke = 'MIRA-AGENT-tool-generate-image-google';
+            } else {
+                throw new Error(`Unsupported provider '${provider}' for model generation.`);
+            }
     }
 
     console.log(`${logPrefix} Using provider '${provider}', invoking tool '${toolToInvoke}' for one image.`);
