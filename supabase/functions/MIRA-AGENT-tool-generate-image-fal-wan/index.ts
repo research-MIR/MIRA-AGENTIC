@@ -1,3 +1,5 @@
+// NOTE: This function has been updated to use 'fal-ai/qwen-image' instead of 'seedream'.
+// The filename is kept for backward compatibility to avoid changing orchestrator logic.
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { fal } from 'npm:@fal-ai/client@1.5.0';
@@ -12,7 +14,6 @@ const corsHeaders = {
 const FAL_KEY = Deno.env.get('FAL_KEY');
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
 
-// Define the hardcoded LoRAs as a constant
 const hardcodedLoras = [{
   path: "https://civitai.com/api/download/models/2079658?type=Model&format=SafeTensor",
   transformer: "high",
@@ -23,15 +24,22 @@ const hardcodedLoras = [{
 }];
 
 const sizeToQwenEnum: { [key: string]: string } = {
+    'square': 'square',
+    'square_hd': 'square_hd',
+    'portrait_4_3': 'portrait_4_3',
+    'landscape_4_3': 'landscape_4_3',
+    'landscape_16_9': 'landscape_16_9',
+    'portrait_16_9': 'portrait_16_9',
+    // Aliases for robustness
     '1:1': 'square',
     '1024x1024': 'square_hd',
     '3:4': 'portrait_4_3',
     '4:3': 'landscape_4_3',
     '16:9': 'landscape_16_9',
     '9:16': 'portrait_16_9',
-    '2:3': 'portrait_4_3', // Closest match
-    '3:2': 'landscape_4_3', // Closest match
-    '21:9': 'landscape_16_9', // Closest match
+    '2:3': 'portrait_4_3',
+    '3:2': 'landscape_4_3',
+    '21:9': 'landscape_16_9',
     '896x1280': 'portrait_4_3',
     '1280x896': 'landscape_4_3',
     '768x1408': 'portrait_16_9',
