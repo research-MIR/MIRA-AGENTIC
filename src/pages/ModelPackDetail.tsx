@@ -20,7 +20,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { ResultsDisplay } from "@/components/GenerateModels/ResultsDisplay";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { showError, showSuccess } from "@/utils/toast";
+import { showError, showSuccess, showLoading, dismissToast } from "@/utils/toast";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { PackDashboard } from "@/components/GenerateModels/PackDashboard";
@@ -46,6 +46,7 @@ interface Pose {
   comfyui_prompt_id?: string;
   prompt_context_for_gemini?: string;
   qa_history?: any[];
+  retry_count?: number;
 }
 
 interface Job {
@@ -71,6 +72,7 @@ const ModelPackDetail = () => {
   const [selectedGender, setSelectedGender] = useState<'male' | 'female' | null>(null);
   const [jobToRemove, setJobToRemove] = useState<string | null>(null);
   const [viewingPoseHistory, setViewingPoseHistory] = useState<Pose | null>(null);
+  const [retryingPose, setRetryingPose] = useState<Pose | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
 
   const { data: pack, isLoading: isLoadingPack, error: packError } = useQuery({
@@ -147,6 +149,27 @@ const ModelPackDetail = () => {
       queryClient.invalidateQueries({ queryKey: ['modelsForPack', packId] });
     }
     setJobToRemove(null);
+  };
+
+  const handleForceRetry = async (pose: Pose, jobId: string) => {
+    if (!session?.user || !packId) return;
+    setRetryingPose(pose);
+    const toastId = showLoading(`Retrying pose: "${pose.pose_prompt}"...`);
+    try {
+        const { error } = await supabase.rpc('retry_failed_pose', {
+            p_job_id: jobId,
+            p_pose_prompt: pose.pose_prompt
+        });
+        if (error) throw error;
+        dismissToast(toastId);
+        showSuccess("Pose re-queued for generation.");
+        queryClient.invalidateQueries({ queryKey: ['modelsForPack', packId] });
+    } catch (err: any) {
+        dismissToast(toastId);
+        showError(`Failed to retry pose: ${err.message}`);
+    } finally {
+        setRetryingPose(null);
+    }
   };
 
   const packStatus = useMemo(() => {
@@ -420,7 +443,12 @@ const ModelPackDetail = () => {
                       </CardContent>
                     </Card>
                   )}
-                  <JobPoseDisplay job={selectedJob} onViewHistory={setViewingPoseHistory} />
+                  <JobPoseDisplay 
+                    job={selectedJob} 
+                    onViewHistory={setViewingPoseHistory}
+                    onForceRetry={handleForceRetry}
+                    retryingPoseId={retryingPose?.pose_prompt || null}
+                  />
                 </div>
               </TabsContent>
               <TabsContent value="upscaled" className="mt-4">

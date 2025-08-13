@@ -1,6 +1,6 @@
 import { useLanguage } from "@/context/LanguageContext";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { AlertTriangle, CheckCircle, Loader2, Wand2, Info } from "lucide-react";
+import { AlertTriangle, CheckCircle, Loader2, Wand2, Info, RefreshCw } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useImagePreview } from "@/context/ImagePreviewContext";
@@ -10,8 +10,10 @@ import { Button } from "@/components/ui/button";
 import { showSuccess } from "@/utils/toast";
 
 interface PoseAnalysis {
-  shoot_focus: 'upper_body' | 'lower_body' | 'full_body';
-  garment: {
+  qa_status: 'pass' | 'fail';
+  reasoning: string;
+  failure_modes?: string[];
+  garment_analysis?: {
     description: string;
     coverage: 'upper_body' | 'lower_body' | 'full_body';
     is_identical_to_base_garment: boolean;
@@ -40,6 +42,8 @@ interface Job {
 interface JobPoseDisplayProps {
   job: Job | null;
   onViewHistory: (pose: Pose) => void;
+  onForceRetry: (pose: Pose, jobId: string) => void;
+  retryingPoseId: string | null;
 }
 
 const getPassBadgeInfo = (pose: Pose) => {
@@ -108,7 +112,7 @@ const PoseStatusIcon = ({ pose }: { pose: Pose }) => {
   );
 };
 
-export const JobPoseDisplay = ({ job, onViewHistory }: JobPoseDisplayProps) => {
+export const JobPoseDisplay = ({ job, onViewHistory, onForceRetry, retryingPoseId }: JobPoseDisplayProps) => {
   const { t } = useLanguage();
   const { showImage } = useImagePreview();
   const poses = job?.final_posed_images || [];
@@ -176,6 +180,18 @@ export const JobPoseDisplay = ({ job, onViewHistory }: JobPoseDisplayProps) => {
                         </TooltipContent>
                       </Tooltip>
                     </TooltipProvider>
+                    {pose.status === 'failed' && (
+                      <div className="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                          {retryingPoseId === pose.pose_prompt ? (
+                              <Loader2 className="h-8 w-8 text-white animate-spin" />
+                          ) : (
+                              <Button variant="secondary" size="sm" onClick={(e) => { e.stopPropagation(); onForceRetry(pose, job!.id); }}>
+                                  <RefreshCw className="h-4 w-4 mr-2" />
+                                  Retry
+                              </Button>
+                          )}
+                      </div>
+                    )}
                 </div>
                 <p className="text-xs text-muted-foreground truncate">{pose.pose_prompt}</p>
                 </div>
