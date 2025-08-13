@@ -204,6 +204,16 @@ serve(async (req)=>{
     const { data: fetchedJob, error: fetchError } = await supabase.from('mira-agent-bitstudio-jobs').select('*').eq('id', pair_job_id).single();
     if (fetchError) throw new Error(fetchError.message || 'Failed to fetch job.');
     job = fetchedJob;
+
+    // --- NEW GUARD CLAUSE ---
+    const terminalStatuses = ['complete', 'failed', 'permanently_failed', 'awaiting_reframe'];
+    const isTerminalStep = job.metadata?.google_vto_step === 'done';
+    if (terminalStatuses.includes(job.status) || isTerminalStep) {
+        console.log(`${logPrefix} Job is in a terminal or hands-off state ('${job.status}', step: '${job.metadata?.google_vto_step}'). Exiting gracefully.`);
+        return new Response(JSON.stringify({ success: true, message: "Job already in a terminal state." }), { headers: corsHeaders });
+    }
+    // --- END GUARD CLAUSE ---
+
     if (reframe_result_url) {
       console.log(`${logPrefix} Received reframe result. Finalizing job.`);
       await supabase.from('mira-agent-bitstudio-jobs').update({
@@ -639,7 +649,9 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
       metadata: { ...metadata, qa_history: qa_history, qa_best_image_base64: bestImageBase64, qa_best_image_url: bestImageUrl.publicUrl, google_vto_step: 'outfit_completeness_check' },
       status: 'outfit_completeness_check'
     }).eq('id', job.id);
-    await invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: job.id });
+    await invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', {
+      pair_job_id: job.id
+    });
   }
 }
 
