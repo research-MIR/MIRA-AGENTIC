@@ -214,6 +214,15 @@ async function handlePendingState(supabase: any, job: any) {
     const aspectRatio = job.context?.aspect_ratio || '1024x1024';
     
     let toolToInvoke = '';
+    let payload: { [key: string]: any } = {
+        prompt: finalPrompt,
+        number_of_images: 1,
+        model_id: selectedModelId,
+        invoker_user_id: job.user_id,
+        seed: Math.floor(Math.random() * 1e15),
+        source: 'model_pack_generator'
+    };
+
     switch (selectedModelId) {
         case 'fal-ai/wan/v2.2-a14b/text-to-image':
             toolToInvoke = 'MIRA-AGENT-tool-generate-image-fal-wan';
@@ -231,17 +240,16 @@ async function handlePendingState(supabase: any, job: any) {
             }
     }
 
+    // Add the correctly named size/aspect ratio parameter based on the provider
+    if (provider === 'google') {
+        payload.size = aspectRatio; // Google tool expects 'size'
+    } else { // Fal.ai tools
+        payload.size = aspectRatio; // Our Fal tools also expect 'size' which they map internally
+    }
+
     console.log(`${logPrefix} Using provider '${provider}', invoking tool '${toolToInvoke}' for one image.`);
     const { data: generationResult, error: generationError } = await supabase.functions.invoke(toolToInvoke, {
-        body: {
-            prompt: finalPrompt,
-            number_of_images: 1,
-            model_id: selectedModelId,
-            invoker_user_id: job.user_id,
-            size: aspectRatio,
-            seed: Math.floor(Math.random() * 1e15),
-            source: 'model_pack_generator'
-        }
+        body: payload
     });
     if (generationError) throw new Error(`Image generation failed: ${generationError.message}`);
     
