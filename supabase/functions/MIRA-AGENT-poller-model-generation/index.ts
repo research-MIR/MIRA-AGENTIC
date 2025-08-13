@@ -393,41 +393,44 @@ async function handlePollingPosesState(supabase: any, job: any) {
     const queueData = await queueResponse.json();
 
     for (const [index, poseJob] of updatedPoseJobs.entries()) {
-        // Skip already finished or failed poses that have exhausted retries
         if (poseJob.status === 'complete' || (poseJob.status === 'failed' && (poseJob.retry_count || 0) >= MAX_RETRIES)) {
             continue;
         }
 
-        // --- Handle Failed Poses (Retry Logic) ---
-        if (poseJob.status === 'failed' && (poseJob.retry_count || 0) < MAX_RETRIES) {
-            const newRetryCount = (poseJob.retry_count || 0) + 1;
-            console.log(`${logPrefix} Retrying failed pose "${poseJob.pose_prompt}" (Attempt ${newRetryCount}/${MAX_RETRIES}).`);
-            updatedPoseJobs[index].status = 'pending';
-            updatedPoseJobs[index].retry_count = newRetryCount;
+        if (poseJob.status === 'pending') {
+            console.log(`${logPrefix} Found pending pose "${poseJob.pose_prompt}". Dispatching to generator.`);
+            updatedPoseJobs[index].status = 'processing'; 
             hasChanged = true;
-            
             supabase.functions.invoke('MIRA-AGENT-tool-comfyui-pose-generator', {
                 body: {
                     job_id: job.id,
                     base_model_url: job.base_model_image_url,
                     pose_prompt: poseJob.pose_prompt,
-                    pose_image_url: null, // Assuming retry doesn't use an image ref for now
+                    pose_image_url: null,
                 }
-            }).catch(err => console.error(`${logPrefix} ERROR: Failed to re-invoke generator for retry:`, err));
+            }).catch(err => {
+                console.error(`${logPrefix} ERROR: Failed to dispatch generator for pending pose:`, err);
+            });
             continue;
         }
 
-        // --- Handle Analyzing Poses (Stall Detection) ---
+        if (poseJob.status === 'failed' && (poseJob.retry_count || 0) < MAX_RETRIES) {
+            const newRetryCount = (poseJob.retry_count || 0) + 1;
+            console.log(`${logPrefix} Auto-retrying failed pose "${poseJob.pose_prompt}" (Attempt ${newRetryCount}/${MAX_RETRIES}). Setting to pending.`);
+            updatedPoseJobs[index].status = 'pending';
+            updatedPoseJobs[index].retry_count = newRetryCount;
+            hasChanged = true;
+            continue;
+        }
+
         if (poseJob.status === 'analyzing') {
             const analysisStartedAt = poseJob.analysis_started_at ? new Date(poseJob.analysis_started_at).getTime() : 0;
             const now = Date.now();
             const secondsSinceStart = (now - analysisStartedAt) / 1000;
-
             if (secondsSinceStart > ANALYSIS_STALLED_THRESHOLD_SECONDS) {
                 console.warn(`${logPrefix} STALL DETECTED: Pose analysis for "${poseJob.pose_prompt}" has been running for over ${ANALYSIS_STALLED_THRESHOLD_SECONDS}s. Re-triggering analyzer.`);
                 updatedPoseJobs[index].analysis_started_at = new Date().toISOString();
                 hasChanged = true;
-                
                 supabase.functions.invoke('MIRA-AGENT-analyzer-pose-image', {
                     body: {
                         job_id: job.id,
@@ -440,37 +443,29 @@ async function handlePollingPosesState(supabase: any, job: any) {
             continue;
         }
 
-        // --- Handle Processing Poses (Polling ComfyUI) ---
         if (poseJob.status === 'processing' && poseJob.comfyui_prompt_id) {
             const isJobInQueue = queueData.queue_running.some((item: any) => item[1] === poseJob.comfyui_prompt_id) || 
                                  queueData.queue_pending.some((item: any) => item[1] === poseJob.comfyui_prompt_id);
-
             if (isJobInQueue) continue;
-
             const historyUrl = `${comfyUiAddress}/history/${poseJob.comfyui_prompt_id}`;
             const historyResponse = await fetch(historyUrl);
-            
             if (historyResponse.ok) {
                 const historyData = await historyResponse.json();
                 const promptHistory = historyData[poseJob.comfyui_prompt_id];
                 const outputNode = await findOutputImage(promptHistory?.outputs, FINAL_OUTPUT_NODE_ID_POSE, FALLBACK_NODE_IDS_POSE);
-
                 if (outputNode) {
                     const image = outputNode;
                     const tempImageUrl = `${comfyUiAddress}/view?filename=${encodeURIComponent(image.filename)}&subfolder=${encodeURIComponent(image.subfolder)}&type=${image.type}`;
                     const imageResponse = await fetch(tempImageUrl);
                     if (!imageResponse.ok) throw new Error(`Failed to download final pose image from ComfyUI: ${imageResponse.statusText}`);
                     const imageBuffer = await imageResponse.arrayBuffer();
-
                     const filePath = `${job.user_id}/model-poses/${Date.now()}_${image.filename}`;
                     await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(filePath, imageBuffer, { contentType: 'image/png', upsert: true });
                     const { data: { publicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
-
                     updatedPoseJobs[index].status = 'analyzing';
                     updatedPoseJobs[index].final_url = publicUrl;
                     updatedPoseJobs[index].analysis_started_at = new Date().toISOString();
                     hasChanged = true;
-
                     supabase.functions.invoke('MIRA-AGENT-analyzer-pose-image', {
                         body: {
                             job_id: job.id,
@@ -493,14 +488,12 @@ async function handlePollingPosesState(supabase: any, job: any) {
     }
 
     const isFullyFinished = updatedPoseJobs.every(p => p.status === 'complete' || (p.status === 'failed' && p.retry_count >= MAX_RETRIES));
-
     if (hasChanged || (isFullyFinished && job.status !== 'complete')) {
         const finalStatus = isFullyFinished ? 'complete' : job.status;
         await supabase.from('mira-agent-model-generation-jobs').update({ 
             final_posed_images: updatedPoseJobs,
             status: finalStatus 
         }).eq('id', job.id);
-
         if (finalStatus === 'complete') {
             console.log(`${logPrefix} All pose jobs are complete. Main job finalized.`);
         } else {
