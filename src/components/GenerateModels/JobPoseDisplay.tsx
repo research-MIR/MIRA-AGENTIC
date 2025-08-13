@@ -146,6 +146,7 @@ export const JobPoseDisplay = ({ job, onViewHistory, onForceRetry, retryingPoseI
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             {poses.map((pose, index) => {
               const passBadge = getPassBadgeInfo(pose);
+              const isRetryable = pose.status === 'complete' || pose.status === 'failed';
               return (
                 <div key={`${job.id}-${index}`} className="space-y-2">
                 <div 
@@ -180,7 +181,7 @@ export const JobPoseDisplay = ({ job, onViewHistory, onForceRetry, retryingPoseI
                         </TooltipContent>
                       </Tooltip>
                     </TooltipProvider>
-                    {pose.status === 'failed' && (
+                    {isRetryable && (
                       <div className="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                           {retryingPoseId === pose.pose_prompt ? (
                               <Loader2 className="h-8 w-8 text-white animate-spin" />
