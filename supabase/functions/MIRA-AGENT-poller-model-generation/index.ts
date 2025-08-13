@@ -137,7 +137,7 @@ serve(async (req) => {
   if (!job_id) { throw new Error("job_id is required."); }
 
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-  console.log(`[ModelGenPoller][${job_id}] Poller invoked.`);
+  console.log(`[ModelGenPoller][${job_id}] Poller v1.1.0 invoked.`);
   let job: any = null;
 
   try {
