@@ -8,9 +8,12 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { showSuccess } from "@/utils/toast";
 
+// This interface now correctly reflects the data from MIRA-AGENT-analyzer-pose-image
 interface PoseAnalysis {
-  shoot_focus: 'upper_body' | 'lower_body' | 'full_body';
-  garment: {
+  qa_status: 'pass' | 'fail';
+  reasoning: string;
+  failure_modes?: string[];
+  garment_analysis?: {
     description: string;
     coverage: 'upper_body' | 'lower_body' | 'full_body';
     is_identical_to_base_garment: boolean;
@@ -69,11 +72,8 @@ export const UpscaledPosesGallery = ({ jobs }: UpscaledPosesGalleryProps) => {
             onClick={() => showImage({ images: upscaledPoses.map(p => ({ url: p.final_url, jobId: p.jobId })), currentIndex: index })}
           >
             <SecureImageDisplay imageUrl={pose.final_url} alt={pose.pose_prompt} />
-            {pose.analysis && (
-              <>
-                <Badge variant="secondary" className="absolute top-1 left-1 z-10 capitalize">{pose.analysis.shoot_focus.replace('_', ' ')}</Badge>
-                <Badge variant="default" className="absolute top-1 right-1 z-10 capitalize">{pose.analysis.garment.coverage.replace('_', ' ')}</Badge>
-              </>
+            {pose.analysis?.garment_analysis?.coverage && (
+              <Badge variant="default" className="absolute top-1 right-1 z-10 capitalize">{pose.analysis.garment_analysis.coverage.replace('_', ' ')}</Badge>
             )}
             {pose.comfyui_prompt_id && (
               <TooltipProvider>
