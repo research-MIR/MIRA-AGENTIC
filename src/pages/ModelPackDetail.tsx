@@ -28,8 +28,10 @@ import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious
 import { PoseHistoryModal } from "@/components/GenerateModels/PoseHistoryModal";
 
 interface PoseAnalysis {
-  shoot_focus: 'upper_body' | 'lower_body' | 'full_body';
-  garment: {
+  qa_status: 'pass' | 'fail';
+  reasoning: string;
+  failure_modes?: string[];
+  garment_analysis?: {
     description: string;
     coverage: 'upper_body' | 'lower_body' | 'full_body';
     is_identical_to_base_garment: boolean;
@@ -41,7 +43,7 @@ interface Pose {
   is_upscaled?: boolean;
   status: string;
   pose_prompt: string;
-  jobId: string;
+  jobId?: string;
   analysis?: PoseAnalysis;
   comfyui_prompt_id?: string;
   prompt_context_for_gemini?: string;

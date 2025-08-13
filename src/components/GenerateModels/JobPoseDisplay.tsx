@@ -119,7 +119,7 @@ export const JobPoseDisplay = ({ job, onViewHistory, onForceRetry, retryingPoseI
 
   const handleInfoClick = (e: React.MouseEvent, pose: Pose) => {
     e.stopPropagation();
-    onViewHistory(pose);
+    onViewHistory({ ...pose, jobId: job!.id });
   };
 
   if (!job) {
