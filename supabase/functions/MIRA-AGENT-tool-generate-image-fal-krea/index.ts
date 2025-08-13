@@ -13,6 +13,13 @@ const FAL_KEY = Deno.env.get('FAL_KEY');
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
 
 const sizeToKreaEnum: { [key: string]: string } = {
+    'square': 'square',
+    'square_hd': 'square_hd',
+    'portrait_4_3': 'portrait_4_3',
+    'landscape_4_3': 'landscape_4_3',
+    'landscape_16_9': 'landscape_16_9',
+    'portrait_16_9': 'portrait_16_9',
+    // Aliases for robustness
     '1:1': 'square',
     '1024x1024': 'square_hd',
     '3:4': 'portrait_4_3',
