@@ -24,6 +24,7 @@ const modelAliases: { [key: string]: string } = {
   'fal-ai/flux-pro/v1.1-ultra/redux': 'Creative Model (Refined)',
   'fal-ai/bytedance/seedream/v3/text-to-image': 'Creative Model V3',
   'fal-ai/wan/v2.2-a14b/text-to-image': 'Creative Model V2.2',
+  'fal-ai/flux/krea': 'FLUX.1 Krea [dev]',
 };
 
 export const ModelSelector = ({ models, selectedModelId, onModelChange, disabled = false }: ModelSelectorProps) => {
