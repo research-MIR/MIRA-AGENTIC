@@ -4,7 +4,7 @@ import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Users, Plus, Loader2, MoreVertical, Pencil, Trash2 } from "lucide-react";
+import { Users, Plus, Loader2, MoreVertical, Pencil, Trash2, Download } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useLanguage } from "@/context/LanguageContext";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { showError, showSuccess, showLoading, dismissToast } from "@/utils/toast";
+import JSZip from 'jszip';
 
 interface ModelPack {
   id: string;
@@ -32,6 +33,7 @@ const ModelPacks = () => {
   const [newPackName, setNewPackName] = useState('');
   const [newPackDescription, setNewPackDescription] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDownloading, setIsDownloading] = useState<string | null>(null);
 
   const { data: packs, isLoading, error } = useQuery<ModelPack[]>({
     queryKey: ["modelPacks", session?.user?.id],
@@ -120,6 +122,89 @@ const ModelPacks = () => {
     }
   };
 
+  const handleDownloadPack = async (pack: ModelPack) => {
+    if (!session?.user) return;
+    setIsDownloading(pack.id);
+    const toastId = showLoading(`Preparing download for "${pack.name}"...`);
+
+    try {
+        const { data: packDetails, error: rpcError } = await supabase.rpc('get_full_model_pack_details_for_export', { p_pack_id: pack.id });
+        if (rpcError) throw rpcError;
+        if (!packDetails || packDetails.length === 0) {
+            throw new Error("No completed models with poses found in this pack to download.");
+        }
+
+        const itemsToDownload: { url: string; prompt: string; type: 'base' | 'pose' }[] = [];
+        for (const job of packDetails) {
+            if (job.base_model_image_url && job.final_prompt_used) {
+                itemsToDownload.push({
+                    url: job.base_model_image_url,
+                    prompt: job.final_prompt_used,
+                    type: 'base'
+                });
+            }
+            if (job.final_posed_images) {
+                for (const pose of job.final_posed_images) {
+                    if (pose.final_url && pose.pose_prompt) {
+                        itemsToDownload.push({
+                            url: pose.final_url,
+                            prompt: pose.pose_prompt,
+                            type: 'pose'
+                        });
+                    }
+                }
+            }
+        }
+
+        if (itemsToDownload.length === 0) {
+            throw new Error("No images or prompts could be prepared for download.");
+        }
+
+        dismissToast(toastId);
+        const downloadToastId = showLoading(`Downloading ${itemsToDownload.length} assets...`);
+
+        const imageFetchPromises = itemsToDownload.map(item => 
+            fetch(item.url).then(res => {
+                if (!res.ok) throw new Error(`Failed to fetch ${item.url}`);
+                return res.blob();
+            })
+        );
+        const imageBlobs = await Promise.all(imageFetchPromises);
+
+        dismissToast(downloadToastId);
+        const zipToastId = showLoading("Zipping files...");
+        const zip = new JSZip();
+        let counter = 1;
+
+        for (let i = 0; i < itemsToDownload.length; i++) {
+            const item = itemsToDownload[i];
+            const blob = imageBlobs[i];
+            
+            zip.file(`${counter}.png`, blob);
+            zip.file(`${counter}.txt`, item.prompt);
+            counter++;
+        }
+
+        const zipBlob = await zip.generateAsync({ type: "blob" });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(zipBlob);
+        link.download = `${pack.name.replace(/\s+/g, '_')}_poses.zip`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(link.href);
+
+        dismissToast(zipToastId);
+        showSuccess("Download started!");
+
+    } catch (err: any) {
+        dismissToast(toastId);
+        showError(`Download failed: ${err.message}`);
+    } finally {
+        setIsDownloading(null);
+    }
+  };
+
   return (
     <div className="p-4 md:p-8 h-screen overflow-y-auto">
       <header className="pb-4 mb-8 border-b flex justify-between items-center">
@@ -155,10 +240,14 @@ const ModelPacks = () => {
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button variant="ghost" size="icon" className="h-7 w-7 flex-shrink-0 -mr-2 -mt-2 opacity-0 group-hover:opacity-100">
-                        <MoreVertical className="h-4 w-4" />
+                        {isDownloading === pack.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <MoreVertical className="h-4 w-4" />}
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => handleDownloadPack(pack)} disabled={isDownloading === pack.id}>
+                        <Download className="mr-2 h-4 w-4" />
+                        Download All Poses
+                      </DropdownMenuItem>
                       <DropdownMenuItem onClick={() => handleEditPack(pack)}><Pencil className="mr-2 h-4 w-4" />Edit</DropdownMenuItem>
                       <AlertDialog>
                         <AlertDialogTrigger asChild>
