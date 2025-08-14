@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { GoogleGenAI, Content, Part, HarmCategory, HarmBlockThreshold, GenerationResult } from 'https://esm.sh/@google/genai@0.15.0';
-import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { GoogleGenAI, HarmCategory, HarmBlockThreshold } from 'https://esm.sh/@google/genai@0.15.0';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
@@ -12,81 +12,116 @@ const RETRY_DELAY_MS = 1000;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
 };
 
 const safetySettings = [
-    { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-    { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
-    { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
-    { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+  {
+    category: HarmCategory.HARM_CATEGORY_HARASSMENT,
+    threshold: HarmBlockThreshold.BLOCK_NONE
+  },
+  {
+    category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+    threshold: HarmBlockThreshold.BLOCK_NONE
+  },
+  {
+    category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+    threshold: HarmBlockThreshold.BLOCK_NONE
+  },
+  {
+    category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+    threshold: HarmBlockThreshold.BLOCK_NONE
+  }
 ];
 
-const systemPrompt = `You are a "Quality Assurance AI" for a photorealistic model generation pipeline. You will be given a user's creative brief, the final detailed prompt that was sent to the image generator, and four candidate images. Your sole task is to evaluate them and choose the single best one that matches all requirements, and identify the model's gender.
+const systemPrompt = `You are a "Quality Assurance AI" for a photorealistic model generation pipeline. You will be given a user's creative brief, the final detailed prompt that was sent to the image generator, and four candidate images. Your task is to act as a gatekeeper: first, validate if any images meet the core requirements, and then select the best one.
 
 ### Your Inputs:
 - **User's Brief:** The original, high-level description from the user.
 - **Final Generation Prompt:** The exact, detailed prompt used to create the images. This is your primary source of truth for technical and stylistic evaluation.
 - **Candidate Images:** Four images labeled "Image 0" through "Image 3".
 
-### Evaluation Criteria (in order of importance):
-1.  **Pose & Framing Compliance (Highest Priority):** The image MUST be a full-body shot, and the model MUST be in a neutral, frontal, standing A-pose with arms relaxed at their sides and a neutral facial expression. You must explicitly check if the prompt's "FULL BODY SHOOT" rule was followed. Reject any image that is a close-up, medium shot, or has a dynamic/expressive pose.
-2.  **Prompt Coherence:** Does the model in the image accurately reflect the **Final Generation Prompt**? This is more important than the original user brief. Check for specific details mentioned in the final prompt (e.g., lighting, background, specific clothing).
-3.  **Anatomical Correctness:** The model must have realistic human anatomy. Check for common AI errors like incorrect hands, distorted limbs, or unnatural facial features. Reject any image with clear anatomical flaws.
-4.  **Photorealism:** The image should look like a real photograph. Assess the skin texture, lighting, and overall quality.
-5.  **Aesthetic Appeal (Tie-breaker only):** If multiple images perfectly satisfy all the above criteria, use general aesthetic appeal as the final deciding factor.
+### Primary Directive: Full Body Shot Validation
+Your first and most important task is to scan all four candidate images to determine if **at least one** of them is a valid **full body shot** as specified in the prompt's "PHOTOGRAPHY_STYLE" rule. An image is invalid if it is a close-up, medium shot, or if the model's feet are not visible.
+
+### Decision Logic & Evaluation Criteria:
+1.  **If one or more images are valid full body shots:** Your action is to **"select"**. From *only the valid candidates*, choose the single best one based on the following criteria in order of importance:
+    a.  **Anatomical Correctness:** The model must have realistic human anatomy. Reject any image with clear flaws (e.g., incorrect hands, distorted limbs).
+    b.  **Prompt Coherence:** The model must accurately reflect the **Final Generation Prompt**.
+    c.  **Photorealism & Aesthetic Appeal:** The image should be high quality and visually appealing.
+2.  **If ZERO images are valid full body shots:** Your action is to **"retry"**. The entire batch fails the primary directive.
 
 ### Gender Identification:
-After selecting the best image, you MUST identify the gender of the model. The value must be one of two strings: "male" or "female".
+If your action is "select", you MUST identify the gender of the model in the selected image. The value must be one of two strings: "male" or "female".
 
 ### Your Output:
-Your entire response MUST be a single, valid JSON object with TWO keys: "best_image_index" and "gender".
+Your entire response MUST be a single, valid JSON object with the following keys: "action", "best_image_index", "gender", and "reasoning".
 
-**Example Output:**
+**Example Output (Success):**
 \`\`\`json
 {
+  "action": "select",
   "best_image_index": 2,
-  "gender": "female"
+  "gender": "female",
+  "reasoning": "Images 0 and 1 were invalid medium shots. Image 2 was selected from the valid candidates as it has the highest photorealism and best anatomical correctness."
+}
+\`\`\`
+
+**Example Output (Failure):**
+\`\`\`json
+{
+  "action": "retry",
+  "best_image_index": null,
+  "gender": null,
+  "reasoning": "All four candidates failed the 'Full body shot' requirement. The generations were primarily medium shots, violating the core prompt."
 }
 \`\`\`
 `;
 
-async function downloadImageAsPart(supabase: SupabaseClient, publicUrl: string, label: string): Promise<Part[]> {
-    const url = new URL(publicUrl);
-    const pathSegments = url.pathname.split('/');
-    const bucketName = pathSegments[pathSegments.indexOf('public') + 1];
-    const filePath = decodeURIComponent(pathSegments.slice(pathSegments.indexOf(bucketName) + 1).join('/'));
-    const { data, error } = await supabase.storage.from(bucketName).download(filePath);
-    if (error) throw new Error(`Failed to download ${label}: ${error.message}`);
-    const buffer = await data.arrayBuffer();
-    const base64 = encodeBase64(buffer);
-    return [{ inlineData: { mimeType: data.type, data: base64 } }];
+async function downloadImageAsPart(supabase: any, publicUrl: string, label: string) {
+  const url = new URL(publicUrl);
+  const pathSegments = url.pathname.split('/');
+  const bucketName = pathSegments[pathSegments.indexOf('public') + 1];
+  const filePath = decodeURIComponent(pathSegments.slice(pathSegments.indexOf(bucketName) + 1).join('/'));
+  const { data, error } = await supabase.storage.from(bucketName).download(filePath);
+  if (error) throw new Error(`Failed to download ${label}: ${error.message}`);
+  const buffer = await data.arrayBuffer();
+  const base64 = encodeBase64(buffer);
+  return [{
+    inlineData: {
+      mimeType: data.type,
+      data: base64
+    }
+  }];
 }
 
-function extractJson(text: string): any {
-    if (!text) { // Guard clause for null, undefined, or empty string
-        throw new Error("The model returned an empty response.");
-    }
-    const match = text.match(/```json\s*([\s\S]*?)\s*```/);
-    if (match && match[1]) {
-        try {
-            return JSON.parse(match[1]);
-        } catch (e) {
-            console.error("[QualityAssuranceTool] Failed to parse extracted JSON block:", e);
-            // Fall through to try parsing the whole string
-        }
-    }
+function extractJson(text: string) {
+  if (!text) {
+    throw new Error("The model returned an empty response.");
+  }
+  const match = text.match(/```json\s*([\s\S]*?)\s*```/);
+  if (match && match[1]) {
     try {
-        return JSON.parse(text);
+      return JSON.parse(match[1]);
     } catch (e) {
-        console.error(`[QualityAssuranceTool] Failed to parse raw text as JSON. Text was: "${text}"`);
-        throw new Error("The model returned a response that could not be parsed as JSON.");
+      console.error("[QualityAssuranceTool] Failed to parse extracted JSON block:", e);
+      // Fall through to try parsing the whole string
     }
+  }
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    console.error(`[QualityAssuranceTool] Failed to parse raw text as JSON. Text was: "${text}"`);
+    throw new Error("The model returned a response that could not be parsed as JSON.");
+  }
 }
 
 serve(async (req) => {
-  if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
-
+  if (req.method === 'OPTIONS') {
+    return new Response(null, {
+      headers: corsHeaders
+    });
+  }
   try {
     const { image_urls, model_description, set_description, final_generation_prompt } = await req.json();
     if (!image_urls || !Array.isArray(image_urls) || image_urls.length === 0) {
@@ -95,82 +130,100 @@ serve(async (req) => {
     if (!model_description) {
       throw new Error("model_description is required for coherence check.");
     }
-
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-    const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
-    
+    const ai = new GoogleGenAI({
+      apiKey: GEMINI_API_KEY!
+    });
     const userBriefText = `--- USER'S CREATIVE BRIEF ---\nModel Description: "${model_description}"\nSet Description: "${set_description || 'a minimal studio with a neutral background'}"\n\n--- FINAL GENERATION PROMPT (PRIMARY TRUTH) ---\n${final_generation_prompt || 'Not provided.'}\n--- END BRIEF ---`;
-    const parts: Part[] = [{ text: userBriefText }];
-
+    const parts = [{
+      text: userBriefText
+    }];
     const imagePartsPromises = image_urls.map((url, index) => downloadImageAsPart(supabase, url, `Image ${index}`));
     const imagePartsArrays = await Promise.all(imagePartsPromises);
     parts.push(...imagePartsArrays.flat());
-
-    let result: GenerationResult | null = null;
-    let lastError: Error | null = null;
-
+    let result = null;
+    let lastError = null;
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-        try {
-            console.log(`[QualityAssuranceTool] Calling Gemini API, attempt ${attempt}/${MAX_RETRIES}...`);
-            result = await ai.models.generateContent({
-                model: MODEL_NAME,
-                contents: [{ role: 'user', parts: parts }],
-                generationConfig: { responseMimeType: "application/json" },
-                safetySettings,
-                config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
-            });
-
-            if (result?.text) {
-                lastError = null; // Clear error on success
-                break; // Exit loop on success
+      try {
+        console.log(`[QualityAssuranceTool] Calling Gemini API, attempt ${attempt}/${MAX_RETRIES}...`);
+        result = await ai.models.generateContent({
+          model: MODEL_NAME,
+          contents: [{
+            role: 'user',
+            parts: parts
+          }],
+          generationConfig: {
+            responseMimeType: "application/json"
+          },
+          safetySettings,
+          config: {
+            systemInstruction: {
+              role: "system",
+              parts: [{
+                text: systemPrompt
+              }]
             }
-            
-            console.warn(`[QualityAssuranceTool] Attempt ${attempt} resulted in an empty or blocked response. Full response:`, JSON.stringify(result, null, 2));
-            lastError = new Error("AI model returned an empty or blocked response.");
-
-        } catch (error) {
-            lastError = error;
-            console.warn(`[QualityAssuranceTool] Attempt ${attempt} failed:`, error.message);
+          }
+        });
+        if (result?.text) {
+          lastError = null; // Clear error on success
+          break; // Exit loop on success
         }
-
-        if (attempt < MAX_RETRIES) {
-            const delay = RETRY_DELAY_MS * attempt; // Exponential backoff
-            console.log(`[QualityAssuranceTool] Retrying in ${delay}ms...`);
-            await new Promise(resolve => setTimeout(resolve, delay));
-        }
+        console.warn(`[QualityAssuranceTool] Attempt ${attempt} resulted in an empty or blocked response. Full response:`, JSON.stringify(result, null, 2));
+        lastError = new Error("AI model returned an empty or blocked response.");
+      } catch (error) {
+        lastError = error;
+        console.warn(`[QualityAssuranceTool] Attempt ${attempt} failed:`, error.message);
+      }
+      if (attempt < MAX_RETRIES) {
+        const delay = RETRY_DELAY_MS * attempt; // Exponential backoff
+        console.log(`[QualityAssuranceTool] Retrying in ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
     }
-
     if (lastError) {
-        console.error(`[QualityAssuranceTool] All retries failed. Last error:`, lastError.message);
-        throw lastError;
+      console.error(`[QualityAssuranceTool] All retries failed. Last error:`, lastError.message);
+      throw lastError;
     }
-
     if (!result || !result.text) {
-        console.error("[QualityAssuranceTool] AI model failed to return a valid text response after all retries. Full response:", JSON.stringify(result, null, 2));
-        throw new Error("AI model failed to respond with valid text after all retries.");
+      console.error("[QualityAssuranceTool] AI model failed to return a valid text response after all retries. Full response:", JSON.stringify(result, null, 2));
+      throw new Error("AI model failed to respond with valid text after all retries.");
     }
 
     const responseJson = extractJson(result.text);
-    const bestIndex = responseJson.best_image_index;
-    const gender = responseJson.gender;
+    const { action, best_image_index, gender, reasoning } = responseJson;
 
-    if (typeof bestIndex !== 'number' || bestIndex < 0 || bestIndex >= image_urls.length) {
-        throw new Error("AI did not return a valid index for the best image.");
-    }
-    if (gender !== 'male' && gender !== 'female') {
-        throw new Error("AI did not return a valid gender ('male' or 'female').");
+    if (!action || (action !== 'select' && action !== 'retry')) {
+        throw new Error("AI response is missing a valid 'action' ('select' or 'retry').");
     }
 
-    return new Response(JSON.stringify({ best_image_index: bestIndex, gender: gender }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 200,
+    if (action === 'select') {
+        if (typeof best_image_index !== 'number' || best_image_index < 0 || best_image_index >= image_urls.length) {
+            throw new Error("AI action was 'select' but it did not return a valid 'best_image_index'.");
+        }
+        if (gender !== 'male' && gender !== 'female') {
+            throw new Error("AI action was 'select' but it did not return a valid 'gender' ('male' or 'female').");
+        }
+    }
+
+    // Return the full analysis object for the poller to handle
+    return new Response(JSON.stringify(responseJson), {
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/json'
+      },
+      status: 200
     });
-
   } catch (error) {
     console.error("[QualityAssuranceTool] Error:", error);
-    return new Response(JSON.stringify({ error: error.message }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 500,
+    return new Response(JSON.stringify({
+      error: error.message
+    }), {
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/json'
+      },
+      status: 500
     });
   }
 });
