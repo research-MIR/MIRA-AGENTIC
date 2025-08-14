@@ -22,7 +22,8 @@ const OUTFIT_ANALYSIS_MAX_RETRIES = 3;
 const OUTFIT_ANALYSIS_RETRY_DELAY_MS = 15000; // Increased delay
 const REFRAME_STALL_THRESHOLD_SECONDS = 55;
 const MAX_REFRAME_RETRIES = 2;
-const QA_MAX_RETRIES = 3; // Updated to 3 retries
+const QA_MAX_RETRIES = 3;
+const MAX_DB_RETRIES = 5; // New constant for database connection retries
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -35,7 +36,6 @@ async function invokeNextStep(supabase: SupabaseClient, functionName: string, pa
     body: payload
   });
   if (error) {
-    // Log the error but also re-throw it so the calling function knows it failed.
     console.error(`[invokeNextStep] Error invoking ${functionName}:`, error);
     throw error;
   }
@@ -79,11 +79,14 @@ async function safeGetPublicUrl(supabase: SupabaseClient, bucket: string, path: 
 }
 
 async function uploadBase64ToStorage(supabase: SupabaseClient, base64: string, userId: string, filename: string) {
-    const buffer = decodeBase64(base64);
-    const filePath = `${userId}/vto-pack-results/${Date.now()}-${filename}`;
-    await safeUpload(supabase, GENERATED_IMAGES_BUCKET, filePath, new Blob([buffer], { type: 'image/png' }), { contentType: 'image/png', upsert: true });
-    const publicUrl = await safeGetPublicUrl(supabase, GENERATED_IMAGES_BUCKET, filePath);
-    return { publicUrl, storagePath: filePath };
+  const buffer = decodeBase64(base64);
+  const filePath = `${userId}/vto-pack-results/${Date.now()}-${filename}`;
+  await safeUpload(supabase, GENERATED_IMAGES_BUCKET, filePath, new Blob([buffer], { type: 'image/png' }), { contentType: 'image/png', upsert: true });
+  const publicUrl = await safeGetPublicUrl(supabase, GENERATED_IMAGES_BUCKET, filePath);
+  return {
+    publicUrl,
+    storagePath: filePath
+  };
 }
 
 // --- Utility Functions ---
@@ -115,58 +118,48 @@ async function invokeWithRetry(supabase: SupabaseClient, functionName: string, p
 }
 
 async function generateMixedPortfolio(supabase: SupabaseClient, job: any, steps: any[], logPrefix: string) {
-    try {
-        console.log(`${logPrefix} Verifying dimensions of garment image before generation...`);
-        const garmentBlob = await safeDownload(supabase, job.metadata.optimized_garment_url, logPrefix);
-        const garmentImage = await ISImage.decode(await garmentBlob.arrayBuffer());
-        console.log(`${logPrefix} VERIFIED: Garment image dimensions sent to VTO tool are ${garmentImage.width}x${garmentImage.height}.`);
-    } catch (e) {
-        console.warn(`${logPrefix} Could not verify garment image dimensions before generation. This is non-fatal. Error: ${e.message}`);
+  try {
+    console.log(`${logPrefix} Verifying dimensions of garment image before generation...`);
+    const garmentBlob = await safeDownload(supabase, job.metadata.optimized_garment_url, logPrefix);
+    const garmentImage = await ISImage.decode(await garmentBlob.arrayBuffer());
+    console.log(`${logPrefix} VERIFIED: Garment image dimensions sent to VTO tool are ${garmentImage.width}x${garmentImage.height}.`);
+  } catch (e) {
+    console.warn(`${logPrefix} Could not verify garment image dimensions before generation. This is non-fatal. Error: ${e.message}`);
+  }
+  const generationPromises = steps.map((stepConfig) => invokeWithRetry(supabase, 'MIRA-AGENT-tool-virtual-try-on', {
+    body: {
+      ...stepConfig,
+      person_image_url: job.metadata.cropped_person_url,
+      garment_image_url: job.metadata.optimized_garment_url
     }
-
-    const generationPromises = steps.map(stepConfig => 
-        invokeWithRetry(
-            supabase,
-            'MIRA-AGENT-tool-virtual-try-on',
-            { body: { ...stepConfig, person_image_url: job.metadata.cropped_person_url, garment_image_url: job.metadata.optimized_garment_url } },
-            3, // maxRetries
-            logPrefix
-        )
-    );
-    const results = await Promise.allSettled(generationPromises);
-    const successfulImages = results.filter((r): r is PromiseFulfilledResult<any> => r.status === 'fulfilled' && r.value?.generatedImages).flatMap(r => r.value.generatedImages);
-    
-    if (successfulImages.length === 0) {
-        const firstRejection = results.find((r): r is PromiseRejectedResult => r.status === 'rejected');
-        if (firstRejection) {
-            throw firstRejection.reason;
-        }
-        throw new Error("VTO tool did not return any valid images for this generation step.");
+  }, 3, logPrefix));
+  const results = await Promise.allSettled(generationPromises);
+  const successfulImages = results.filter((r): r is PromiseFulfilledResult<any> => r.status === 'fulfilled' && r.value?.generatedImages).flatMap(r => r.value.generatedImages);
+  if (successfulImages.length === 0) {
+    const firstRejection = results.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+    if (firstRejection) {
+      throw firstRejection.reason;
     }
-    return successfulImages;
+    throw new Error("VTO tool did not return any valid images for this generation step.");
+  }
+  return successfulImages;
 }
 
 async function createPaddedSquareImage(image: ISImage, logPrefix: string): Promise<ISImage> {
-    console.log(`${logPrefix} [createPaddedSquareImage] Applying 1:1 squaring and 15% padding.`);
-    const originalWidth = image.width;
-    const originalHeight = image.height;
-
-    const borderX = originalWidth * 0.15;
-    const borderY = originalHeight * 0.15;
-    const paddedWidth = originalWidth + (2 * borderX);
-    const paddedHeight = originalHeight + (2 * borderY);
-
-    const canvasSize = Math.round(Math.max(paddedWidth, paddedHeight));
-
-    const finalCanvas = new ISImage(canvasSize, canvasSize).fill(0xFFFFFFFF); // White background
-
-    const destX = Math.round((canvasSize - originalWidth) / 2);
-    const destY = Math.round((canvasSize - originalHeight) / 2);
-
-    finalCanvas.composite(image, destX, destY);
-    console.log(`${logPrefix} [createPaddedSquareImage] Transformed from ${originalWidth}x${originalHeight} to ${canvasSize}x${canvasSize} canvas.`);
-    
-    return finalCanvas;
+  console.log(`${logPrefix} [createPaddedSquareImage] Applying 1:1 squaring and 15% padding.`);
+  const originalWidth = image.width;
+  const originalHeight = image.height;
+  const borderX = originalWidth * 0.15;
+  const borderY = originalHeight * 0.15;
+  const paddedWidth = originalWidth + (2 * borderX);
+  const paddedHeight = originalHeight + (2 * borderY);
+  const canvasSize = Math.round(Math.max(paddedWidth, paddedHeight));
+  const finalCanvas = new ISImage(canvasSize, canvasSize).fill(0xFFFFFFFF); // White background
+  const destX = Math.round((canvasSize - originalWidth) / 2);
+  const destY = Math.round((canvasSize - originalHeight) / 2);
+  finalCanvas.composite(image, destX, destY);
+  console.log(`${logPrefix} [createPaddedSquareImage] Transformed from ${originalWidth}x${originalHeight} to ${canvasSize}x${canvasSize} canvas.`);
+  return finalCanvas;
 }
 
 async function finalizeAsIs(supabase: SupabaseClient, job: any, logPrefix: string, reasonMessage: string, imageBase64: string) {
@@ -187,11 +180,7 @@ async function finalizeAsIs(supabase: SupabaseClient, job: any, logPrefix: strin
 
 // --- State Machine Logic ---
 serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
-  }
-
-  const { pair_job_id, reframe_result_url, bitstudio_result_url } = await req.json();
+  const { pair_job_id, reframe_result_url, bitstudio_result_url, retry_attempt = 0 } = await req.json();
   if (!pair_job_id) {
     return new Response(JSON.stringify({ error: "pair_job_id is required." }), { status: 400, headers: corsHeaders });
   }
@@ -201,8 +190,26 @@ serve(async (req) => {
   let job: any;
 
   try {
+    if (req.method === 'OPTIONS') {
+      return new Response(null, { headers: corsHeaders });
+    }
+
     const { data: fetchedJob, error: fetchError } = await supabase.from('mira-agent-bitstudio-jobs').select('*').eq('id', pair_job_id).single();
-    if (fetchError) throw new Error(fetchError.message || 'Failed to fetch job.');
+    if (fetchError) {
+        // NEW: Check for specific database connection error
+        if (fetchError.message.includes("Could not query the database for the schema cache")) {
+            if (retry_attempt < MAX_DB_RETRIES) {
+                const delay = 10000 * Math.pow(2, retry_attempt); // 10s, 20s, 40s...
+                console.warn(`${logPrefix} Database connection error. Retrying in ${delay}ms (Attempt ${retry_attempt + 1}/${MAX_DB_RETRIES}).`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                await invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id, reframe_result_url, bitstudio_result_url, retry_attempt: retry_attempt + 1 });
+                return new Response(JSON.stringify({ success: true, message: "Retrying due to DB connection issue." }), { headers: corsHeaders });
+            } else {
+                throw new Error(`Database connection failed after ${MAX_DB_RETRIES} retries.`);
+            }
+        }
+        throw new Error(fetchError.message || 'Failed to fetch job.');
+    }
     job = fetchedJob;
 
     const terminalStatuses = ['complete', 'failed', 'permanently_failed', 'awaiting_reframe'];
