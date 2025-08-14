@@ -14,7 +14,7 @@ const ANALYSIS_STALLED_THRESHOLD_SECONDS = 60;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
 };
 
 const tiledUpscalerWorkflow = `{
@@ -79,7 +79,10 @@ async function uploadImageToComfyUI(comfyUiUrl: string, imageBlob: Blob, filenam
   formData.append('image', imageBlob, filename);
   formData.append('overwrite', 'true');
   const uploadUrl = `${comfyUiUrl}/upload/image`;
-  const response = await fetch(uploadUrl, { method: 'POST', body: formData });
+  const response = await fetch(uploadUrl, {
+    method: 'POST',
+    body: formData
+  });
   if (!response.ok) throw new Error(`ComfyUI upload failed: ${await response.text()}`);
   const data = await response.json();
   return data.name;
@@ -281,16 +284,45 @@ async function handleBaseGenerationCompleteState(supabase: any, job: any) {
 
   if (job.auto_approve) {
     console.log(`${logPrefix} Auto-approving best image...`);
-    const { data: qaData, error: qaError } = await supabase.functions.invoke('MIRA-AGENT-tool-quality-assurance-model', {
-      body: {
-        image_urls: job.base_generation_results.map((img: any) => img.url),
-        model_description: job.model_description,
-        set_description: job.set_description,
-        final_generation_prompt: job.metadata?.final_prompt_used
-      }
-    });
 
-    if (qaError) throw new Error(`Quality assurance failed: ${qaError.message}`);
+    let qaData = null;
+    let lastQaError = null;
+
+    for (let attempt = 1; attempt <= MAX_BASE_MODEL_RETRIES + 1; attempt++) {
+        try {
+            const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-quality-assurance-model', {
+                body: {
+                    image_urls: job.base_generation_results.map((img: any) => img.url),
+                    model_description: job.model_description,
+                    set_description: job.set_description,
+                    final_generation_prompt: job.metadata?.final_prompt_used
+                }
+            });
+
+            if (error) throw new Error(error.message || 'Function invocation failed with an unknown error.');
+            
+            qaData = data;
+            lastQaError = null; // Clear error on success
+            break; // Success, exit the loop
+        } catch (error) {
+            lastQaError = error;
+            console.warn(`${logPrefix} QA tool invocation failed on attempt ${attempt}/${MAX_BASE_MODEL_RETRIES + 1}:`, error.message);
+            if (attempt > MAX_BASE_MODEL_RETRIES) {
+                break;
+            }
+            const delay = RETRY_DELAY_MS * Math.pow(2, attempt - 1); // Exponential backoff
+            console.log(`${logPrefix} Retrying in ${delay}ms...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+        }
+    }
+
+    if (lastQaError) {
+        throw new Error(`Quality assurance failed after all retries: ${lastQaError.message}`);
+    }
+
+    if (!qaData) {
+        throw new Error("Quality assurance tool returned no data after all retries.");
+    }
 
     if (qaData.action === 'select') {
       console.log(`${logPrefix} QA check passed. Reason: "${qaData.reasoning}". Selecting image index ${qaData.best_image_index}.`);
