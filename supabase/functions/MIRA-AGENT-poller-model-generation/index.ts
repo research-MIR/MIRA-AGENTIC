@@ -10,6 +10,7 @@ const POLLING_INTERVAL_MS = 5000;
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
 const MAX_RETRIES = 2;
 const MAX_BASE_MODEL_RETRIES = 2;
+const RETRY_DELAY_MS = 5000;
 const ANALYSIS_STALLED_THRESHOLD_SECONDS = 60;
 
 const corsHeaders = {
