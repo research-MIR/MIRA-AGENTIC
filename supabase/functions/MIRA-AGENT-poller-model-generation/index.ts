@@ -86,6 +86,7 @@ async function uploadImageToComfyUI(comfyUiUrl: string, imageBlob: Blob, filenam
   });
   if (!response.ok) throw new Error(`ComfyUI upload failed: ${await response.text()}`);
   const data = await response.json();
+  if (!data.name) throw new Error("ComfyUI did not return a filename for the uploaded image.");
   return data.name;
 }
 
@@ -253,11 +254,10 @@ async function handlePendingState(supabase: any, job: any) {
             }
     }
 
-    // Add the correctly named size/aspect ratio parameter based on the provider
     if (provider === 'google') {
-        payload.size = aspectRatio; // Google tool expects 'size'
-    } else { // Fal.ai tools
-        payload.size = aspectRatio; // Our Fal tools also expect 'size' which they map internally
+        payload.size = aspectRatio;
+    } else {
+        payload.size = aspectRatio;
     }
 
     console.log(`${logPrefix} Using provider '${provider}', invoking tool '${toolToInvoke}' for one image.`);
@@ -303,15 +303,15 @@ async function handleBaseGenerationCompleteState(supabase: any, job: any) {
             if (error) throw new Error(error.message || 'Function invocation failed with an unknown error.');
             
             qaData = data;
-            lastQaError = null; // Clear error on success
-            break; // Success, exit the loop
+            lastQaError = null;
+            break;
         } catch (error) {
             lastQaError = error;
             console.warn(`${logPrefix} QA tool invocation failed on attempt ${attempt}/${MAX_BASE_MODEL_RETRIES + 1}:`, error.message);
             if (attempt > MAX_BASE_MODEL_RETRIES) {
                 break;
             }
-            const delay = RETRY_DELAY_MS * Math.pow(2, attempt - 1); // Exponential backoff
+            const delay = RETRY_DELAY_MS * Math.pow(2, attempt - 1);
             console.log(`${logPrefix} Retrying in ${delay}ms...`);
             await new Promise(resolve => setTimeout(resolve, delay));
         }
@@ -351,7 +351,7 @@ async function handleBaseGenerationCompleteState(supabase: any, job: any) {
         console.log(`${logPrefix} Attempting retry ${newRetryCount}/${MAX_BASE_MODEL_RETRIES}. Resetting job to 'pending'.`);
         await supabase.from('mira-agent-model-generation-jobs').update({
           status: 'pending',
-          base_generation_results: [], // Clear the failed results
+          base_generation_results: [],
           metadata: { ...job.metadata, base_model_retry_count: newRetryCount },
           error_message: `QA failed: ${qaData.reasoning}. Retrying...`
         }).eq('id', job.id);
@@ -383,7 +383,7 @@ async function handleGeneratingPosesState(supabase: any, job: any) {
   const basePose = {
     pose_prompt: "Neutral A-pose, frontal",
     comfyui_prompt_id: null,
-    status: 'analyzing', // Base pose is immediately ready for analysis
+    status: 'analyzing',
     final_url: job.base_model_image_url,
     is_upscaled: false,
     analysis_started_at: new Date().toISOString(),
@@ -408,7 +408,6 @@ async function handleGeneratingPosesState(supabase: any, job: any) {
     final_posed_images: finalPoseArray 
   }).eq('id', job.id);
 
-  // Dispatch analysis for the base pose
   supabase.functions.invoke('MIRA-AGENT-analyzer-pose-image', {
     body: {
       job_id: job.id,
@@ -418,7 +417,6 @@ async function handleGeneratingPosesState(supabase: any, job: any) {
     }
   }).catch(err => console.error(`[ModelGenPoller][${job.id}] ERROR: Failed to invoke analyzer for base pose:`, err));
 
-  // Dispatch generation for all other poses
   const poseGenerationPromises = job.pose_prompts.map((pose: any) => {
     const payload = {
       job_id: job.id,
@@ -484,6 +482,7 @@ async function handlePollingPosesState(supabase: any, job: any) {
             console.log(`${logPrefix} Auto-retrying failed pose "${poseJob.pose_prompt}" (Attempt ${newRetryCount}/${MAX_RETRIES}). Setting to pending.`);
             updatedPoseJobs[index].status = 'pending';
             updatedPoseJobs[index].retry_count = newRetryCount;
+            updatedPoseJobs[index].last_retry_type = 'automatic';
             hasChanged = true;
             continue;
         }

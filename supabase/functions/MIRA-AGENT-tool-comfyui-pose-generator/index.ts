@@ -177,6 +177,7 @@ const twoPassWorkflowTemplate = `{
   "271": { "inputs": { "scheduler": "simple", "steps": 25, "denoise": 0.9000000000000001, "model": ["212", 0] }, "class_type": "BasicScheduler", "_meta": { "title": "BasicScheduler" } },
   "273": { "inputs": { "clamp": true, "gamma": 1, "contrast": 1, "exposure": 0, "offset": 0, "hue": 0, "saturation": 1.1000000000000003, "value": 1, "image": ["236", 0] }, "class_type": "Color Correct (mtb)", "_meta": { "title": "Color Correct (mtb)" } }
 }`;
+
 const singlePassWorkflowTemplate = `{
   "6": { "inputs": { "text": ["192", 0], "clip": ["212", 1] }, "class_type": "CLIPTextEncode", "_meta": { "title": "CLIP Text Encode (Positive Prompt)" } },
   "35": { "inputs": { "guidance": 3.5, "conditioning": ["177", 0] }, "class_type": "FluxGuidance", "_meta": { "title": "FluxGuidance" } },
@@ -206,7 +207,8 @@ const singlePassWorkflowTemplate = `{
   "250": { "inputs": { "text": "", "clip": ["212", 1] }, "class_type": "CLIPTextEncode", "_meta": { "title": "CLIP Text Encode (Positive Prompt)" } },
   "254": { "inputs": { "samples": ["197", 0], "vae": ["39", 0] }, "class_type": "VAEDecode", "_meta": { "title": "VAE Decode" } }
 }`;
-function parseStorageURL(url) {
+
+function parseStorageURL(url: string) {
   const u = new URL(url);
   const pathSegments = u.pathname.split('/');
   const objectSegmentIndex = pathSegments.indexOf('object');
@@ -218,31 +220,28 @@ function parseStorageURL(url) {
   if (!bucket || !path) {
     throw new Error(`Could not parse bucket or path from Supabase URL: ${url}`);
   }
-  return {
-    bucket,
-    path
-  };
+  return { bucket, path };
 }
-async function downloadFromSupabase(supabase, publicUrl) {
+
+async function downloadFromSupabase(supabase: any, publicUrl: string) {
   const { bucket, path } = parseStorageURL(publicUrl);
   const { data, error } = await supabase.storage.from(bucket).download(path);
   if (error) throw new Error(`Supabase download failed: ${error.message}`);
   return data;
 }
-async function uploadToComfyUI(comfyUiUrl, imageBlob, filename) {
+
+async function uploadToComfyUI(comfyUiUrl: string, imageBlob: Blob, filename: string) {
   const formData = new FormData();
   formData.append('image', imageBlob, filename);
   formData.append('overwrite', 'true');
   const uploadUrl = `${comfyUiUrl}/upload/image`;
-  const response = await fetch(uploadUrl, {
-    method: 'POST',
-    body: formData
-  });
+  const response = await fetch(uploadUrl, { method: 'POST', body: formData });
   if (!response.ok) throw new Error(`ComfyUI upload failed: ${await response.text()}`);
   const data = await response.json();
   return data.name;
 }
-function extractJson(text) {
+
+function extractJson(text: string) {
   const match = text.match(/```json\s*([\s\S]*?)\s*```/);
   if (match && match[1]) return JSON.parse(match[1]);
   try {
@@ -251,7 +250,23 @@ function extractJson(text) {
     throw new Error("The model returned a response that could not be parsed as JSON.");
   }
 }
-serve(async (req)=>{
+
+function getDenoiseValue(pose: any): number {
+    const count = pose.retry_count || 0;
+    const type = pose.last_retry_type;
+
+    if (count >= 2 && type === 'manual') {
+        return 0.92;
+    }
+    
+    if (count === 1 && type === 'manual') {
+        return 0.88;
+    }
+
+    return 0.85;
+}
+
+serve(async (req) => {
   const requestId = `pose-generator-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
   if (req.method === 'OPTIONS') {
     return new Response(null, {
@@ -262,7 +277,7 @@ serve(async (req)=>{
     });
   }
   if (!COMFYUI_ENDPOINT_URL) throw new Error("COMFYUI_ENDPOINT_URL is not set.");
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
   const sanitizedAddress = COMFYUI_ENDPOINT_URL.replace(/\/+$/, "");
   try {
     const body = await req.json();
@@ -271,45 +286,28 @@ serve(async (req)=>{
     if (!base_model_url || !pose_prompt || !job_id) {
       throw new Error("base_model_url, pose_prompt, and job_id are required.");
     }
-    const ai = new GoogleGenAI({
-      apiKey: GEMINI_API_KEY
-    });
-    // --- Step 1: Fetch Job and Identity Passport ---
-    console.log(`[PoseGenerator][${requestId}] INFO: Step 1: Fetching job data and Identity Passport...`);
+    const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
+    
+    console.log(`[PoseGenerator][${requestId}] INFO: Step 1: Fetching job data...`);
     const { data: job, error: fetchError } = await supabase.from('mira-agent-model-generation-jobs').select('metadata, final_posed_images').eq('id', job_id).single();
     if (fetchError) throw fetchError;
+    
     const identityPassport = job.metadata?.identity_passport;
-    // --- Step 2: Triage the user's request ---
+    const currentPose = (job.final_posed_images || []).find((p: any) => p.pose_prompt === pose_prompt);
+    if (!currentPose) {
+        throw new Error(`Could not find pose with prompt "${pose_prompt}" in job ${job_id}.`);
+    }
+
     console.log(`[PoseGenerator][${requestId}] INFO: Step 2: Classifying user intent...`);
     const triageResult = await ai.models.generateContent({
       model: "gemini-2.5-flash-lite-preview-06-17",
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            {
-              text: pose_prompt
-            }
-          ]
-        }
-      ],
-      generationConfig: {
-        responseMimeType: "application/json"
-      },
-      config: {
-        systemInstruction: {
-          role: "system",
-          parts: [
-            {
-              text: TRIAGE_SYSTEM_PROMPT
-            }
-          ]
-        }
-      }
+      contents: [{ role: 'user', parts: [{ text: pose_prompt }] }],
+      generationConfig: { responseMimeType: "application/json" },
+      config: { systemInstruction: { role: "system", parts: [{ text: TRIAGE_SYSTEM_PROMPT }] } }
     });
     const { task_type, garment_description } = extractJson(triageResult.text);
     console.log(`[PoseGenerator][${requestId}] INFO: Intent classified as: '${task_type}'. Garment: '${garment_description || 'N/A'}'`);
-    // --- Step 3: Select workflow and construct enriched prompt ---
+    
     let finalWorkflowString;
     let selectedSystemPrompt;
     let baseEditingTask;
@@ -335,26 +333,28 @@ serve(async (req)=>{
     }
     console.log(`[PoseGenerator][${requestId}] INFO: Workflow selected. Type: ${task_type}. Final Editing Task: "${enrichedEditingTask}"`);
     const finalWorkflow = JSON.parse(finalWorkflowString);
-    // --- Step 4: Log the context before generation ---
+
+    const denoiseValue = getDenoiseValue(currentPose);
+    console.log(`[PoseGenerator][${requestId}] INFO: Dynamic Denoise calculated. Retry Count: ${currentPose.retry_count || 0}, Type: ${currentPose.last_retry_type || 'N/A'}. Final Denoise: ${denoiseValue}`);
+    finalWorkflow['204'].inputs.denoise = denoiseValue;
+    if (finalWorkflow['271']) {
+        finalWorkflow['271'].inputs.denoise = denoiseValue + 0.05; // Keep 2nd pass slightly higher
+    }
+
     console.log(`[PoseGenerator][${requestId}] INFO: Step 4: Logging prompt context to database...`);
-    const updatedPoses = (job.final_posed_images || []).map((pose)=>{
+    const updatedPoses = (job.final_posed_images || []).map((pose: any) => {
       if (pose.pose_prompt === pose_prompt) {
-        return {
-          ...pose,
-          prompt_context_for_gemini: enrichedEditingTask
-        };
+        return { ...pose, prompt_context_for_gemini: enrichedEditingTask };
       }
       return pose;
     });
-    const { error: logError } = await supabase.from('mira-agent-model-generation-jobs').update({
-      final_posed_images: updatedPoses
-    }).eq('id', job_id);
+    const { error: logError } = await supabase.from('mira-agent-model-generation-jobs').update({ final_posed_images: updatedPoses }).eq('id', job_id);
     if (logError) {
       console.warn(`[PoseGenerator][${requestId}] WARNING: Failed to log prompt context: ${logError.message}`);
     } else {
       console.log(`[PoseGenerator][${requestId}] INFO: Prompt context logged successfully.`);
     }
-    // --- Step 5: Populate workflow with assets and prompts ---
+
     console.log(`[PoseGenerator][${requestId}] INFO: Step 5: Downloading and uploading assets...`);
     const baseModelBlob = await downloadFromSupabase(supabase, base_model_url);
     const uniqueBaseModelFilename = `base_model_${requestId}.png`;
@@ -381,15 +381,11 @@ serve(async (req)=>{
       finalWorkflow['257'].inputs.String = garment_description || "";
     }
     const queueUrl = `${sanitizedAddress}/prompt`;
-    const payload = {
-      prompt: finalWorkflow
-    };
+    const payload = { prompt: finalWorkflow };
     console.log(`[PoseGenerator][${requestId}] INFO: Step 6: Sending final payload to ComfyUI...`);
     const response = await fetch(queueUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
     if (!response.ok) throw new Error(`ComfyUI server error: ${await response.text()}`);
@@ -397,7 +393,7 @@ serve(async (req)=>{
     if (!data.prompt_id) throw new Error("ComfyUI did not return a prompt_id.");
     const comfyui_prompt_id = data.prompt_id;
     console.log(`[PoseGenerator][${requestId}] INFO: Job queued successfully with prompt_id: ${comfyui_prompt_id}`);
-    // --- Step 7: Atomically update job with prompt_id ---
+    
     console.log(`[PoseGenerator][${requestId}] INFO: Atomically updating main job ${job_id} with new pose...`);
     const { error: rpcError } = await supabase.rpc('update_pose_with_prompt_id', {
       p_job_id: job_id,
@@ -408,9 +404,7 @@ serve(async (req)=>{
       throw new Error(`Failed to update job ${job_id} via RPC: ${rpcError.message}`);
     }
     console.log(`[PoseGenerator][${requestId}] INFO: Main job ${job_id} updated successfully via RPC.`);
-    return new Response(JSON.stringify({
-      comfyui_prompt_id: comfyui_prompt_id
-    }), {
+    return new Response(JSON.stringify({ comfyui_prompt_id: comfyui_prompt_id }), {
       headers: {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
@@ -419,9 +413,7 @@ serve(async (req)=>{
     });
   } catch (error) {
     console.error(`[PoseGenerator][${requestId}] ERROR:`, error);
-    return new Response(JSON.stringify({
-      error: error.message
-    }), {
+    return new Response(JSON.stringify({ error: error.message }), {
       headers: {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
