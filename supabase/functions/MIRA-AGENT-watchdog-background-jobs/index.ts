@@ -1,8 +1,10 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+const GENERATED_IMAGES_BUCKET = 'mira-generations';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -17,6 +19,16 @@ const STALLED_VTO_WORKER_CATCH_ALL_THRESHOLD_SECONDS = 55;
 const MAX_WATCHDOG_RETRIES = 3;
 const STALLED_MASK_EXPANDED_THRESHOLD_SECONDS = 120;
 const STALLED_PROCESSING_STEP_2_THRESHOLD_SECONDS = 60;
+const STALLED_FINALIZATION_THRESHOLD_SECONDS = 60;
+
+async function uploadBase64ToStorage(supabase: SupabaseClient, base64: string, userId: string, filename: string) {
+    const buffer = decodeBase64(base64);
+    const filePath = `${userId}/vto-pack-results/${Date.now()}-${filename}`;
+    const { error } = await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(filePath, new Blob([buffer], { type: 'image/png' }), { contentType: 'image/png', upsert: true });
+    if (error) throw error;
+    const { data: { publicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
+    return { publicUrl, storagePath: filePath };
+}
 
 serve(async (req)=>{
   const requestId = `watchdog-bg-${Date.now()}`;
@@ -49,6 +61,55 @@ serve(async (req)=>{
     const actionsTaken: string[] = [];
     
     // --- Each task is now wrapped in its own try/catch block for maximum resilience ---
+    try {
+        console.log(`[Watchdog-BG][${requestId}] === Task: Finalizing Gracefully Failed Jobs ===`);
+        const finalizationThreshold = new Date(Date.now() - STALLED_FINALIZATION_THRESHOLD_SECONDS * 1000).toISOString();
+        const { data: jobsToFinalize, error: finalizeError } = await supabase
+            .from('mira-agent-bitstudio-jobs')
+            .select('id, user_id, metadata')
+            .eq('status', 'awaiting_finalization')
+            .lt('updated_at', finalizationThreshold);
+
+        if (finalizeError) throw finalizeError;
+
+        if (jobsToFinalize && jobsToFinalize.length > 0) {
+            console.log(`[Watchdog-BG][${requestId}] Found ${jobsToFinalize.length} jobs awaiting finalization.`);
+            const finalizationPromises = jobsToFinalize.map(async (job) => {
+                const logPrefix = `[Watchdog-Finalizer][${job.id}]`;
+                try {
+                    const { final_image_base64, finalization_reason } = job.metadata;
+                    if (!final_image_base64 || !finalization_reason) {
+                        throw new Error("Job is missing final_image_base64 or finalization_reason in metadata.");
+                    }
+                    console.log(`${logPrefix} Finalizing job...`);
+                    const finalImage = await uploadBase64ToStorage(supabase, final_image_base64, job.user_id, 'final_vto_pack.png');
+                    await supabase.from('mira-agent-bitstudio-jobs').update({
+                        status: 'complete',
+                        final_image_url: finalImage.publicUrl,
+                        error_message: finalization_reason,
+                        metadata: {
+                            ...job.metadata,
+                            final_image_base64: null, // Clear large data
+                            google_vto_step: 'done'
+                        }
+                    }).eq('id', job.id);
+                    console.log(`${logPrefix} Job finalized successfully.`);
+                } catch (e) {
+                    console.error(`${logPrefix} Error during finalization:`, e.message);
+                    await supabase.from('mira-agent-bitstudio-jobs').update({
+                        status: 'failed',
+                        error_message: `Watchdog finalization failed: ${e.message}`
+                    }).eq('id', job.id);
+                }
+            });
+            await Promise.allSettled(finalizationPromises);
+            actionsTaken.push(`Finalized ${jobsToFinalize.length} gracefully failed jobs.`);
+        } else {
+            console.log(`[Watchdog-BG][${requestId}] No jobs awaiting finalization.`);
+        }
+    } catch (e) {
+        console.error(`[Watchdog-BG][${requestId}] Task (Finalization) failed:`, e.message);
+    }
     try {
       console.log(`[Watchdog-BG][${requestId}] === Task 1: Triggering Self-Sufficient BitStudio Poller ===`);
       const { error: invokeError } = await supabase.functions.invoke('MIRA-AGENT-poller-bitstudio', {
@@ -119,7 +180,7 @@ serve(async (req)=>{
     try {
       console.log(`[Watchdog-BG][${requestId}] === NEW TASK: Recovering Stalled 'segmenting' Jobs ===`);
       const threshold = new Date(Date.now() - STALLED_SEGMENTING_THRESHOLD_SECONDS * 1000).toISOString();
-      const { data: stalledJobs, error } = await supabase.from('mira-agent-batch-inpaint-pair-jobs').select('id').in('status', ['segmenting']).lt('updated_at', threshold);
+      const { data: stalledJobs, error } = await supabase.from('mira-agent-batch-inpaint-pair-jobs').select('id').in('status', [ 'segmenting' ]).lt('updated_at', threshold);
       if (error) throw error;
       if (stalledJobs && stalledJobs.length > 0) {
         console.log(`[Watchdog-BG][${requestId}] Found ${stalledJobs.length} stalled 'segmenting' jobs. Resetting to 'pending'.`);
