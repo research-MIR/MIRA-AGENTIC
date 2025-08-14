@@ -9,6 +9,7 @@ const FAL_KEY = Deno.env.get('FAL_KEY');
 const POLLING_INTERVAL_MS = 5000;
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
 const MAX_RETRIES = 2;
+const MAX_BASE_MODEL_RETRIES = 2;
 const ANALYSIS_STALLED_THRESHOLD_SECONDS = 60;
 
 const corsHeaders = {
@@ -275,110 +276,141 @@ async function handlePendingState(supabase: any, job: any) {
 }
 
 async function handleBaseGenerationCompleteState(supabase: any, job: any) {
-    const logPrefix = `[ModelGenPoller][${job.id}]`;
-    console.log(`${logPrefix} State: BASE_GENERATION_COMPLETE.`);
-    if (job.auto_approve) {
-        console.log(`${logPrefix} Auto-approving best image...`);
-        const { data: qaData, error: qaError } = await supabase.functions.invoke('MIRA-AGENT-tool-quality-assurance-model', {
-            body: { 
-                image_urls: job.base_generation_results.map((img: any) => img.url),
-                model_description: job.model_description,
-                set_description: job.set_description,
-                final_generation_prompt: job.metadata?.final_prompt_used
-            }
-        });
-        if (qaError) throw new Error(`Quality assurance failed: ${qaError.message}`);
-        
-        const bestImage = job.base_generation_results[qaData.best_image_index];
+  const logPrefix = `[ModelGenPoller][${job.id}]`;
+  console.log(`${logPrefix} State: BASE_GENERATION_COMPLETE.`);
+
+  if (job.auto_approve) {
+    console.log(`${logPrefix} Auto-approving best image...`);
+    const { data: qaData, error: qaError } = await supabase.functions.invoke('MIRA-AGENT-tool-quality-assurance-model', {
+      body: {
+        image_urls: job.base_generation_results.map((img: any) => img.url),
+        model_description: job.model_description,
+        set_description: job.set_description,
+        final_generation_prompt: job.metadata?.final_prompt_used
+      }
+    });
+
+    if (qaError) throw new Error(`Quality assurance failed: ${qaError.message}`);
+
+    if (qaData.action === 'select') {
+      console.log(`${logPrefix} QA check passed. Reason: "${qaData.reasoning}". Selecting image index ${qaData.best_image_index}.`);
+      const bestImage = job.base_generation_results[qaData.best_image_index];
+      await supabase.from('mira-agent-model-generation-jobs').update({
+        status: 'generating_poses',
+        base_model_image_url: bestImage.url,
+        gender: qaData.gender
+      }).eq('id', job.id);
+
+      console.log(`${logPrefix} AI selected image and tagged gender as '${qaData.gender}'. Invoking analyzer to create Identity Passport.`);
+      supabase.functions.invoke('MIRA-AGENT-analyzer-pose-image', {
+        body: { job_id: job.id, base_model_image_url: bestImage.url }
+      }).catch((err: any) => console.error(`${logPrefix} Failed to invoke Identity Passport creation:`, err));
+
+      console.log(`${logPrefix} Re-invoking poller to proceed to 'generating_poses' state.`);
+      supabase.functions.invoke('MIRA-AGENT-poller-model-generation', { body: { job_id: job.id } }).catch(console.error);
+
+    } else if (qaData.action === 'retry') {
+      console.warn(`${logPrefix} QA check failed. Reason: "${qaData.reasoning}". Initiating retry.`);
+      const currentRetries = job.metadata?.base_model_retry_count || 0;
+
+      if (currentRetries < MAX_BASE_MODEL_RETRIES) {
+        const newRetryCount = currentRetries + 1;
+        console.log(`${logPrefix} Attempting retry ${newRetryCount}/${MAX_BASE_MODEL_RETRIES}. Resetting job to 'pending'.`);
         await supabase.from('mira-agent-model-generation-jobs').update({
-            status: 'generating_poses', // This will be the next state
-            base_model_image_url: bestImage.url,
-            gender: qaData.gender
+          status: 'pending',
+          base_generation_results: [], // Clear the failed results
+          metadata: { ...job.metadata, base_model_retry_count: newRetryCount },
+          error_message: `QA failed: ${qaData.reasoning}. Retrying...`
         }).eq('id', job.id);
-        
-        console.log(`${logPrefix} AI selected image and tagged gender as '${qaData.gender}'. Invoking analyzer to create Identity Passport.`);
-        
-        // Create the Identity Passport
-        supabase.functions.invoke('MIRA-AGENT-analyzer-pose-image', {
-            body: { job_id: job.id, base_model_image_url: bestImage.url }
-        }).catch(err => console.error(`${logPrefix} Failed to invoke Identity Passport creation:`, err));
 
-        console.log(`${logPrefix} Re-invoking poller to proceed to 'generating_poses' state.`);
+        console.log(`${logPrefix} Job reset. Re-invoking poller to generate a new batch.`);
         supabase.functions.invoke('MIRA-AGENT-poller-model-generation', { body: { job_id: job.id } }).catch(console.error);
-
+      } else {
+        const finalErrorMessage = `Failed to generate a valid base model after ${MAX_BASE_MODEL_RETRIES + 1} attempts. Last reason: ${qaData.reasoning}`;
+        console.error(`${logPrefix} ${finalErrorMessage}`);
+        await supabase.from('mira-agent-model-generation-jobs').update({
+          status: 'failed',
+          error_message: finalErrorMessage
+        }).eq('id', job.id);
+      }
     } else {
-        console.log(`${logPrefix} Awaiting manual user approval.`);
-        await supabase.from('mira-agent-model-generation-jobs').update({ status: 'awaiting_approval' }).eq('id', job.id);
+      throw new Error(`QA tool returned an unknown action: '${qaData.action}'`);
     }
+  } else {
+    console.log(`${logPrefix} Awaiting manual user approval.`);
+    await supabase.from('mira-agent-model-generation-jobs').update({
+      status: 'awaiting_approval'
+    }).eq('id', job.id);
+  }
 }
 
 async function handleGeneratingPosesState(supabase: any, job: any) {
-    console.log(`[ModelGenPoller][${job.id}] State: GENERATING_POSES.`);
-    
-    const basePose = {
-        pose_prompt: "Neutral A-pose, frontal",
-        comfyui_prompt_id: null,
-        status: 'analyzing', // Base pose is immediately ready for analysis
-        final_url: job.base_model_image_url,
-        is_upscaled: false,
-        analysis_started_at: new Date().toISOString(),
-        retry_count: 0,
-        qa_history: []
+  console.log(`[ModelGenPoller][${job.id}] State: GENERATING_POSES.`);
+  
+  const basePose = {
+    pose_prompt: "Neutral A-pose, frontal",
+    comfyui_prompt_id: null,
+    status: 'analyzing', // Base pose is immediately ready for analysis
+    final_url: job.base_model_image_url,
+    is_upscaled: false,
+    analysis_started_at: new Date().toISOString(),
+    retry_count: 0,
+    qa_history: []
+  };
+
+  const newPosePlaceholders = job.pose_prompts.map((pose: any) => ({
+    pose_prompt: pose.value,
+    comfyui_prompt_id: null,
+    status: 'pending',
+    final_url: null,
+    is_upscaled: false,
+    retry_count: 0,
+    qa_history: []
+  }));
+
+  const finalPoseArray = [basePose, ...newPosePlaceholders];
+
+  await supabase.from('mira-agent-model-generation-jobs').update({ 
+    status: 'generating_poses',
+    final_posed_images: finalPoseArray 
+  }).eq('id', job.id);
+
+  // Dispatch analysis for the base pose
+  supabase.functions.invoke('MIRA-AGENT-analyzer-pose-image', {
+    body: {
+      job_id: job.id,
+      image_url: job.base_model_image_url,
+      base_model_image_url: job.base_model_image_url,
+      pose_prompt: basePose.pose_prompt
+    }
+  }).catch(err => console.error(`[ModelGenPoller][${job.id}] ERROR: Failed to invoke analyzer for base pose:`, err));
+
+  // Dispatch generation for all other poses
+  const poseGenerationPromises = job.pose_prompts.map((pose: any) => {
+    const payload = {
+      job_id: job.id,
+      base_model_url: job.base_model_image_url,
+      pose_prompt: pose.value,
+      pose_image_url: pose.type === 'image' ? pose.value : null,
     };
+    return supabase.functions.invoke('MIRA-AGENT-tool-comfyui-pose-generator', { body: payload });
+  });
 
-    const newPosePlaceholders = job.pose_prompts.map((pose: any) => ({
-        pose_prompt: pose.value,
-        comfyui_prompt_id: null,
-        status: 'pending',
-        final_url: null,
-        is_upscaled: false,
-        retry_count: 0,
-        qa_history: []
-    }));
-
-    const finalPoseArray = [basePose, ...newPosePlaceholders];
-
-    await supabase.from('mira-agent-model-generation-jobs').update({ 
-        status: 'generating_poses',
-        final_posed_images: finalPoseArray 
-    }).eq('id', job.id);
-
-    // Dispatch analysis for the base pose
-    supabase.functions.invoke('MIRA-AGENT-analyzer-pose-image', {
-        body: {
-            job_id: job.id,
-            image_url: job.base_model_image_url,
-            base_model_image_url: job.base_model_image_url,
-            pose_prompt: basePose.pose_prompt
-        }
-    }).catch(err => console.error(`[ModelGenPoller][${job.id}] ERROR: Failed to invoke analyzer for base pose:`, err));
-
-    // Dispatch generation for all other poses
-    const poseGenerationPromises = job.pose_prompts.map((pose: any) => {
-        const payload = {
-            job_id: job.id,
-            base_model_url: job.base_model_image_url,
-            pose_prompt: pose.value,
-            pose_image_url: pose.type === 'image' ? pose.value : null,
-        };
-        return supabase.functions.invoke('MIRA-AGENT-tool-comfyui-pose-generator', { body: payload });
-    });
-
-    Promise.allSettled(poseGenerationPromises).then(results => {
-        const failedCount = results.filter(r => r.status === 'rejected').length;
-        if (failedCount > 0) {
-            console.error(`[ModelGenPoller][${job.id}] Failed to dispatch ${failedCount} pose generation jobs.`);
-        } else {
-            console.log(`[ModelGenPoller][${job.id}] All ${job.pose_prompts.length} pose generation jobs dispatched successfully.`);
-        }
-        
-        supabase.from('mira-agent-model-generation-jobs').update({ status: 'polling_poses' })
-            .eq('id', job.id)
-            .then(() => {
-                console.log(`[ModelGenPoller][${job.id}] Status updated to polling_poses. Re-invoking poller.`);
-                supabase.functions.invoke('MIRA-AGENT-poller-model-generation', { body: { job_id: job.id } }).catch(console.error);
-            });
-    });
+  Promise.allSettled(poseGenerationPromises).then(results => {
+    const failedCount = results.filter(r => r.status === 'rejected').length;
+    if (failedCount > 0) {
+      console.error(`[ModelGenPoller][${job.id}] Failed to dispatch ${failedCount} pose generation jobs.`);
+    } else {
+      console.log(`[ModelGenPoller][${job.id}] All ${job.pose_prompts.length} pose generation jobs dispatched successfully.`);
+    }
+    
+    supabase.from('mira-agent-model-generation-jobs').update({ status: 'polling_poses' })
+      .eq('id', job.id)
+      .then(() => {
+        console.log(`[ModelGenPoller][${job.id}] Status updated to polling_poses. Re-invoking poller.`);
+        supabase.functions.invoke('MIRA-AGENT-poller-model-generation', { body: { job_id: job.id } }).catch(console.error);
+      });
+  });
 }
 
 async function handlePollingPosesState(supabase: any, job: any) {
