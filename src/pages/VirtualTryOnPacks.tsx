@@ -2,21 +2,11 @@ import React, { useState, useMemo, useRef, useEffect } from "react";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { useLanguage } from "@/context/LanguageContext";
 import { Button } from "@/components/ui/button";
-import { VtoModeSelector } from "@/components/VTO/VtoModeSelector";
-import { VtoInputProvider, QueueItem } from "@/components/VTO/VtoInputProvider";
-import { VtoReviewQueue } from "@/components/VTO/VtoReviewQueue";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Wand2, Loader2, Info, History, ArrowLeft, BarChart2, CheckCircle, XCircle, AlertTriangle, UserCheck2, BadgeAlert, FileText, RefreshCw, Download, HardDriveDownload } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { optimizeImage, sanitizeFilename } from "@/lib/utils";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Switch } from "@/components/ui/switch";
-import { cn } from "@/lib/utils";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Card, CardContent } from "@/components/ui/card";
 import { Link } from "react-router-dom";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Progress } from "@/components/ui/progress";
@@ -87,8 +77,6 @@ const RecentPacksView = () => {
   const [packToDownload, setPackToDownload] = useState<PackSummary | null>(null);
   const [isStartingRefinement, setIsStartingRefinement] = useState<string | null>(null);
   const [packToRefine, setPackToRefine] = useState<PackSummary | null>(null);
-  const [isRetrying, setIsRetrying] = useState<string | null>(null);
-  const [isRequeuing, setIsRequeuing] = useState<string | null>(null);
   const [isRetryingIncomplete, setIsRetryingIncomplete] = useState<string | null>(null);
 
   const { data: queryData, isLoading, error } = useQuery<any>({
@@ -209,7 +197,6 @@ const RecentPacksView = () => {
         summary.completed_jobs = jobsForThisPack.filter((j: any) => (j.status === 'complete' || j.status === 'done') && j.final_image_url).length;
         summary.pending_jobs = jobsForThisPack.filter((j: any) => j.status === 'pending').length;
         
-        // Reset report-based counts before recalculating from reports
         summary.passed_perfect = 0;
         summary.passed_pose_change = 0;
         summary.passed_logo_issue = 0;
@@ -456,4 +443,37 @@ const RecentPacksView = () => {
   );
 };
 
-// ... rest of the file remains the same
+const VirtualTryOnPacks = () => {
+  const { t } = useLanguage();
+  const [mode, setMode] = useState<'view' | 'create'>('view');
+  const [queue, setQueue] = useState<QueueItem[]>([]);
+
+  const handleQueueReady = (newQueue: QueueItem[]) => {
+    setQueue(newQueue);
+    setMode('review');
+  };
+
+  if (mode === 'view') {
+    return (
+      <div className="p-4 md:p-8 h-screen overflow-y-auto">
+        <header className="pb-4 mb-8 border-b">
+          <h1 className="text-3xl font-bold">{t('virtualTryOnPacks')}</h1>
+          <p className="text-muted-foreground">{t('vtoPacksDescription')}</p>
+        </header>
+        <RecentPacksView />
+      </div>
+    );
+  }
+
+  if (mode === 'create') {
+    return <VtoInputProvider onQueueReady={handleQueueReady} onGoBack={() => setMode('view')} />;
+  }
+
+  if (mode === 'review') {
+    return <VtoReviewQueue queue={queue} />;
+  }
+
+  return null;
+};
+
+export default VirtualTryOnPacks;
