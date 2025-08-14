@@ -2,7 +2,6 @@ export const vtoTranslations = {
   it: {
     proMode: "Modalità Pro",
     vtoDescription: "Una suite di strumenti per il camerino virtuale. Usa 'Prova Singola' per creazioni individuali dettagliate o 'Processo Multiplo' per generare più variazioni contemporaneamente.",
-    vtoPacksDescription: "Rivedi e gestisci i tuoi pack di generazione Virtual Try-On (VTO).",
     noRecentJobsVTO: "Nessun job recente trovato per questa modalità.",
     singleVtoDescription: "Carica un'immagine di una persona e una di un indumento. L'IA può generare automaticamente un prompt per combinarli, oppure puoi scriverne uno tu.",
     personImage: "Immagine Persona",
@@ -165,7 +164,6 @@ Prima di tentare di nuovo, controlla se il tuo lavoro appare nella lista dei "Jo
   en: {
     proMode: "Pro Mode",
     vtoDescription: "A suite of tools for the virtual dressing room. Use 'Single Try-On' for detailed individual creations or 'Batch Process' to generate multiple variations at once.",
-    vtoPacksDescription: "Review and manage your Virtual Try-On (VTO) generation packs.",
     noRecentJobsVTO: "No recent jobs found for this mode.",
     singleVtoDescription: "Upload one person and one garment image. The AI can auto-generate a prompt to combine them, or you can write your own.",
     personImage: "Person Image",
