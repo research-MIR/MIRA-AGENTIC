@@ -195,21 +195,7 @@ serve(async (req) => {
     }
 
     const { data: fetchedJob, error: fetchError } = await supabase.from('mira-agent-bitstudio-jobs').select('*').eq('id', pair_job_id).single();
-    if (fetchError) {
-        // NEW: Check for specific database connection error
-        if (fetchError.message.includes("Could not query the database for the schema cache")) {
-            if (retry_attempt < MAX_DB_RETRIES) {
-                const delay = 10000 * Math.pow(2, retry_attempt); // 10s, 20s, 40s...
-                console.warn(`${logPrefix} Database connection error. Retrying in ${delay}ms (Attempt ${retry_attempt + 1}/${MAX_DB_RETRIES}).`);
-                await new Promise(resolve => setTimeout(resolve, delay));
-                await invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id, reframe_result_url, bitstudio_result_url, retry_attempt: retry_attempt + 1 });
-                return new Response(JSON.stringify({ success: true, message: "Retrying due to DB connection issue." }), { headers: corsHeaders });
-            } else {
-                throw new Error(`Database connection failed after ${MAX_DB_RETRIES} retries.`);
-            }
-        }
-        throw new Error(fetchError.message || 'Failed to fetch job.');
-    }
+    if (fetchError) throw fetchError;
     job = fetchedJob;
 
     const terminalStatuses = ['complete', 'failed', 'permanently_failed', 'awaiting_reframe'];
@@ -277,24 +263,17 @@ serve(async (req) => {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`${logPrefix} Error:`, errorMessage);
 
-    if (errorMessage.includes("Relay Error") || errorMessage.includes("Error invoking the Edge Function")) {
-        console.warn(`${logPrefix} Invocation error detected. Attempting recovery.`);
-        try {
-            const { data: currentJobState, error: refetchError } = await supabase.from('mira-agent-bitstudio-jobs').select('metadata').eq('id', pair_job_id).single();
-            if (refetchError) throw refetchError;
+    const isInfrastructureError = errorMessage.includes("Could not query the database for the schema cache") || errorMessage.includes("Edge Function returned a non-2xx status code");
 
-            const retries = (currentJobState.metadata?.invocation_retries || 0) + 1;
-            if (retries <= 2) {
-                console.log(`${logPrefix} Re-invoking self for recovery. Attempt ${retries}/2.`);
-                await supabase.from('mira-agent-bitstudio-jobs').update({ metadata: { ...currentJobState.metadata, invocation_retries: retries } }).eq('id', pair_job_id);
-                await invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id: pair_job_id });
-                return new Response(JSON.stringify({ success: true, message: `Recovery attempt ${retries} initiated.` }), { headers: corsHeaders });
-            } else {
-                console.error(`${logPrefix} Max invocation retries reached. Proceeding to fail the job.`);
-            }
-        } catch (recoveryError) {
-            console.error(`${logPrefix} Recovery attempt failed:`, recoveryError.message);
-        }
+    if (isInfrastructureError && retry_attempt < MAX_DB_RETRIES) {
+        const nextAttempt = retry_attempt + 1;
+        const delay = 10000 * Math.pow(2, retry_attempt); // 10s, 20s, 40s...
+        console.warn(`${logPrefix} Infrastructure error detected. Retrying in ${delay}ms (Attempt ${nextAttempt}/${MAX_DB_RETRIES}).`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        
+        await invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', { pair_job_id, reframe_result_url, bitstudio_result_url, retry_attempt: nextAttempt });
+        
+        return new Response(JSON.stringify({ success: true, message: `Recovery attempt ${nextAttempt} initiated.` }), { headers: corsHeaders });
     }
 
     const currentStep = job?.metadata?.google_vto_step;
