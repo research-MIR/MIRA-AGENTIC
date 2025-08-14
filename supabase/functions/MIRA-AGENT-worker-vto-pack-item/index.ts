@@ -143,18 +143,21 @@ async function generateMixedPortfolio(supabase: SupabaseClient, job: any, steps:
 }
 
 async function createPaddedSquareImage(image: ISImage, logPrefix: string): Promise<ISImage> {
-  console.log(`${logPrefix} [createPaddedSquareImage] Applying 1:1 squaring and 15% padding.`);
+  // NOTE: Padding has been temporarily set to zero as it seems unnecessary for the model.
+  // The primary goal is to standardize the image to a 1:1 aspect ratio by placing it on a square canvas.
+  console.log(`${logPrefix} [createPaddedSquareImage] Applying 1:1 squaring with zero padding.`);
   const originalWidth = image.width;
   const originalHeight = image.height;
-  const borderX = originalWidth * 0.15;
-  const borderY = originalHeight * 0.15;
-  const paddedWidth = originalWidth + (2 * borderX);
-  const paddedHeight = originalHeight + (2 * borderY);
-  const canvasSize = Math.round(Math.max(paddedWidth, paddedHeight));
+
+  // Create a square canvas based on the longest side of the original image.
+  const canvasSize = Math.round(Math.max(originalWidth, originalHeight));
   const finalCanvas = new ISImage(canvasSize, canvasSize).fill(0xFFFFFFFF); // White background
+
+  // Center the original image on the new square canvas.
   const destX = Math.round((canvasSize - originalWidth) / 2);
   const destY = Math.round((canvasSize - originalHeight) / 2);
   finalCanvas.composite(image, destX, destY);
+  
   console.log(`${logPrefix} [createPaddedSquareImage] Transformed from ${originalWidth}x${originalHeight} to ${canvasSize}x${canvasSize} canvas.`);
   return finalCanvas;
 }
@@ -187,7 +190,7 @@ serve(async (req)=>{
       'failed',
       'permanently_failed',
       'awaiting_reframe',
-      'awaiting_finalization' // Add new state here
+      'awaiting_finalization'
     ];
     const isTerminalStep = job.metadata?.google_vto_step === 'done';
     if (terminalStatuses.includes(job.status) || isTerminalStep) {
@@ -810,7 +813,7 @@ async function handleAutoComplete(supabase: SupabaseClient, job: any, logPrefix:
   const finalImageBase64 = vtoResult?.generatedImages?.[0]?.base64Image;
   if (!finalImageBase64) throw new Error("Auto-complete VTO did not return a valid image.");
   if (job.metadata.skip_reframe === true) {
-    console.log(`${logPrefix} Auto-complete finished. 'skip_reframe' is true. Finalizing job with 1:1 image.`);
+    console.log(`${logPrefix} Auto-complete finished. 'skip_reframe' is true. Setting job to 'awaiting_finalization'.`);
     await supabase.from('mira-agent-bitstudio-jobs').update({
         status: 'awaiting_finalization',
         metadata: {
@@ -851,6 +854,7 @@ async function handleReframe(supabase: SupabaseClient, job: any, logPrefix: stri
   const { qa_best_image_base64, final_aspect_ratio, prompt_appendix } = job.metadata;
   if (!qa_best_image_base64) throw new Error("Missing best VTO image for reframe step.");
   if (job.metadata.skip_reframe === true || job.metadata.final_aspect_ratio === '1:1') {
+    console.log(`${logPrefix} Reframe skipped as per configuration. Setting job to 'awaiting_finalization'.`);
     await supabase.from('mira-agent-bitstudio-jobs').update({
         status: 'awaiting_finalization',
         metadata: {
@@ -859,7 +863,7 @@ async function handleReframe(supabase: SupabaseClient, job: any, logPrefix: stri
             finalization_reason: "Reframe skipped as per configuration."
         }
     }).eq('id', job.id);
-    console.log(`${logPrefix} Reframe skipped. Job is now awaiting finalization by the watchdog.`);
+    console.log(`${logPrefix} Job is now awaiting finalization by the watchdog.`);
   } else {
     try {
       const { data: reframeJobData, error: reframeError } = await supabase.functions.invoke('MIRA-AGENT-proxy-reframe', {
@@ -908,7 +912,7 @@ async function handleReframe(supabase: SupabaseClient, job: any, logPrefix: stri
                 finalization_reason: `Reframe failed after ${MAX_REFRAME_RETRIES} attempts: ${errorMessage}`
             }
         }).eq('id', job.id);
-        console.log(`${logPrefix} Reframe failed. Job is now awaiting finalization by the watchdog.`);
+        console.log(`${logPrefix} Job is now awaiting finalization by the watchdog.`);
       }
     }
   }
