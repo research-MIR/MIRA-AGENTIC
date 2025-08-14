@@ -52,6 +52,7 @@ export const reportsTranslations = {
     restartIncompleteConfirmationTitle: "Riavviare i Job Incompleti?",
     restartIncompleteConfirmationDescription: "Questo rimetterà in coda tutti i {count} job in sospeso, in elaborazione e falliti in questo pack. I job completati con successo non saranno interessati. Vuoi continuare?",
     restartIncompleteAction: "Sì, Riavvia Job",
+    gracefullyFailedTooltip: "Questo pack contiene {count} immagini che sono state completate forzatamente nonostante problemi di qualità.",
   },
   en: {
     vtoAnalysisReports: "VTO Analysis Reports",
@@ -106,5 +107,6 @@ export const reportsTranslations = {
     restartIncompleteConfirmationTitle: "Restart Incomplete Jobs?",
     restartIncompleteConfirmationDescription: "This will re-queue all {count} pending, processing, and failed jobs in this pack. Successfully completed jobs will not be affected. Do you want to continue?",
     restartIncompleteAction: "Yes, Restart Jobs",
+    gracefullyFailedTooltip: "This pack contains {count} images that were force-completed despite quality issues.",
   },
 };
