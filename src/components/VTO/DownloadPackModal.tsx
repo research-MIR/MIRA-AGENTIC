@@ -14,7 +14,7 @@ import { Loader2, Download, CheckCircle, ImageIcon, Shirt, Users, List } from "l
 import { useLanguage } from "@/context/LanguageContext";
 import { useSession } from '@/components/Auth/SessionContextProvider';
 import { showError, showSuccess, showLoading, dismissToast } from '@/utils/toast';
-import { cn } from '@/lib/utils';
+import { cn, calculateFileHash } from '@/lib/utils';
 import JSZip from 'jszip';
 import { Progress } from '@/components/ui/progress';
 
@@ -88,17 +88,15 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
       setProgressMessage("Loading wardrobe...");
       const { data: wardrobeGarments, error: wardrobeError } = await supabase
         .from('mira-agent-garments')
-        .select('id, storage_path, image_hash')
+        .select('id, image_hash')
         .eq('user_id', session!.user.id);
       if (wardrobeError) throw wardrobeError;
 
-      const storagePathToIdMap = new Map<string, string>();
-      const hashToIdMap = new Map<string, string>();
+      const hashToGarmentIdMap = new Map<string, string>();
       wardrobeGarments.forEach(g => {
-          if (g.storage_path) storagePathToIdMap.set(g.storage_path, g.id);
-          if (g.image_hash) hashToIdMap.set(g.image_hash, g.id);
+          if (g.image_hash) hashToGarmentIdMap.set(g.image_hash, g.id);
       });
-      console.log(`[DownloadPack] Pre-loaded ${wardrobeGarments.length} garments into lookup maps.`);
+      console.log(`[DownloadPack] Pre-loaded ${wardrobeGarments.length} garments into hash lookup map.`);
 
       setProgressMessage("Fetching job list...");
       let jobsToDownload: any[] = [];
@@ -162,6 +160,7 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
       let skippedCount = 0;
       let duplicateCount = 0;
       const filenames = new Set<string>();
+      const urlToHashMap = new Map<string, string>(); // Performance cache
 
       for (const job of jobsToDownload) {
         processedCount++;
@@ -176,48 +175,48 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
 
           // --- Pose ID Logic ---
           let poseId = 'pose_unknown';
-          let poseIdSource = 'unknown';
           if (job.metadata?.model_generation_job_id) {
               poseId = job.metadata.model_generation_job_id;
-              poseIdSource = 'model_generation_job_id';
           } else if (job.metadata?.original_vto_job_id) {
               poseId = job.metadata.original_vto_job_id;
-              poseIdSource = 'original_vto_job_id';
           } else if (job.source_person_image_url) {
               const urlParts = job.source_person_image_url.split('/');
               const filename = urlParts.pop()?.split('.')[0] || '';
               const timestampMatch = filename.match(/\d{13}/);
               if (timestampMatch) {
                   poseId = timestampMatch[0];
-                  poseIdSource = 'timestamp_from_url';
               } else {
                   poseId = filename.substring(0, 16);
-                  poseIdSource = 'substring_from_url';
               }
           }
-          
           if (!poseId || poseId.trim() === '' || poseId === 'pose_unknown') {
               poseId = job.id;
-              poseIdSource = 'fallback_job_id';
-              console.warn(`[DownloadPack] ANOMALY DETECTED for Job ID: ${job.id}\n> Reason: Could not determine a reliable Pose ID.\n> Fallback Action: Using Job ID as the Pose ID.\n> Final Pose ID: ${poseId}`);
           }
 
-          // --- Garment ID Logic ---
+          // --- NEW Garment ID Logic ---
           let garmentId = 'garment_unknown';
-          let garmentIdSource = 'unknown';
-          const garmentHash = job.metadata?.garment_analysis?.hash;
           const garmentUrl = job.source_garment_image_url;
 
-          if (garmentHash && hashToIdMap.has(garmentHash)) {
-              garmentId = hashToIdMap.get(garmentHash)!;
-              garmentIdSource = 'hash_match';
-          } else if (garmentUrl && storagePathToIdMap.has(garmentUrl)) {
-              garmentId = storagePathToIdMap.get(garmentUrl)!;
-              garmentIdSource = 'url_match';
+          if (!garmentUrl) {
+              garmentId = job.id; // Fallback if URL is missing
+              console.warn(`[DownloadPack] ANOMALY DETECTED for Job ID: ${job.id}\n> Reason: source_garment_image_url is missing.\n> Fallback Action: Using Job ID as Garment ID.\n> Final Garment ID: ${garmentId}`);
           } else {
-              garmentId = job.id;
-              garmentIdSource = 'fallback_job_id';
-              console.warn(`[DownloadPack] ANOMALY DETECTED for Job ID: ${job.id}\n> Reason: Could not find a reliable Garment ID.\n>   - Hash Match: FAILED (Hash: ${garmentHash || 'N/A'})\n>   - URL Match: FAILED (URL: ${garmentUrl || 'N/A'})\n> Fallback Action: Using Job ID as the Garment ID.\n> Final Garment ID: ${garmentId}`);
+              let garmentHash = urlToHashMap.get(garmentUrl);
+              if (!garmentHash) {
+                  const response = await fetch(garmentUrl);
+                  if (!response.ok) throw new Error(`Failed to download garment image ${garmentUrl}`);
+                  const blob = await response.blob();
+                  const file = new File([blob], "tempfile");
+                  garmentHash = await calculateFileHash(file);
+                  urlToHashMap.set(garmentUrl, garmentHash);
+              }
+
+              if (hashToGarmentIdMap.has(garmentHash)) {
+                  garmentId = hashToGarmentIdMap.get(garmentHash)!;
+              } else {
+                  garmentId = job.id; // Fallback if hash not in wardrobe
+                  console.warn(`[DownloadPack] ANOMALY DETECTED for Job ID: ${job.id}\n> Reason: Garment hash '${garmentHash}' not found in Wardrobe.\n> Source URL: ${garmentUrl}\n> Fallback Action: Using Job ID as Garment ID.\n> Final Garment ID: ${garmentId}`);
+              }
           }
 
           const filename = `Pose_${sanitize(poseId)}_Garment_${sanitize(garmentId)}_JobID_${sanitize(job.id.substring(0, 8))}.jpg`;
