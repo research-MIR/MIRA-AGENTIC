@@ -62,6 +62,19 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
   const [progress, setProgress] = useState(0);
   const [progressMessage, setProgressMessage] = useState('');
 
+  const parseStorageURL = (url: string) => {
+    const urlObj = new URL(url);
+    const pathSegments = urlObj.pathname.split('/');
+    const objectIndex = pathSegments.indexOf('object');
+    if (objectIndex === -1 || objectIndex + 2 >= pathSegments.length) {
+      throw new Error(`Invalid Supabase URL format: ${url}`);
+    }
+    const bucketName = pathSegments[objectIndex + 2];
+    const pathStartIndex = urlObj.pathname.indexOf(bucketName) + bucketName.length + 1;
+    const storagePath = decodeURIComponent(urlObj.pathname.substring(pathStartIndex));
+    return { bucket: bucketName, path: storagePath };
+  };
+
   const handleDownload = async () => {
     if (!pack || !session?.user) return;
     setIsDownloading(true);
@@ -203,10 +216,10 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
           } else {
               let garmentHash = urlToHashMap.get(garmentUrl);
               if (!garmentHash) {
-                  const response = await fetch(garmentUrl);
-                  if (!response.ok) throw new Error(`Failed to download garment image ${garmentUrl}`);
-                  const blob = await response.blob();
-                  const file = new File([blob], "tempfile");
+                  const { bucket, path } = parseStorageURL(garmentUrl);
+                  const { data: blob, error } = await supabase.storage.from(bucket).download(path);
+                  if (error) throw new Error(`Failed to download garment image ${garmentUrl}: ${error.message}`);
+                  const file = new File([blob!], "tempfile");
                   garmentHash = await calculateFileHash(file);
                   urlToHashMap.set(garmentUrl, garmentHash);
               }
