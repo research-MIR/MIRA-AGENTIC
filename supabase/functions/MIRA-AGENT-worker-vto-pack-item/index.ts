@@ -127,8 +127,11 @@ async function generateMixedPortfolio(supabase: SupabaseClient, job: any, steps:
   try {
     console.log(`${logPrefix} Verifying dimensions of garment image before generation...`);
     const garmentBlob = await safeDownload(supabase, job.metadata.optimized_garment_url, logPrefix);
-    const garmentImage = await ISImage.decode(await garmentBlob.arrayBuffer());
+    const arr = await garmentBlob.arrayBuffer();
+    let garmentImage: ISImage | null = await ISImage.decode(arr);
     console.log(`${logPrefix} VERIFIED: Garment image dimensions sent to VTO tool are ${garmentImage.width}x${garmentImage.height}.`);
+    garmentImage = null;
+    await Promise.resolve();  // yield to GC
   } catch (e) {
     console.warn(`${logPrefix} Could not verify garment image dimensions before generation. This is non-fatal. Error: ${e.message}`);
   }
@@ -172,6 +175,9 @@ async function createPaddedSquareImage(image: ISImage, logPrefix: string): Promi
 
 // --- State Machine Logic ---
 serve(async (req)=>{
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders });
+  }
   const { pair_job_id, reframe_result_url, bitstudio_result_url, retry_attempt = 0 } = await req.json();
   if (!pair_job_id) {
     return new Response(JSON.stringify({
@@ -185,20 +191,13 @@ serve(async (req)=>{
   const logPrefix = `[VTO-Pack-Worker][${pair_job_id}]`;
   let job: any;
   try {
-    if (req.method === 'OPTIONS') {
-      return new Response(null, {
-        headers: corsHeaders
-      });
-    }
     const { data: fetchedJob, error: fetchError } = await supabase.from('mira-agent-bitstudio-jobs').select('*').eq('id', pair_job_id).single();
     if (fetchError) throw fetchError;
     job = fetchedJob;
     const terminalStatuses = [
       'complete',
       'failed',
-      'permanently_failed',
-      'awaiting_reframe',
-      'awaiting_finalization'
+      'permanently_failed'
     ];
     const isTerminalStep = job.metadata?.google_vto_step === 'done';
     if (terminalStatuses.includes(job.status) || isTerminalStep) {
@@ -505,7 +504,8 @@ async function handlePrepareAssets(supabase: SupabaseClient, job: any, logPrefix
     personBlob = null;
     let personImage: ISImage | null = await ISImage.decode(personArr);
     // @ts-ignore
-    let personArr_ = null;
+    let arr: any = personArr;
+    arr = null;
 
     const { width: originalWidth, height: originalHeight } = personImage;
     const abs_x = Math.floor(personBox[1] / 1000 * originalWidth);
@@ -537,7 +537,8 @@ async function handlePrepareAssets(supabase: SupabaseClient, job: any, logPrefix
     garmentBlob = null;
     let garmentImage: ISImage | null = await ISImage.decode(garmentArr);
     // @ts-ignore
-    let garmentArr_ = null;
+    let arr: any = garmentArr;
+    arr = null;
 
     const MAX_GARMENT_DIMENSION = 2048;
     if (Math.max(garmentImage.width, garmentImage.height) > MAX_GARMENT_DIMENSION) {
@@ -552,7 +553,8 @@ async function handlePrepareAssets(supabase: SupabaseClient, job: any, logPrefix
 
     const optimizedGarmentBuffer = await finalGarmentImage.encodeJPEG(75);
     // @ts-ignore
-    let finalGarmentImage_ = null;
+    let finalImg: any = finalGarmentImage;
+    finalImg = null;
 
     const optimizedGarmentBlob = new Blob([optimizedGarmentBuffer], { type: 'image/jpeg' });
     const tempGarmentPath = `tmp/${job.user_id}/${Date.now()}-optimized_garment.jpeg`;
@@ -1010,16 +1012,30 @@ async function handleAwaitingReframe(supabase: SupabaseClient, job: any, logPref
     console.log(`${logPrefix} STALL ACTION: Deleting stalled reframe job ${reframeJobId}.`);
     await supabase.from('mira-agent-jobs').delete().eq('id', reframeJobId);
     console.log(`${logPrefix} STALL ACTION: Restarting reframe process (Attempt ${reframeRetryCount}/${MAX_REFRAME_RETRIES}).`);
-    const { data: newReframeJobData, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-reframe', {
-      body: {
-        user_id: job.user_id,
-        base_image_base64: job.metadata.qa_best_image_base64,
-        prompt: job.metadata.prompt_appendix || "",
-        aspect_ratio: job.metadata.final_aspect_ratio,
-        source: 'reframe_from_vto',
-        parent_vto_job_id: job.id
+    
+    let base64ForReframe = job.metadata.qa_best_image_base64;
+    if (!base64ForReframe && job.metadata.qa_best_image_url) {
+      console.log(`${logPrefix} Base64 missing, re-downloading from URL for reframe restart...`);
+      const blob = await safeDownload(supabase, job.metadata.qa_best_image_url, logPrefix);
+      base64ForReframe = await blobToBase64(blob);
+    }
+    if (!base64ForReframe) {
+      throw new Error("Cannot restart reframe: missing qa_best_image_base64 and qa_best_image_url.");
+    }
+
+    const { data: newReframeJobData, error: proxyError } = await supabase.functions.invoke(
+      'MIRA-AGENT-proxy-reframe',
+      {
+        body: {
+          user_id: job.user_id,
+          base_image_base64: base64ForReframe,
+          prompt: job.metadata.prompt_appendix || "",
+          aspect_ratio: job.metadata.final_aspect_ratio,
+          source: 'reframe_from_vto',
+          parent_vto_job_id: job.id
+        }
       }
-    });
+    );
     if (proxyError) throw new Error(`Failed to re-invoke reframe proxy: ${proxyError.message}`);
     console.log(`${logPrefix} STALL ACTION: New reframe job ${newReframeJobData.jobId} created. Updating parent VTO job with new link.`);
     await supabase.from('mira-agent-bitstudio-jobs').update({
