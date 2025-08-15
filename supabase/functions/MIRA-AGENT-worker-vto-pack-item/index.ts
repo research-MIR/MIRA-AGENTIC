@@ -92,6 +92,15 @@ const blobToBase64 = async (blob: Blob): Promise<string> => {
   return encodeBase64(new Uint8Array(buffer));
 };
 
+function safeStringify(obj: any, limit = 5000): string {
+  try {
+    const s = JSON.stringify(obj);
+    return s.length > limit ? s.slice(0, limit) + `… [truncated ${s.length - limit} chars]` : s;
+  } catch {
+    return '[unstringifiable JSON]';
+  }
+}
+
 async function invokeWithRetry(supabase: SupabaseClient, functionName: string, payload: object, maxRetries: number, logPrefix: string) {
   let lastError: Error | null = null;
   for(let attempt = 1; attempt <= maxRetries; attempt++){
@@ -123,41 +132,55 @@ async function generateMixedPortfolio(supabase: SupabaseClient, job: any, steps:
   } catch (e) {
     console.warn(`${logPrefix} Could not verify garment image dimensions before generation. This is non-fatal. Error: ${e.message}`);
   }
-  const generationPromises = steps.map((stepConfig) => invokeWithRetry(supabase, 'MIRA-AGENT-tool-virtual-try-on', {
-      body: {
-        ...stepConfig,
-        person_image_url: job.metadata.cropped_person_url,
-        garment_image_url: job.metadata.optimized_garment_url
-      }
-    }, 3, logPrefix));
-  const results = await Promise.allSettled(generationPromises);
-  const successfulImages = results.filter((r): r is PromiseFulfilledResult<any> => r.status === 'fulfilled' && r.value?.generatedImages).flatMap(r => r.value.generatedImages);
-  if (successfulImages.length === 0) {
-    const firstRejection = results.find((r): r is PromiseRejectedResult => r.status === 'rejected');
-    if (firstRejection) {
-      throw firstRejection.reason;
+
+  // Run each step sequentially to lower peak memory.
+  const allImages: any[] = [];
+  for (const stepConfig of steps) {
+    const imagesFromStep = await invokeWithRetry(
+      supabase,
+      'MIRA-AGENT-tool-virtual-try-on',
+      {
+        body: {
+          ...stepConfig,
+          person_image_url: job.metadata.cropped_person_url,
+          garment_image_url: job.metadata.optimized_garment_url
+        }
+      },
+      3,
+      logPrefix
+    ).then(res => res?.generatedImages || []);
+
+    if (imagesFromStep.length === 0) {
+      throw new Error("VTO tool did not return any valid images for this generation step.");
     }
-    throw new Error("VTO tool did not return any valid images for this generation step.");
+
+    // Push and immediately let go of local references to reduce pressure.
+    for (const img of imagesFromStep) allImages.push(img);
   }
-  return successfulImages;
+
+  return allImages;
 }
 
 async function createPaddedSquareImage(image: ISImage, logPrefix: string): Promise<ISImage> {
-  // NOTE: Padding has been temporarily set to zero as it seems unnecessary for the model.
-  // The primary goal is to standardize the image to a 1:1 aspect ratio by placing it on a square canvas.
-  console.log(`${logPrefix} [createPaddedSquareImage] Applying 1:1 squaring with zero padding.`);
   const originalWidth = image.width;
   const originalHeight = image.height;
 
-  // Create a square canvas based on the longest side of the original image.
-  const canvasSize = Math.round(Math.max(originalWidth, originalHeight));
-  const finalCanvas = new ISImage(canvasSize, canvasSize).fill(0xFFFFFFFF); // White background
+  if (originalWidth === originalHeight) {
+    console.log(`${logPrefix} [createPaddedSquareImage] Already 1:1; skipping canvas allocation.`);
+    return image; // no extra canvas, no extra memory
+  }
 
-  // Center the original image on the new square canvas.
+  console.log(`${logPrefix} [createPaddedSquareImage] Applying 1:1 squaring with zero padding.`);
+  const canvasSize = Math.round(Math.max(originalWidth, originalHeight));
+  const finalCanvas = new ISImage(canvasSize, canvasSize).fill(0xFFFFFFFF);
   const destX = Math.round((canvasSize - originalWidth) / 2);
   const destY = Math.round((canvasSize - originalHeight) / 2);
   finalCanvas.composite(image, destX, destY);
-  
+
+  // Help GC: drop reference to the original bitmap now that it's copied
+  // @ts-ignore
+  image = null;
+
   console.log(`${logPrefix} [createPaddedSquareImage] Transformed from ${originalWidth}x${originalHeight} to ${canvasSize}x${canvasSize} canvas.`);
   return finalCanvas;
 }
@@ -479,61 +502,81 @@ async function handlePrepareAssets(supabase: SupabaseClient, job: any, logPrefix
   const { source_person_image_url, source_garment_image_url, metadata } = job;
   const personBox = metadata.bbox_person;
   if (!personBox) throw new Error("Cannot prepare assets: bbox_person is missing from metadata.");
+  
   let [personBlob, garmentBlob] = await Promise.all([
     safeDownload(supabase, source_person_image_url, logPrefix),
     safeDownload(supabase, source_garment_image_url, logPrefix)
   ]);
   console.log(`${logPrefix} Original blob sizes - Person: ${personBlob.size} bytes, Garment: ${garmentBlob.size} bytes.`);
-  const personImage = await ISImage.decode(await personBlob.arrayBuffer());
-  personBlob = null; // GC
-  const { width: originalWidth, height: originalHeight } = personImage;
-  const abs_x = Math.floor(personBox[1] / 1000 * originalWidth);
-  const abs_y = Math.floor(personBox[0] / 1000 * originalHeight);
-  const abs_width = Math.ceil((personBox[3] - personBox[1]) / 1000 * originalWidth);
-  const abs_height = Math.ceil((personBox[2] - personBox[0]) / 1000 * originalHeight);
-  const bbox = {
-    x: Math.max(0, Math.min(abs_x, originalWidth - 1)),
-    y: Math.max(0, Math.min(abs_y, originalHeight - 1)),
-    width: Math.max(1, Math.min(abs_width, originalWidth - abs_x)),
-    height: Math.max(1, Math.min(abs_height, originalHeight - abs_y))
-  };
-  const croppedPersonImage = personImage.clone().crop(bbox.x, bbox.y, bbox.width, bbox.height);
-  const croppedPersonBuffer = await croppedPersonImage.encodeJPEG(75);
-  const croppedPersonBlob = new Blob([
-    croppedPersonBuffer
-  ], {
-    type: 'image/jpeg'
-  });
-  const tempPersonPath = `tmp/${job.user_id}/${Date.now()}-cropped_person.jpeg`;
-  await safeUpload(supabase, TEMP_UPLOAD_BUCKET, tempPersonPath, croppedPersonBlob, {
-    contentType: "image/jpeg"
-  });
-  const croppedPersonUrl = await safeGetPublicUrl(supabase, TEMP_UPLOAD_BUCKET, tempPersonPath);
-  console.log(`${logPrefix} Cropped person image uploaded to temp storage.`);
-  const garmentImage = await ISImage.decode(await garmentBlob.arrayBuffer());
-  garmentBlob = null; // GC
-  const MAX_GARMENT_DIMENSION = 2048;
-  if (Math.max(garmentImage.width, garmentImage.height) > MAX_GARMENT_DIMENSION) {
-    garmentImage.resize(garmentImage.width > garmentImage.height ? MAX_GARMENT_DIMENSION : ISImage.RESIZE_AUTO, garmentImage.height > garmentImage.width ? MAX_GARMENT_DIMENSION : ISImage.RESIZE_AUTO);
+
+  let croppedPersonUrl: string;
+  let optimizedGarmentUrl: string;
+
+  { // PERSON SCOPE
+    const personArr = await personBlob.arrayBuffer();
+    personBlob = null;
+    let personImage: ISImage | null = await ISImage.decode(personArr);
+    // @ts-ignore
+    let personArr_ = null;
+
+    const { width: originalWidth, height: originalHeight } = personImage;
+    const abs_x = Math.floor(personBox[1] / 1000 * originalWidth);
+    const abs_y = Math.floor(personBox[0] / 1000 * originalHeight);
+    const abs_width = Math.ceil((personBox[3] - personBox[1]) / 1000 * originalWidth);
+    const abs_height = Math.ceil((personBox[2] - personBox[0]) / 1000 * originalHeight);
+    const bbox = {
+      x: Math.max(0, Math.min(abs_x, originalWidth - 1)),
+      y: Math.max(0, Math.min(abs_y, originalHeight - 1)),
+      width: Math.max(1, Math.min(abs_width, originalWidth - abs_x)),
+      height: Math.max(1, Math.min(abs_height, originalHeight - abs_y))
+    };
+    
+    personImage.crop(bbox.x, bbox.y, bbox.width, bbox.height);
+    const croppedPersonBuffer = await personImage.encodeJPEG(75);
+    // @ts-ignore
+    personImage = null;
+
+    const croppedPersonBlob = new Blob([croppedPersonBuffer], { type: 'image/jpeg' });
+    const tempPersonPath = `tmp/${job.user_id}/${Date.now()}-cropped_person.jpeg`;
+    await safeUpload(supabase, TEMP_UPLOAD_BUCKET, tempPersonPath, croppedPersonBlob, { contentType: "image/jpeg" });
+    croppedPersonUrl = await safeGetPublicUrl(supabase, TEMP_UPLOAD_BUCKET, tempPersonPath);
+    console.log(`${logPrefix} Cropped person image uploaded to temp storage.`);
   }
-  const finalGarmentImage = await createPaddedSquareImage(garmentImage, logPrefix);
-  const optimizedGarmentBuffer = await finalGarmentImage.encodeJPEG(75);
-  const optimizedGarmentBlob = new Blob([
-    optimizedGarmentBuffer
-  ], {
-    type: 'image/jpeg'
-  });
-  const tempGarmentPath = `tmp/${job.user_id}/${Date.now()}-optimized_garment.jpeg`;
-  await safeUpload(supabase, TEMP_UPLOAD_BUCKET, tempGarmentPath, optimizedGarmentBlob, {
-    contentType: "image/jpeg"
-  });
-  const optimizedGarmentUrl = await safeGetPublicUrl(supabase, TEMP_UPLOAD_BUCKET, tempGarmentPath);
-  console.log(`${logPrefix} Optimized, padded, and squared garment image uploaded to temp storage.`);
+
+  { // GARMENT SCOPE
+    const garmentArr = await garmentBlob.arrayBuffer();
+    garmentBlob = null;
+    let garmentImage: ISImage | null = await ISImage.decode(garmentArr);
+    // @ts-ignore
+    let garmentArr_ = null;
+
+    const MAX_GARMENT_DIMENSION = 2048;
+    if (Math.max(garmentImage.width, garmentImage.height) > MAX_GARMENT_DIMENSION) {
+      garmentImage.resize(
+        garmentImage.width > garmentImage.height ? MAX_GARMENT_DIMENSION : ISImage.RESIZE_AUTO,
+        garmentImage.height > garmentImage.width ? MAX_GARMENT_DIMENSION : ISImage.RESIZE_AUTO
+      );
+    }
+    const finalGarmentImage = await createPaddedSquareImage(garmentImage, logPrefix);
+    // @ts-ignore
+    garmentImage = null;
+
+    const optimizedGarmentBuffer = await finalGarmentImage.encodeJPEG(75);
+    // @ts-ignore
+    let finalGarmentImage_ = null;
+
+    const optimizedGarmentBlob = new Blob([optimizedGarmentBuffer], { type: 'image/jpeg' });
+    const tempGarmentPath = `tmp/${job.user_id}/${Date.now()}-optimized_garment.jpeg`;
+    await safeUpload(supabase, TEMP_UPLOAD_BUCKET, tempGarmentPath, optimizedGarmentBlob, { contentType: "image/jpeg" });
+    optimizedGarmentUrl = await safeGetPublicUrl(supabase, TEMP_UPLOAD_BUCKET, tempGarmentPath);
+    console.log(`${logPrefix} Optimized, padded, and squared garment image uploaded to temp storage.`);
+  }
+
   console.log(`${logPrefix} Saved processed garment URL to metadata.debug_assets: ${optimizedGarmentUrl}`);
   await supabase.from('mira-agent-bitstudio-jobs').update({
     metadata: {
       ...metadata,
-      bbox: bbox,
+      bbox: metadata.bbox_person, // Keep original bbox for potential future use
       cropped_person_url: croppedPersonUrl,
       optimized_garment_url: optimizedGarmentUrl,
       debug_assets: {
@@ -573,8 +616,9 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
   let qaData;
   let lastQaError = null;
   for(let attempt = 1; attempt <= QA_MAX_RETRIES; attempt++){
+    let personBlob: Blob | null = null, garmentBlob: Blob | null = null;
     try {
-      let [personBlob, garmentBlob] = await Promise.all([
+      [personBlob, garmentBlob] = await Promise.all([
         safeDownload(supabase, job.source_person_image_url, logPrefix),
         safeDownload(supabase, job.source_garment_image_url, logPrefix)
       ]);
@@ -587,8 +631,6 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
           is_absolute_final_attempt: !!bitstudio_result_url
         }
       });
-      personBlob = null; // GC
-      garmentBlob = null; // GC
       if (analysisError) throw analysisError;
       if (data.error) {
         throw new Error(`QA tool reported an internal failure: ${data.error}`);
@@ -603,6 +645,10 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
         const delay = 15000 * Math.pow(2, attempt - 1); // Exponential backoff: 15s, 30s, 60s
         await new Promise((resolve)=>setTimeout(resolve, delay));
       }
+    } finally {
+        personBlob = null;
+        garmentBlob = null;
+        await Promise.resolve(); // give GC a chance before retry
     }
   }
   if (lastQaError) {
@@ -616,7 +662,7 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
   if (!qaData || !qaData.action) {
     throw new Error("Quality checker returned invalid data after all retries and fallbacks.");
   }
-  console.log(`[VTO_QA_DECISION][${pair_job_id}] Full AI Response: ${JSON.stringify(qaData)}`);
+  console.log(`[VTO_QA_DECISION][${pair_job_id}] Full AI Response: ${safeStringify(qaData, 8000)}`);
   const qa_history = metadata.qa_history || [];
   const newHistoryEntry = {
     pass_number: qa_retry_count + 1,
@@ -635,13 +681,13 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
       } else {
         console.warn(`${logPrefix} Final QA check failed and fallback is disabled. Setting job to 'awaiting_finalization'.`);
         await supabase.from('mira-agent-bitstudio-jobs').update({
-            status: 'awaiting_finalization',
-            metadata: {
-                ...job.metadata,
-                qa_history: qa_history,
-                final_image_base64: bestImage.base64Image,
-                finalization_reason: `Generation quality was low, but this was the best available result. QA Reasoning: ${qaData.reasoning}`
-            }
+          status: 'awaiting_finalization',
+          metadata: {
+            ...job.metadata,
+            qa_history: qa_history,
+            final_image_base64: bestImage.base64Image,
+            finalization_reason: `Generation quality was low, but this was the best available result. QA Reasoning: ${qaData.reasoning}`
+          }
         }).eq('id', job.id);
         console.log(`${logPrefix} Job is now awaiting finalization by the watchdog.`);
         return;
@@ -754,7 +800,7 @@ async function handleOutfitCompletenessCheck(supabase: SupabaseClient, job: any,
     ...analysisData,
     vto_garment_type: garment_analysis.type_of_fit
   };
-  console.log(`[VTO_OUTFIT_COMPLETENESS_ANALYSIS][${pair_job_id}] Full Analysis: ${JSON.stringify(fullAnalysisLog)}`);
+  console.log(`[VTO_OUTFIT_COMPLETENESS_ANALYSIS][${pair_job_id}] Full Analysis: ${safeStringify(fullAnalysisLog, 8000)}`);
   if (analysisData.is_outfit_complete || analysisData.missing_items.length === 0) {
     console.log(`${logPrefix} Outfit is complete. Proceeding to reframe.`);
     await supabase.from('mira-agent-bitstudio-jobs').update({
@@ -856,12 +902,12 @@ async function handleReframe(supabase: SupabaseClient, job: any, logPrefix: stri
   if (job.metadata.skip_reframe === true || job.metadata.final_aspect_ratio === '1:1') {
     console.log(`${logPrefix} Reframe skipped as per configuration. Setting job to 'awaiting_finalization'.`);
     await supabase.from('mira-agent-bitstudio-jobs').update({
-        status: 'awaiting_finalization',
-        metadata: {
-            ...job.metadata,
-            final_image_base64: qa_best_image_base64,
-            finalization_reason: "Reframe skipped as per configuration."
-        }
+      status: 'awaiting_finalization',
+      metadata: {
+        ...job.metadata,
+        final_image_base64: qa_best_image_base64,
+        finalization_reason: "Reframe skipped as per configuration."
+      }
     }).eq('id', job.id);
     console.log(`${logPrefix} Job is now awaiting finalization by the watchdog.`);
   } else {
@@ -905,12 +951,12 @@ async function handleReframe(supabase: SupabaseClient, job: any, logPrefix: stri
       } else {
         console.error(`${logPrefix} Reframe failed after ${MAX_REFRAME_RETRIES} retries. Falling back to 1:1 image.`);
         await supabase.from('mira-agent-bitstudio-jobs').update({
-            status: 'awaiting_finalization',
-            metadata: {
-                ...job.metadata,
-                final_image_base64: qa_best_image_base64,
-                finalization_reason: `Reframe failed after ${MAX_REFRAME_RETRIES} attempts: ${errorMessage}`
-            }
+          status: 'awaiting_finalization',
+          metadata: {
+            ...job.metadata,
+            final_image_base64: qa_best_image_base64,
+            finalization_reason: `Reframe failed after ${MAX_REFRAME_RETRIES} attempts: ${errorMessage}`
+          }
         }).eq('id', job.id);
         console.log(`${logPrefix} Job is now awaiting finalization by the watchdog.`);
       }
