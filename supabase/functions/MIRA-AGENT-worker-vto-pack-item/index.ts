@@ -110,6 +110,9 @@ function buildRenderImageUrl(publicUrl: string, params?: { format?: 'webp' | 'jp
 }
 
 async function safeDownloadOptimized(publicUrl: string, logPrefix: string, params = { format: 'webp' as const, quality: 82 }) {
+  if (publicUrl.includes('/sign/')) {
+    throw new Error("Cannot use render endpoint with signed URLs.");
+  }
   const renderUrl = buildRenderImageUrl(publicUrl, params);
   try {
     const res = await fetch(renderUrl);
