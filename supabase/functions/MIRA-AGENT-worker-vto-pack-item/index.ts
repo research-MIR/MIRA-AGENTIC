@@ -92,7 +92,7 @@ const blobToBase64 = async (blob: Blob): Promise<string> => {
   return encodeBase64(new Uint8Array(buffer));
 };
 
-function safeStringify(obj: any, limit = 5000): string {
+function safeStringify(obj: any, limit = 8000): string {
   try {
     const s = JSON.stringify(obj);
     return s.length > limit ? s.slice(0, limit) + `… [truncated ${s.length - limit} chars]` : s;
@@ -136,53 +136,38 @@ async function generateMixedPortfolio(supabase: SupabaseClient, job: any, steps:
   // Run each step sequentially to lower peak memory.
   const allImages: any[] = [];
   for (const stepConfig of steps) {
-    const imagesFromStep = await invokeWithRetry(
+    const data = await invokeWithRetry(
       supabase,
       'MIRA-AGENT-tool-virtual-try-on',
-      {
-        body: {
-          ...stepConfig,
-          person_image_url: job.metadata.cropped_person_url,
-          garment_image_url: job.metadata.optimized_garment_url
-        }
-      },
+      { body: { ...stepConfig, person_image_url: job.metadata.cropped_person_url, garment_image_url: job.metadata.optimized_garment_url } },
       3,
       logPrefix
-    ).then(res => res?.generatedImages || []);
+    );
+    const images = data?.generatedImages || [];
+    if (images.length === 0) throw new Error("VTO tool did not return any valid images for this generation step.");
+    for (const img of images) allImages.push(img);
 
-    if (imagesFromStep.length === 0) {
-      throw new Error("VTO tool did not return any valid images for this generation step.");
-    }
-
-    // Push and immediately let go of local references to reduce pressure.
-    for (const img of imagesFromStep) allImages.push(img);
+    // Give GC a scheduling point before next heavy call
+    await Promise.resolve();
   }
-
   return allImages;
 }
 
 async function createPaddedSquareImage(image: ISImage, logPrefix: string): Promise<ISImage> {
-  const originalWidth = image.width;
-  const originalHeight = image.height;
-
-  if (originalWidth === originalHeight) {
+  const w = image.width, h = image.height;
+  if (w === h) {
     console.log(`${logPrefix} [createPaddedSquareImage] Already 1:1; skipping canvas allocation.`);
-    return image; // no extra canvas, no extra memory
+    return image;
   }
-
   console.log(`${logPrefix} [createPaddedSquareImage] Applying 1:1 squaring with zero padding.`);
-  const canvasSize = Math.round(Math.max(originalWidth, originalHeight));
-  const finalCanvas = new ISImage(canvasSize, canvasSize).fill(0xFFFFFFFF);
-  const destX = Math.round((canvasSize - originalWidth) / 2);
-  const destY = Math.round((canvasSize - originalHeight) / 2);
-  finalCanvas.composite(image, destX, destY);
-
-  // Help GC: drop reference to the original bitmap now that it's copied
+  const size = Math.max(w, h);
+  const canvas = new ISImage(size, size).fill(0xFFFFFFFF);
+  const dx = Math.round((size - w) / 2), dy = Math.round((size - h) / 2);
+  canvas.composite(image, dx, dy);
   // @ts-ignore
-  image = null;
-
-  console.log(`${logPrefix} [createPaddedSquareImage] Transformed from ${originalWidth}x${originalHeight} to ${canvasSize}x${canvasSize} canvas.`);
-  return finalCanvas;
+  image = null; // let GC reclaim the original bitmap
+  console.log(`${logPrefix} [createPaddedSquareImage] Transformed from ${w}x${h} to ${size}x${size} canvas.`);
+  return canvas;
 }
 
 // --- State Machine Logic ---
@@ -272,6 +257,7 @@ serve(async (req)=>{
               status: 'quality_check'
             }).eq('id', job.id);
             console.log(`${logPrefix} Round 1 complete. Advancing to quality_check.`);
+            await Promise.resolve(); // Yield to GC
             await invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', {
               pair_job_id: job.id
             });
@@ -303,6 +289,7 @@ serve(async (req)=>{
               status: 'quality_check'
             }).eq('id', job.id);
             console.log(`${logPrefix} Round 2 complete. Advancing to quality_check.`);
+            await Promise.resolve(); // Yield to GC
             await invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', {
               pair_job_id: job.id
             });
@@ -330,6 +317,7 @@ serve(async (req)=>{
               status: 'quality_check'
             }).eq('id', job.id);
             console.log(`${logPrefix} Round 3 complete. Advancing to final quality_check.`);
+            await Promise.resolve(); // Yield to GC
             await invokeNextStep(supabase, 'MIRA-AGENT-worker-vto-pack-item', {
               pair_job_id: job.id
             });
@@ -541,6 +529,7 @@ async function handlePrepareAssets(supabase: SupabaseClient, job: any, logPrefix
     await safeUpload(supabase, TEMP_UPLOAD_BUCKET, tempPersonPath, croppedPersonBlob, { contentType: "image/jpeg" });
     croppedPersonUrl = await safeGetPublicUrl(supabase, TEMP_UPLOAD_BUCKET, tempPersonPath);
     console.log(`${logPrefix} Cropped person image uploaded to temp storage.`);
+    await Promise.resolve(); // Yield to GC
   }
 
   { // GARMENT SCOPE
