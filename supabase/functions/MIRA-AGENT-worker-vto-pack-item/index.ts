@@ -578,7 +578,7 @@ async function handlePrepareAssets(supabase: SupabaseClient, job: any, logPrefix
         garmentImage.height > garmentImage.width ? MAX_GARMENT_DIMENSION : ISImage.RESIZE_AUTO
       );
     }
-    const finalGarmentImage = await createPaddedSquareImage(garmentImage, logPrefix);
+    let finalGarmentImage = await createPaddedSquareImage(garmentImage, logPrefix);
     // @ts-ignore
     garmentImage = null;
 
