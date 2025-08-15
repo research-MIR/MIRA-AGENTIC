@@ -122,7 +122,7 @@ const ModelPacks = () => {
     }
   };
 
-  const handleDownloadPack = async (pack: ModelPack, downloadType: 'all' | 'original_only') => {
+  const handleDownloadPack = async (pack: ModelPack, downloadType: 'all' | 'original_only' | 'upscaled_only') => {
     if (!session?.user) return;
     setIsDownloading(pack.id);
     const toastId = showLoading(`Preparing download for "${pack.name}"...`);
@@ -134,57 +134,56 @@ const ModelPacks = () => {
             throw new Error("No completed models with poses found in this pack to download.");
         }
 
-        const itemsToDownload: { url: string; prompt: string; type: 'base' | 'pose' }[] = [];
+        const zip = new JSZip();
+        let filesToDownload = 0;
+
         for (const job of packDetails) {
-            if (job.base_model_image_url && job.final_prompt_used) {
-                itemsToDownload.push({
-                    url: job.base_model_image_url,
-                    prompt: job.final_prompt_used,
-                    type: 'base'
-                });
+            const modelId = job.job_id;
+            const modelFolder = zip.folder(modelId);
+            if (!modelFolder) {
+                throw new Error(`Failed to create folder for model ${modelId}`);
             }
-            if (downloadType === 'all' && job.final_posed_images) {
+
+            if (downloadType === 'original_only') {
+                if (job.base_model_image_url && job.final_prompt_used) {
+                    filesToDownload++;
+                    const response = await fetch(job.base_model_image_url);
+                    const blob = await response.blob();
+                    modelFolder.file(`base_model.png`, blob);
+                    modelFolder.file(`base_model_prompt.txt`, job.final_prompt_used);
+                }
+                continue; // Skip poses for this type
+            }
+
+            if (job.final_posed_images) {
                 for (const pose of job.final_posed_images) {
+                    const isUpscaled = pose.is_upscaled === true;
+                    
+                    if (downloadType === 'upscaled_only' && !isUpscaled) {
+                        continue;
+                    }
+
                     if (pose.final_url && pose.pose_prompt) {
-                        itemsToDownload.push({
-                            url: pose.final_url,
-                            prompt: pose.pose_prompt,
-                            type: 'pose'
-                        });
+                        filesToDownload++;
+                        const poseId = pose.comfyui_prompt_id || `pose_${Math.random().toString(36).substring(2, 9)}`;
+                        
+                        const imageResponse = await fetch(pose.final_url);
+                        const imageBlob = await imageResponse.blob();
+                        modelFolder.file(`${poseId}.png`, imageBlob);
+                        
+                        modelFolder.file(`${poseId}.txt`, pose.pose_prompt);
                     }
                 }
             }
         }
 
-        if (itemsToDownload.length === 0) {
-            throw new Error("No images or prompts could be prepared for download.");
+        if (filesToDownload === 0) {
+            throw new Error(`No images found for the selected download type ('${downloadType}').`);
         }
 
         dismissToast(toastId);
-        const downloadToastId = showLoading(`Downloading ${itemsToDownload.length} assets...`);
-
-        const imageFetchPromises = itemsToDownload.map(item => 
-            fetch(item.url).then(res => {
-                if (!res.ok) throw new Error(`Failed to fetch ${item.url}`);
-                return res.blob();
-            })
-        );
-        const imageBlobs = await Promise.all(imageFetchPromises);
-
-        dismissToast(downloadToastId);
-        const zipToastId = showLoading("Zipping files...");
-        const zip = new JSZip();
-        let counter = 1;
-
-        for (let i = 0; i < itemsToDownload.length; i++) {
-            const item = itemsToDownload[i];
-            const blob = imageBlobs[i];
-            
-            zip.file(`${counter}.png`, blob);
-            zip.file(`${counter}.txt`, item.prompt);
-            counter++;
-        }
-
+        const zipToastId = showLoading(`Zipping ${filesToDownload} files...`);
+        
         const zipBlob = await zip.generateAsync({ type: "blob" });
         const link = document.createElement("a");
         link.href = URL.createObjectURL(zipBlob);
@@ -247,6 +246,10 @@ const ModelPacks = () => {
                       <DropdownMenuItem onClick={() => handleDownloadPack(pack, 'all')} disabled={isDownloading === pack.id}>
                         <Download className="mr-2 h-4 w-4" />
                         Download All Poses
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => handleDownloadPack(pack, 'upscaled_only')} disabled={isDownloading === pack.id}>
+                        <Download className="mr-2 h-4 w-4" />
+                        Download Upscaled Poses
                       </DropdownMenuItem>
                       <DropdownMenuItem onClick={() => handleDownloadPack(pack, 'original_only')} disabled={isDownloading === pack.id}>
                         <Download className="mr-2 h-4 w-4" />
