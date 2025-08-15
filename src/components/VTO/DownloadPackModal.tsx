@@ -169,43 +169,60 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
         setProgressMessage(`Processing ${processedCount}/${totalFiles}...`);
         
         try {
+          console.log(`[DownloadPack] --- Processing Job ID: ${job.id} ---`);
           if (!job.final_image_url) {
-            console.warn(`[DownloadPack] Skipping job ${job.id} because final_image_url is null.`);
+            console.warn(`[DownloadPack] Skipping job because final_image_url is null.`);
             skippedCount++;
             continue;
           }
 
-          let poseId = 'model_unknown';
+          // --- Pose ID Logic ---
+          let poseId = 'pose_unknown';
           if (job.metadata?.model_generation_job_id) {
-              poseId = job.metadata.model_generation_job_id.substring(0, 8);
+              poseId = job.metadata.model_generation_job_id;
+              console.log(`[DownloadPack] PoseID found via model_generation_job_id: ${poseId}`);
           } else if (job.metadata?.original_vto_job_id) {
-              poseId = job.metadata.original_vto_job_id.substring(0, 8);
+              poseId = job.metadata.original_vto_job_id;
+              console.log(`[DownloadPack] PoseID found via original_vto_job_id: ${poseId}`);
           } else if (job.source_person_image_url) {
               const urlParts = job.source_person_image_url.split('/');
               const filename = urlParts.pop()?.split('.')[0] || '';
               const timestampMatch = filename.match(/\d{13}/);
-              if (timestampMatch) poseId = timestampMatch[0].substring(7);
-              else poseId = filename.substring(0, 8);
+              if (timestampMatch) {
+                  poseId = timestampMatch[0];
+                  console.log(`[DownloadPack] PoseID parsed from person URL timestamp: ${poseId}`);
+              } else {
+                  poseId = filename.substring(0, 16);
+                  console.log(`[DownloadPack] PoseID parsed from person URL filename: ${poseId}`);
+              }
           } else {
-              poseId = job.id.substring(0, 8);
+              poseId = job.id;
+              console.log(`[DownloadPack] PoseID fell back to job.id: ${poseId}`);
+          }
+          if (!poseId || poseId.trim() === '') {
+              poseId = job.id;
+              console.warn(`[DownloadPack] WARNING: PoseID was empty, using job.id as final fallback: ${poseId}`);
           }
 
+          // --- Garment ID Logic ---
           let garmentId = 'garment_unknown';
-          if (job.metadata?.garment_analysis?.hash && hashToIdMap.has(job.metadata.garment_analysis.hash)) {
-              garmentId = hashToIdMap.get(job.metadata.garment_analysis.hash)!;
-          } else if (job.source_garment_image_url && storagePathToIdMap.has(job.source_garment_image_url)) {
-              garmentId = storagePathToIdMap.get(job.source_garment_image_url)!;
+          const garmentHash = job.metadata?.garment_analysis?.hash;
+          const garmentUrl = job.source_garment_image_url;
+          console.log(`[DownloadPack] Garment clues: Hash='${garmentHash}', URL='${garmentUrl}'`);
+
+          if (garmentHash && hashToIdMap.has(garmentHash)) {
+              garmentId = hashToIdMap.get(garmentHash)!;
+              console.log(`[DownloadPack] GarmentID found via HASH match: ${garmentId}`);
+          } else if (garmentUrl && storagePathToIdMap.has(garmentUrl)) {
+              garmentId = storagePathToIdMap.get(garmentUrl)!;
+              console.log(`[DownloadPack] GarmentID found via URL match: ${garmentId}`);
           } else {
-              // FALLBACK: If no definitive match is found in the wardrobe via hash or direct URL,
-              // we use the VTO job's own unique ID as the identifier for the garment.
-              // This prevents incorrect grouping of different garments that might share a
-              // generic or missing source_garment_image_url. The folder/filename will be based on
-              // the job ID, but it guarantees correctness and avoids grouping disparate items.
               garmentId = job.id;
+              console.log(`[DownloadPack] GarmentID fell back to job.id: ${garmentId}`);
           }
-          
-          const filename = `Pose_${poseId}_Garment_${garmentId}_JobID_${job.id.substring(0, 8)}.jpg`;
-          console.log(`[DownloadPack] Processing Job ID ${job.id}: PoseID='${poseId}', GarmentID='${garmentId}', Final Filename='${filename}'`);
+
+          const filename = `Pose_${sanitize(poseId)}_Garment_${sanitize(garmentId)}_JobID_${sanitize(job.id.substring(0, 8))}.jpg`;
+          console.log(`[DownloadPack] Final constructed filename: ${filename}`);
 
           if (filenames.has(filename)) {
             console.warn(`[DownloadPack] WARNING: Duplicate filename detected: '${filename}'. This will overwrite a previous file in the zip.`);
