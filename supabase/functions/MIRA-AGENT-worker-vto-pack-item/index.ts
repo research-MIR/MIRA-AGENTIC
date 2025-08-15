@@ -101,6 +101,37 @@ function safeStringify(obj: any, limit = 8000): string {
   }
 }
 
+function buildRenderImageUrl(publicUrl: string, params?: { format?: 'webp' | 'jpg', quality?: number }) {
+  const u = new URL(publicUrl);
+  u.pathname = u.pathname.replace('/object/', '/render/image/');
+  if (params?.format) u.searchParams.set('format', params.format);
+  if (typeof params?.quality === 'number') u.searchParams.set('quality', String(params.quality));
+  return u.toString();
+}
+
+async function safeDownloadOptimized(publicUrl: string, logPrefix: string, params = { format: 'webp' as const, quality: 82 }) {
+  const renderUrl = buildRenderImageUrl(publicUrl, params);
+  try {
+    const res = await fetch(renderUrl);
+    if (!res.ok) throw new Error(`render fetch failed: ${res.status} ${res.statusText}`);
+    const blob = await res.blob();
+    console.log(`${logPrefix} [safeDownloadOptimized] Transformed download. Blob size: ${blob.size}`);
+    return blob;
+  } catch (e) {
+    console.warn(`${logPrefix} [safeDownloadOptimized] Falling back to direct download: ${String(e)}`);
+    throw e;
+  }
+}
+
+async function toJpegBase64(blob: Blob, quality = 82) {
+  const arr = await blob.arrayBuffer();
+  let img: ISImage | null = await ISImage.decode(arr);
+  const buf = await img.encodeJPEG(quality);
+  // @ts-ignore
+  img = null;
+  return encodeBase64(new Uint8Array(buf));
+}
+
 async function invokeWithRetry(supabase: SupabaseClient, functionName: string, payload: object, maxRetries: number, logPrefix: string) {
   let lastError: Error | null = null;
   for(let attempt = 1; attempt <= maxRetries; attempt++){
@@ -553,8 +584,7 @@ async function handlePrepareAssets(supabase: SupabaseClient, job: any, logPrefix
 
     const optimizedGarmentBuffer = await finalGarmentImage.encodeJPEG(75);
     // @ts-ignore
-    let finalImg: any = finalGarmentImage;
-    finalImg = null;
+    finalGarmentImage = null;
 
     const optimizedGarmentBlob = new Blob([optimizedGarmentBuffer], { type: 'image/jpeg' });
     const tempGarmentPath = `tmp/${job.user_id}/${Date.now()}-optimized_garment.jpeg`;
@@ -609,14 +639,28 @@ async function handleQualityCheck(supabase: SupabaseClient, job: any, logPrefix:
   for(let attempt = 1; attempt <= QA_MAX_RETRIES; attempt++){
     let personBlob: Blob | null = null, garmentBlob: Blob | null = null;
     try {
-      [personBlob, garmentBlob] = await Promise.all([
-        safeDownload(supabase, job.source_person_image_url, logPrefix),
-        safeDownload(supabase, job.source_garment_image_url, logPrefix)
-      ]);
+      const personUrlForQa  = job.metadata.cropped_person_url   || job.source_person_image_url;
+      const garmentUrlForQa = job.metadata.optimized_garment_url || job.source_garment_image_url;
+
+      try {
+        [personBlob, garmentBlob] = await Promise.all([
+          safeDownloadOptimized(personUrlForQa, logPrefix, { format: 'webp', quality: 82 }),
+          safeDownloadOptimized(garmentUrlForQa, logPrefix, { format: 'webp', quality: 82 })
+        ]);
+      } catch {
+        [personBlob, garmentBlob] = await Promise.all([
+          safeDownload(supabase, personUrlForQa, logPrefix),
+          safeDownload(supabase, garmentUrlForQa, logPrefix)
+        ]);
+      }
+
+      const personB64  = await toJpegBase64(personBlob, 82);
+      const garmentB64 = await toJpegBase64(garmentBlob, 82);
+
       const { data, error: analysisError } = await supabase.functions.invoke('MIRA-AGENT-tool-vto-quality-checker', {
         body: {
-          original_person_image_base64: await blobToBase64(personBlob),
-          reference_garment_image_base64: await blobToBase64(garmentBlob),
+          original_person_image_base64: personB64,
+          reference_garment_image_base64: garmentB64,
           generated_images_base64: variations.map((img: any)=>img.base64Image),
           is_escalation_check: is_escalation_check,
           is_absolute_final_attempt: !!bitstudio_result_url
