@@ -191,22 +191,17 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
           }
 
           let garmentId = 'garment_unknown';
-          if (job.metadata?.garment_analysis?.hash) {
-              garmentId = hashToIdMap.get(job.metadata.garment_analysis.hash) || job.metadata.garment_analysis.hash;
+          if (job.metadata?.garment_analysis?.hash && hashToIdMap.has(job.metadata.garment_analysis.hash)) {
+              garmentId = hashToIdMap.get(job.metadata.garment_analysis.hash)!;
           } else if (job.source_garment_image_url && storagePathToIdMap.has(job.source_garment_image_url)) {
               garmentId = storagePathToIdMap.get(job.source_garment_image_url)!;
-          } else if (job.source_garment_image_url) {
-              const urlParts = job.source_garment_image_url.split('/');
-              const filename = urlParts.pop()?.split('.')[0] || '';
-              const uuidMatch = filename.match(/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/i);
-              if (uuidMatch) garmentId = uuidMatch[0];
-              else {
-                  const timestampMatch = filename.match(/\d{13}/);
-                  if (timestampMatch) garmentId = timestampMatch[0];
-                  else garmentId = filename.substring(0, 20);
-              }
           } else {
-              garmentId = job.id.substring(0, 8);
+              // FALLBACK: If no definitive match is found in the wardrobe via hash or direct URL,
+              // we use the VTO job's own unique ID as the identifier for the garment.
+              // This prevents incorrect grouping of different garments that might share a
+              // generic or missing source_garment_image_url. The folder/filename will be based on
+              // the job ID, but it guarantees correctness and avoids grouping disparate items.
+              garmentId = job.id;
           }
           
           const filename = `Pose_${poseId}_Garment_${garmentId}_JobID_${job.id.substring(0, 8)}.jpg`;
