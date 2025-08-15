@@ -14,7 +14,7 @@ import { Loader2, Download, CheckCircle, ImageIcon, Shirt, Users, List } from "l
 import { useLanguage } from "@/context/LanguageContext";
 import { useSession } from '@/components/Auth/SessionContextProvider';
 import { showError, showSuccess, showLoading, dismissToast } from '@/utils/toast';
-import { cn, calculateFileHash } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 import JSZip from 'jszip';
 import { Progress } from '@/components/ui/progress';
 
@@ -62,19 +62,6 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
   const [progress, setProgress] = useState(0);
   const [progressMessage, setProgressMessage] = useState('');
 
-  const parseStorageURL = (url: string) => {
-    const urlObj = new URL(url);
-    const pathSegments = urlObj.pathname.split('/');
-    const objectIndex = pathSegments.indexOf('object');
-    if (objectIndex === -1 || objectIndex + 2 >= pathSegments.length) {
-      throw new Error(`Invalid Supabase URL format: ${url}`);
-    }
-    const bucketName = pathSegments[objectIndex + 2];
-    const pathStartIndex = urlObj.pathname.indexOf(bucketName) + bucketName.length + 1;
-    const storagePath = decodeURIComponent(urlObj.pathname.substring(pathStartIndex));
-    return { bucket: bucketName, path: storagePath };
-  };
-
   const handleDownload = async () => {
     if (!pack || !session?.user) return;
     setIsDownloading(true);
@@ -101,15 +88,15 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
       setProgressMessage("Loading wardrobe...");
       const { data: wardrobeGarments, error: wardrobeError } = await supabase
         .from('mira-agent-garments')
-        .select('id, image_hash')
+        .select('id, storage_path')
         .eq('user_id', session!.user.id);
       if (wardrobeError) throw wardrobeError;
 
-      const hashToGarmentIdMap = new Map<string, string>();
+      const urlToGarmentIdMap = new Map<string, string>();
       wardrobeGarments.forEach(g => {
-          if (g.image_hash) hashToGarmentIdMap.set(g.image_hash, g.id);
+          if (g.storage_path) urlToGarmentIdMap.set(g.storage_path, g.id);
       });
-      console.log(`[DownloadPack] Pre-loaded ${wardrobeGarments.length} garments into hash lookup map.`);
+      console.log(`[DownloadPack] Pre-loaded ${wardrobeGarments.length} garments into URL lookup map.`);
 
       setProgressMessage("Fetching job list...");
       let jobsToDownload: any[] = [];
@@ -173,7 +160,6 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
       let skippedCount = 0;
       let duplicateCount = 0;
       const filenames = new Set<string>();
-      const urlToHashMap = new Map<string, string>(); // Performance cache
 
       for (const job of jobsToDownload) {
         processedCount++;
@@ -186,7 +172,6 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
             continue;
           }
 
-          // --- Pose ID Logic ---
           let poseId = 'pose_unknown';
           if (job.metadata?.model_generation_job_id) {
               poseId = job.metadata.model_generation_job_id;
@@ -206,29 +191,18 @@ export const DownloadPackModal = ({ isOpen, onClose, pack }: DownloadPackModalPr
               poseId = job.id;
           }
 
-          // --- NEW Garment ID Logic ---
           let garmentId = 'garment_unknown';
           const garmentUrl = job.source_garment_image_url;
 
           if (!garmentUrl) {
-              garmentId = job.id; // Fallback if URL is missing
+              garmentId = job.id;
               console.warn(`[DownloadPack] ANOMALY DETECTED for Job ID: ${job.id}\n> Reason: source_garment_image_url is missing.\n> Fallback Action: Using Job ID as Garment ID.\n> Final Garment ID: ${garmentId}`);
           } else {
-              let garmentHash = urlToHashMap.get(garmentUrl);
-              if (!garmentHash) {
-                  const { bucket, path } = parseStorageURL(garmentUrl);
-                  const { data: blob, error } = await supabase.storage.from(bucket).download(path);
-                  if (error) throw new Error(`Failed to download garment image ${garmentUrl}: ${error.message}`);
-                  const file = new File([blob!], "tempfile");
-                  garmentHash = await calculateFileHash(file);
-                  urlToHashMap.set(garmentUrl, garmentHash);
-              }
-
-              if (hashToGarmentIdMap.has(garmentHash)) {
-                  garmentId = hashToGarmentIdMap.get(garmentHash)!;
+              if (urlToGarmentIdMap.has(garmentUrl)) {
+                  garmentId = urlToGarmentIdMap.get(garmentUrl)!;
               } else {
-                  garmentId = job.id; // Fallback if hash not in wardrobe
-                  console.warn(`[DownloadPack] ANOMALY DETECTED for Job ID: ${job.id}\n> Reason: Garment hash '${garmentHash}' not found in Wardrobe.\n> Source URL: ${garmentUrl}\n> Fallback Action: Using Job ID as Garment ID.\n> Final Garment ID: ${garmentId}`);
+                  garmentId = job.id;
+                  console.warn(`[DownloadPack] ANOMALY DETECTED for Job ID: ${job.id}\n> Reason: Garment URL not found in Wardrobe.\n> Source URL: ${garmentUrl}\n> Fallback Action: Using Job ID as Garment ID.\n> Final Garment ID: ${garmentId}`);
               }
           }
 
