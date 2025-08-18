@@ -37,7 +37,7 @@ export const ModelGenerator = ({ packId }: ModelGeneratorProps) => {
   const [activeTab, setActiveTab] = useState<'single' | 'multi'>('single');
   const [multiModelPrompt, setMultiModelPrompt] = useState("");
   const [modelDescription, setModelDescription] = useState("");
-  const [setDescription, setSetDescription] = useState("grey ecommerce background");
+  const [setDescription, setSetDescription] = useState("white ecommerce background,with no shadows, no vignette");
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [autoApprove, setAutoApprove] = useState(true);
   const [poses, setPoses] = useState<Pose[]>([{ type: 'text', value: '', file: undefined, previewUrl: undefined }]);
