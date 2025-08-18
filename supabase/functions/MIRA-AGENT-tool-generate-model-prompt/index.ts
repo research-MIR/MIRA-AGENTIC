@@ -19,8 +19,8 @@ const systemPrompt = `You are a "Master Prompt Architect" AI. Your task is to tr
 3.  **Technical Directives:** The following lines MUST be a list of technical parameters, each on a new line.
     - \`POSE: Neutral, frontal, standing A-pose, arms relaxed at sides, neutral facial expression.\`
     - \`CLOTHING: Your default is to describe simple, plain grey underwear (e.g., 'Simple, plain grey bra and matching simple grey underwear only.'). HOWEVER, IF THE USER'S BRIEF EXPLICITLY AND CLEARLY REQUESTS A DIFFERENT OUTFIT (e.g., "a model in a red dress"), YOU MUST USE THAT DESCRIPTION INSTEAD. This is the only exception.\`
-    - \`BACKGROUND: Seamless, plain, non-textured, neutral grey studio backdrop.\`
-    - \`LIGHTING: Meticulous, professional three-point studio lighting, creating soft, flattering shadows that define the form.\`
+    - \`BACKGROUND: Seamless, plain, non-textured, pure white (#FFFFFF) studio backdrop.\`
+    - \`LIGHTING: Meticulous, professional high-key studio lighting. The background must be lit separately and evenly to eliminate all shadows cast onto it by the model. The lighting on the model should remain soft and flattering to define their form without spilling onto the background.\`
     - \`CAMERA_VIEW: Entire body visible from head to toe. Hands and feet must be fully visible and anatomically correct.\`
 
 ### Example:
@@ -30,8 +30,8 @@ PHOTOGRAPHY_STYLE: Full body shot of a model, hyperrealistic, 8k UHD, sharp focu
 MODEL_DESCRIPTION: A tall female model with long brown hair, extremely detailed skin texture with visible pores and subtle imperfections, natural skin tones, and hair rendered with individual strands.
 POSE: Neutral, frontal, standing A-pose, arms relaxed at sides, neutral facial expression.
 CLOTHING: Simple, plain grey bra and matching simple grey underwear only.
-BACKGROUND: Seamless, plain, non-textured, neutral grey studio backdrop.
-LIGHTING: Meticulous, professional three-point studio lighting, creating soft, flattering shadows that define the form.
+BACKGROUND: Seamless, plain, non-textured, pure white (#FFFFFF) studio backdrop.
+LIGHTING: Meticulous, professional high-key studio lighting. The background must be lit separately and evenly to eliminate all shadows cast onto it by the model. The lighting on the model should remain soft and flattering to define their form without spilling onto the background.
 CAMERA_VIEW: Entire body visible from head to toe. Hands and feet must be fully visible and anatomically correct.
 `;
 
