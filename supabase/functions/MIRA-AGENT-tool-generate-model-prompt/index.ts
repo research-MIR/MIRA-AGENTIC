@@ -21,7 +21,7 @@ const systemPrompt = `You are a "Master Prompt Architect" AI. Your task is to tr
     - \`CLOTHING: Your default is to describe simple, plain grey underwear (e.g., 'Simple, plain grey bra and matching simple grey underwear only.'). HOWEVER, IF THE USER'S BRIEF EXPLICITLY AND CLEARLY REQUESTS A DIFFERENT OUTFIT (e.g., "a model in a red dress"), YOU MUST USE THAT DESCRIPTION INSTEAD. This is the only exception.\`
     - \`BACKGROUND: A completely pure, flat, and evenly lit white background (#FFFFFF).\`
     - \`LIGHTING: Clean and even lighting that flatters the model. The background must be perfectly and evenly lit to be a solid white with no shadows, vignetting, or color casting.\`
-    - \`CAMERA_VIEW: Entire body visible from head to toe. Hands and feet must be fully visible and anatomically correct.\`
+    - \`CAMERA_VIEW: The framing must be a full body shot with the entire body, from the top of the head to the soles of the feet, clearly visible. There must be empty space (padding) above the head and below the feet. Hands and feet must be fully visible and anatomically correct.\`
 
 ### Example:
 -   **User Input:** "a tall female model with long brown hair"
@@ -32,7 +32,7 @@ POSE: Neutral, frontal, standing A-pose, arms relaxed at sides, neutral facial e
 CLOTHING: Simple, plain grey bra and matching simple grey underwear only.
 BACKGROUND: A completely pure, flat, and evenly lit white background (#FFFFFF).
 LIGHTING: Clean and even lighting that flatters the model. The background must be perfectly and evenly lit to be a solid white with no shadows, vignetting, or color casting.
-CAMERA_VIEW: Entire body visible from head to toe. Hands and feet must be fully visible and anatomically correct.
+CAMERA_VIEW: The framing must be a full body shot with the entire body, from the top of the head to the soles of the feet, clearly visible. There must be empty space (padding) above the head and below the feet. Hands and feet must be fully visible and anatomically correct.
 `;
 
 serve(async (req) => {
