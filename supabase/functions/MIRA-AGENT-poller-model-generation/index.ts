@@ -68,10 +68,8 @@ const tiledUpscalerWorkflow = `{
   "319": { "inputs": { "image": ["149", 0] }, "class_type": "Get Image Size" },
   "322": { "inputs": { "mask": ["318", 0] }, "class_type": "MaskToImage" }
 }`;
-
 const FINAL_OUTPUT_NODE_ID_UPSCALE = "283";
 const FALLBACK_NODE_IDS_UPSCALE = ["431", "430", "9", "4"];
-
 const FINAL_OUTPUT_NODE_ID_POSE = "9";
 const FALLBACK_NODE_IDS_POSE = ["213", "4"];
 
@@ -465,35 +463,37 @@ async function handlePollingPosesState(supabase: any, job: any) {
     let hasChanged = false;
     const updatedPoseJobs = [...job.final_posed_images];
 
-    // Check if there are any ComfyUI jobs that need polling.
+    // --- Part 1: Check on existing jobs (retries, stalls, ComfyUI polling) ---
     const comfyuiJobsToPoll = updatedPoseJobs.filter(p => p.comfyui_prompt_id && p.status === 'processing');
-
     let queueData = null;
     if (comfyuiJobsToPoll.length > 0) {
         console.log(`${logPrefix} Found ${comfyuiJobsToPoll.length} ComfyUI jobs to poll. Fetching queue status...`);
         const comfyUiAddress = COMFYUI_ENDPOINT_URL!.replace(/\/+$/, "");
         const queueUrl = `${comfyUiAddress}/queue`;
-        const queueResponse = await fetch(queueUrl);
-        if (!queueResponse.ok) {
-            console.error(`${logPrefix} CRITICAL: Failed to fetch ComfyUI queue. Status: ${queueResponse.status}. Halting this polling cycle.`);
-            return; 
-        }
-        const contentType = queueResponse.headers.get("content-type");
-        if (contentType && contentType.indexOf("application/json") !== -1) {
-            queueData = await queueResponse.json();
-        } else {
-            console.error(`${logPrefix} CRITICAL: ComfyUI queue returned non-JSON response. Content-Type: ${contentType}. Halting this polling cycle.`);
+        try {
+            const queueResponse = await fetch(queueUrl);
+            if (!queueResponse.ok) {
+                console.error(`${logPrefix} CRITICAL: Failed to fetch ComfyUI queue. Status: ${queueResponse.status}. Halting this polling cycle.`);
+                return; 
+            }
+            const contentType = queueResponse.headers.get("content-type");
+            if (contentType && contentType.indexOf("application/json") !== -1) {
+                queueData = await queueResponse.json();
+            } else {
+                console.error(`${logPrefix} CRITICAL: ComfyUI queue returned non-JSON response. Content-Type: ${contentType}. Halting this polling cycle.`);
+                return;
+            }
+        } catch (e) {
+            console.error(`${logPrefix} CRITICAL: Could not connect to ComfyUI queue at ${queueUrl}. Error: ${e.message}. Halting this polling cycle.`);
             return;
         }
     }
 
     for (const [index, poseJob] of updatedPoseJobs.entries()) {
-        // Skip poses that are done or have failed permanently
         if (poseJob.status === 'complete' || (poseJob.status === 'failed' && (poseJob.retry_count || 0) >= MAX_RETRIES)) {
             continue;
         }
 
-        // Handle automatic retries for failed jobs (applies to both engines)
         if (poseJob.status === 'failed' && (poseJob.retry_count || 0) < MAX_RETRIES) {
             const newRetryCount = (poseJob.retry_count || 0) + 1;
             console.log(`${logPrefix} Auto-retrying failed pose "${poseJob.pose_prompt}" (Attempt ${newRetryCount}/${MAX_RETRIES}). Setting to pending.`);
@@ -501,10 +501,9 @@ async function handlePollingPosesState(supabase: any, job: any) {
             updatedPoseJobs[index].retry_count = newRetryCount;
             updatedPoseJobs[index].last_retry_type = 'automatic';
             hasChanged = true;
-            continue; // The 'pending' logic below will handle re-dispatching
+            continue;
         }
 
-        // Handle stalled analysis jobs (applies to both engines)
         if (poseJob.status === 'analyzing') {
             const analysisStartedAt = poseJob.analysis_started_at ? new Date(poseJob.analysis_started_at).getTime() : 0;
             const now = Date.now();
@@ -525,30 +524,6 @@ async function handlePollingPosesState(supabase: any, job: any) {
             continue;
         }
 
-        // Handle pending jobs (applies to both engines)
-        if (poseJob.status === 'pending') {
-            console.log(`${logPrefix} Found pending pose "${poseJob.pose_prompt}". Dispatching to generator based on engine.`);
-            updatedPoseJobs[index].status = 'processing';
-            hasChanged = true;
-            
-            const executionEngine = job.context?.execution_engine || 'comfyui';
-            const toolToInvoke = executionEngine === 'fal_kontext' ? 'MIRA-AGENT-tool-fal-kontext-edit' : 'MIRA-AGENT-tool-comfyui-pose-generator';
-            
-            supabase.functions.invoke(toolToInvoke, {
-                body: {
-                    job_id: job.id,
-                    base_model_url: job.base_model_image_url,
-                    pose_prompt: poseJob.pose_prompt,
-                    pose_image_url: null, // Assuming text-to-pose for now
-                }
-            }).catch(err => {
-                console.error(`${logPrefix} ERROR: Failed to dispatch generator for pending pose: `, err);
-                // Optionally, revert status back to failed here
-            });
-            continue;
-        }
-
-        // --- ComfyUI-SPECIFIC POLLING LOGIC ---
         if (poseJob.status === 'processing' && poseJob.comfyui_prompt_id) {
             if (!queueData) {
                 console.warn(`${logPrefix} Skipping poll for ComfyUI job ${poseJob.comfyui_prompt_id} because queue data is unavailable.`);
@@ -558,7 +533,7 @@ async function handlePollingPosesState(supabase: any, job: any) {
             const isJobInQueue = queueData.queue_running.some((item: any) => item[1] === poseJob.comfyui_prompt_id) ||
                                  queueData.queue_pending.some((item: any) => item[1] === poseJob.comfyui_prompt_id);
 
-            if (isJobInQueue) continue; // Still running, check next time
+            if (isJobInQueue) continue;
 
             const comfyUiAddress = COMFYUI_ENDPOINT_URL!.replace(/\/+$/, "");
             const historyUrl = `${comfyUiAddress}/history/${poseJob.comfyui_prompt_id}`;
@@ -605,23 +580,52 @@ async function handlePollingPosesState(supabase: any, job: any) {
         }
     }
 
-    const isFullyFinished = updatedPoseJobs.every(p => p.status === 'complete' || (p.status === 'failed' && p.retry_count >= MAX_RETRIES));
-
-    if (hasChanged || (isFullyFinished && job.status !== 'complete')) {
-        const finalStatus = isFullyFinished ? 'complete' : job.status;
+    if (hasChanged) {
         await supabase.from('mira-agent-model-generation-jobs').update({
-            final_posed_images: updatedPoseJobs,
-            status: finalStatus
+            final_posed_images: updatedPoseJobs
+        }).eq('id', job.id);
+    }
+
+    // --- Part 2: Claim and dispatch ONE new pending job ---
+    const pendingPoseIndex = updatedPoseJobs.findIndex(p => p.status === 'pending');
+
+    if (pendingPoseIndex !== -1) {
+        const poseToDispatch = updatedPoseJobs[pendingPoseIndex];
+        console.log(`${logPrefix} Found pending pose "${poseToDispatch.pose_prompt}". Claiming and dispatching...`);
+
+        updatedPoseJobs[pendingPoseIndex].status = 'processing';
+
+        await supabase.from('mira-agent-model-generation-jobs').update({
+            final_posed_images: updatedPoseJobs
         }).eq('id', job.id);
 
-        if (finalStatus === 'complete') {
-            console.log(`${logPrefix} All pose jobs are complete. Main job finalized.`);
-        } else {
-            console.log(`${logPrefix} DB updated. Re-invoking poller to continue.`);
-            supabase.functions.invoke('MIRA-AGENT-poller-model-generation', { body: { job_id: job.id } }).catch(console.error);
-        }
-    } else {
-        console.log(`${logPrefix} No changes detected in this polling cycle.`);
+        const executionEngine = job.context?.execution_engine || 'comfyui';
+        const toolToInvoke = executionEngine === 'fal_kontext' ? 'MIRA-AGENT-tool-fal-kontext-edit' : 'MIRA-AGENT-tool-comfyui-pose-generator';
+        
+        console.log(`${logPrefix} Dispatching pose "${poseToDispatch.pose_prompt}" to engine via tool: ${toolToInvoke}`);
+        supabase.functions.invoke(toolToInvoke, {
+            body: {
+                job_id: job.id,
+                base_model_url: job.base_model_image_url,
+                pose_prompt: poseToDispatch.pose_prompt,
+                pose_image_url: null // Assuming text-to-pose for now
+            }
+        }).catch(err => {
+            console.error(`${logPrefix} ERROR: Failed to dispatch generator for pending pose: `, err);
+        });
+        return;
+    }
+
+    // --- Part 3: Check if all jobs are finished ---
+    const isFullyFinished = updatedPoseJobs.every(p => p.status === 'complete' || (p.status === 'failed' && p.retry_count >= MAX_RETRIES));
+
+    if (isFullyFinished && job.status !== 'complete') {
+        await supabase.from('mira-agent-model-generation-jobs').update({
+            status: 'complete'
+        }).eq('id', job.id);
+        console.log(`${logPrefix} All pose jobs are complete. Main job finalized.`);
+    } else if (!hasChanged && pendingPoseIndex === -1) {
+        console.log(`${logPrefix} No changes or pending jobs detected in this polling cycle.`);
     }
 }
 
