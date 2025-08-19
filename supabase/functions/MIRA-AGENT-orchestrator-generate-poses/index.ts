@@ -26,13 +26,16 @@ serve(async (req) => {
         pose_prompts, 
         user_id,
         pack_id,
-        aspect_ratio
+        aspect_ratio,
+        engine // New parameter
     } = await req.json();
 
     if (!model_description || !selected_model_id || !pose_prompts || !Array.isArray(pose_prompts) || !user_id || !pack_id) {
       throw new Error("model_description, selected_model_id, pose_prompts array, user_id, and pack_id are required.");
     }
-    console.log(`[Orchestrator-Poses][${requestId}] Received ${pose_prompts.length} poses for user ${user_id}. Auto-approve: ${auto_approve}`);
+    
+    const executionEngine = engine || 'comfyui'; // Default to comfyui
+    console.log(`[Orchestrator-Poses][${requestId}] Received ${pose_prompts.length} poses for user ${user_id}. Engine: ${executionEngine}. Auto-approve: ${auto_approve}`);
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
 
@@ -50,7 +53,8 @@ serve(async (req) => {
         last_polled_at: new Date().toISOString(),
         context: {
           selectedModelId: selected_model_id,
-          aspect_ratio: aspect_ratio || '1024x1024'
+          aspect_ratio: aspect_ratio || '1024x1024',
+          execution_engine: executionEngine // Save the engine choice
         }
       })
       .select('id')
