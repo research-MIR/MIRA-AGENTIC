@@ -92,30 +92,32 @@ function blendWeighted(canvas: Image, tile: Image, x0: number, y0: number, hx: F
   const cb = canvas.bitmap, tb = tile.bitmap;
   const W = canvas.width, tw = tile.width, th = tile.height;
 
-  for (let y=0; y<th; y++) {
+  for (let y = 0; y < th; y++) {
     const absY = y0 + y;
     if (absY < 0 || absY >= canvas.height) continue;
     const wy = vy[y];
     const cy = absY * W;
     const ty = y * tw;
-    for (let x=0; x<tw; x++) {
+    for (let x = 0; x < tw; x++) {
       const absX = x0 + x;
       if (absX < 0 || absX >= canvas.width) continue;
+
       const w = hx[x] * wy;
       if (w <= 0) continue;
 
       const cidx = ((cy + absX) << 2);
       const tidx = ((ty + x) << 2);
 
-      const wOld = cb[cidx+3] / 255;
-      const wNew = Math.min(1, wOld + w);
+      const wOld = cb[cidx + 3] / 255;
+      const wNew = wOld + w;
+
       const scaleOld = wOld > 0 ? (wOld / wNew) : 0;
       const scaleAdd = w / wNew;
 
-      cb[cidx  ] = Math.round(cb[cidx  ] * scaleOld + tb[tidx  ] * scaleAdd);
-      cb[cidx+1] = Math.round(cb[cidx+1] * scaleOld + tb[tidx+1] * scaleAdd);
-      cb[cidx+2] = Math.round(cb[cidx+2] * scaleOld + tb[tidx+2] * scaleAdd);
-      cb[cidx+3] = Math.round(wNew * 255);
+      cb[cidx    ] = Math.round(cb[cidx    ] * scaleOld + tb[tidx    ] * scaleAdd);
+      cb[cidx + 1] = Math.round(cb[cidx + 1] * scaleOld + tb[tidx + 1] * scaleAdd);
+      cb[cidx + 2] = Math.round(cb[cidx + 2] * scaleOld + tb[tidx + 2] * scaleAdd);
+      cb[cidx + 3] = Math.min(255, Math.round(wNew * 255));
     }
   }
 }
