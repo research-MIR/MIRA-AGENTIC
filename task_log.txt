@@ -1,0 +1,14 @@
+## Tiled Upscaling Feature Development Log
+
+**Phase 1: Tiling and Captioning Pipeline Setup**
+
+*   **Objective:** Create the initial infrastructure for breaking an image into tiles and generating a descriptive prompt for each tile.
+*   **Actions Taken (2024-07-26):**
+    *   Created two new database tables:
+        *   `mira_agent_tiled_upscale_jobs`: To act as the master record for each upscale task.
+        *   `mira_agent_tiled_upscale_tiles`: To track the state of each individual tile.
+    *   Implemented Row Level Security (RLS) on both tables to ensure users can only access their own jobs.
+    *   Created the main entry point function: `MIRA-AGENT-orchestrator-tiled-upscale`. This function creates the parent job record and delegates the tiling process.
+    *   Created the first worker: `MIRA-AGENT-worker-tiling`. This function downloads the source image, slices it into tiles, creates the individual tile records in the database, and uploads the tile images to storage.
+    *   Created the analysis worker: `MIRA-AGENT-worker-tile-analyzer`. This function is responsible for taking a single tile, generating a text description for it using an AI model, and saving that description back to the tile's record.
+    *   Created a dedicated watchdog: `MIRA-AGENT-watchdog-tiled-upscale`. This function will periodically find tiles that are ready for analysis and trigger the analysis worker, ensuring the process is scalable and resilient.
