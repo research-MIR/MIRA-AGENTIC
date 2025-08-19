@@ -19,3 +19,5 @@
 *   **Actions Taken (2024-07-28):**
     *   **Bug Fix:** Addressed a "Bucket not found" error by creating the `mira-agent-upscale-tiles` storage bucket and setting the appropriate public read-access policies.
     *   **Cron Job:** Confirmed that the watchdog cron job is set to the fastest possible interval of one minute, as per `pg_cron` limitations.
+*   **Actions Taken (2024-07-29):**
+    *   **Bug Fix:** Enabled Supabase Realtime on the `mira_agent_tiled_upscale_tiles` table. This was preventing the frontend visualizer from receiving updates and displaying the processed tiles.
