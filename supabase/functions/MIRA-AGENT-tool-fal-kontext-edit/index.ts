@@ -131,7 +131,7 @@ serve(async (req) => {
       config: { systemInstruction: { role: "system", parts: [{ text: TRIAGE_SYSTEM_PROMPT }] } }
     });
     const { task_type, garment_description } = extractJson(triageResult.text);
-    console.log(`${logPrefix} Intent classified as: '${task_type}'.`);
+    console.log(`${logPrefix} Intent classified as: '${task_type}'. Garment: '${garment_description || 'N/A'}'`);
 
     // 3. Engineer the final prompt
     console.log(`${logPrefix} Step 2: Engineering final prompt...`);
@@ -165,7 +165,7 @@ serve(async (req) => {
       config: { systemInstruction: { role: "system", parts: [{ text: selectedSystemPrompt }] } }
     });
     const finalPrompt = finalPromptResult.text;
-    console.log(`${logPrefix} Final prompt engineered: "${finalPrompt.substring(0, 100)}..."`);
+    console.log(`${logPrefix} Final prompt engineered: "${finalPrompt}"`);
 
     // 4. Call Fal.ai API
     console.log(`${logPrefix} Step 3: Calling Fal.ai 'qwen-image-edit' model...`);
