@@ -82,8 +82,8 @@ serve(async (req) => {
     img.resize(targetW, Image.RESIZE_AUTO, Image.RESIZE_BICUBIC);
     console.log(`${logPrefix} Upscaled -> ${img.width}x${img.height}`);
 
-    const tilesX = Math.ceil(img.width / STEP);
-    const tilesY = Math.ceil(img.height / STEP);
+    const tilesX = img.width <= TILE_SIZE ? 1 : 1 + Math.ceil((img.width - TILE_SIZE) / STEP);
+    const tilesY = img.height <= TILE_SIZE ? 1 : 1 + Math.ceil((img.height - TILE_SIZE) / STEP);
     const totalTiles = tilesX * tilesY;
     console.log(`${logPrefix} totalTiles=${totalTiles} (grid ${tilesX}x${tilesY})`);
 
@@ -95,7 +95,7 @@ serve(async (req) => {
       if (!batch.length) return;
       const chunk = batch.splice(0, batch.length);
       const t0 = performance.now();
-      // FIX: Use upsert for idempotency
+      // Use upsert for idempotency
       const { error } = await supabase.from("mira_agent_tiled_upscale_tiles").upsert(chunk, { onConflict: "parent_job_id,tile_index" });
       if (error) throw error;
       console.log(`${logPrefix} Upserted ${chunk.length} rows in ${(performance.now() - t0).toFixed(2)}ms`);
@@ -107,14 +107,34 @@ serve(async (req) => {
         if (i >= totalTiles) break;
 
         const gx = i % tilesX;
-        const gy = (i / tilesX) | 0;
-        const x = gx * STEP;
-        const y = gy * STEP;
+        const gy = Math.floor(i / tilesX);
+        
+        // --- NEW VARIABLE OVERLAP LOGIC ---
+        let x;
+        if (gx === tilesX - 1) {
+          x = img.width - TILE_SIZE; // Justify to the right edge
+        } else {
+          x = gx * STEP;
+        }
+        x = Math.max(0, x); // Ensure x is not negative if image is smaller than tile
+
+        let y;
+        if (gy === tilesY - 1) {
+          y = img.height - TILE_SIZE; // Justify to the bottom edge
+        } else {
+          y = gy * STEP;
+        }
+        y = Math.max(0, y); // Ensure y is not negative if image is smaller than tile
+        // --- END NEW LOGIC ---
+
         const idx = i;
 
         const tag = `${logPrefix}[W${workerId}][Tile ${idx}]`;
         try {
           const tile = new Image(TILE_SIZE, TILE_SIZE);
+          // This composite call effectively crops the section from the source image
+          // onto the new 1024x1024 canvas. Because of the new x,y logic, it will
+          // never sample outside the source image bounds, thus creating no padding.
           tile.composite(img, -x, -y);
 
           const enc0 = performance.now();
