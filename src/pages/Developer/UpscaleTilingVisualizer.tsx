@@ -52,6 +52,14 @@ const UpscaleTilingVisualizer = () => {
       return data;
     },
     enabled: !!jobId,
+    refetchInterval: (query) => {
+      const data = query.state.data as any;
+      if (data?.status === 'complete' || data?.status === 'failed') {
+        return false; // Stop polling if the job is in a terminal state
+      }
+      return 5000; // Poll every 5 seconds otherwise
+    },
+    refetchOnWindowFocus: true,
   });
 
   const { data: tiles, isLoading: isLoadingTiles } = useQuery({
@@ -176,7 +184,7 @@ const UpscaleTilingVisualizer = () => {
           </div>
           <div className="lg:col-span-2 space-y-6">
             <Card>
-              <CardHeader><CardTitle>Final Image</CardTitle></CardHeader>
+              <CardHeader><CardTitle>Final Composite Image</CardTitle></CardHeader>
               <CardContent>
                 {parentJob?.status === 'complete' && parentJob.final_image_url ? (
                   <SecureImageDisplay imageUrl={parentJob.final_image_url} alt="Final Composite Image" />
