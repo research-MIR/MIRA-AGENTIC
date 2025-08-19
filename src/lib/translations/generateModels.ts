@@ -57,6 +57,9 @@ export const generateModelsTranslations = {
     addPoseToPack: "Aggiungi Posa al Pack",
     default: "Predefinito",
     defaultDescription: "Puoi modificare questo valore!",
+    engine: "Motore",
+    engineComfyUI: "ComfyUI (Predefinito)",
+    engineFalKontext: "Fal.ai Kontext (Sperimentale)",
   },
   en: {
     generateModelsTitle: "Generate Models",
@@ -116,5 +119,8 @@ export const generateModelsTranslations = {
     addPoseToPack: "Add Pose to Pack",
     default: "Default",
     defaultDescription: "You can change this!",
+    engine: "Engine",
+    engineComfyUI: "ComfyUI (Default)",
+    engineFalKontext: "Fal.ai Kontext (Experimental)",
   },
 };

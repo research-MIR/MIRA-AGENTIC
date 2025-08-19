@@ -44,6 +44,7 @@ export const ModelGenerator = ({ packId }: ModelGeneratorProps) => {
   const [isLoading, setIsLoading] = useState(false);
   const [isPoseModalOpen, setIsPoseModalOpen] = useState(false);
   const [aspectRatio, setAspectRatio] = useState("1024x1024");
+  const [engine, setEngine] = useState<'comfyui' | 'fal_kontext'>('comfyui');
 
   useEffect(() => {
     fetchModels();
@@ -98,6 +99,7 @@ export const ModelGenerator = ({ packId }: ModelGeneratorProps) => {
           pose_prompts: validPoses,
           pack_id: packId,
           aspect_ratio: aspectRatio,
+          engine: engine,
         }
       });
       if (error) throw error;
@@ -151,6 +153,7 @@ export const ModelGenerator = ({ packId }: ModelGeneratorProps) => {
               pose_prompts: validPoses,
               pack_id: packId,
               aspect_ratio: aspectRatio,
+              engine: engine,
             }
           });
           if (error) throw error;
@@ -197,6 +200,8 @@ export const ModelGenerator = ({ packId }: ModelGeneratorProps) => {
           setMultiModelPrompt={setMultiModelPrompt}
           aspectRatio={aspectRatio}
           setAspectRatio={setAspectRatio}
+          engine={engine}
+          setEngine={setEngine}
         />
         
         <Card>

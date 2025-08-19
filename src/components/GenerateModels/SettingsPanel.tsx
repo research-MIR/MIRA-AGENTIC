@@ -28,6 +28,8 @@ interface SettingsPanelProps {
   setMultiModelPrompt: (value: string) => void;
   aspectRatio: string;
   setAspectRatio: (value: string) => void;
+  engine: string;
+  setEngine: (engine: 'comfyui' | 'fal_kontext') => void;
 }
 
 const modelAspectRatioMap: Record<string, string[]> = {
@@ -68,6 +70,8 @@ export const SettingsPanel = ({
   setMultiModelPrompt,
   aspectRatio,
   setAspectRatio,
+  engine,
+  setEngine,
 }: SettingsPanelProps) => {
   const { t } = useLanguage();
   const selectedModel = models.find(m => m.model_id_string === selectedModelId);
@@ -140,6 +144,16 @@ export const SettingsPanel = ({
             onModelChange={setSelectedModelId}
             disabled={isJobActive}
           />
+        </div>
+        <div className="space-y-2">
+          <Label>{t('engine')}</Label>
+          <Select value={engine} onValueChange={(v) => setEngine(v as 'comfyui' | 'fal_kontext')} disabled={isJobActive}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="comfyui">{t('engineComfyUI')}</SelectItem>
+              <SelectItem value="fal_kontext">{t('engineFalKontext')}</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
         <div className="space-y-2">
             <Label>{t('aspectRatio')}</Label>
