@@ -171,7 +171,11 @@ serve(async (req) => {
     console.log(`${logPrefix} Step 3: Calling Fal.ai 'qwen-image-edit' model...`);
     fal.config({ credentials: FAL_KEY });
     const falResult: any = await fal.subscribe("fal-ai/qwen-image-edit", {
-      input: { prompt: finalPrompt, image_url: base_model_url },
+      input: { 
+        prompt: finalPrompt, 
+        image_url: base_model_url,
+        enable_safety_checker: false // Disable safety checker
+      },
       logs: true,
     });
     const finalImage = falResult?.images?.[0];
@@ -213,7 +217,7 @@ serve(async (req) => {
         const { data: job, error: fetchError } = await supabase.from('mira-agent-model-generation-jobs').select('final_posed_images').eq('id', job_id).single();
         if (!fetchError && job) {
             const updatedPoses = (job.final_posed_images || []).map((pose: any) => {
-                if (pose.pose_prompt === body.pose_prompt) {
+                if (pose.pose_prompt === pose_prompt) {
                     return { ...pose, status: 'failed', error_message: `Fal.ai tool failed: ${error.message}` };
                 }
                 return pose;
