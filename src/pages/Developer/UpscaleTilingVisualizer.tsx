@@ -2,13 +2,12 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { useSession } from '@/components/Auth/SessionContextProvider';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Loader2, UploadCloud, AlertTriangle, Image as ImageIcon, PlusCircle } from 'lucide-react';
+import { Loader2, UploadCloud, AlertTriangle, Image as ImageIcon, PlusCircle, RefreshCw } from 'lucide-react';
 import { showError, showLoading, dismissToast } from '@/utils/toast';
 import { useDropzone } from '@/hooks/useDropzone';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { RealtimeChannel } from '@supabase/supabase-js';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { TileDetailModal } from '@/components/Developer/TileDetailModal';
 import { SecureImageDisplay } from '@/components/VTO/SecureImageDisplay';
@@ -24,6 +23,7 @@ const UpscaleTilingVisualizer = () => {
   const [selectedTile, setSelectedTile] = useState<any | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
 
@@ -54,12 +54,13 @@ const UpscaleTilingVisualizer = () => {
     enabled: !!jobId,
     refetchInterval: (query) => {
       const data = query.state.data as any;
-      if (data?.status === 'complete' || data?.status === 'failed') {
-        return false; // Stop polling if the job is in a terminal state
+      if (data && (data.status === 'complete' || data.status === 'failed')) {
+        return false;
       }
-      return 5000; // Poll every 5 seconds otherwise
+      return 5000;
     },
     refetchOnWindowFocus: true,
+    staleTime: 0, // Always treat data as stale to ensure refetching
   });
 
   const { data: tiles, isLoading: isLoadingTiles } = useQuery({
@@ -71,6 +72,7 @@ const UpscaleTilingVisualizer = () => {
       return data;
     },
     enabled: !!jobId,
+    staleTime: 0,
   });
 
   useEffect(() => {
@@ -96,7 +98,7 @@ const UpscaleTilingVisualizer = () => {
   const handleFileSelect = useCallback((file: File | null) => {
     if (!file || !file.type.startsWith('image/')) return;
     setSourceFile(file);
-    setJobId(null); // Go to "new job" mode
+    setJobId(null);
     const reader = new FileReader();
     reader.readAsDataURL(file);
     reader.onload = (event) => setSourcePreview(event.target?.result as string);
@@ -122,7 +124,7 @@ const UpscaleTilingVisualizer = () => {
       });
       if (error) throw error;
       setJobId(data.jobId);
-      setSourceFile(null); // Clear the file after starting
+      setSourceFile(null);
       setSourcePreview(null);
     } catch (err: any) {
       dismissToast(toastId);
@@ -141,6 +143,13 @@ const UpscaleTilingVisualizer = () => {
     setJobId(null);
     setSourceFile(null);
     setSourcePreview(null);
+  };
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await queryClient.invalidateQueries({ queryKey: ['tiledUpscaleJob', jobId] });
+    await queryClient.invalidateQueries({ queryKey: ['tiledUpscaleTiles', jobId] });
+    setTimeout(() => setIsRefreshing(false), 500);
   };
 
   const sourceImageUrlForDisplay = jobId ? parentJob?.source_image_url : sourcePreview;
@@ -184,7 +193,14 @@ const UpscaleTilingVisualizer = () => {
           </div>
           <div className="lg:col-span-2 space-y-6">
             <Card>
-              <CardHeader><CardTitle>Final Composite Image</CardTitle></CardHeader>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <CardTitle>Final Composite Image</CardTitle>
+                {jobId && (
+                  <Button variant="outline" size="icon" onClick={handleRefresh} disabled={isRefreshing}>
+                    <RefreshCw className={cn("h-4 w-4", isRefreshing && "animate-spin")} />
+                  </Button>
+                )}
+              </CardHeader>
               <CardContent>
                 {parentJob?.status === 'complete' && parentJob.final_image_url ? (
                   <SecureImageDisplay imageUrl={parentJob.final_image_url} alt="Final Composite Image" />
