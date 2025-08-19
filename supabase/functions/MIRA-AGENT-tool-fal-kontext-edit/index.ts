@@ -3,6 +3,7 @@ import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-
 import { GoogleGenAI, Content, Part, GenerationResult } from 'https://esm.sh/@google/genai@0.15.0';
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 import { fal } from 'npm:@fal-ai/client@1.5.0';
+import imageSize from "https://esm.sh/image-size";
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
@@ -87,12 +88,34 @@ function extractJson(text: string): any {
   }
 }
 
+function parseStorageURL(url: string) {
+    const u = new URL(url);
+    const pathSegments = u.pathname.split('/');
+    const objectSegmentIndex = pathSegments.indexOf('object');
+    if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) {
+        throw new Error(`Invalid Supabase storage URL format: ${url}`);
+    }
+    const bucket = pathSegments[objectSegmentIndex + 2];
+    const path = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
+    if (!bucket || !path) {
+        throw new Error(`Could not parse bucket or path from Supabase URL: ${url}`);
+    }
+    return { bucket, path };
+}
+
+async function getDimensionsFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<{width: number, height: number}> {
+    const { bucket, path } = parseStorageURL(publicUrl);
+    const { data: fileHead, error } = await supabase.storage.from(bucket).download(path, { range: '0-65535' });
+    if (error) throw new Error(`Failed to download image header: ${error.message}`);
+    const buffer = new Uint8Array(await fileHead.arrayBuffer());
+    const size = imageSize(buffer);
+    if (!size || !size.width || !size.height) throw new Error("Could not determine image dimensions from file header.");
+    return { width: size.width, height: size.height };
+}
+
 async function downloadImageAsPart(supabase: SupabaseClient, publicUrl: string, label: string): Promise<Part[]> {
-  const url = new URL(publicUrl);
-  const pathSegments = url.pathname.split('/');
-  const bucketName = pathSegments[pathSegments.indexOf('public') + 1];
-  const filePath = decodeURIComponent(pathSegments.slice(pathSegments.indexOf(bucketName) + 1).join('/'));
-  const { data, error } = await supabase.storage.from(bucketName).download(filePath);
+  const { bucket, path } = parseStorageURL(publicUrl);
+  const { data, error } = await supabase.storage.from(bucket).download(path);
   if (error) throw new Error(`Failed to download ${label}: ${error.message}`);
   const buffer = await data.arrayBuffer();
   const base64 = encodeBase64(buffer);
@@ -167,14 +190,18 @@ serve(async (req) => {
     const finalPrompt = finalPromptResult.text;
     console.log(`${logPrefix} Final prompt engineered: "${finalPrompt}"`);
 
-    // 4. Call Fal.ai API
-    console.log(`${logPrefix} Step 3: Calling Fal.ai 'qwen-image-edit' model...`);
+    // 4. Get image dimensions and call Fal.ai API
+    console.log(`${logPrefix} Step 3: Getting image dimensions and calling Fal.ai 'qwen-image-edit' model...`);
+    const { width, height } = await getDimensionsFromSupabase(supabase, base_model_url);
+    console.log(`${logPrefix} Original image dimensions: ${width}x${height}`);
+
     fal.config({ credentials: FAL_KEY });
     const falResult: any = await fal.subscribe("fal-ai/qwen-image-edit", {
       input: { 
         prompt: finalPrompt, 
         image_url: base_model_url,
-        enable_safety_checker: false // Disable safety checker
+        image_size: { width, height },
+        enable_safety_checker: false
       },
       logs: true,
     });
