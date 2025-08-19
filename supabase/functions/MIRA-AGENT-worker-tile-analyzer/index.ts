@@ -85,19 +85,15 @@ serve(async (req) => {
           .eq('id', tile_id);
     }
 
-    return new Response(JSON.stringify({ success: true, prompt: description }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 200,
-    });
+    // FIX: Return a proper JSON response
+    return Response.json({ success: true, prompt: description }, { headers: corsHeaders });
 
   } catch (error) {
     console.error(`${logPrefix} Error:`, error);
     if (tile_id) {
         await supabase.from('mira_agent_tiled_upscale_tiles').update({ status: 'failed', error_message: `Analysis failed: ${error.message}` }).eq('id', tile_id);
     }
-    return new Response(JSON.stringify({ error: error.message }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 500,
-    });
+    // FIX: Return error as proper JSON
+    return Response.json({ error: error.message }, { status: 500, headers: corsHeaders });
   }
 });
