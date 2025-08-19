@@ -20,6 +20,9 @@ const UpscaleTilingVisualizer = () => {
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
+  const renderCount = useRef(0);
+  renderCount.current++;
+  console.log(`[Visualizer] Render #${renderCount.current}. Job ID: ${jobId}`);
 
   const handleFileSelect = useCallback((file: File | null) => {
     if (!file || !file.type.startsWith('image/')) return;
@@ -82,11 +85,11 @@ const UpscaleTilingVisualizer = () => {
   };
 
   useEffect(() => {
-    console.log(`[Realtime] useEffect triggered. Current Job ID: ${jobId}`);
+    console.log(`[Realtime] Effect triggered. Job ID: ${jobId}`);
 
     if (!jobId) {
       if (channelRef.current) {
-        console.log(`[Realtime] No jobId. Cleaning up existing channel: ${channelRef.current.topic}`);
+        console.log(`[Realtime] No jobId, removing existing channel: ${channelRef.current.topic}`);
         supabase.removeChannel(channelRef.current);
         channelRef.current = null;
       }
@@ -111,20 +114,18 @@ const UpscaleTilingVisualizer = () => {
 
     fetchAndSetTiles();
 
-    // Ensure we don't create duplicate channels
     const channelTopic = `tiled-upscale-job-${jobId}`;
-    if (channelRef.current && channelRef.current.topic === channelTopic) {
-        console.log(`[Realtime] Channel for ${jobId} already exists. Skipping creation.`);
-        return;
-    }
-
-    // If a different channel exists, remove it first
+    // Defensively remove any lingering channel before creating a new one
     if (channelRef.current) {
-        console.log(`[Realtime] Removing old channel ${channelRef.current.topic} before creating new one.`);
+        console.log(`[Realtime] Pre-emptive cleanup of channel: ${channelRef.current.topic}`);
         supabase.removeChannel(channelRef.current);
     }
 
-    const channel = supabase.channel(channelTopic)
+    const channel = supabase.channel(channelTopic);
+    channelRef.current = channel;
+    console.log(`[Realtime] New channel object created for topic: ${channel.topic}`);
+
+    channel
         .on('postgres_changes', {
             event: '*',
             schema: 'public',
@@ -140,16 +141,17 @@ const UpscaleTilingVisualizer = () => {
                 console.error(`[Realtime] Subscription error for ${jobId}:`, err);
             }
         });
-
-    channelRef.current = channel;
-    console.log(`[Realtime] New channel created and subscribed for ${jobId}. Topic: ${channel.topic}`);
+    
+    console.log(`[Realtime] .subscribe() called for ${channel.topic}`);
 
     return () => {
-        console.log(`[Realtime] Cleanup function called for useEffect with jobId: ${jobId}.`);
-        if (channel) {
-            console.log(`[Realtime] Unsubscribing from channel: ${channel.topic}`);
-            supabase.removeChannel(channel);
+        console.log(`[Realtime] Cleanup function called for effect with jobId=${jobId}.`);
+        if (channelRef.current && channelRef.current.topic === channel.topic) {
+            console.log(`[Realtime] Removing channel from ref: ${channelRef.current.topic}`);
+            supabase.removeChannel(channelRef.current);
             channelRef.current = null;
+        } else {
+            console.warn(`[Realtime] Cleanup skipped. Ref channel is either null or for a different topic.`);
         }
     };
   }, [jobId, supabase]);
