@@ -37,6 +37,8 @@ interface Job {
     id: string;
     final_posed_images?: Pose[];
     model_description?: string;
+    auto_approve: boolean;
+    status: 'pending' | 'base_generation_complete' | 'awaiting_approval' | 'generating_poses' | 'polling_poses' | 'upscaling_poses' | 'complete' | 'failed';
 }
 
 interface JobPoseDisplayProps {
@@ -44,6 +46,8 @@ interface JobPoseDisplayProps {
   onViewHistory: (pose: Pose) => void;
   onForceRetry: (pose: Pose, jobId: string) => void;
   retryingPoseId: string | null;
+  onRetryBaseModel: (jobId: string) => void;
+  isRetryingBase: boolean;
 }
 
 const getPassBadgeInfo = (pose: Pose) => {
@@ -112,15 +116,10 @@ const PoseStatusIcon = ({ pose }: { pose: Pose }) => {
   );
 };
 
-export const JobPoseDisplay = ({ job, onViewHistory, onForceRetry, retryingPoseId }: JobPoseDisplayProps) => {
+export const JobPoseDisplay = ({ job, onViewHistory, onForceRetry, retryingPoseId, onRetryBaseModel, isRetryingBase }: JobPoseDisplayProps) => {
   const { t } = useLanguage();
   const { showImage } = useImagePreview();
   const poses = job?.final_posed_images || [];
-
-  const handleInfoClick = (e: React.MouseEvent, pose: Pose) => {
-    e.stopPropagation();
-    onViewHistory({ ...pose, jobId: job!.id });
-  };
 
   if (!job) {
     return (
@@ -135,7 +134,15 @@ export const JobPoseDisplay = ({ job, onViewHistory, onForceRetry, retryingPoseI
   return (
     <Card>
         <CardHeader>
-            <CardTitle>Generated Poses for Job</CardTitle>
+            <div className="flex justify-between items-center">
+                <CardTitle>Generated Poses for Job</CardTitle>
+                {job.auto_approve && (job.status === 'complete' || job.status === 'failed') && (
+                    <Button variant="outline" size="sm" onClick={() => onRetryBaseModel(job.id)} disabled={isRetryingBase}>
+                        {isRetryingBase ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                        Retry Base Model
+                    </Button>
+                )}
+            </div>
             {job.model_description && (
                 <CardDescription>
                     <strong>Prompt Used:</strong> {job.model_description}

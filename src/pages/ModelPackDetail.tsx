@@ -175,13 +175,14 @@ const ModelPackDetail = () => {
     }
   };
 
-  const handleRetryBaseModel = async () => {
-    if (!selectedJobId) return;
+  const handleRetryBaseModel = async (jobIdToRetry?: string) => {
+    const jobId = jobIdToRetry || selectedJobId;
+    if (!jobId) return;
     setIsRetryingBase(true);
     const toastId = showLoading("Retrying base model generation...");
     try {
         const { error } = await supabase.functions.invoke('MIRA-AGENT-tool-retry-base-model', {
-            body: { job_id: selectedJobId }
+            body: { job_id: jobId }
         });
         if (error) throw error;
         dismissToast(toastId);
@@ -458,7 +459,7 @@ const ModelPackDetail = () => {
                           </RadioGroup>
                         </div>
                         <div className="grid grid-cols-2 gap-4">
-                          <Button variant="outline" className="w-full" onClick={handleRetryBaseModel} disabled={isRetryingBase}>
+                          <Button variant="outline" className="w-full" onClick={() => handleRetryBaseModel()} disabled={isRetryingBase}>
                             {isRetryingBase ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
                             Retry Generation
                           </Button>
@@ -483,7 +484,7 @@ const ModelPackDetail = () => {
                             </p>
                             <Button 
                                 className="w-full" 
-                                onClick={handleRetryBaseModel}
+                                onClick={() => handleRetryBaseModel()}
                                 disabled={isRetryingBase}
                             >
                                 {isRetryingBase ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
@@ -497,6 +498,8 @@ const ModelPackDetail = () => {
                     onViewHistory={setViewingPoseHistory}
                     onForceRetry={handleForceRetry}
                     retryingPoseId={retryingPose?.pose_prompt || null}
+                    onRetryBaseModel={handleRetryBaseModel}
+                    isRetryingBase={isRetryingBase}
                   />
                 </div>
               </TabsContent>

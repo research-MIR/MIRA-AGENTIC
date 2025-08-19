@@ -35,13 +35,14 @@ serve(async (req) => {
 
     const currentRetryCount = job.metadata?.base_model_retry_count || 0;
 
-    // 2. Update the job to reset its state
+    // 2. Update the job to reset its state, including clearing old poses
     const { error: updateError } = await supabase
       .from('mira-agent-model-generation-jobs')
       .update({
         status: 'pending',
         base_generation_results: [],
         base_model_image_url: null,
+        final_posed_images: [], // Clear old poses
         error_message: null,
         metadata: {
           ...job.metadata,
