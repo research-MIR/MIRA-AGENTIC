@@ -378,7 +378,27 @@ async function handleBaseGenerationCompleteState(supabase: any, job: any) {
 
 async function handleGeneratingPosesState(supabase: any, job: any) {
   const logPrefix = `[ModelGenPoller][${job.id}]`;
-  console.log(`${logPrefix} State: GENERATING_POSES.`);
+  console.log(`${logPrefix} State: GENERATING_POSES. Attempting to claim and dispatch poses.`);
+
+  // --- ATOMIC CLAIM ---
+  const { count, error: claimError } = await supabase
+    .from('mira-agent-model-generation-jobs')
+    .update({ status: 'polling_poses' })
+    .eq('id', job.id)
+    .eq('status', 'generating_poses');
+
+  if (claimError) {
+    console.error(`${logPrefix} Error trying to claim job:`, claimError.message);
+    throw claimError;
+  }
+
+  if (count === 0) {
+    console.log(`${logPrefix} Job was already claimed by another instance or is not in 'generating_poses' state. Exiting gracefully.`);
+    return;
+  }
+  // --- END ATOMIC CLAIM ---
+
+  console.log(`${logPrefix} Successfully claimed job. Proceeding to create and dispatch poses.`);
   
   const executionEngine = job.context?.execution_engine || 'comfyui';
   console.log(`${logPrefix} Using execution engine: ${executionEngine}`);
@@ -407,7 +427,6 @@ async function handleGeneratingPosesState(supabase: any, job: any) {
   const finalPoseArray = [basePose, ...newPosePlaceholders];
 
   await supabase.from('mira-agent-model-generation-jobs').update({ 
-    status: 'generating_poses',
     final_posed_images: finalPoseArray 
   }).eq('id', job.id);
 
@@ -446,13 +465,6 @@ async function handleGeneratingPosesState(supabase: any, job: any) {
     } else {
       console.log(`[ModelGenPoller][${job.id}] All ${job.pose_prompts.length} pose generation jobs dispatched successfully.`);
     }
-    
-    supabase.from('mira-agent-model-generation-jobs').update({ status: 'polling_poses' })
-      .eq('id', job.id)
-      .then(() => {
-        console.log(`[ModelGenPoller][${job.id}] Status updated to polling_poses. Re-invoking poller.`);
-        supabase.functions.invoke('MIRA-AGENT-poller-model-generation', { body: { job_id: job.id } }).catch(console.error);
-      });
   });
 }
 
@@ -580,12 +592,6 @@ async function handlePollingPosesState(supabase: any, job: any) {
         }
     }
 
-    if (hasChanged) {
-        await supabase.from('mira-agent-model-generation-jobs').update({
-            final_posed_images: updatedPoseJobs
-        }).eq('id', job.id);
-    }
-
     // --- Part 2: Claim and dispatch ONE new pending job ---
     const pendingPoseIndex = updatedPoseJobs.findIndex(p => p.status === 'pending');
 
@@ -594,7 +600,9 @@ async function handlePollingPosesState(supabase: any, job: any) {
         console.log(`${logPrefix} Found pending pose "${poseToDispatch.pose_prompt}". Claiming and dispatching...`);
 
         updatedPoseJobs[pendingPoseIndex].status = 'processing';
+        hasChanged = true; // Mark that we've made a change
 
+        // Update the database immediately to "claim" the job
         await supabase.from('mira-agent-model-generation-jobs').update({
             final_posed_images: updatedPoseJobs
         }).eq('id', job.id);
@@ -613,18 +621,25 @@ async function handlePollingPosesState(supabase: any, job: any) {
         }).catch(err => {
             console.error(`${logPrefix} ERROR: Failed to dispatch generator for pending pose: `, err);
         });
-        return;
+        return; // Exit after dispatching one job to prevent multiple dispatches in one run
     }
 
     // --- Part 3: Check if all jobs are finished ---
     const isFullyFinished = updatedPoseJobs.every(p => p.status === 'complete' || (p.status === 'failed' && p.retry_count >= MAX_RETRIES));
 
-    if (isFullyFinished && job.status !== 'complete') {
+    if (hasChanged || (isFullyFinished && job.status !== 'complete')) {
+        const finalStatus = isFullyFinished ? 'complete' : job.status;
         await supabase.from('mira-agent-model-generation-jobs').update({
-            status: 'complete'
+            final_posed_images: updatedPoseJobs,
+            status: finalStatus
         }).eq('id', job.id);
-        console.log(`${logPrefix} All pose jobs are complete. Main job finalized.`);
-    } else if (!hasChanged && pendingPoseIndex === -1) {
+
+        if (finalStatus === 'complete') {
+            console.log(`${logPrefix} All pose jobs are complete. Main job finalized.`);
+        } else if (hasChanged) {
+            console.log(`${logPrefix} DB updated. The next watchdog cycle will continue polling.`);
+        }
+    } else {
         console.log(`${logPrefix} No changes or pending jobs detected in this polling cycle.`);
     }
 }
