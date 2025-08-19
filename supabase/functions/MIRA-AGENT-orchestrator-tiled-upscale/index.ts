@@ -38,10 +38,10 @@ serve(async (req) => {
 
     if (insertError) throw insertError;
     const parentJobId = newJob.id;
-    console.log(`${logPrefix} Parent job ${parentJobId} created. Invoking tiling worker.`);
+    console.log(`${logPrefix} Parent job ${parentJobId} created. Invoking tiling and analysis worker.`);
 
-    // Asynchronously invoke the worker to do the heavy lifting of tiling.
-    supabase.functions.invoke('MIRA-AGENT-worker-tiling', {
+    // Asynchronously invoke the new, all-in-one worker.
+    supabase.functions.invoke('MIRA-AGENT-worker-tiling-and-analysis', {
       body: { parent_job_id: parentJobId }
     }).catch(err => {
       console.error(`${logPrefix} Failed to invoke tiling worker for job ${parentJobId}:`, err);

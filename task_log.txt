@@ -21,3 +21,9 @@
     *   **Cron Job:** Confirmed that the watchdog cron job is set to the fastest possible interval of one minute, as per `pg_cron` limitations.
 *   **Actions Taken (2024-07-29):**
     *   **Bug Fix:** Enabled Supabase Realtime on the `mira_agent_tiled_upscale_tiles` table. This was preventing the frontend visualizer from receiving updates and displaying the processed tiles.
+*   **Actions Taken (2024-07-30):**
+    *   **Refactor & Implementation:** Implemented the full pre-processing and analysis pipeline to mimic the ComfyUI workflow.
+        *   Created a new, comprehensive worker: `MIRA-AGENT-worker-tiling-and-analysis`. This single function now handles pre-upscaling, slicing into overlapping tiles, and dispatching all tiles for parallel captioning.
+        *   Updated the orchestrator (`MIRA-AGENT-orchestrator-tiled-upscale`) to call this new, more powerful worker.
+        *   Deleted the original, simpler `MIRA-AGENT-worker-tiling` function, as it is now obsolete.
+        *   The system now fully prepares all necessary data (tiles, coordinates, captions) for the future generation and merging steps.

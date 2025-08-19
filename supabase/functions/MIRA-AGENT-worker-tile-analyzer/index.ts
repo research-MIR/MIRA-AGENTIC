@@ -7,7 +7,6 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const MODEL_NAME = "gemini-1.5-flash-latest";
-const TILE_UPLOAD_BUCKET = 'mira-agent-upscale-tiles';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -29,24 +28,32 @@ async function downloadImage(supabase: SupabaseClient, publicUrl: string) {
 serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
 
-  const { tile_id } = await req.json();
-  if (!tile_id) throw new Error("tile_id is required.");
-
+  const { tile_id, tile_base64, mime_type } = await req.json();
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-  const logPrefix = `[TileAnalyzerWorker][${tile_id}]`;
+  const logPrefix = `[TileAnalyzerWorker][${tile_id || 'direct_call'}]`;
 
   try {
-    const { data: tile, error: fetchError } = await supabase
-      .from('mira_agent_tiled_upscale_tiles')
-      .select('source_tile_url')
-      .eq('id', tile_id)
-      .single();
-    if (fetchError) throw fetchError;
-    if (!tile.source_tile_url) throw new Error("Tile record is missing a source_tile_url.");
+    let imageBase64 = tile_base64;
+    let imageMimeType = mime_type;
 
-    console.log(`${logPrefix} Downloading tile from ${tile.source_tile_url}`);
-    const imageBlob = await downloadImage(supabase, tile.source_tile_url);
-    const imageBase64 = encodeBase64(await imageBlob.arrayBuffer());
+    if (tile_id) {
+        const { data: tile, error: fetchError } = await supabase
+          .from('mira_agent_tiled_upscale_tiles')
+          .select('source_tile_url')
+          .eq('id', tile_id)
+          .single();
+        if (fetchError) throw fetchError;
+        if (!tile.source_tile_url) throw new Error("Tile record is missing a source_tile_url.");
+
+        console.log(`${logPrefix} Downloading tile from ${tile.source_tile_url}`);
+        const imageBlob = await downloadImage(supabase, tile.source_tile_url);
+        imageBase64 = encodeBase64(await imageBlob.arrayBuffer());
+        imageMimeType = imageBlob.type;
+    }
+
+    if (!imageBase64) {
+        throw new Error("No image data provided (either via tile_id or directly as base64).");
+    }
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
     const result = await ai.models.generateContent({
@@ -55,7 +62,7 @@ serve(async (req) => {
             role: 'user',
             parts: [{
                 inlineData: {
-                    mimeType: imageBlob.type,
+                    mimeType: imageMimeType || 'image/png',
                     data: imageBase64
                 }
             }]
@@ -66,16 +73,20 @@ serve(async (req) => {
     const description = result.text.trim();
     if (!description) throw new Error("AI model failed to generate a description.");
 
-    console.log(`${logPrefix} Generated prompt: "${description.substring(0, 80)}..."`);
-    await supabase
-      .from('mira_agent_tiled_upscale_tiles')
-      .update({ generated_prompt: description, status: 'pending_generation' })
-      .eq('id', tile_id);
+    if (tile_id) {
+        console.log(`${logPrefix} Generated prompt: "${description.substring(0, 80)}..."`);
+        await supabase
+          .from('mira_agent_tiled_upscale_tiles')
+          .update({ generated_prompt: description, status: 'pending_generation' })
+          .eq('id', tile_id);
+    }
 
     return new Response(JSON.stringify({ success: true, prompt: description }), { headers: corsHeaders });
   } catch (error) {
     console.error(`${logPrefix} Error:`, error);
-    await supabase.from('mira_agent_tiled_upscale_tiles').update({ status: 'failed', error_message: `Analysis failed: ${error.message}` }).eq('id', tile_id);
+    if (tile_id) {
+        await supabase.from('mira_agent_tiled_upscale_tiles').update({ status: 'failed', error_message: `Analysis failed: ${error.message}` }).eq('id', tile_id);
+    }
     return new Response(JSON.stringify({ error: error.message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
   }
 });
