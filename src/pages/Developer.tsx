@@ -106,6 +106,7 @@ const Developer = () => {
   const [isClearingFailedJobs, setIsClearingFailedJobs] = useState(false);
   const [isRecompositing, setIsRecompositing] = useState(false);
   const [isCancellingVtoPacks, setIsCancellingVtoPacks] = useState(false);
+  const [isCancellingUpscales, setIsCancellingUpscales] = useState(false);
 
   const handleCancelAllSegmentationJobs = async () => {
     setIsCancelling(true);
@@ -219,6 +220,22 @@ const Developer = () => {
     }
   };
 
+  const handleCancelAllTiledUpscaleJobs = async () => {
+    setIsCancellingUpscales(true);
+    const toastId = showLoading("Cancelling all active tiled upscale jobs...");
+    try {
+        const { data, error } = await supabase.functions.invoke('MIRA-AGENT-tool-admin-cancel-all-tiled-upscale-jobs');
+        if (error) throw error;
+        dismissToast(toastId);
+        showSuccess(data.message);
+    } catch (err: any) {
+        dismissToast(toastId);
+        showError(`Failed to cancel jobs: ${err.message}`);
+    } finally {
+        setIsCancellingUpscales(false);
+    }
+  };
+
   return (
     <div className="p-4 md:p-8 h-screen overflow-y-auto">
       <header className="pb-4 mb-8 border-b">
@@ -271,6 +288,26 @@ const Developer = () => {
                     <AlertDialogAction onClick={handleCancelAllSegmentationJobs} disabled={isCancelling}>
                       {isCancelling && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                       Yes, cancel all segmentation jobs
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="destructive">Cancel All Tiled Upscale Jobs</Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This will cancel ALL active ('tiling' or 'generating') Tiled Upscale jobs and their child tiles for EVERY user. This action cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={handleCancelAllTiledUpscaleJobs} disabled={isCancellingUpscales}>
+                      {isCancellingUpscales && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      Yes, cancel all upscale jobs
                     </AlertDialogAction>
                   </AlertDialogFooter>
                 </AlertDialogContent>
