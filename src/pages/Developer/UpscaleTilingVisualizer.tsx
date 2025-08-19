@@ -2,7 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { useSession } from '@/components/Auth/SessionContextProvider';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Loader2, UploadCloud, AlertTriangle, Image as ImageIcon } from 'lucide-react';
+import { Loader2, UploadCloud, AlertTriangle, Image as ImageIcon, PlusCircle } from 'lucide-react';
 import { showError, showLoading, dismissToast } from '@/utils/toast';
 import { useDropzone } from '@/hooks/useDropzone';
 import { cn } from '@/lib/utils';
@@ -12,6 +12,9 @@ import { RealtimeChannel } from '@supabase/supabase-js';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { TileDetailModal } from '@/components/Developer/TileDetailModal';
 import { SecureImageDisplay } from '@/components/VTO/SecureImageDisplay';
+import { RecentJobThumbnail } from '@/components/Jobs/RecentJobThumbnail';
+import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel";
+import { Skeleton } from '@/components/ui/skeleton';
 
 const UpscaleTilingVisualizer = () => {
   const { supabase, session } = useSession();
@@ -23,6 +26,22 @@ const UpscaleTilingVisualizer = () => {
   const [isLoading, setIsLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
+
+  const { data: recentJobs, isLoading: isLoadingRecent } = useQuery({
+    queryKey: ['recentTiledUpscaleJobs', session?.user?.id],
+    queryFn: async () => {
+      if (!session?.user) return [];
+      const { data, error } = await supabase
+        .from('mira_agent_tiled_upscale_jobs')
+        .select('*')
+        .eq('user_id', session.user.id)
+        .order('created_at', { ascending: false })
+        .limit(10);
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!session?.user,
+  });
 
   const { data: parentJob, isLoading: isLoadingParent } = useQuery({
     queryKey: ['tiledUpscaleJob', jobId],
@@ -47,24 +66,29 @@ const UpscaleTilingVisualizer = () => {
   });
 
   useEffect(() => {
-    if (!jobId || !session?.user?.id) return;
-
-    const channel = supabase.channel(`tiled-upscale-job-${jobId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'mira_agent_tiled_upscale_jobs', filter: `id=eq.${jobId}` },
-        () => queryClient.invalidateQueries({ queryKey: ['tiledUpscaleJob', jobId] })
+    if (!session?.user?.id) return;
+    const channel = supabase.channel(`tiled-upscale-jobs-all`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mira_agent_tiled_upscale_jobs', filter: `user_id=eq.${session.user.id}` },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ['tiledUpscaleJob', jobId] });
+          queryClient.invalidateQueries({ queryKey: ['recentTiledUpscaleJobs', session.user.id] });
+        }
       )
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'mira_agent_tiled_upscale_tiles', filter: `parent_job_id=eq.${jobId}` },
-        () => queryClient.invalidateQueries({ queryKey: ['tiledUpscaleTiles', jobId] })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mira_agent_tiled_upscale_tiles' },
+        (payload) => {
+          if (payload.new.parent_job_id === jobId) {
+            queryClient.invalidateQueries({ queryKey: ['tiledUpscaleTiles', jobId] });
+          }
+        }
       )
       .subscribe();
-
     return () => { supabase.removeChannel(channel); };
   }, [jobId, supabase, session?.user?.id, queryClient]);
 
   const handleFileSelect = useCallback((file: File | null) => {
     if (!file || !file.type.startsWith('image/')) return;
     setSourceFile(file);
-    setJobId(null);
+    setJobId(null); // Go to "new job" mode
     const reader = new FileReader();
     reader.readAsDataURL(file);
     reader.onload = (event) => setSourcePreview(event.target?.result as string);
@@ -90,6 +114,8 @@ const UpscaleTilingVisualizer = () => {
       });
       if (error) throw error;
       setJobId(data.jobId);
+      setSourceFile(null); // Clear the file after starting
+      setSourcePreview(null);
     } catch (err: any) {
       dismissToast(toastId);
       showError(`Process failed: ${err.message}`);
@@ -103,6 +129,14 @@ const UpscaleTilingVisualizer = () => {
     setIsModalOpen(true);
   };
 
+  const startNewJob = () => {
+    setJobId(null);
+    setSourceFile(null);
+    setSourcePreview(null);
+  };
+
+  const sourceImageUrlForDisplay = jobId ? parentJob?.source_image_url : sourcePreview;
+
   return (
     <>
       <div className="p-4 md:p-8 h-full overflow-y-auto">
@@ -113,18 +147,32 @@ const UpscaleTilingVisualizer = () => {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-1 space-y-6">
             <Card>
-              <CardHeader><CardTitle>1. Upload Image</CardTitle></CardHeader>
-              <CardContent>
-                <div {...dropzoneProps} onClick={() => fileInputRef.current?.click()} className={cn("p-4 border-2 border-dashed rounded-lg text-center cursor-pointer hover:border-primary transition-colors", isDraggingOver && "border-primary bg-primary/10")}>
-                  {sourcePreview ? <img src={sourcePreview} alt="Source preview" className="max-h-48 mx-auto rounded-md" /> : <><UploadCloud className="mx-auto h-12 w-12 text-muted-foreground" /><p className="mt-2 text-sm font-medium">Click or drag source image</p></>}
-                  <Input ref={fileInputRef} type="file" className="hidden" accept="image/*" onChange={(e) => handleFileSelect(e.target.files?.[0] || null)} />
+              <CardHeader>
+                <div className="flex justify-between items-center">
+                  <CardTitle>{jobId ? "Selected Job" : "1. Upload Image"}</CardTitle>
+                  {jobId && <Button variant="outline" size="sm" onClick={startNewJob}><PlusCircle className="h-4 w-4 mr-2" />New Job</Button>}
                 </div>
+              </CardHeader>
+              <CardContent>
+                {sourceImageUrlForDisplay ? (
+                  <div className="w-full aspect-square bg-muted rounded-md overflow-hidden flex justify-center items-center">
+                    <SecureImageDisplay imageUrl={sourceImageUrlForDisplay} alt="Source for refinement" />
+                  </div>
+                ) : (
+                  <div {...dropzoneProps} onClick={() => fileInputRef.current?.click()} className={cn("p-4 border-2 border-dashed rounded-lg text-center cursor-pointer hover:border-primary transition-colors", isDraggingOver && "border-primary bg-primary/10")}>
+                    <UploadCloud className="mx-auto h-12 w-12 text-muted-foreground" />
+                    <p className="mt-2 text-sm font-medium">Click or drag source image</p>
+                    <Input ref={fileInputRef} type="file" className="hidden" accept="image/*" onChange={(e) => handleFileSelect(e.target.files?.[0] || null)} />
+                  </div>
+                )}
               </CardContent>
             </Card>
-            <Button onClick={handleStart} disabled={isLoading || !sourceFile}>
-              {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ImageIcon className="mr-2 h-4 w-4" />}
-              Start Tiling & Analysis
-            </Button>
+            {!jobId && (
+              <Button onClick={handleStart} disabled={isLoading || !sourceFile}>
+                {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ImageIcon className="mr-2 h-4 w-4" />}
+                Start Tiling & Analysis
+              </Button>
+            )}
           </div>
           <div className="lg:col-span-2 space-y-6">
             <Card>
@@ -165,6 +213,30 @@ const UpscaleTilingVisualizer = () => {
             </Card>
           </div>
         </div>
+        <Card className="mt-8">
+          <CardHeader><CardTitle>Recent Jobs</CardTitle></CardHeader>
+          <CardContent>
+            {isLoadingRecent ? <Skeleton className="h-24 w-full" /> : recentJobs && recentJobs.length > 0 ? (
+              <Carousel opts={{ align: "start" }} className="w-full">
+                <CarouselContent className="-ml-4">
+                  {recentJobs.map(job => (
+                    <CarouselItem key={job.id} className="pl-4 basis-auto">
+                      <RecentJobThumbnail
+                        job={job}
+                        onClick={() => setJobId(job.id)}
+                        isSelected={jobId === job.id}
+                      />
+                    </CarouselItem>
+                  ))}
+                </CarouselContent>
+                <CarouselPrevious />
+                <CarouselNext />
+              </Carousel>
+            ) : (
+              <p className="text-sm text-muted-foreground">No recent jobs found.</p>
+            )}
+          </CardContent>
+        </Card>
       </div>
       <TileDetailModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} tile={selectedTile} />
     </>

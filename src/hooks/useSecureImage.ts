@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useSession } from '@/components/Auth/SessionContextProvider';
 
 export const useSecureImage = (
@@ -29,6 +29,12 @@ export const useSecureImage = (
         }
         
         if (imageUrl.includes('supabase.co')) {
+          // Check for known public buckets that don't need authenticated download
+          if (imageUrl.includes('/mira-agent-generations/')) {
+            setDisplayUrl(imageUrl);
+            return;
+          }
+
           const url = new URL(imageUrl);
           const pathSegments = url.pathname.split('/');
           
