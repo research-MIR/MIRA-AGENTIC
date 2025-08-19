@@ -13,7 +13,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const systemPrompt = "You are an expert image analyst. Your sole task is to describe the provided image tile with extreme detail. Focus on textures, materials, lighting, and the specific objects or parts of objects visible. Your output should be a single, descriptive paragraph in natural language, suitable for a text-to-image model. The language must be English.";
+const systemPrompt = "You are an expert image analyst. Your sole task is to describe the provided image tile with extreme detail. Focus on textures, materials, lighting, and the specific objects or parts of objects visible. Your output should be a single, descriptive paragraph in natural language, suitable for a text-to-image model. The language must be in English.";
 
 async function downloadImage(supabase: SupabaseClient, publicUrl: string) {
     const url = new URL(publicUrl);
@@ -26,6 +26,8 @@ async function downloadImage(supabase: SupabaseClient, publicUrl: string) {
 }
 
 serve(async (req) => {
+  console.log("[TileAnalyzerWorker] Function invocation started."); // Canary Log
+
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
 
   const { tile_id, tile_base64, mime_type, tile_url } = await req.json();

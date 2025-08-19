@@ -63,14 +63,12 @@ serve(async (req) => {
     if (fetchError) throw fetchError;
     console.log(`${logPrefix} Fetched parent job details.`);
 
-    const downloadStart = performance.now();
-    console.log(`${logPrefix} Downloading source image from ${job.source_image_url}`);
-    const imageBlob = await downloadImage(supabase, job.source_image_url);
-    console.log(`${logPrefix} Download complete in ${(performance.now() - downloadStart).toFixed(2)}ms. Blob size: ${imageBlob.size} bytes.`);
+    const dl0 = performance.now();
+    const blob = await downloadImage(supabase, job.source_image_url);
+    console.log(`${logPrefix} Download in ${(performance.now() - dl0).toFixed(2)}ms, blob=${blob.size}B`);
 
-    const decodeStart = performance.now();
-    const img = await Image.decode(await imageBlob.arrayBuffer());
-    console.log(`${logPrefix} Decoded image in ${(performance.now() - decodeStart).toFixed(2)}ms. Original dimensions: ${img.width}x${img.height}`);
+    const img = await Image.decode(await blob.arrayBuffer());
+    console.log(`${logPrefix} Decoded ${img.width}x${img.height}`);
 
     const targetW = Math.round(img.width * job.upscale_factor);
     img.resize(targetW, Image.RESIZE_AUTO, Image.RESIZE_BICUBIC);
@@ -130,7 +128,9 @@ serve(async (req) => {
             const { data, error } = await supabase.functions.invoke("MIRA-AGENT-worker-tile-analyzer", {
               body: { tile_url: publicUrl, mime_type: mime },
             });
-            if (error) throw error;
+            console.log(`${tag} Analyzer response: data=${JSON.stringify(data)}, error=${JSON.stringify(error)}`);
+            if (error) throw new Error(`Function invocation failed: ${error.message || JSON.stringify(error)}`);
+            if (data && data.error) throw new Error(`Analyzer function returned an error: ${data.error}`);
             caption = data?.prompt ?? null;
           } else {
             const { encodeBase64 } = await import("https://deno.land/std@0.224.0/encoding/base64.ts");
@@ -138,7 +138,9 @@ serve(async (req) => {
             const { data, error } = await supabase.functions.invoke("MIRA-AGENT-worker-tile-analyzer", {
               body: { tile_base64: b64, mime_type: mime },
             });
-            if (error) throw error;
+            console.log(`${tag} Analyzer response: data=${JSON.stringify(data)}, error=${JSON.stringify(error)}`);
+            if (error) throw new Error(`Function invocation failed: ${error.message || JSON.stringify(error)}`);
+            if (data && data.error) throw new Error(`Analyzer function returned an error: ${data.error}`);
             caption = data?.prompt ?? null;
           }
           const anMs = (performance.now() - an0).toFixed(2);
