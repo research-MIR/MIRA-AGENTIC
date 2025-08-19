@@ -25,6 +25,21 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   global: { fetch }, auth: { persistSession: false }
 });
 
+function parseStorageURL(url: string) {
+    const u = new URL(url);
+    const pathSegments = u.pathname.split('/');
+    const objectSegmentIndex = pathSegments.indexOf('object');
+    if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) {
+        throw new Error(`Invalid Supabase storage URL format: ${url}`);
+    }
+    const bucket = pathSegments[objectSegmentIndex + 2];
+    const path = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
+    if (!bucket || !path) {
+        throw new Error(`Could not parse bucket or path from Supabase URL: ${url}`);
+    }
+    return { bucket, path };
+}
+
 function buildRamp(n: number, invert = false): Float32Array {
   const r = new Float32Array(n);
   if (n <= 0) return r.fill(1);
@@ -114,24 +129,41 @@ async function run(parent_job_id: string) {
   const logPrefix = `[Compositor][${parent_job_id}]`;
   console.log(`${logPrefix} Starting run.`);
 
-  const { data: parentRow, error: e1 } = await supabase.from("mira_agent_tiled_upscale_jobs").select("id,user_id,source_image_url,status,final_image_url").eq("id", parent_job_id).single();
+  const { data: parentRow, error: e1 } = await supabase
+    .from("mira_agent_tiled_upscale_jobs")
+    .select("id,user_id,source_image_url,status,final_image_url,upscale_factor")
+    .eq("id", parent_job_id)
+    .single();
   if (e1 || !parentRow) throw new Error(`Parent not found: ${e1?.message}`);
+
   if (parentRow.final_image_url) {
     console.log(`${logPrefix} Job already has a final image URL. Exiting.`);
     return;
   }
 
-  const { data: tiles, error: e2 } = await supabase.from("mira_agent_tiled_upscale_tiles").select("tile_index,coordinates,generated_tile_url,status").eq("parent_job_id", parent_job_id).order("tile_index", { ascending: true });
+  const { data: tiles, error: e2 } = await supabase
+    .from("mira_agent_tiled_upscale_tiles")
+    .select("tile_index,coordinates,generated_tile_url,status")
+    .eq("parent_job_id", parent_job_id)
+    .order("tile_index", { ascending: true });
   if (e2) throw new Error(e2.message);
 
   const completeTiles: Tile[] = (tiles ?? []).filter(t => t.status === "complete");
   if (!completeTiles.length) throw new Error("No completed tiles found for this job.");
 
-  const { data: sourceBlob, error: dlError } = await supabase.storage.from("mira-agent-user-uploads").download(parentRow.source_image_url.split('/').slice(-2).join('/'));
+  const { bucket, path } = parseStorageURL(parentRow.source_image_url);
+  console.log(`${logPrefix} Downloading source image from bucket: ${bucket}, path: ${path}`);
+  const { data: sourceBlob, error: dlError } = await supabase.storage.from(bucket).download(path);
   if (dlError) throw new Error(`Failed to download original source image: ${dlError.message}`);
+  
   const originalImage = await Image.decode(await sourceBlob.arrayBuffer());
+  
+  // Upscale the base image to get the final canvas dimensions
+  const targetW = Math.round(originalImage.width * parentRow.upscale_factor);
+  originalImage.resize(targetW, Image.RESIZE_AUTO, Image.RESIZE_BICUBIC);
   const W = originalImage.width;
   const H = originalImage.height;
+  console.log(`${logPrefix} Final canvas dimensions will be ${W}x${H}`);
 
   const estMB = (W * H * 4 + TILE_SIZE * TILE_SIZE * 4 + 8 * TILE_SIZE * 4) / (1024 * 1024);
   if (estMB > MEM_HARD_LIMIT_MB) {
