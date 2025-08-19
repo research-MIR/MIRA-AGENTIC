@@ -25,6 +25,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { PackDashboard } from "@/components/GenerateModels/PackDashboard";
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel";
 import { PoseHistoryModal } from "@/components/GenerateModels/PoseHistoryModal";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface PoseAnalysis {
   qa_status: 'pass' | 'fail';
@@ -459,7 +460,7 @@ const ModelPackDetail = () => {
                           </RadioGroup>
                         </div>
                         <div className="grid grid-cols-2 gap-4">
-                          <Button variant="outline" className="w-full" onClick={() => handleRetryBaseModel()} disabled={isRetryingBase}>
+                          <Button variant="outline" className="w-full" onClick={() => handleRetryBaseModel(selectedJob.id)} disabled={isRetryingBase}>
                             {isRetryingBase ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
                             Retry Generation
                           </Button>
@@ -484,7 +485,7 @@ const ModelPackDetail = () => {
                             </p>
                             <Button 
                                 className="w-full" 
-                                onClick={() => handleRetryBaseModel()}
+                                onClick={() => handleRetryBaseModel(selectedJob.id)}
                                 disabled={isRetryingBase}
                             >
                                 {isRetryingBase ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
