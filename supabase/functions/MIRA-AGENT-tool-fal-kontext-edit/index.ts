@@ -178,7 +178,10 @@ serve(async (req) => {
       },
       logs: true,
     });
-    const finalImage = falResult?.images?.[0];
+    
+    console.log(`${logPrefix} Full API response from Fal.ai:`, JSON.stringify(falResult, null, 2));
+
+    const finalImage = falResult?.data?.images?.[0];
     if (!finalImage || !finalImage.url) throw new Error("Fal.ai did not return a valid image.");
 
     // 5. Upload result to Supabase Storage
