@@ -82,7 +82,14 @@ const UpscaleTilingVisualizer = () => {
   };
 
   useEffect(() => {
-    if (!jobId) return;
+    if (!jobId) {
+      // If there's no job, ensure any existing channel is cleaned up.
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+      return;
+    }
 
     const fetchAndSetTiles = async () => {
         const { data, error } = await supabase
@@ -99,10 +106,6 @@ const UpscaleTilingVisualizer = () => {
 
     fetchAndSetTiles();
 
-    if (channelRef.current) {
-        supabase.removeChannel(channelRef.current);
-    }
-
     const channel = supabase.channel(`tiled-upscale-job-${jobId}`)
         .on('postgres_changes', {
             event: '*',
@@ -112,13 +115,24 @@ const UpscaleTilingVisualizer = () => {
         }, () => {
             fetchAndSetTiles(); 
         })
-        .subscribe();
+        .subscribe((status, err) => {
+            if (status === 'SUBSCRIBED') {
+                console.log(`[Realtime] Subscribed successfully to tiled-upscale-job-${jobId}`);
+            }
+            if (err) {
+                console.error(`[Realtime] Subscription error for tiled-upscale-job-${jobId}:`, err);
+            }
+        });
 
     channelRef.current = channel;
 
+    // The cleanup function will be called when the component unmounts
+    // or when the `jobId` dependency changes, triggering a re-run of the effect.
     return () => {
-        if (channelRef.current) {
-            supabase.removeChannel(channelRef.current);
+        if (channel) {
+            console.log(`[Realtime] Unsubscribing from tiled-upscale-job-${jobId}`);
+            supabase.removeChannel(channel);
+            channelRef.current = null;
         }
     };
   }, [jobId, supabase]);
