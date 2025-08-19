@@ -150,7 +150,7 @@ serve(async (req) => {
             tile_index: idx,
             coordinates: { x, y, width: TILE_SIZE, height: TILE_SIZE },
             source_tile_url: publicUrl,
-            generated_prompt: caption,
+            generated_prompt: caption, // FIX: Correctly assign the caption here
             status: "pending_generation",
           };
           batch.push(tileRecord);
