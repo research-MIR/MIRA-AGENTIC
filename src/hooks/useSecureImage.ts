@@ -12,25 +12,31 @@ export const useSecureImage = (
 
   useEffect(() => {
     let objectUrl: string | null = null;
+    const logPrefix = `[useSecureImage]`;
 
     const loadImage = async () => {
+      console.log(`${logPrefix} Hook triggered. Received URL:`, imageUrl);
+
       if (!imageUrl) {
         setDisplayUrl(null);
+        console.log(`${logPrefix} URL is null or undefined. Clearing display URL.`);
         return;
       }
       
       setIsLoading(true);
       setError(null);
+      console.log(`${logPrefix} Set loading to true for URL: ${imageUrl}`);
 
       try {
         if (imageUrl.startsWith('data:image') || imageUrl.startsWith('blob:')) {
           setDisplayUrl(imageUrl);
+          console.log(`${logPrefix} URL is a data/blob URL. Set directly.`);
           return;
         }
         
         if (imageUrl.includes('supabase.co')) {
-          // Check for known public buckets that don't need authenticated download
           if (imageUrl.includes('/mira-agent-generations/')) {
+            console.log(`${logPrefix} URL is in a public bucket. Setting directly.`);
             setDisplayUrl(imageUrl);
             return;
           }
@@ -56,7 +62,7 @@ export const useSecureImage = (
             : undefined;
 
           const MAX_RETRIES = 3;
-          const RETRY_DELAY = 1000; // Base delay of 1 second
+          const RETRY_DELAY = 1000;
 
           for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
             const { data, error: downloadError } = await supabase.storage
@@ -66,19 +72,19 @@ export const useSecureImage = (
             if (!downloadError) {
               objectUrl = URL.createObjectURL(data);
               setDisplayUrl(objectUrl);
-              return; // Success, exit the function
+              console.log(`${logPrefix} Successfully downloaded and created object URL for ${storagePath}.`);
+              return;
             }
 
             if (attempt < MAX_RETRIES) {
-              const delay = RETRY_DELAY * attempt; // Exponential backoff
-              console.warn(`[useSecureImage] Failed to download ${storagePath} (attempt ${attempt}/${MAX_RETRIES}). Retrying in ${delay}ms...`);
+              const delay = RETRY_DELAY * attempt;
+              console.warn(`${logPrefix} Failed to download ${storagePath} (attempt ${attempt}/${MAX_RETRIES}). Retrying in ${delay}ms...`);
               await new Promise(resolve => setTimeout(resolve, delay));
             } else {
               throw new Error(`Failed to download image after ${MAX_RETRIES} attempts: ${downloadError.message}`);
             }
           }
         } else {
-          // Fallback for any other external URLs via proxy
           const { data, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-image-download', { body: { url: imageUrl } });
           if (proxyError) throw new Error(`Proxy failed: ${proxyError.message}`);
           if (data.base64 && data.mimeType) {
@@ -88,11 +94,12 @@ export const useSecureImage = (
           }
         }
       } catch (err: any) {
-        console.error("useSecureImage error:", err);
+        console.error(`${logPrefix} Error loading image ${imageUrl}:`, err);
         setError(err.message);
         setDisplayUrl(null);
       } finally {
         setIsLoading(false);
+        console.log(`${logPrefix} Set loading to false for URL: ${imageUrl}`);
       }
     };
 
@@ -100,6 +107,7 @@ export const useSecureImage = (
 
     return () => {
       if (objectUrl) {
+        console.log(`${logPrefix} Revoking object URL: ${objectUrl}`);
         URL.revokeObjectURL(objectUrl);
       }
     };

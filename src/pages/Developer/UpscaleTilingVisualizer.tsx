@@ -8,6 +8,7 @@ import { useDropzone } from '@/hooks/useDropzone';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { RealtimeChannel } from '@supabase/supabase-js';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { TileDetailModal } from '@/components/Developer/TileDetailModal';
 import { SecureImageDisplay } from '@/components/VTO/SecureImageDisplay';
@@ -60,8 +61,14 @@ const UpscaleTilingVisualizer = () => {
       return 5000;
     },
     refetchOnWindowFocus: true,
-    staleTime: 0, // Always treat data as stale to ensure refetching
+    staleTime: 0,
   });
+
+  useEffect(() => {
+    if (parentJob) {
+      console.log('[Visualizer] Parent job data updated:', parentJob);
+    }
+  }, [parentJob]);
 
   const { data: tiles, isLoading: isLoadingTiles } = useQuery({
     queryKey: ['tiledUpscaleTiles', jobId],
