@@ -234,7 +234,7 @@ serve(async (req) => {
     // 7. Trigger QA
     console.log(`${logPrefix} Step 6: Triggering final QA analysis...`);
     await supabase.functions.invoke('MIRA-AGENT-analyzer-pose-image', {
-      body: { job_id, image_url: publicUrl, base_model_image_url, pose_prompt }
+      body: { job_id, image_url: publicUrl, base_model_url, pose_prompt }
     });
 
     console.log(`${logPrefix} Job complete.`);
