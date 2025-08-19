@@ -31,13 +31,8 @@ serve(async (req) => {
       console.log(`${logPrefix} Found ${pendingAnalysisTiles.length} tiles to analyze. Claiming and dispatching...`);
       const tileIds = pendingAnalysisTiles.map(t => t.id);
       
-      // Atomically claim the jobs
-      await supabase
-        .from('mira_agent_tiled_upscale_tiles')
-        .update({ status: 'analyzing' })
-        .in('id', tileIds);
+      await supabase.from('mira_agent_tiled_upscale_tiles').update({ status: 'analyzing' }).in('id', tileIds);
 
-      // Asynchronously invoke workers
       const analysisPromises = tileIds.map(tile_id => 
         supabase.functions.invoke('MIRA-AGENT-worker-tile-analyzer', { body: { tile_id } })
       );
@@ -61,13 +56,8 @@ serve(async (req) => {
       console.log(`${logPrefix} Found ${pendingGenerationTiles.length} tiles to generate. Claiming and dispatching...`);
       const tileIds = pendingGenerationTiles.map(t => t.id);
 
-      // Atomically claim the jobs
-      await supabase
-        .from('mira_agent_tiled_upscale_tiles')
-        .update({ status: 'generating' })
-        .in('id', tileIds);
+      await supabase.from('mira_agent_tiled_upscale_tiles').update({ status: 'generating' }).in('id', tileIds);
 
-      // Asynchronously invoke workers
       const generationPromises = tileIds.map(tile_id =>
         supabase.functions.invoke('MIRA-AGENT-worker-tile-generator', { body: { tile_id } })
       );
@@ -77,9 +67,26 @@ serve(async (req) => {
       console.log(`${logPrefix} No tiles pending generation.`);
     }
 
-    // --- TODO: Compositing Step ---
-    // In the future, we will add logic here to find parent jobs where all tiles are 'complete'
-    // and invoke the 'MIRA-AGENT-compositor-tiled-upscale'.
+    // --- Compositing Step ---
+    console.log(`${logPrefix} Checking for parent jobs ready for compositing...`);
+    const { data: generatingJobs, error: fetchGeneratingError } = await supabase
+      .from('mira_agent_tiled_upscale_jobs')
+      .select('id, (select count(id) from mira_agent_tiled_upscale_tiles where parent_job_id = mira_agent_tiled_upscale_jobs.id) as total_tiles, (select count(id) from mira_agent_tiled_upscale_tiles where parent_job_id = mira_agent_tiled_upscale_jobs.id and status = \'complete\') as completed_tiles')
+      .eq('status', 'generating');
+
+    if (fetchGeneratingError) throw fetchGeneratingError;
+
+    if (generatingJobs && generatingJobs.length > 0) {
+        for (const job of generatingJobs) {
+            if (job.total_tiles > 0 && job.total_tiles === job.completed_tiles) {
+                console.log(`${logPrefix} Job ${job.id} is ready for compositing. Claiming and dispatching...`);
+                await supabase.from('mira_agent_tiled_upscale_jobs').update({ status: 'compositing' }).eq('id', job.id);
+                supabase.functions.invoke('MIRA-AGENT-compositor-tiled-upscale', { body: { parent_job_id: job.id } }).catch(console.error);
+            }
+        }
+    } else {
+        console.log(`${logPrefix} No jobs in 'generating' state found.`);
+    }
 
     return new Response(JSON.stringify({ success: true, message: "Watchdog check complete." }), { headers: corsHeaders });
   } catch (error) {

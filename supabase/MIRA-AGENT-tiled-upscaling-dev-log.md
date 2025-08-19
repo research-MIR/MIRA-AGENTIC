@@ -47,3 +47,13 @@
     4.  **Watchdog Expansion:** The **`MIRA-AGENT-watchdog-tiled-upscale`** function was significantly updated. It now manages two distinct tasks: first, it finds and dispatches tiles that are `pending_analysis`; second, it finds and dispatches tiles that are `pending_generation`, triggering the new generator worker. This ensures the entire pipeline from tiling to generation is automated.
     5.  **Pipeline Integration:** The `MIRA-AGENT-worker-tiling-and-analysis` function was verified to correctly set the tile status to `'pending_generation'` after a successful analysis, ensuring a smooth handoff to the new generation stage managed by the watchdog.
 *   **Current Status:** The full analysis-to-generation pipeline is now implemented. The system can autonomously tile an image, generate a descriptive caption for each tile, and then use that caption to perform an AI-powered upscale on each tile. The next step is to build the final compositor to stitch these generated tiles back together.
+
+**Phase 4: Final Compositing**
+
+*   **Objective:** Create a worker to stitch the individually generated tiles into a single, seamless final image.
+*   **Actions Taken (2024-08-06):**
+    1.  **Technical Strategy:** Adopted a memory-efficient approach using separable 1-D ramps for alpha blending (feathering) to eliminate seams between tiles, as detailed in the user's technical brief.
+    2.  **New Compositor Worker:** Created the `MIRA-AGENT-compositor-tiled-upscale` Edge Function. This worker is responsible for fetching all completed tiles for a job, pre-computing the blending ramps, sequentially compositing the feathered tiles onto a final canvas, and uploading the result.
+    3.  **Watchdog Integration:** The watchdog was updated with a new task to identify parent jobs where all tiles are complete. It then triggers the new compositor worker for these jobs, completing the automated pipeline.
+    4.  **Risk Mitigation:** Implemented a proactive memory budget check to prevent the function from running on images that are too large for the Edge Function environment, gracefully failing the job instead of timing out.
+*   **Current Status:** The end-to-end tiled upscaling pipeline is now complete. The system can tile, analyze, generate, and composite a final image.
