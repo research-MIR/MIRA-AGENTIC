@@ -7,6 +7,7 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const BUCKET_OUT = "mira-generations";
 
+const TILE_SIZE = 1024; // The base logical tile size before upscaling
 const JPEG_QUALITY = Number(Deno.env.get("COMPOSITOR_JPEG_QUALITY") ?? 90);
 const MEM_HARD_LIMIT_MB = Number(Deno.env.get("COMPOSITOR_MEM_LIMIT_MB") ?? 360);
 
@@ -38,7 +39,7 @@ function parseStorageURL(url: string) {
 
 function buildRamp(n: number, invert = false): Float32Array {
   const r = new Float32Array(n);
-  if (n <= 0) return r.fill(1);
+  if (n <= 1) return r.fill(1);
   for (let i = 0; i < n; i++) {
     let t = i / (n - 1);
     t = t * t * (3 - 2 * t); // smoothstep
@@ -92,14 +93,18 @@ function blendWeighted(canvas: Image, tile: Image, x0: number, y0: number, hx: F
   const W = canvas.width, tw = tile.width, th = tile.height;
 
   for (let y=0; y<th; y++) {
+    const absY = y0 + y;
+    if (absY < 0 || absY >= canvas.height) continue;
     const wy = vy[y];
-    const cy = (y0 + y) * W;
+    const cy = absY * W;
     const ty = y * tw;
     for (let x=0; x<tw; x++) {
+      const absX = x0 + x;
+      if (absX < 0 || absX >= canvas.width) continue;
       const w = hx[x] * wy;
       if (w <= 0) continue;
 
-      const cidx = ((cy + (x0 + x)) << 2);
+      const cidx = ((cy + absX) << 2);
       const tidx = ((ty + x) << 2);
 
       const wOld = cb[cidx+3] / 255;
@@ -110,7 +115,7 @@ function blendWeighted(canvas: Image, tile: Image, x0: number, y0: number, hx: F
       cb[cidx  ] = Math.round(cb[cidx  ] * scaleOld + tb[tidx  ] * scaleAdd);
       cb[cidx+1] = Math.round(cb[cidx+1] * scaleOld + tb[tidx+1] * scaleAdd);
       cb[cidx+2] = Math.round(cb[cidx+2] * scaleOld + tb[tidx+2] * scaleAdd);
-      cb[cidx+3] = Math.round(wNew * 255);   // store weight sum
+      cb[cidx+3] = Math.round(wNew * 255);
     }
   }
 }
@@ -154,17 +159,15 @@ async function run(parent_job_id: string) {
   console.log(`${logPrefix} Detected upscale factor of ${scaleFactor}x (Tiles are ${actualTileSize}px)`);
 
   const { bucket, path } = parseStorageURL(parentRow.source_image_url);
-  console.log(`${logPrefix} Downloading source image from bucket: ${bucket}, path: ${path}`);
   const { data: sourceBlob, error: dlError } = await supabase.storage.from(bucket).download(path);
   if (dlError) throw new Error(`Failed to download original source image: ${dlError.message}`);
   
-  const originalImage = await Image.decode(await sourceBlob.arrayBuffer());
-  
-  const intermediateW = Math.round(originalImage.width * parentRow.upscale_factor);
-  originalImage.resize(intermediateW, Image.RESIZE_AUTO, Image.RESIZE_BICUBIC);
-  
-  const finalW = Math.round(originalImage.width * scaleFactor);
-  const finalH = Math.round(originalImage.height * scaleFactor);
+  let originalImage: Image | null = await Image.decode(await sourceBlob.arrayBuffer());
+  const upW = Math.round(originalImage.width * parentRow.upscale_factor);
+  const upH = Math.round(originalImage.height * parentRow.upscale_factor);
+  const finalW = Math.round(upW * scaleFactor);
+  const finalH = Math.round(upH * scaleFactor);
+  originalImage = null; // Release memory
   console.log(`${logPrefix} Final canvas dimensions will be ${finalW}x${finalH}`);
 
   const estMB = (finalW * finalH * 4 * 2 + 8 * actualTileSize * 4) / (1024 * 1024);
@@ -173,34 +176,30 @@ async function run(parent_job_id: string) {
     throw new Error(`Refused: est ${estMB.toFixed(1)} MB > limit ${MEM_HARD_LIMIT_MB}`);
   }
 
-  const canvas = new Image(finalW, finalH); // Starts as transparent black
+  const canvas = new Image(finalW, finalH);
   console.log(`${logPrefix} Created empty canvas for normalized blending.`);
 
-  // --- New Dynamic Step & Overlap Calculation ---
   const xs = [...new Set(completeTiles.map(t => t.coordinates.x))].sort((a,b)=>a-b);
   const ys = [...new Set(completeTiles.map(t => t.coordinates.y))].sort((a,b)=>a-b);
   const dx = xs.length > 1 ? Math.min(...xs.slice(1).map((v,i)=>v - xs[i])) : 0;
   const dy = ys.length > 1 ? Math.min(...ys.slice(1).map((v,i)=>v - ys[i])) : 0;
-  const stepX = Math.round(dx * scaleFactor);
-  const stepY = Math.round(dy * scaleFactor);
-  const ovX = Math.max(0, Math.min(actualTileSize >> 1, actualTileSize - stepX));
-  const ovY = Math.max(0, Math.min(actualTileSize >> 1, actualTileSize - stepY));
+  const stepX = dx > 0 ? Math.round(dx * scaleFactor) : Number.POSITIVE_INFINITY;
+  const stepY = dy > 0 ? Math.round(dy * scaleFactor) : Number.POSITIVE_INFINITY;
+  const ovX = Number.isFinite(stepX) ? Math.max(0, Math.min(actualTileSize >> 1, actualTileSize - stepX)) : 0;
+  const ovY = Number.isFinite(stepY) ? Math.max(0, Math.min(actualTileSize >> 1, actualTileSize - stepY)) : 0;
   console.log(`${logPrefix} Inferred scaled steps: {x: ${stepX}, y: ${stepY}}. Overlaps: {x: ${ovX}, y: ${ovY}}`);
 
-  const HR = ramps1D(actualTileSize, ovX);
-  const VR = rampsY(actualTileSize, ovY);
-
-  // --- New Robust Neighbor Lookup ---
-  const EPSX = Math.max(1, Math.floor(stepX/8)), EPSY = Math.max(1, Math.floor(stepY/8));
+  const EPSX = Math.max(1, Math.floor(actualTileSize / 64));
+  const EPSY = Math.max(1, Math.floor(actualTileSize / 64));
   const key = (x:number,y:number)=> `${Math.round(x/EPSX)},${Math.round(y/EPSY)}`;
   const idx = new Set(completeTiles.map(t => key(Math.round(t.coordinates.x*scaleFactor), Math.round(t.coordinates.y*scaleFactor))));
   function flags(x:number,y:number) {
     const k = (xx:number,yy:number)=> idx.has(key(xx,yy));
     return {
-      left:   k(x - stepX, y),
-      right:  k(x + stepX, y),
-      top:    k(x, y - stepY),
-      bottom: k(x, y + stepY),
+      left:   Number.isFinite(stepX) ? k(x - stepX, y) : false,
+      right:  Number.isFinite(stepX) ? k(x + stepX, y) : false,
+      top:    Number.isFinite(stepY) ? k(x, y - stepY) : false,
+      bottom: Number.isFinite(stepY) ? k(x, y + stepY) : false,
     };
   }
 
@@ -213,10 +212,11 @@ async function run(parent_job_id: string) {
     let tile: Image | null = await Image.decode(bytes);
     console.log(`${logPrefix} Processing Tile #${t.tile_index} | Coords: {x:${t.coordinates.x}, y:${t.coordinates.y}} | Decoded Size: ${tile.width}x${tile.height}`);
     
-    if (tile.width !== actualTileSize) {
-        console.warn(`${logPrefix} Tile #${t.tile_index} has unexpected size ${tile.width}x${tile.height}. Resizing to ${actualTileSize}px.`);
-        tile.resize(actualTileSize, actualTileSize, Image.RESIZE_BICUBIC);
-    }
+    const tileW = tile.width, tileH = tile.height;
+    const ovXlocal = Math.min(ovX, tileW);
+    const ovYlocal = Math.min(ovY, tileH);
+    const HR = ramps1D(tileW, ovXlocal);
+    const VR = rampsY(tileH, ovYlocal);
 
     const scaledX = Math.round(t.coordinates.x * scaleFactor);
     const scaledY = Math.round(t.coordinates.y * scaleFactor);
@@ -229,7 +229,6 @@ async function run(parent_job_id: string) {
     tile = null; // Help GC
   }
 
-  // Force full opacity before encoding to JPEG
   for (let i = 0; i < canvas.bitmap.length; i += 4) canvas.bitmap[i + 3] = 255;
 
   const jpeg = await canvas.encodeJPEG(JPEG_QUALITY);
