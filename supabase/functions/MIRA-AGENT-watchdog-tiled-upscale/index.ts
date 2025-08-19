@@ -47,9 +47,35 @@ serve(async (req) => {
       console.log(`${logPrefix} No tiles pending analysis.`);
     }
 
-    // --- TODO: Generation Step ---
-    // In the future, we will add logic here to find tiles with status 'pending_generation'
-    // and invoke the 'MIRA-AGENT-worker-tile-generator'.
+    // --- Generation Step ---
+    console.log(`${logPrefix} Checking for tiles pending generation...`);
+    const { data: pendingGenerationTiles, error: fetchGenerationError } = await supabase
+      .from('mira_agent_tiled_upscale_tiles')
+      .select('id')
+      .eq('status', 'pending_generation')
+      .limit(BATCH_SIZE);
+
+    if (fetchGenerationError) throw fetchGenerationError;
+
+    if (pendingGenerationTiles && pendingGenerationTiles.length > 0) {
+      console.log(`${logPrefix} Found ${pendingGenerationTiles.length} tiles to generate. Claiming and dispatching...`);
+      const tileIds = pendingGenerationTiles.map(t => t.id);
+
+      // Atomically claim the jobs
+      await supabase
+        .from('mira_agent_tiled_upscale_tiles')
+        .update({ status: 'generating' })
+        .in('id', tileIds);
+
+      // Asynchronously invoke workers
+      const generationPromises = tileIds.map(tile_id =>
+        supabase.functions.invoke('MIRA-AGENT-worker-tile-generator', { body: { tile_id } })
+      );
+      await Promise.allSettled(generationPromises);
+      console.log(`${logPrefix} Dispatched ${tileIds.length} generation workers.`);
+    } else {
+      console.log(`${logPrefix} No tiles pending generation.`);
+    }
 
     // --- TODO: Compositing Step ---
     // In the future, we will add logic here to find parent jobs where all tiles are 'complete'
