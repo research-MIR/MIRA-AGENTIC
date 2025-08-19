@@ -15,8 +15,6 @@ const MAX_CONCURRENCY = Number(Deno.env.get("TILE_ANALYSIS_CONCURRENCY") ?? 2);
 const INSERT_BATCH_SIZE = Number(Deno.env.get("TILE_INSERT_BATCH_SIZE") ?? 100);
 
 // encode settings
-const TILE_ENCODE = (Deno.env.get("TILE_ENCODE") ?? "webp").toLowerCase(); // "webp" | "jpeg" | "png"
-const TILE_QUALITY = Number(Deno.env.get("TILE_QUALITY") ?? 85); // for webp/jpeg
 const ANALYZER_INPUT = (Deno.env.get("ANALYZER_INPUT") ?? "url").toLowerCase(); // "url" | "base64"
 
 const corsHeaders = {
@@ -33,12 +31,6 @@ async function downloadImage(supabase: any, publicUrl: string): Promise<Blob> {
   const { data, error } = await supabase.storage.from(bucketName).download(filePath);
   if (error) throw new Error(`Failed to download from Supabase storage (${filePath}): ${error.message}`);
   return data;
-}
-
-function pickMimeAndFmt() {
-  if (TILE_ENCODE === "webp") return { mime: "image/webp", fmt: 2 }; // imagescript: 0=PNG, 1=JPEG, 2=WEBP
-  if (TILE_ENCODE === "jpeg" || TILE_ENCODE === "jpg") return { mime: "image/jpeg", fmt: 1 };
-  return { mime: "image/png", fmt: 0 };
 }
 
 function toObject(maybeJson: unknown) {
@@ -61,7 +53,7 @@ serve(async (req) => {
     if (!parent_job_id) throw new Error("parent_job_id is required.");
 
     const logPrefix = `[TilingAnalysisWorker][${parent_job_id}]`;
-    console.log(`${logPrefix} Invoked. Concurrency=${MAX_CONCURRENCY}, DB Batch Size=${INSERT_BATCH_SIZE}, Encode=${TILE_ENCODE}@${TILE_QUALITY}, Input=${ANALYZER_INPUT}`);
+    console.log(`${logPrefix} Invoked. Concurrency=${MAX_CONCURRENCY}, DB Batch Size=${INSERT_BATCH_SIZE}, Encode=PNG, Input=${ANALYZER_INPUT}`);
 
     const { data: job, error: fetchError } = await supabase
       .from("mira_agent_tiled_upscale_jobs")
@@ -87,7 +79,10 @@ serve(async (req) => {
     const totalTiles = tilesX * tilesY;
     console.log(`${logPrefix} totalTiles=${totalTiles} (grid ${tilesX}x${tilesY})`);
 
-    const { mime, fmt } = pickMimeAndFmt();
+    const mime = "image/png";
+    const fmt = 0; // imagescript: 0=PNG
+    const fileExt = "png";
+
     let next = 0;
     const batch: any[] = [];
 
@@ -95,7 +90,6 @@ serve(async (req) => {
       if (!batch.length) return;
       const chunk = batch.splice(0, batch.length);
       const t0 = performance.now();
-      // FIX: Use upsert for idempotency
       const { error } = await supabase.from("mira_agent_tiled_upscale_tiles").upsert(chunk, { onConflict: "parent_job_id,tile_index" });
       if (error) throw error;
       console.log(`${logPrefix} Upserted ${chunk.length} rows in ${(performance.now() - t0).toFixed(2)}ms`);
@@ -118,10 +112,9 @@ serve(async (req) => {
           tile.composite(img, -x, -y);
 
           const enc0 = performance.now();
-          const tileBuffer = await tile.encode(fmt, TILE_QUALITY);
+          const tileBuffer = await tile.encode(fmt);
           const encMs = (performance.now() - enc0).toFixed(2);
 
-          const fileExt = TILE_ENCODE === "png" ? "png" : TILE_ENCODE === "jpeg" || TILE_ENCODE === "jpg" ? "jpg" : "webp";
           const filePath = `${job.user_id}/${parent_job_id}/tile_${idx}.${fileExt}`;
           const up0 = performance.now();
           await supabase.storage.from(TILE_UPLOAD_BUCKET).upload(filePath, tileBuffer, {
