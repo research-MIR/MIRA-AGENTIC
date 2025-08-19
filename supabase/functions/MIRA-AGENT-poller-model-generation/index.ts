@@ -616,7 +616,8 @@ async function handlePollingPosesState(supabase: any, job: any) {
                 job_id: job.id,
                 base_model_url: job.base_model_image_url,
                 pose_prompt: poseToDispatch.pose_prompt,
-                pose_image_url: null // Assuming text-to-pose for now
+                pose_image_url: null, // Assuming text-to-pose for now
+                retry_count: poseToDispatch.retry_count || 0
             }
         }).catch(err => {
             console.error(`${logPrefix} ERROR: Failed to dispatch generator for pending pose: `, err);
