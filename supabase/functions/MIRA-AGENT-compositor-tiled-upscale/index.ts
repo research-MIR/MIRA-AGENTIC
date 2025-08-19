@@ -5,7 +5,7 @@ import { Image } from "https://deno.land/x/imagescript@1.2.15/mod.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const BUCKET_OUT = "mira-agent-generations";
+const BUCKET_OUT = "mira-generations";
 
 const TILE_SIZE = 1024;
 const TILE_OVERLAP = 264;
