@@ -116,6 +116,13 @@ const PoseStatusIcon = ({ pose }: { pose: Pose }) => {
   );
 };
 
+const handleInfoClick = (e: React.MouseEvent, pose: Pose) => {
+  e.stopPropagation();
+  const idToCopy = pose.comfyui_prompt_id || pose.jobId;
+  navigator.clipboard.writeText(idToCopy);
+  showSuccess("ID copied to clipboard!");
+};
+
 export const JobPoseDisplay = ({ job, onViewHistory, onForceRetry, retryingPoseId, onRetryBaseModel, isRetryingBase }: JobPoseDisplayProps) => {
   const { t } = useLanguage();
   const { showImage } = useImagePreview();
