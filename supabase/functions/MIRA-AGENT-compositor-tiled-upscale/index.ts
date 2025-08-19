@@ -51,7 +51,7 @@ function buildRamp(n: number, invert = false): Float32Array {
   return r;
 }
 
-function ramps1D(size = TILE_SIZE, ov = TILE_OVERLAP) {
+function ramps1D(size: number, ov: number) {
   const left = new Float32Array(size);
   const right = new Float32Array(size);
   const L = buildRamp(ov, false);
@@ -79,18 +79,18 @@ function ramps1D(size = TILE_SIZE, ov = TILE_OVERLAP) {
   };
 }
 
-function ramps2D() {
-  const H = ramps1D();
+function ramps2D(size: number, ov: number) {
+  const H = ramps1D(size, ov);
   const V_ramps: any = {};
 
   function buildV(hasTop: boolean, hasBottom: boolean): Float32Array {
-    const arr = new Float32Array(TILE_SIZE);
-    const top = buildRamp(TILE_OVERLAP, false);
-    const bottom = buildRamp(TILE_OVERLAP, true);
-    for (let y = 0; y < TILE_SIZE; y++) {
+    const arr = new Float32Array(size);
+    const top = buildRamp(ov, false);
+    const bottom = buildRamp(ov, true);
+    for (let y = 0; y < size; y++) {
       let g = 1;
-      if (hasTop) g = Math.min(g, y < TILE_OVERLAP ? top[y] : 1);
-      if (hasBottom) g = Math.min(g, y >= TILE_SIZE - TILE_OVERLAP ? bottom[y - (TILE_SIZE - TILE_OVERLAP)] : 1);
+      if (hasTop) g = Math.min(g, y < ov ? top[y] : 1);
+      if (hasBottom) g = Math.min(g, y >= size - ov ? bottom[y - (size - ov)] : 1);
       arr[y] = g;
     }
     return arr;
@@ -107,10 +107,12 @@ function pick1D(R: any, hasNeg: boolean, hasPos: boolean, axis: "h" | "v") {
 
 function applyFeatherAlpha(tile: Image, hx: Float32Array, vy: Float32Array) {
   const bmp = tile.bitmap;
+  const width = tile.width;
+  const height = tile.height;
   let i = 0;
-  for (let y = 0; y < TILE_SIZE; y++) {
+  for (let y = 0; y < height; y++) {
     const gy = vy[y];
-    for (let x = 0; x < TILE_SIZE; x++) {
+    for (let x = 0; x < width; x++) {
       const gx = hx[x];
       const aIdx = i + 3;
       bmp[aIdx] = Math.round(bmp[aIdx] * (gx * gy));
@@ -151,6 +153,14 @@ async function run(parent_job_id: string) {
   const completeTiles: Tile[] = (tiles ?? []).filter(t => t.status === "complete");
   if (!completeTiles.length) throw new Error("No completed tiles found for this job.");
 
+  // --- DYNAMIC SCALE DETECTION ---
+  const firstTileBytes = await fetchBytes(completeTiles[0].generated_tile_url, new AbortController().signal);
+  const firstTileImage = await Image.decode(firstTileBytes);
+  const actualTileSize = firstTileImage.width; // Assuming square tiles
+  const scaleFactor = actualTileSize / TILE_SIZE;
+  console.log(`${logPrefix} Detected upscale factor of ${scaleFactor}x (Tiles are ${actualTileSize}px)`);
+  // --- END DYNAMIC SCALE DETECTION ---
+
   const { bucket, path } = parseStorageURL(parentRow.source_image_url);
   console.log(`${logPrefix} Downloading source image from bucket: ${bucket}, path: ${path}`);
   const { data: sourceBlob, error: dlError } = await supabase.storage.from(bucket).download(path);
@@ -158,24 +168,26 @@ async function run(parent_job_id: string) {
   
   const originalImage = await Image.decode(await sourceBlob.arrayBuffer());
   
-  const targetW = Math.round(originalImage.width * parentRow.upscale_factor);
-  originalImage.resize(targetW, Image.RESIZE_AUTO, Image.RESIZE_BICUBIC);
-  const W = originalImage.width;
-  const H = originalImage.height;
-  console.log(`${logPrefix} Final canvas dimensions will be ${W}x${H}`);
+  const intermediateW = Math.round(originalImage.width * parentRow.upscale_factor);
+  originalImage.resize(intermediateW, Image.RESIZE_AUTO, Image.RESIZE_BICUBIC);
+  
+  const finalW = Math.round(originalImage.width * scaleFactor);
+  const finalH = Math.round(originalImage.height * scaleFactor);
+  console.log(`${logPrefix} Final canvas dimensions will be ${finalW}x${finalH}`);
 
-  const estMB = (W * H * 4 * 2 + 8 * TILE_SIZE * 4) / (1024 * 1024); // *2 for canvas + original
+  const estMB = (finalW * finalH * 4 * 2 + 8 * actualTileSize * 4) / (1024 * 1024);
   if (estMB > MEM_HARD_LIMIT_MB) {
     await supabase.from("mira_agent_tiled_upscale_jobs").update({ status: "failed", error_message: `Estimated RAM ${estMB.toFixed(1)}MB exceeds limit ${MEM_HARD_LIMIT_MB}MB.` }).eq("id", parent_job_id);
     throw new Error(`Refused: est ${estMB.toFixed(1)} MB > limit ${MEM_HARD_LIMIT_MB}`);
   }
 
-  const canvas = new Image(W, H);
-  // CRITICAL FIX: Draw the upscaled original image as the base layer first.
+  const canvas = new Image(finalW, finalH);
+  originalImage.resize(finalW, finalH, Image.RESIZE_BICUBIC);
   canvas.composite(originalImage, 0, 0);
   console.log(`${logPrefix} Base image composited onto canvas.`);
 
-  const R = ramps2D();
+  const SCALED_TILE_OVERLAP = TILE_OVERLAP * scaleFactor;
+  const R = ramps2D(actualTileSize, SCALED_TILE_OVERLAP);
 
   function neighborFlags(t: Tile) {
     const { x, y } = t.coordinates;
@@ -195,17 +207,24 @@ async function run(parent_job_id: string) {
     let tile: Image | null = await Image.decode(bytes);
     console.log(`${logPrefix} Processing Tile #${t.tile_index} | Coords: {x:${t.coordinates.x}, y:${t.coordinates.y}} | Decoded Size: ${tile.width}x${tile.height}`);
     
+    if (tile.width !== actualTileSize) {
+        console.warn(`${logPrefix} Tile #${t.tile_index} has unexpected size ${tile.width}x${tile.height}. Resizing to ${actualTileSize}px.`);
+        tile.resize(actualTileSize, actualTileSize, Image.RESIZE_BICUBIC);
+    }
+
     const n = neighborFlags(t);
     const hx = pick1D(R, n.left, n.right, "h");
     const vy = pick1D(R, n.top, n.bottom, "v");
     applyFeatherAlpha(tile, hx, vy);
 
-    canvas.composite(tile, t.coordinates.x, t.coordinates.y);
+    const scaledX = Math.round(t.coordinates.x * scaleFactor);
+    const scaledY = Math.round(t.coordinates.y * scaleFactor);
+    canvas.composite(tile, scaledX, scaledY);
     tile = null; // Help GC
   }
 
   const jpeg = await canvas.encodeJPEG(JPEG_QUALITY);
-  const outPath = `${parentRow.user_id}/${parent_job_id}/tiled-upscale-final-${W}x${H}.jpg`;
+  const outPath = `${parentRow.user_id}/${parent_job_id}/tiled-upscale-final-${finalW}x${finalH}.jpg`;
   await supabase.storage.from(BUCKET_OUT).upload(outPath, jpeg, { contentType: "image/jpeg", upsert: true });
   const { data: pub } = supabase.storage.from(BUCKET_OUT).getPublicUrl(outPath);
 
