@@ -41,6 +41,14 @@ function pickMimeAndFmt() {
   return { mime: "image/png", fmt: 0 };
 }
 
+function toObject(maybeJson: unknown) {
+  if (typeof maybeJson === "string") {
+    try { return JSON.parse(maybeJson); }
+    catch { return { error: "non-json-string", raw: maybeJson }; }
+  }
+  return maybeJson ?? {};
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -87,9 +95,10 @@ serve(async (req) => {
       if (!batch.length) return;
       const chunk = batch.splice(0, batch.length);
       const t0 = performance.now();
-      const { error } = await supabase.from("mira_agent_tiled_upscale_tiles").insert(chunk);
+      // FIX: Use upsert for idempotency
+      const { error } = await supabase.from("mira_agent_tiled_upscale_tiles").upsert(chunk, { onConflict: "parent_job_id,tile_index" });
       if (error) throw error;
-      console.log(`${logPrefix} Inserted ${chunk.length} rows in ${(performance.now() - t0).toFixed(2)}ms`);
+      console.log(`${logPrefix} Upserted ${chunk.length} rows in ${(performance.now() - t0).toFixed(2)}ms`);
     }
 
     async function processOne(workerId: number) {
@@ -122,27 +131,21 @@ serve(async (req) => {
           const { data: { publicUrl } } = supabase.storage.from(TILE_UPLOAD_BUCKET).getPublicUrl(filePath);
           const upMs = (performance.now() - up0).toFixed(2);
 
-          let caption: string | null = null;
           const an0 = performance.now();
-          if (ANALYZER_INPUT === "url") {
-            const { data, error } = await supabase.functions.invoke("MIRA-AGENT-worker-tile-analyzer", {
-              body: { tile_url: publicUrl, mime_type: mime },
-            });
-            console.log(`${tag} Analyzer response: data=${JSON.stringify(data)}, error=${JSON.stringify(error)}`);
-            if (error) throw new Error(`Function invocation failed: ${error.message || JSON.stringify(error)}`);
-            if (data && data.error) throw new Error(`Analyzer function returned an error: ${data.error}`);
-            caption = data?.prompt ?? null;
-          } else {
-            const { encodeBase64 } = await import("https://deno.land/std@0.224.0/encoding/base64.ts");
-            const b64 = encodeBase64(tileBuffer);
-            const { data, error } = await supabase.functions.invoke("MIRA-AGENT-worker-tile-analyzer", {
-              body: { tile_base64: b64, mime_type: mime },
-            });
-            console.log(`${tag} Analyzer response: data=${JSON.stringify(data)}, error=${JSON.stringify(error)}`);
-            if (error) throw new Error(`Function invocation failed: ${error.message || JSON.stringify(error)}`);
-            if (data && data.error) throw new Error(`Analyzer function returned an error: ${data.error}`);
-            caption = data?.prompt ?? null;
+          const { data, error } = await supabase.functions.invoke("MIRA-AGENT-worker-tile-analyzer", {
+            body: ANALYZER_INPUT === "url"
+              ? { tile_url: publicUrl, mime_type: mime }
+              : { tile_base64: encodeBase64(tileBuffer), mime_type: mime }
+          });
+
+          console.log(`${tag} Analyzer response: data=${JSON.stringify(data)}, error=${JSON.stringify(error)}`);
+          if (error) throw new Error(`Function invocation failed: ${error.message || JSON.stringify(error)}`);
+
+          const payload = toObject(data);
+          if (payload && payload.error && !payload.prompt) {
+            throw new Error(`Analyzer function returned an error shape: ${JSON.stringify(payload)}`);
           }
+          const caption = typeof payload?.prompt === "string" ? payload.prompt : null;
           const anMs = (performance.now() - an0).toFixed(2);
 
           const tileRecord = {

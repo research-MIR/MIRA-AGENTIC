@@ -17,4 +17,9 @@
         3.  **Bug 1 (`TypeError`):** The refactored code introduced a `TypeError: tile.blit is not a function`. This was fixed by replacing `.blit()` with the correct `.composite()` method from the `imagescript` library.
         4.  **Bug 2 (Silent Failure):** After fixing the `TypeError`, logs showed that the `MIRA-AGENT-worker-tile-analyzer` was not being invoked, causing `generated_prompt` to be `null`. This was fixed by adding more robust error handling and logging to both the calling and receiving functions.
         5.  **Bug 3 (Assignment Error):** With the analyzer now running correctly, logs revealed a final bug: the returned prompt text was not being correctly assigned to the database record in the main worker. This has now been fixed.
-    *   **Current Status:** The tiling and analysis pipeline is now considered stable, robust, and fully functional.
+*   **Actions Taken (2024-08-03):**
+    *   **Final Fix & Hardening:**
+        *   **Root Cause Identified:** User analysis of logs revealed the core issue: the analyzer function was returning a JSON *string* instead of a JSON *object* with the correct content-type. The calling function was therefore unable to parse `data.prompt`.
+        *   **Analyzer Fix:** The `MIRA-AGENT-worker-tile-analyzer` has been corrected to return a proper `Response.json()` object.
+        *   **Caller Hardening:** The `MIRA-AGENT-worker-tiling-and-analysis` function has been made more defensive, with logic to parse the response even if it's a string.
+        *   **Idempotency:** A unique index has been added to `mira_agent_tiled_upscale_tiles` on `(parent_job_id, tile_index)`, and the database write has been changed to an `upsert` to prevent data duplication from accidental re-runs. The pipeline is now considered robust.
