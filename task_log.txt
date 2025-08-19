@@ -10,16 +10,16 @@
     *   **Refactor & Implementation:** Implemented the full pre-processing and analysis pipeline to mimic the ComfyUI workflow.
         *   Created a new, comprehensive worker: `MIRA-AGENT-worker-tiling-and-analysis`.
         *   Deleted the original, simpler `MIRA-AGENT-worker-tiling` function.
-*   **Actions Taken (2024-07-31 - 2024-08-02):**
+*   **Actions Taken (2024-07-31 - 2024-08-03):**
     *   **Performance & Bug Fix Iteration:**
         1.  **Initial Problem:** The first implementation of the tiling worker was memory-intensive, leading to `Memory limit exceeded` errors.
         2.  **Refactor 1 (Memory Efficiency):** Re-implemented the worker with a more memory-efficient design using a concurrent worker pool, on-the-fly tile processing, and batched database inserts.
         3.  **Bug 1 (`TypeError`):** The refactored code introduced a `TypeError: tile.blit is not a function`. This was fixed by replacing `.blit()` with the correct `.composite()` method from the `imagescript` library.
         4.  **Bug 2 (Silent Failure):** After fixing the `TypeError`, logs showed that the `MIRA-AGENT-worker-tile-analyzer` was not being invoked, causing `generated_prompt` to be `null`. This was fixed by adding more robust error handling and logging to both the calling and receiving functions.
-        5.  **Bug 3 (Assignment Error):** With the analyzer now running correctly, logs revealed a final bug: the returned prompt text was not being correctly assigned to the database record in the main worker. This has now been fixed.
-*   **Actions Taken (2024-08-03):**
-    *   **Final Fix & Hardening:**
-        *   **Root Cause Identified:** User analysis of logs revealed the core issue: the analyzer function was returning a JSON *string* instead of a JSON *object* with the correct content-type. The calling function was therefore unable to parse `data.prompt`.
-        *   **Analyzer Fix:** The `MIRA-AGENT-worker-tile-analyzer` has been corrected to return a proper `Response.json()` object.
-        *   **Caller Hardening:** The `MIRA-AGENT-worker-tiling-and-analysis` function has been made more defensive, with logic to parse the response even if it's a string.
-        *   **Idempotency:** A unique index has been added to `mira_agent_tiled_upscale_tiles` on `(parent_job_id, tile_index)`, and the database write has been changed to an `upsert` to prevent data duplication from accidental re-runs. The pipeline is now considered robust.
+        5.  **Bug 3 (JSON Parsing Error):** With the analyzer now running, user-provided logs clearly showed the root cause of the `null` prompts: the analyzer was returning a JSON *string* with a `text/plain` content type, not a JSON object. The main worker was attempting to access `data.prompt` on a string, which correctly resulted in `undefined`.
+        6.  **Final Backend Fix & Hardening:**
+            *   **Analyzer Fix:** The `MIRA-AGENT-worker-tile-analyzer` was corrected to return a proper `Response.json()` object with the correct `Content-Type: application/json` header.
+            *   **Caller Hardening:** The `MIRA-AGENT-worker-tiling-and-analysis` function was made more defensive, with logic to parse the response even if it's a string.
+            *   **Idempotency:** A unique index was added to `mira_agent_tiled_upscale_tiles` on `(parent_job_id, tile_index)`, and the database write was changed to an `upsert` to prevent data duplication from accidental re-runs.
+        7.  **Bug 4 (Frontend Realtime Failure):** After all backend issues were resolved, the frontend visualizer still did not display the tiles. The initial diagnosis that the table was not enabled for Realtime was proven incorrect by a database error. The actual issue was that the `UpscaleTilingVisualizer.tsx` component was not subscribed to the Supabase Realtime channel for the `mira_agent_tiled_upscale_tiles` table. This was fixed by adding the appropriate `useEffect` hook to establish the subscription.
+    *   **Current Status:** The tiling and analysis pipeline is now considered stable, robust, and fully functional from end to end.
