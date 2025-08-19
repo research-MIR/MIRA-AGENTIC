@@ -1,9 +1,9 @@
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
-import { AlertTriangle, Loader2, CheckCircle, XCircle, Wand2, Info } from 'lucide-react';
+import { AlertTriangle, CheckCircle, Loader2, XCircle, Wand2, Info } from 'lucide-react';
 import { useSecureImage } from '@/hooks/useSecureImage';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Badge } from "@/components/ui/badge";
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { showSuccess } from '@/utils/toast';
 
@@ -67,6 +67,7 @@ export const RecentJobThumbnail = ({ job, onClick, isSelected }: Props) => {
   };
 
   const aggregateStatus = getAggregateStatus();
+  const hasFailedPoses = job.final_posed_images?.some(p => p.status === 'failed');
 
   const renderStatusIcon = () => {
     if (!aggregateStatus) return null;
@@ -104,6 +105,20 @@ export const RecentJobThumbnail = ({ job, onClick, isSelected }: Props) => {
             {job.gender.charAt(0).toUpperCase()}
           </Badge>
         )}
+        {hasFailedPoses && !aggregateStatus?.color.includes('destructive') && (
+            <TooltipProvider>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <div className="absolute top-1 right-1 h-6 w-6 rounded-full flex items-center justify-center bg-yellow-500 border-2 border-background">
+                            <AlertTriangle className="h-4 w-4 text-black" />
+                        </div>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                        <p>One or more poses failed to generate.</p>
+                    </TooltipContent>
+                </Tooltip>
+            </TooltipProvider>
+        )}
         {renderStatusIcon()}
         <TooltipProvider>
           <Tooltip>
@@ -128,8 +143,14 @@ export const RecentJobThumbnail = ({ job, onClick, isSelected }: Props) => {
   };
 
   return (
-    <button onClick={onClick} className={cn("border-2 rounded-lg p-1 flex-shrink-0 w-24 h-24 relative", isSelected ? "border-primary" : "border-transparent")}>
+    <div 
+      onClick={onClick} 
+      className={cn("border-2 rounded-lg p-1 flex-shrink-0 w-24 h-24 relative cursor-pointer", isSelected ? "border-primary" : "border-transparent")}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onClick()}
+    >
       {renderContent()}
-    </button>
+    </div>
   );
 };
