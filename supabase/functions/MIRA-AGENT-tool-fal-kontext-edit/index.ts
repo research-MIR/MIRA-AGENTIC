@@ -17,7 +17,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// --- System Prompts (Mirrored from ComfyUI tool for consistency) ---
+// --- System Prompts ---
 
 const TRIAGE_SYSTEM_PROMPT = `You are a task classification and information extraction AI. Analyze the user's prompt and determine their primary intent. Your response MUST be a single JSON object with two keys: 'task_type' and 'garment_description'.
 
@@ -78,12 +78,24 @@ You MUST describe the background and lighting from the source image and include 
 ### Your Output:
 Your output is NOT a conversation; it is ONLY the final, optimized prompt. Analyze the request and the single image canvas. Apply all relevant principles to construct a single, precise, and explicit instruction. Describe what to change (the garment), but describe what to keep (pose, identity, background, lighting) in even greater detail.`;
 
-// --- Helper Functions ---
+const SIMPLE_RETRY_SYSTEM_PROMPT = `You are an expert prompt engineer. Your task is to take a user's request and convert it into a simple, direct command for an image editing model. Your entire output must be ONLY the final command text. Do not add any preservation clauses or extra details about the background, lighting, or identity.
 
+Example 1 (Pose):
+User Request: "make him stand with his left hand on his hip and his right arm relaxed"
+Your Output: "Change the man's pose so he is standing with his left hand on his hip and his right arm hanging relaxed by his side."
+
+Example 2 (Garment):
+User Request: "a red t-shirt"
+Your Output: "Change the garment to a red t-shirt."
+`;
+
+// --- Helper Functions ---
 function extractJson(text: string): any {
   const match = text.match(/```json\s*([\s\S]*?)\s*```/);
   if (match && match[1]) return JSON.parse(match[1]);
-  try { return JSON.parse(text); } catch (e) {
+  try {
+    return JSON.parse(text);
+  } catch (e) {
     throw new Error("The model returned a response that could not be parsed as JSON.");
   }
 }
@@ -123,12 +135,11 @@ async function downloadImageAsPart(supabase: SupabaseClient, publicUrl: string, 
 }
 
 // --- Main Handler ---
-
 serve(async (req) => {
   const requestId = `fal-kontext-edit-${Date.now()}`;
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
 
-  const { job_id, base_model_url, pose_prompt, pose_image_url } = await req.json();
+  const { job_id, base_model_url, pose_prompt, pose_image_url, retry_count = 0 } = await req.json();
   if (!job_id || !base_model_url || !pose_prompt) {
     throw new Error("job_id, base_model_url, and pose_prompt are required.");
   }
@@ -156,20 +167,28 @@ serve(async (req) => {
     const { task_type, garment_description } = extractJson(triageResult.text);
     console.log(`${logPrefix} Intent classified as: '${task_type}'. Garment: '${garment_description || 'N/A'}'`);
 
-    // 3. Engineer the final prompt
+    // 3. Engineer the final prompt using the new dynamic strategy
     console.log(`${logPrefix} Step 2: Engineering final prompt...`);
     let selectedSystemPrompt;
     let baseEditingTask;
-    if (task_type === 'garment') {
-      selectedSystemPrompt = GARMENT_SWAP_SYSTEM_PROMPT;
-      baseEditingTask = `change their garment to: ${garment_description}`;
-    } else { // 'pose' or 'both'
-      selectedSystemPrompt = POSE_CHANGE_SYSTEM_PROMPT;
-      baseEditingTask = pose_prompt;
+
+    if (retry_count > 0) {
+        console.log(`${logPrefix} This is a retry (attempt ${retry_count + 1}). Using simple prompt strategy.`);
+        selectedSystemPrompt = SIMPLE_RETRY_SYSTEM_PROMPT;
+        baseEditingTask = pose_prompt; // The user's original text is the most direct instruction
+    } else {
+        console.log(`${logPrefix} This is the first attempt. Using complex prompt strategy.`);
+        if (task_type === 'garment') {
+            selectedSystemPrompt = GARMENT_SWAP_SYSTEM_PROMPT;
+            baseEditingTask = `change their garment to: ${garment_description}`;
+        } else { // 'pose' or 'both'
+            selectedSystemPrompt = POSE_CHANGE_SYSTEM_PROMPT;
+            baseEditingTask = pose_prompt;
+        }
     }
 
     let enrichedEditingTask = `User Request: "${baseEditingTask}"`;
-    if (identityPassport) {
+    if (identityPassport && retry_count === 0) { // Only add passport on the first, complex attempt
       const passportText = `Identity Constraints: The model MUST have ${identityPassport.skin_tone}, ${identityPassport.hair_style}, and ${identityPassport.eye_color}. These features must be preserved perfectly.`;
       enrichedEditingTask = `${passportText}\n\n${enrichedEditingTask}`;
     }
