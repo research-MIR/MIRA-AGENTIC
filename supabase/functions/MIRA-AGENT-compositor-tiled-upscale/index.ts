@@ -105,18 +105,36 @@ function pick1D(R: any, hasNeg: boolean, hasPos: boolean, axis: "h" | "v") {
   return R[key];
 }
 
-function applyFeatherAlpha(tile: Image, hx: Float32Array, vy: Float32Array) {
-  const bmp = tile.bitmap;
-  const width = tile.width;
-  const height = tile.height;
-  let i = 0;
-  for (let y = 0; y < height; y++) {
-    const gy = vy[y];
-    for (let x = 0; x < width; x++) {
-      const gx = hx[x];
-      const aIdx = i + 3;
-      bmp[aIdx] = Math.round(bmp[aIdx] * (gx * gy));
-      i += 4;
+function blendWeighted(canvas: Image, tile: Image, x0: number, y0: number, hx: Float32Array, vy: Float32Array) {
+  const cb = canvas.bitmap;
+  const tb = tile.bitmap;
+  const W = canvas.width;
+  const tw = tile.width;
+  const th = tile.height;
+
+  for (let y = 0; y < th; y++) {
+    const wy = vy[y];
+    const cy = (y0 + y) * W;
+    const ty = y * tw;
+    for (let x = 0; x < tw; x++) {
+      const w = hx[x] * wy; // our feather weight in [0,1]
+      if (w <= 0) continue;
+
+      const cidx = ((cy + (x0 + x)) << 2);
+      const tidx = ((ty + x) << 2);
+
+      // use canvas alpha channel as running weight sum (0..255 ~ 0..1)
+      const wOld = cb[cidx + 3] / 255;
+      const wNew = Math.min(1, wOld + w); // sums to 1 in overlaps; clamp for safety
+
+      // normalized running average: C' = (Cold*wOld + Cadd*w) / (wOld + w)
+      const scaleOld = (wOld > 0 ? (wOld / wNew) : 0);
+      const scaleAdd = (w / wNew);
+
+      cb[cidx    ] = Math.round(cb[cidx    ] * scaleOld + tb[tidx    ] * scaleAdd);
+      cb[cidx + 1] = Math.round(cb[cidx + 1] * scaleOld + tb[tidx + 1] * scaleAdd);
+      cb[cidx + 2] = Math.round(cb[cidx + 2] * scaleOld + tb[tidx + 2] * scaleAdd);
+      cb[cidx + 3] = Math.round(wNew * 255); // store new running weight
     }
   }
 }
@@ -153,13 +171,11 @@ async function run(parent_job_id: string) {
   const completeTiles: Tile[] = (tiles ?? []).filter(t => t.status === "complete");
   if (!completeTiles.length) throw new Error("No completed tiles found for this job.");
 
-  // --- DYNAMIC SCALE DETECTION ---
   const firstTileBytes = await fetchBytes(completeTiles[0].generated_tile_url, new AbortController().signal);
   const firstTileImage = await Image.decode(firstTileBytes);
-  const actualTileSize = firstTileImage.width; // Assuming square tiles
+  const actualTileSize = firstTileImage.width;
   const scaleFactor = actualTileSize / TILE_SIZE;
   console.log(`${logPrefix} Detected upscale factor of ${scaleFactor}x (Tiles are ${actualTileSize}px)`);
-  // --- END DYNAMIC SCALE DETECTION ---
 
   const { bucket, path } = parseStorageURL(parentRow.source_image_url);
   console.log(`${logPrefix} Downloading source image from bucket: ${bucket}, path: ${path}`);
@@ -181,20 +197,22 @@ async function run(parent_job_id: string) {
     throw new Error(`Refused: est ${estMB.toFixed(1)} MB > limit ${MEM_HARD_LIMIT_MB}`);
   }
 
-  const canvas = new Image(finalW, finalH);
-  originalImage.resize(finalW, finalH, Image.RESIZE_BICUBIC);
-  canvas.composite(originalImage, 0, 0);
-  console.log(`${logPrefix} Base image composited onto canvas.`);
+  const canvas = new Image(finalW, finalH); // Starts as transparent black
+  console.log(`${logPrefix} Created empty canvas for normalized blending.`);
 
   const SCALED_TILE_OVERLAP = TILE_OVERLAP * scaleFactor;
   const R = ramps2D(actualTileSize, SCALED_TILE_OVERLAP);
 
+  const key = (x:number,y:number)=> `${Math.round(x)}:${Math.round(y)}`;
+  const idx = new Set(completeTiles.map(o => key(o.coordinates.x, o.coordinates.y)));
+  const hasAt = (x:number,y:number)=> idx.has(key(x,y));
+
   function neighborFlags(t: Tile) {
     const { x, y } = t.coordinates;
-    const left = completeTiles.some(o => o.coordinates.y === y && o.coordinates.x === x - STEP);
-    const right = completeTiles.some(o => o.coordinates.y === y && o.coordinates.x === x + STEP);
-    const top = completeTiles.some(o => o.coordinates.x === x && o.coordinates.y === y - STEP);
-    const bottom = completeTiles.some(o => o.coordinates.x === x && o.coordinates.y === y + STEP);
+    const left  = hasAt(x - STEP, y);
+    const right = hasAt(x + STEP, y);
+    const top   = hasAt(x, y - STEP);
+    const bottom= hasAt(x, y + STEP);
     return { left, right, top, bottom };
   }
 
@@ -215,13 +233,16 @@ async function run(parent_job_id: string) {
     const n = neighborFlags(t);
     const hx = pick1D(R, n.left, n.right, "h");
     const vy = pick1D(R, n.top, n.bottom, "v");
-    applyFeatherAlpha(tile, hx, vy);
-
+    
     const scaledX = Math.round(t.coordinates.x * scaleFactor);
     const scaledY = Math.round(t.coordinates.y * scaleFactor);
-    canvas.composite(tile, scaledX, scaledY);
+    blendWeighted(canvas, tile, scaledX, scaledY, hx, vy);
+    
     tile = null; // Help GC
   }
+
+  // Force full opacity before encoding to JPEG
+  for (let i = 0; i < canvas.bitmap.length; i += 4) canvas.bitmap[i + 3] = 255;
 
   const jpeg = await canvas.encodeJPEG(JPEG_QUALITY);
   const outPath = `${parentRow.user_id}/${parent_job_id}/tiled-upscale-final-${finalW}x${finalH}.jpg`;
