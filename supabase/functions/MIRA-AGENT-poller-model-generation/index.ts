@@ -15,7 +15,7 @@ const ANALYSIS_STALLED_THRESHOLD_SECONDS = 60;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
 const tiledUpscalerWorkflow = `{
@@ -264,8 +264,9 @@ async function handlePendingState(supabase: any, job: any) {
     console.log(`${logPrefix} Final payload being sent to tool:`, JSON.stringify(payload, null, 2));
 
     const { data: generationResult, error: generationError } = await supabase.functions.invoke(toolToInvoke, {
-        body: payload
+      body: payload
     });
+
     if (generationError) throw new Error(`Image generation failed: ${generationError.message}`);
     
     const newImage = generationResult.images[0];
@@ -378,8 +379,12 @@ async function handleBaseGenerationCompleteState(supabase: any, job: any) {
 }
 
 async function handleGeneratingPosesState(supabase: any, job: any) {
-  console.log(`[ModelGenPoller][${job.id}] State: GENERATING_POSES.`);
+  const logPrefix = `[ModelGenPoller][${job.id}]`;
+  console.log(`${logPrefix} State: GENERATING_POSES.`);
   
+  const executionEngine = job.context?.execution_engine || 'comfyui';
+  console.log(`${logPrefix} Using execution engine: ${executionEngine}`);
+
   const basePose = {
     pose_prompt: "Neutral A-pose, frontal",
     comfyui_prompt_id: null,
@@ -424,7 +429,16 @@ async function handleGeneratingPosesState(supabase: any, job: any) {
       pose_prompt: pose.value,
       pose_image_url: pose.type === 'image' ? pose.value : null,
     };
-    return supabase.functions.invoke('MIRA-AGENT-tool-comfyui-pose-generator', { body: payload });
+
+    let toolToInvoke = '';
+    if (executionEngine === 'fal_kontext') {
+        toolToInvoke = 'MIRA-AGENT-tool-fal-kontext-edit'; 
+    } else {
+        toolToInvoke = 'MIRA-AGENT-tool-comfyui-pose-generator';
+    }
+    console.log(`[ModelGenPoller][${job.id}] Dispatching pose "${pose.value}" to engine via tool: ${toolToInvoke}`);
+
+    return supabase.functions.invoke(toolToInvoke, { body: payload });
   });
 
   Promise.allSettled(poseGenerationPromises).then(results => {
