@@ -82,43 +82,74 @@ const UpscaleTilingVisualizer = () => {
   };
 
   useEffect(() => {
-    if (!jobId) return;
+    console.log(`[Realtime] useEffect triggered. Current Job ID: ${jobId}`);
+
+    if (!jobId) {
+      if (channelRef.current) {
+        console.log(`[Realtime] No jobId. Cleaning up existing channel: ${channelRef.current.topic}`);
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+      return;
+    }
 
     const fetchAndSetTiles = async () => {
+        console.log(`[Realtime] Fetching initial tiles for job: ${jobId}`);
         const { data, error } = await supabase
             .from('mira_agent_tiled_upscale_tiles')
             .select('*')
             .eq('parent_job_id', jobId)
             .order('tile_index', { ascending: true });
         if (error) {
+            console.error(`[Realtime] Error fetching tiles for ${jobId}:`, error);
             showError(error.message);
         } else {
+            console.log(`[Realtime] Fetched ${data?.length || 0} tiles for ${jobId}.`);
             setTiles(data || []);
         }
     };
 
     fetchAndSetTiles();
 
+    // Ensure we don't create duplicate channels
+    const channelTopic = `tiled-upscale-job-${jobId}`;
+    if (channelRef.current && channelRef.current.topic === channelTopic) {
+        console.log(`[Realtime] Channel for ${jobId} already exists. Skipping creation.`);
+        return;
+    }
+
+    // If a different channel exists, remove it first
     if (channelRef.current) {
+        console.log(`[Realtime] Removing old channel ${channelRef.current.topic} before creating new one.`);
         supabase.removeChannel(channelRef.current);
     }
 
-    const channel = supabase.channel(`tiled-upscale-job-${jobId}`)
+    const channel = supabase.channel(channelTopic)
         .on('postgres_changes', {
             event: '*',
             schema: 'public',
             table: 'mira_agent_tiled_upscale_tiles',
             filter: `parent_job_id=eq.${jobId}`
-        }, () => {
+        }, (payload) => {
+            console.log(`[Realtime] Received postgres_change for ${jobId}:`, payload);
             fetchAndSetTiles(); 
         })
-        .subscribe();
+        .subscribe((status, err) => {
+            console.log(`[Realtime] Subscription status for ${jobId}: ${status}`);
+            if (err) {
+                console.error(`[Realtime] Subscription error for ${jobId}:`, err);
+            }
+        });
 
     channelRef.current = channel;
+    console.log(`[Realtime] New channel created and subscribed for ${jobId}. Topic: ${channel.topic}`);
 
     return () => {
-        if (channelRef.current) {
-            supabase.removeChannel(channelRef.current);
+        console.log(`[Realtime] Cleanup function called for useEffect with jobId: ${jobId}.`);
+        if (channel) {
+            console.log(`[Realtime] Unsubscribing from channel: ${channel.topic}`);
+            supabase.removeChannel(channel);
+            channelRef.current = null;
         }
     };
   }, [jobId, supabase]);
