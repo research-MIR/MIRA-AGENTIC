@@ -7,10 +7,6 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const BUCKET_OUT = "mira-generations";
 
-const TILE_SIZE = 1024;
-const TILE_OVERLAP = 264;
-const STEP = TILE_SIZE - TILE_OVERLAP;
-
 const JPEG_QUALITY = Number(Deno.env.get("COMPOSITOR_JPEG_QUALITY") ?? 90);
 const MEM_HARD_LIMIT_MB = Number(Deno.env.get("COMPOSITOR_MEM_LIMIT_MB") ?? 360);
 
@@ -52,89 +48,69 @@ function buildRamp(n: number, invert = false): Float32Array {
 }
 
 function ramps1D(size: number, ov: number) {
-  const left = new Float32Array(size);
-  const right = new Float32Array(size);
-  const L = buildRamp(ov, false);
-  const R = buildRamp(ov, true);
-
-  for (let x = 0; x < size; x++) {
-    if (x < ov) left[x] = L[x]; else left[x] = 1;
-    if (x >= size - ov) right[x] = R[x - (size - ov)]; else right[x] = 1;
+  const L = buildRamp(ov, false), R = buildRamp(ov, true);
+  const left = new Float32Array(size), right = new Float32Array(size);
+  for (let x=0; x<size; x++) {
+    left[x]  = x < ov ? L[x] : 1;
+    right[x] = x >= size-ov ? R[x-(size-ov)] : 1;
   }
-
-  function variant(hasLeft: boolean, hasRight: boolean) {
+  const mk = (hasNeg:boolean, hasPos:boolean) => {
     const v = new Float32Array(size);
-    for (let x = 0; x < size; x++) {
+    for (let x=0; x<size; x++) {
       let g = 1;
-      if (hasLeft) g = Math.min(g, left[x]);
-      if (hasRight) g = Math.min(g, right[x]);
+      if (hasNeg) g = Math.min(g, left[x]);
+      if (hasPos) g = Math.min(g, right[x]);
       v[x] = g;
     }
     return v;
-  }
-
-  return {
-    h00: variant(false, false), h10: variant(true, false),
-    h01: variant(false, true), h11: variant(true, true),
   };
+  return { h00: mk(false,false), h10: mk(true,false), h01: mk(false,true), h11: mk(true,true) };
 }
 
-function ramps2D(size: number, ov: number) {
-  const H = ramps1D(size, ov);
-  const V_ramps: any = {};
-
-  function buildV(hasTop: boolean, hasBottom: boolean): Float32Array {
-    const arr = new Float32Array(size);
-    const top = buildRamp(ov, false);
-    const bottom = buildRamp(ov, true);
-    for (let y = 0; y < size; y++) {
-      let g = 1;
-      if (hasTop) g = Math.min(g, y < ov ? top[y] : 1);
-      if (hasBottom) g = Math.min(g, y >= size - ov ? bottom[y - (size - ov)] : 1);
-      arr[y] = g;
-    }
-    return arr;
+function rampsY(size:number, ov:number) {
+  const T = buildRamp(ov,false), B = buildRamp(ov,true);
+  const top = new Float32Array(size), bot = new Float32Array(size);
+  for (let y=0; y<size; y++) {
+    top[y] = y < ov ? T[y] : 1;
+    bot[y] = y >= size-ov ? B[y-(size-ov)] : 1;
   }
-  V_ramps.v00 = buildV(false, false); V_ramps.v10 = buildV(true, false);
-  V_ramps.v01 = buildV(false, true); V_ramps.v11 = buildV(true, true);
-  return { ...H, ...V_ramps };
-}
-
-function pick1D(R: any, hasNeg: boolean, hasPos: boolean, axis: "h" | "v") {
-  const key = `${axis}${hasNeg ? '1' : '0'}${hasPos ? '1' : '0'}`;
-  return R[key];
+  const mk = (hasNeg:boolean, hasPos:boolean) => {
+    const v = new Float32Array(size);
+    for (let y=0; y<size; y++) {
+      let g = 1;
+      if (hasNeg) g = Math.min(g, top[y]);
+      if (hasPos) g = Math.min(g, bot[y]);
+      v[y] = g;
+    }
+    return v;
+  };
+  return { v00: mk(false,false), v10: mk(true,false), v01: mk(false,true), v11: mk(true,true) };
 }
 
 function blendWeighted(canvas: Image, tile: Image, x0: number, y0: number, hx: Float32Array, vy: Float32Array) {
-  const cb = canvas.bitmap;
-  const tb = tile.bitmap;
-  const W = canvas.width;
-  const tw = tile.width;
-  const th = tile.height;
+  const cb = canvas.bitmap, tb = tile.bitmap;
+  const W = canvas.width, tw = tile.width, th = tile.height;
 
-  for (let y = 0; y < th; y++) {
+  for (let y=0; y<th; y++) {
     const wy = vy[y];
     const cy = (y0 + y) * W;
     const ty = y * tw;
-    for (let x = 0; x < tw; x++) {
-      const w = hx[x] * wy; // our feather weight in [0,1]
+    for (let x=0; x<tw; x++) {
+      const w = hx[x] * wy;
       if (w <= 0) continue;
 
       const cidx = ((cy + (x0 + x)) << 2);
       const tidx = ((ty + x) << 2);
 
-      // use canvas alpha channel as running weight sum (0..255 ~ 0..1)
-      const wOld = cb[cidx + 3] / 255;
-      const wNew = Math.min(1, wOld + w); // sums to 1 in overlaps; clamp for safety
+      const wOld = cb[cidx+3] / 255;
+      const wNew = Math.min(1, wOld + w);
+      const scaleOld = wOld > 0 ? (wOld / wNew) : 0;
+      const scaleAdd = w / wNew;
 
-      // normalized running average: C' = (Cold*wOld + Cadd*w) / (wOld + w)
-      const scaleOld = (wOld > 0 ? (wOld / wNew) : 0);
-      const scaleAdd = (w / wNew);
-
-      cb[cidx    ] = Math.round(cb[cidx    ] * scaleOld + tb[tidx    ] * scaleAdd);
-      cb[cidx + 1] = Math.round(cb[cidx + 1] * scaleOld + tb[tidx + 1] * scaleAdd);
-      cb[cidx + 2] = Math.round(cb[cidx + 2] * scaleOld + tb[tidx + 2] * scaleAdd);
-      cb[cidx + 3] = Math.round(wNew * 255); // store new running weight
+      cb[cidx  ] = Math.round(cb[cidx  ] * scaleOld + tb[tidx  ] * scaleAdd);
+      cb[cidx+1] = Math.round(cb[cidx+1] * scaleOld + tb[tidx+1] * scaleAdd);
+      cb[cidx+2] = Math.round(cb[cidx+2] * scaleOld + tb[tidx+2] * scaleAdd);
+      cb[cidx+3] = Math.round(wNew * 255);   // store weight sum
     }
   }
 }
@@ -200,20 +176,32 @@ async function run(parent_job_id: string) {
   const canvas = new Image(finalW, finalH); // Starts as transparent black
   console.log(`${logPrefix} Created empty canvas for normalized blending.`);
 
-  const SCALED_TILE_OVERLAP = TILE_OVERLAP * scaleFactor;
-  const R = ramps2D(actualTileSize, SCALED_TILE_OVERLAP);
+  // --- New Dynamic Step & Overlap Calculation ---
+  const xs = [...new Set(completeTiles.map(t => t.coordinates.x))].sort((a,b)=>a-b);
+  const ys = [...new Set(completeTiles.map(t => t.coordinates.y))].sort((a,b)=>a-b);
+  const dx = xs.length > 1 ? Math.min(...xs.slice(1).map((v,i)=>v - xs[i])) : 0;
+  const dy = ys.length > 1 ? Math.min(...ys.slice(1).map((v,i)=>v - ys[i])) : 0;
+  const stepX = Math.round(dx * scaleFactor);
+  const stepY = Math.round(dy * scaleFactor);
+  const ovX = Math.max(0, Math.min(actualTileSize >> 1, actualTileSize - stepX));
+  const ovY = Math.max(0, Math.min(actualTileSize >> 1, actualTileSize - stepY));
+  console.log(`${logPrefix} Inferred scaled steps: {x: ${stepX}, y: ${stepY}}. Overlaps: {x: ${ovX}, y: ${ovY}}`);
 
-  const key = (x:number,y:number)=> `${Math.round(x)}:${Math.round(y)}`;
-  const idx = new Set(completeTiles.map(o => key(o.coordinates.x, o.coordinates.y)));
-  const hasAt = (x:number,y:number)=> idx.has(key(x,y));
+  const HR = ramps1D(actualTileSize, ovX);
+  const VR = rampsY(actualTileSize, ovY);
 
-  function neighborFlags(t: Tile) {
-    const { x, y } = t.coordinates;
-    const left  = hasAt(x - STEP, y);
-    const right = hasAt(x + STEP, y);
-    const top   = hasAt(x, y - STEP);
-    const bottom= hasAt(x, y + STEP);
-    return { left, right, top, bottom };
+  // --- New Robust Neighbor Lookup ---
+  const EPSX = Math.max(1, Math.floor(stepX/8)), EPSY = Math.max(1, Math.floor(stepY/8));
+  const key = (x:number,y:number)=> `${Math.round(x/EPSX)},${Math.round(y/EPSY)}`;
+  const idx = new Set(completeTiles.map(t => key(Math.round(t.coordinates.x*scaleFactor), Math.round(t.coordinates.y*scaleFactor))));
+  function flags(x:number,y:number) {
+    const k = (xx:number,yy:number)=> idx.has(key(xx,yy));
+    return {
+      left:   k(x - stepX, y),
+      right:  k(x + stepX, y),
+      top:    k(x, y - stepY),
+      bottom: k(x, y + stepY),
+    };
   }
 
   for (const t of completeTiles) {
@@ -230,12 +218,12 @@ async function run(parent_job_id: string) {
         tile.resize(actualTileSize, actualTileSize, Image.RESIZE_BICUBIC);
     }
 
-    const n = neighborFlags(t);
-    const hx = pick1D(R, n.left, n.right, "h");
-    const vy = pick1D(R, n.top, n.bottom, "v");
-    
     const scaledX = Math.round(t.coordinates.x * scaleFactor);
     const scaledY = Math.round(t.coordinates.y * scaleFactor);
+    const f = flags(scaledX, scaledY);
+    const hx = HR[`h${f.left?1:0}${f.right?1:0}` as const];
+    const vy = VR[`v${f.top?1:0}${f.bottom?1:0}` as const];
+
     blendWeighted(canvas, tile, scaledX, scaledY, hx, vy);
     
     tile = null; // Help GC
