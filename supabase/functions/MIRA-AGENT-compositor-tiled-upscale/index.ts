@@ -88,6 +88,14 @@ function rampsY(size:number, ov:number) {
   return { v00: mk(false,false), v10: mk(true,false), v01: mk(false,true), v11: mk(true,true) };
 }
 
+const rampCache = new Map<string, {HR:any, VR:any}>();
+function getRamps(w:number,h:number,ovx:number,ovy:number){
+  const key = `${w}x${h}:${ovx},${ovy}`;
+  let r = rampCache.get(key);
+  if (!r) { r = { HR: ramps1D(w, ovx), VR: rampsY(h, ovy) }; rampCache.set(key, r); }
+  return r;
+}
+
 function blendWeighted(canvas: Image, tile: Image, x0: number, y0: number, hx: Float32Array, vy: Float32Array) {
   const cb = canvas.bitmap, tb = tile.bitmap;
   const W = canvas.width, tw = tile.width, th = tile.height;
@@ -154,7 +162,11 @@ async function run(parent_job_id: string) {
   const completeTiles: Tile[] = (tiles ?? []).filter(t => t.status === "complete");
   if (!completeTiles.length) throw new Error("No completed tiles found for this job.");
 
-  const firstTileBytes = await fetchBytes(completeTiles[0].generated_tile_url, new AbortController().signal);
+  const firstTileCtl = new AbortController();
+  const firstTileTimeout = setTimeout(() => firstTileCtl.abort(), 25_000);
+  const firstTileBytes = await fetchBytes(completeTiles[0].generated_tile_url, firstTileCtl.signal);
+  clearTimeout(firstTileTimeout);
+
   const firstTileImage = await Image.decode(firstTileBytes);
   const actualTileSize = firstTileImage.width;
   const scaleFactor = actualTileSize / TILE_SIZE;
@@ -217,8 +229,7 @@ async function run(parent_job_id: string) {
     const tileW = tile.width, tileH = tile.height;
     const ovXlocal = Math.min(ovX, tileW);
     const ovYlocal = Math.min(ovY, tileH);
-    const HR = ramps1D(tileW, ovXlocal);
-    const VR = rampsY(tileH, ovYlocal);
+    const { HR, VR } = getRamps(tileW, tileH, ovXlocal, ovYlocal);
 
     const scaledX = Math.round(t.coordinates.x * scaleFactor);
     const scaledY = Math.round(t.coordinates.y * scaleFactor);
