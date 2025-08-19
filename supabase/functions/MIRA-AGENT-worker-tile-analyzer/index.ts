@@ -28,15 +28,19 @@ async function downloadImage(supabase: SupabaseClient, publicUrl: string) {
 serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
 
-  const { tile_id, tile_base64, mime_type } = await req.json();
+  const { tile_id, tile_base64, mime_type, tile_url } = await req.json();
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-  const logPrefix = `[TileAnalyzerWorker][${tile_id || 'direct_call'}]`;
+  const logPrefix = `[TileAnalyzerWorker][${tile_id || tile_url || 'direct_call'}]`;
 
   try {
     let imageBase64 = tile_base64;
     let imageMimeType = mime_type;
 
-    if (tile_id) {
+    if (tile_url) {
+        const imageBlob = await downloadImage(supabase, tile_url);
+        imageBase64 = encodeBase64(await imageBlob.arrayBuffer());
+        imageMimeType = imageBlob.type;
+    } else if (tile_id) {
         const { data: tile, error: fetchError } = await supabase
           .from('mira_agent_tiled_upscale_tiles')
           .select('source_tile_url')
@@ -45,14 +49,13 @@ serve(async (req) => {
         if (fetchError) throw fetchError;
         if (!tile.source_tile_url) throw new Error("Tile record is missing a source_tile_url.");
 
-        console.log(`${logPrefix} Downloading tile from ${tile.source_tile_url}`);
         const imageBlob = await downloadImage(supabase, tile.source_tile_url);
         imageBase64 = encodeBase64(await imageBlob.arrayBuffer());
         imageMimeType = imageBlob.type;
     }
 
     if (!imageBase64) {
-        throw new Error("No image data provided (either via tile_id or directly as base64).");
+        throw new Error("No image data provided (via tile_id, tile_url, or directly as base64).");
     }
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
@@ -74,7 +77,6 @@ serve(async (req) => {
     if (!description) throw new Error("AI model failed to generate a description.");
 
     if (tile_id) {
-        console.log(`${logPrefix} Generated prompt: "${description.substring(0, 80)}..."`);
         await supabase
           .from('mira_agent_tiled_upscale_tiles')
           .update({ generated_prompt: description, status: 'pending_generation' })
