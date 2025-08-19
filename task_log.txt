@@ -12,3 +12,7 @@
     *   Created the first worker: `MIRA-AGENT-worker-tiling`. This function downloads the source image, slices it into tiles, creates the individual tile records in the database, and uploads the tile images to storage.
     *   Created the analysis worker: `MIRA-AGENT-worker-tile-analyzer`. This function is responsible for taking a single tile, generating a text description for it using an AI model, and saving that description back to the tile's record.
     *   Created a dedicated watchdog: `MIRA-AGENT-watchdog-tiled-upscale`. This function will periodically find tiles that are ready for analysis and trigger the analysis worker, ensuring the process is scalable and resilient.
+*   **Actions Taken (2024-07-27):**
+    *   Created a new developer tool page: `UpscaleTilingVisualizer.tsx`. This page allows for testing and visualizing the entire tiling and captioning pipeline.
+    *   Added a link to the new tool on the main Developer page.
+    *   Set up a cron job to run the `MIRA-AGENT-watchdog-tiled-upscale` function every minute, ensuring that pending tiles are automatically picked up for analysis.
