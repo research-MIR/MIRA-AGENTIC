@@ -2,7 +2,6 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { Image } from "https://deno.land/x/imagescript@1.2.15/mod.ts";
-import { createCanvas, loadImage } from "https://deno.land/x/canvas@v1.4.1/mod.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -165,16 +164,16 @@ async function run(parent_job_id: string) {
   const H = originalImage.height;
   console.log(`${logPrefix} Final canvas dimensions will be ${W}x${H}`);
 
-  const estMB = (W * H * 4 + TILE_SIZE * TILE_SIZE * 4 + 8 * TILE_SIZE * 4) / (1024 * 1024);
+  const estMB = (W * H * 4 * 2 + 8 * TILE_SIZE * 4) / (1024 * 1024); // *2 for canvas + original
   if (estMB > MEM_HARD_LIMIT_MB) {
     await supabase.from("mira_agent_tiled_upscale_jobs").update({ status: "failed", error_message: `Estimated RAM ${estMB.toFixed(1)}MB exceeds limit ${MEM_HARD_LIMIT_MB}MB.` }).eq("id", parent_job_id);
     throw new Error(`Refused: est ${estMB.toFixed(1)} MB > limit ${MEM_HARD_LIMIT_MB}`);
   }
 
-  const canvas = createCanvas(W, H);
-  const ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#FF00FF'; // Use magenta for debug background
-  ctx.fillRect(0, 0, W, H);
+  const canvas = new Image(W, H);
+  // CRITICAL FIX: Draw the upscaled original image as the base layer first.
+  canvas.composite(originalImage, 0, 0);
+  console.log(`${logPrefix} Base image composited onto canvas.`);
 
   const R = ramps2D();
 
@@ -201,14 +200,13 @@ async function run(parent_job_id: string) {
     const vy = pick1D(R, n.top, n.bottom, "v");
     applyFeatherAlpha(tile, hx, vy);
 
-    const tileForCanvas = await loadImage(await tile.encode(0)); // Convert to format deno-canvas can use
-    ctx.drawImage(tileForCanvas, t.coordinates.x, t.coordinates.y);
+    canvas.composite(tile, t.coordinates.x, t.coordinates.y);
     tile = null; // Help GC
   }
 
-  const jpegBuffer = canvas.toBuffer('image/jpeg', { quality: JPEG_QUALITY / 100 });
+  const jpeg = await canvas.encodeJPEG(JPEG_QUALITY);
   const outPath = `${parentRow.user_id}/${parent_job_id}/tiled-upscale-final-${W}x${H}.jpg`;
-  await supabase.storage.from(BUCKET_OUT).upload(outPath, jpegBuffer, { contentType: "image/jpeg", upsert: true });
+  await supabase.storage.from(BUCKET_OUT).upload(outPath, jpeg, { contentType: "image/jpeg", upsert: true });
   const { data: pub } = supabase.storage.from(BUCKET_OUT).getPublicUrl(outPath);
 
   await supabase.from("mira_agent_tiled_upscale_jobs").update({ status: "complete", final_image_url: pub.publicUrl }).eq("id", parent_job_id);
