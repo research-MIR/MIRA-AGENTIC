@@ -107,10 +107,10 @@ serve(async (req) => {
         const tag = `${logPrefix}[W${workerId}][Tile ${idx}]`;
         try {
           // --- Make a tile WITHOUT cloning the full image ---
-          // Create a fresh tile canvas and blit the source with negative offset.
+          // Create a fresh tile canvas and composite the source with negative offset.
           // This copies only the visible region into the tile-sized buffer.
           const tile = new Image(TILE_SIZE, TILE_SIZE);
-          tile.blit(img, -x, -y); // no full-image clone!
+          tile.composite(img, -x, -y); // FIX: Use .composite() instead of .blit()
 
           // --- Encode compactly (WEBP/JPEG) ---
           const enc0 = performance.now();
