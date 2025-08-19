@@ -6,7 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { ModelGenerator } from "@/components/GenerateModels/ModelGenerator";
 import { useLanguage } from "@/context/LanguageContext";
-import { Loader2, Wand2, Users, ArrowLeft, Trash2, AlertTriangle } from "lucide-react";
+import { Loader2, Wand2, Users, ArrowLeft, Trash2, AlertTriangle, RefreshCw } from "lucide-react";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { PackStatusIndicator } from "@/components/GenerateModels/PackStatusIndicator";
 import { JobProgressBar } from "@/components/GenerateModels/JobProgressBar";
@@ -22,7 +22,6 @@ import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { showError, showSuccess, showLoading, dismissToast } from "@/utils/toast";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { PackDashboard } from "@/components/GenerateModels/PackDashboard";
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel";
 import { PoseHistoryModal } from "@/components/GenerateModels/PoseHistoryModal";
@@ -43,7 +42,7 @@ interface Pose {
   is_upscaled?: boolean;
   status: string;
   pose_prompt: string;
-  jobId?: string;
+  jobId: string;
   analysis?: PoseAnalysis;
   comfyui_prompt_id?: string;
   prompt_context_for_gemini?: string;
@@ -61,6 +60,7 @@ interface Job {
   auto_approve: boolean;
   model_description?: string;
   gender?: 'male' | 'female' | null;
+  error_message?: string;
 }
 
 const ModelPackDetail = () => {
@@ -75,6 +75,7 @@ const ModelPackDetail = () => {
   const [jobToRemove, setJobToRemove] = useState<string | null>(null);
   const [viewingPoseHistory, setViewingPoseHistory] = useState<Pose | null>(null);
   const [retryingPose, setRetryingPose] = useState<Pose | null>(null);
+  const [isRetryingBase, setIsRetryingBase] = useState(false);
   const channelRef = useRef<RealtimeChannel | null>(null);
 
   const { data: pack, isLoading: isLoadingPack, error: packError } = useQuery({
@@ -171,6 +172,27 @@ const ModelPackDetail = () => {
         showError(`Failed to retry pose: ${err.message}`);
     } finally {
         setRetryingPose(null);
+    }
+  };
+
+  const handleRetryBaseModel = async () => {
+    if (!selectedJobId) return;
+    setIsRetryingBase(true);
+    const toastId = showLoading("Retrying base model generation...");
+    try {
+        const { error } = await supabase.functions.invoke('MIRA-AGENT-tool-retry-base-model', {
+            body: { job_id: selectedJobId }
+        });
+        if (error) throw error;
+        dismissToast(toastId);
+        showSuccess("Base model re-queued for generation.");
+        queryClient.invalidateQueries({ queryKey: ['modelsForPack', packId] });
+        setSelectedJobId(null); // Deselect job as it's now processing
+    } catch (err: any) {
+        dismissToast(toastId);
+        showError(`Failed to retry: ${err.message}`);
+    } finally {
+        setIsRetryingBase(false);
     }
   };
 
@@ -435,14 +457,39 @@ const ModelPackDetail = () => {
                             </div>
                           </RadioGroup>
                         </div>
-                        <Button 
-                          className="w-full" 
-                          onClick={handleApproveBaseModel}
-                          disabled={!selectedBaseModelId || !selectedGender}
-                        >
-                          Approve & Generate Poses
-                        </Button>
+                        <div className="grid grid-cols-2 gap-4">
+                          <Button variant="outline" className="w-full" onClick={handleRetryBaseModel} disabled={isRetryingBase}>
+                            {isRetryingBase ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                            Retry Generation
+                          </Button>
+                          <Button className="w-full" onClick={handleApproveBaseModel} disabled={!selectedBaseModelId || !selectedGender || isRetryingBase}>
+                            Approve & Generate Poses
+                          </Button>
+                        </div>
                       </CardContent>
+                    </Card>
+                  )}
+                  {selectedJob && selectedJob.status === 'failed' && !selectedJob.base_model_image_url && (
+                    <Card>
+                        <CardHeader>
+                            <CardTitle className="text-destructive">Base Model Failed</CardTitle>
+                            <CardDescription>
+                                The initial generation of the base model for this job failed.
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            <p className="text-sm text-muted-foreground mb-4">
+                                Error: {selectedJob.error_message || "An unknown error occurred."}
+                            </p>
+                            <Button 
+                                className="w-full" 
+                                onClick={handleRetryBaseModel}
+                                disabled={isRetryingBase}
+                            >
+                                {isRetryingBase ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                                Retry Base Model Generation
+                            </Button>
+                        </CardContent>
                     </Card>
                   )}
                   <JobPoseDisplay 
