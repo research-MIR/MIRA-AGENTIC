@@ -31,3 +31,7 @@
     *   **Performance Refactor:** Re-implemented the `MIRA-AGENT-worker-tiling-and-analysis` function based on a more memory-efficient design. The new implementation uses a small, concurrent worker pool, on-the-fly tile processing (eliminating large in-memory arrays), and batched database inserts to significantly reduce peak memory usage and improve resilience. Added extensive logging for detailed performance monitoring.
 *   **Actions Taken (2024-08-01):**
     *   **Bug Fix:** Corrected a `TypeError` in the tiling worker. The incorrect method `.blit()` was being called; this has been replaced with the correct `.composite()` method from the `imagescript` library to perform the memory-efficient tile creation.
+*   **Actions Taken (2024-08-02):**
+    *   **Cleanup & Enhancement:**
+        *   Deleted the obsolete `MIRA-AGENT-worker-tiling` function.
+        *   Added more detailed logging to the `MIRA-AGENT-worker-tiling-and-analysis` function to show the generated caption and the full database record for each tile.

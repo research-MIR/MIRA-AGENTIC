@@ -53,7 +53,7 @@ serve(async (req) => {
     if (!parent_job_id) throw new Error("parent_job_id is required.");
 
     const logPrefix = `[TilingAnalysisWorker][${parent_job_id}]`;
-    console.log(`${logPrefix} Concurrency=${MAX_CONCURRENCY}, InsertBatch=${INSERT_BATCH_SIZE}, Encode=${TILE_ENCODE}@${TILE_QUALITY}, Input=${ANALYZER_INPUT}`);
+    console.log(`${logPrefix} Invoked. Concurrency=${MAX_CONCURRENCY}, DB Batch Size=${INSERT_BATCH_SIZE}, Encode=${TILE_ENCODE}@${TILE_QUALITY}, Input=${ANALYZER_INPUT}`);
 
     const { data: job, error: fetchError } = await supabase
       .from("mira_agent_tiled_upscale_jobs")
@@ -61,19 +61,21 @@ serve(async (req) => {
       .eq("id", parent_job_id)
       .single();
     if (fetchError) throw fetchError;
+    console.log(`${logPrefix} Fetched parent job details.`);
 
-    const dl0 = performance.now();
-    const blob = await downloadImage(supabase, job.source_image_url);
-    console.log(`${logPrefix} Download in ${(performance.now() - dl0).toFixed(2)}ms, blob=${blob.size}B`);
+    const downloadStart = performance.now();
+    console.log(`${logPrefix} Downloading source image from ${job.source_image_url}`);
+    const imageBlob = await downloadImage(supabase, job.source_image_url);
+    console.log(`${logPrefix} Download complete in ${(performance.now() - downloadStart).toFixed(2)}ms. Blob size: ${imageBlob.size} bytes.`);
 
-    const img = await Image.decode(await blob.arrayBuffer());
-    console.log(`${logPrefix} Decoded ${img.width}x${img.height}`);
+    const decodeStart = performance.now();
+    const img = await Image.decode(await imageBlob.arrayBuffer());
+    console.log(`${logPrefix} Decoded image in ${(performance.now() - decodeStart).toFixed(2)}ms. Original dimensions: ${img.width}x${img.height}`);
 
     const targetW = Math.round(img.width * job.upscale_factor);
     img.resize(targetW, Image.RESIZE_AUTO, Image.RESIZE_BICUBIC);
     console.log(`${logPrefix} Upscaled -> ${img.width}x${img.height}`);
 
-    // compute grid without allocating coords[]
     const tilesX = Math.ceil(img.width / STEP);
     const tilesY = Math.ceil(img.height / STEP);
     const totalTiles = tilesX * tilesY;
@@ -97,7 +99,6 @@ serve(async (req) => {
         const i = next++;
         if (i >= totalTiles) break;
 
-        // derive tile coord from index, keep constant TILE_SIZE
         const gx = i % tilesX;
         const gy = (i / tilesX) | 0;
         const x = gx * STEP;
@@ -106,18 +107,13 @@ serve(async (req) => {
 
         const tag = `${logPrefix}[W${workerId}][Tile ${idx}]`;
         try {
-          // --- Make a tile WITHOUT cloning the full image ---
-          // Create a fresh tile canvas and composite the source with negative offset.
-          // This copies only the visible region into the tile-sized buffer.
           const tile = new Image(TILE_SIZE, TILE_SIZE);
-          tile.composite(img, -x, -y); // FIX: Use .composite() instead of .blit()
+          tile.composite(img, -x, -y);
 
-          // --- Encode compactly (WEBP/JPEG) ---
           const enc0 = performance.now();
           const tileBuffer = await tile.encode(fmt, TILE_QUALITY);
           const encMs = (performance.now() - enc0).toFixed(2);
 
-          // --- Upload first, then analyze by URL (no Base64 strings in memory) ---
           const fileExt = TILE_ENCODE === "png" ? "png" : TILE_ENCODE === "jpeg" || TILE_ENCODE === "jpg" ? "jpg" : "webp";
           const filePath = `${job.user_id}/${parent_job_id}/tile_${idx}.${fileExt}`;
           const up0 = performance.now();
@@ -137,7 +133,6 @@ serve(async (req) => {
             if (error) throw error;
             caption = data?.prompt ?? null;
           } else {
-            // Fallback (not recommended): Base64 if you really must
             const { encodeBase64 } = await import("https://deno.land/std@0.224.0/encoding/base64.ts");
             const b64 = encodeBase64(tileBuffer);
             const { data, error } = await supabase.functions.invoke("MIRA-AGENT-worker-tile-analyzer", {
@@ -148,14 +143,17 @@ serve(async (req) => {
           }
           const anMs = (performance.now() - an0).toFixed(2);
 
-          batch.push({
+          const tileRecord = {
             parent_job_id,
             tile_index: idx,
             coordinates: { x, y, width: TILE_SIZE, height: TILE_SIZE },
             source_tile_url: publicUrl,
             generated_prompt: caption,
             status: "pending_generation",
-          });
+          };
+          batch.push(tileRecord);
+          console.log(`${tag} Record prepared for DB: ${JSON.stringify(tileRecord)}`);
+
           if (batch.length >= INSERT_BATCH_SIZE) await flushBatch();
 
           console.log(`${tag} Encoded(${mime}) ${tileBuffer.length}B in ${encMs}ms, uploaded in ${upMs}ms, analyzed in ${anMs}ms`);
@@ -176,7 +174,6 @@ serve(async (req) => {
       }
     }
 
-    // small worker pool to cap peak memory
     const workers = Array.from({ length: Math.max(1, MAX_CONCURRENCY) }, (_, k) => processOne(k + 1));
     await Promise.all(workers);
     await flushBatch();
