@@ -118,6 +118,7 @@ function blendWeighted(canvas: Image, tile: Image, x0: number, y0: number, hx: F
 
       const wOld = cb[cidx + 3] / 255;
       const wNew = wOld + w;
+      if (wNew < 1e-8) continue;
 
       const scaleOld = wOld > 0 ? (wOld / wNew) : 0;
       const scaleAdd = w / wNew;
@@ -193,14 +194,16 @@ async function run(parent_job_id: string) {
   const canvas = new Image(finalW, finalH);
   console.log(`${logPrefix} Created empty canvas for normalized blending.`);
 
-  const xs = [...new Set(completeTiles.map(t => t.coordinates.x))].sort((a,b)=>a-b);
-  const ys = [...new Set(completeTiles.map(t => t.coordinates.y))].sort((a,b)=>a-b);
-  const dx = xs.length > 1 ? Math.min(...xs.slice(1).map((v,i)=>v - xs[i])) : 0;
-  const dy = ys.length > 1 ? Math.min(...ys.slice(1).map((v,i)=>v - ys[i])) : 0;
+  const EPS_PRE = Math.max(1, Math.floor(TILE_SIZE / 64));
+  const q = (v:number)=> Math.round(v / EPS_PRE) * EPS_PRE;
+  const xs = [...new Set(completeTiles.map(t => q(t.coordinates.x)))].sort((a,b)=>a-b);
+  const ys = [...new Set(completeTiles.map(t => q(t.coordinates.y)))].sort((a,b)=>a-b);
+  const dx = xs.length > 1 ? Math.min(...xs.slice(1).map((v,i)=> v - xs[i])) : 0;
+  const dy = ys.length > 1 ? Math.min(...ys.slice(1).map((v,i)=> v - ys[i])) : 0;
   const stepX = dx > 0 ? Math.round(dx * scaleFactor) : Number.POSITIVE_INFINITY;
   const stepY = dy > 0 ? Math.round(dy * scaleFactor) : Number.POSITIVE_INFINITY;
-  const ovX = Number.isFinite(stepX) ? Math.max(0, Math.min(actualTileSize >> 1, actualTileSize - stepX)) : 0;
-  const ovY = Number.isFinite(stepY) ? Math.max(0, Math.min(actualTileSize >> 1, actualTileSize - stepY)) : 0;
+  const ovX = Number.isFinite(stepX) ? Math.max(0, actualTileSize - stepX) : 0;
+  const ovY = Number.isFinite(stepY) ? Math.max(0, actualTileSize - stepY) : 0;
   console.log(`${logPrefix} Inferred scaled steps: {x: ${stepX}, y: ${stepY}}. Overlaps: {x: ${ovX}, y: ${ovY}}`);
 
   const EPSX = Math.max(1, Math.floor(actualTileSize / 64));
