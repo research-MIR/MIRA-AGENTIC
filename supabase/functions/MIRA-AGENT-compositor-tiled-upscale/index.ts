@@ -173,11 +173,17 @@ async function run(parent_job_id: string) {
   const scaleFactor = actualTileSize / TILE_SIZE;
   console.log(`${logPrefix} Detected upscale factor of ${scaleFactor}x (Tiles are ${actualTileSize}px)`);
 
-  const maxX = Math.max(...completeTiles.map(t => t.coordinates.x));
-  const maxY = Math.max(...completeTiles.map(t => t.coordinates.y));
-  const finalW = Math.round((maxX + TILE_SIZE) * scaleFactor);
-  const finalH = Math.round((maxY + TILE_SIZE) * scaleFactor);
-  console.log(`${logPrefix} Final canvas dimensions calculated from tiles: ${finalW}x${finalH}`);
+  const { bucket, path } = parseStorageURL(parentRow.source_image_url);
+  const { data: sourceBlob, error: dlError } = await supabase.storage.from(bucket).download(path);
+  if (dlError) throw new Error(`Failed to download original source image: ${dlError.message}`);
+  
+  let originalImage: Image | null = await Image.decode(await sourceBlob.arrayBuffer());
+  const upW = Math.round(originalImage.width * parentRow.upscale_factor);
+  const upH = Math.round(originalImage.height * parentRow.upscale_factor);
+  const finalW = Math.round(upW * scaleFactor);
+  const finalH = Math.round(upH * scaleFactor);
+  originalImage = null; // Release memory
+  console.log(`${logPrefix} Final canvas dimensions will be ${finalW}x${finalH}`);
 
   const estMB = (finalW * finalH * 4 + actualTileSize * actualTileSize * 4 + 16*1024*1024) / (1024*1024);
   if (estMB > MEM_HARD_LIMIT_MB) {
@@ -223,6 +229,11 @@ async function run(parent_job_id: string) {
     let tile: Image | null = await Image.decode(bytes);
     console.log(`${logPrefix} Processing Tile #${t.tile_index} | Coords: {x:${t.coordinates.x}, y:${t.coordinates.y}} | Decoded Size: ${tile.width}x${tile.height}`);
     
+    if (tile.width !== actualTileSize || tile.height !== actualTileSize) {
+        console.warn(`${logPrefix} Tile #${t.tile_index} has unexpected size ${tile.width}x${tile.height}. Resizing to ${actualTileSize}px.`);
+        tile.resize(actualTileSize, actualTileSize, Image.RESIZE_BICUBIC);
+    }
+
     const tileW = tile.width, tileH = tile.height;
     const ovXlocal = Math.min(ovX, tileW);
     const ovYlocal = Math.min(ovY, tileH);

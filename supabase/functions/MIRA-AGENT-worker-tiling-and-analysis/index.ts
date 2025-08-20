@@ -2,7 +2,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { Image } from "https://deno.land/x/imagescript@1.2.15/mod.ts";
-import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -82,6 +81,9 @@ serve(async (req) => {
     const estImgBytes = img.width * img.height * 4;
     const perWorkerBytes = (BASE_TILE * BASE_TILE * 4) + (2 * 1024 * 1024);
     const budget = TILE_ANALYSIS_MEM_BUDGET_MB * 1024 * 1024;
+    if (estImgBytes + perWorkerBytes > budget) {
+        throw new Error(`Source image too large for analysis memory budget (${TILE_ANALYSIS_MEM_BUDGET_MB} MB).`);
+    }
     const EFFECTIVE_CONCURRENCY = Math.max(1, Math.min(MAX_CONCURRENCY, Math.floor((budget - estImgBytes) / perWorkerBytes)));
     console.log(`${logPrefix} Effective concurrency set to ${EFFECTIVE_CONCURRENCY} based on memory budget.`);
 
@@ -101,10 +103,7 @@ serve(async (req) => {
       console.log(`${logPrefix} Upserted ${chunk.length} rows in ${(performance.now() - t0).toFixed(2)}ms`);
     }
 
-    const pool = Array.from({ length: EFFECTIVE_CONCURRENCY }, () => new Image(BASE_TILE, BASE_TILE));
-
     async function processOne(workerId: number) {
-      const tileImg = pool[workerId - 1];
       while (true) {
         const i = next++;
         if (i >= totalTiles) break;
@@ -122,11 +121,12 @@ serve(async (req) => {
 
         const tag = `${logPrefix}[W${workerId}][Tile ${i}]`;
         try {
+          const tileImg = new Image(BASE_TILE, BASE_TILE);
           tileImg.composite(img, -srcX, -srcY);
           const tileBuffer = await tileImg.encode(fmt, quality);
 
           const filePath = `${job.user_id}/${parent_job_id}/tile_${i}.jpeg`;
-          await supabase.storage.from(TILE_UPLOAD_BUCKET).upload(filePath, tileBuffer, { contentType: mime, upsert: true });
+          await supabase.storage.from(TILE_UPLOAD_BUCKET).upload(filePath, tileBuffer, { contentType: mime, upsert: true, cacheControl: "31536000, immutable" });
           const { data: { publicUrl } } = supabase.storage.from(TILE_UPLOAD_BUCKET).getPublicUrl(filePath);
 
           const { data, error } = await supabase.functions.invoke("MIRA-AGENT-worker-tile-analyzer", {
@@ -154,6 +154,8 @@ serve(async (req) => {
           console.log(`${tag} Record prepared. Prompt length: ${caption ? caption.length : 0}`);
 
           if (batch.length >= INSERT_BATCH_SIZE) await flushBatch();
+          if ((i & 15) === 0) await new Promise(r => setTimeout(r, 0));
+
         } catch (e) {
           console.error(`${tag} FAILED:`, e);
           batch.push({
