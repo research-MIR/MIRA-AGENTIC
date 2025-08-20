@@ -22,76 +22,65 @@ serve(async (req) => {
 
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
   const logPrefix = `[TileGeneratorWorker][${tile_id}]`;
-  console.log(`${logPrefix} Invoked.`);
 
   try {
-    if (!FAL_KEY) {
-      throw new Error("Server configuration error: Missing FAL_KEY secret.");
-    }
-    fal.config({ credentials: FAL_KEY });
-
-    const { data: tile, error: fetchError } = await supabase
+    const { data: claimedTile, error: claimError } = await supabase
       .from('mira_agent_tiled_upscale_tiles')
-      .select('source_tile_url, generated_prompt, parent_job_id')
+      .update({ status: 'generating', updated_at: new Date().toISOString() })
       .eq('id', tile_id)
+      .eq('status', 'pending_generation')
+      .select('id, parent_job_id, source_tile_bucket, source_tile_path, generated_prompt')
       .single();
 
-    if (fetchError) throw fetchError;
-    if (!tile) throw new Error(`Tile with ID ${tile_id} not found.`);
-    if (!tile.source_tile_url || !tile.generated_prompt) {
-      throw new Error("Tile is missing source_tile_url or generated_prompt.");
+    if (claimError) throw new Error(`Claiming tile failed: ${claimError.message}`);
+    if (!claimedTile) {
+      console.log(`${logPrefix} Tile already claimed or not in 'pending_generation' state. Exiting.`);
+      return new Response(JSON.stringify({ success: true, message: "Tile already processed." }), { headers: corsHeaders });
     }
-    
-    console.log(`${logPrefix} Fetched tile data. Prompt: "${tile.generated_prompt.substring(0, 50)}..."`);
 
-    const falInput = {
-      image_url: tile.source_tile_url,
-      prompt: tile.generated_prompt,
-      resemblance: 75,
-      detail: 60,
-      expand_prompt: false,
-    };
+    const { parent_job_id, source_tile_bucket, source_tile_path, generated_prompt } = claimedTile;
+    if (!source_tile_bucket || !source_tile_path || !generated_prompt) {
+      throw new Error("Tile record is missing required data for generation.");
+    }
 
-    console.log(`${logPrefix} Calling fal-ai/ideogram/upscale with payload...`);
+    const { data: { publicUrl: source_tile_url } } = supabase.storage.from(source_tile_bucket).getPublicUrl(source_tile_path);
+
+    fal.config({ credentials: FAL_KEY! });
     const result: any = await fal.subscribe("fal-ai/ideogram/upscale", {
-      input: falInput,
-      logs: true,
-      onQueueUpdate: (update) => {
-        if (update.status === "IN_PROGRESS" && update.logs) {
-          update.logs.forEach((log) => console.log(`${logPrefix} [Fal-Log] ${log.message}`));
-        }
+      input: {
+        image_url: source_tile_url,
+        prompt: generated_prompt,
+        resemblance: 75,
+        detail: 60,
+        expand_prompt: false,
       },
+      logs: true,
     });
 
     const upscaledImage = result?.data?.images?.[0];
-    if (!upscaledImage || !upscaledImage.url) {
-      throw new Error("Upscaling service did not return a valid image URL.");
-    }
-    console.log(`${logPrefix} Upscaling successful. New URL: ${upscaledImage.url}`);
+    if (!upscaledImage || !upscaledImage.url) throw new Error("Upscaling service did not return a valid image URL.");
 
     const imageResponse = await fetch(upscaledImage.url);
     if (!imageResponse.ok) throw new Error(`Failed to download generated image from ${upscaledImage.url}`);
     const imageBuffer = await imageResponse.arrayBuffer();
 
-    const { data: parentJob, error: parentFetchError } = await supabase
-        .from('mira_agent_tiled_upscale_jobs')
-        .select('user_id')
-        .eq('id', tile.parent_job_id)
-        .single();
-    if (parentFetchError) throw parentFetchError;
+    const { data: parentJob } = await supabase.from('mira_agent_tiled_upscale_jobs').select('user_id').eq('id', parent_job_id).single();
+    if (!parentJob) throw new Error(`Parent job ${parent_job_id} not found.`);
 
-    const filePath = `${parentJob.user_id}/${tile.parent_job_id}/generated_tile_${tile_id}.png`;
-    await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(filePath, imageBuffer, { contentType: 'image/png', upsert: true });
-    const { data: { publicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
-    console.log(`${logPrefix} Uploaded final image to storage: ${publicUrl}`);
-
+    const finalFilePath = `${parentJob.user_id}/${parent_job_id}/generated_tile_${tile_id}.png`;
+    await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(finalFilePath, imageBuffer, { contentType: 'image/png', upsert: true });
+    
     await supabase
       .from('mira_agent_tiled_upscale_tiles')
-      .update({ generated_tile_url: publicUrl, status: 'complete' })
+      .update({ 
+        generated_tile_bucket: GENERATED_IMAGES_BUCKET,
+        generated_tile_path: finalFilePath,
+        status: 'complete' 
+      })
       .eq('id', tile_id);
 
     console.log(`${logPrefix} Job complete.`);
-    return new Response(JSON.stringify({ success: true, generated_tile_url: publicUrl }), { headers: corsHeaders });
+    return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
 
   } catch (error) {
     console.error(`${logPrefix} Error:`, error);

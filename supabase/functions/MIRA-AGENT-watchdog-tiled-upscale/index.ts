@@ -3,11 +3,13 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-const BATCH_SIZE = 10; // Number of tiles to process per watchdog run
+const BATCH_SIZE = 10;
+const STALLED_THRESHOLD_SECONDS = 180; // 3 minutes for any in-progress task
+const FAILED_RETRY_THRESHOLD_SECONDS = 300; // 5 minutes for a failed task
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
 };
 
 serve(async (req) => {
@@ -17,106 +19,90 @@ serve(async (req) => {
   const logPrefix = `[TiledUpscaleWatchdog]`;
 
   try {
-    // --- Analysis Step ---
-    console.log(`${logPrefix} Checking for tiles pending analysis...`);
-    const { data: pendingAnalysisTiles, error: fetchAnalysisError } = await supabase
+    // --- Stalled Job Recovery ---
+    const stalledThreshold = new Date(Date.now() - STALLED_THRESHOLD_SECONDS * 1000).toISOString();
+    const { data: stalledTiles, error: fetchStalledError } = await supabase
       .from('mira_agent_tiled_upscale_tiles')
-      .select('id')
-      .eq('status', 'pending_analysis')
-      .limit(BATCH_SIZE);
+      .select('id, status')
+      .in('status', ['analyzing', 'generating'])
+      .lt('updated_at', stalledThreshold);
 
+    if (fetchStalledError) throw fetchStalledError;
+
+    if (stalledTiles && stalledTiles.length > 0) {
+      console.log(`${logPrefix} Found ${stalledTiles.length} stalled tiles. Resetting them...`);
+      const updates = stalledTiles.map(tile => ({
+        id: tile.id,
+        status: tile.status === 'analyzing' ? 'pending_analysis' : 'pending_generation',
+        error_message: 'Reset by watchdog due to stall.',
+        updated_at: new Date().toISOString()
+      }));
+      await supabase.from('mira_agent_tiled_upscale_tiles').upsert(updates);
+    }
+
+    // --- Failed Job Retry ---
+    const failedThreshold = new Date(Date.now() - FAILED_RETRY_THRESHOLD_SECONDS * 1000).toISOString();
+    const { data: failedTiles, error: fetchFailedError } = await supabase
+      .from('mira_agent_tiled_upscale_tiles')
+      .select('id, status')
+      .in('status', ['analysis_failed', 'generation_failed'])
+      .lt('updated_at', failedThreshold);
+    
+    if (fetchFailedError) throw fetchFailedError;
+
+    if (failedTiles && failedTiles.length > 0) {
+        console.log(`${logPrefix} Found ${failedTiles.length} failed tiles eligible for retry. Resetting...`);
+        const updates = failedTiles.map(tile => ({
+            id: tile.id,
+            status: tile.status === 'analysis_failed' ? 'pending_analysis' : 'pending_generation',
+            error_message: 'Retrying after previous failure.',
+            updated_at: new Date().toISOString()
+        }));
+        await supabase.from('mira_agent_tiled_upscale_tiles').upsert(updates);
+    }
+
+    // --- Dispatch Pending Analysis ---
+    const { data: pendingAnalysisTiles, error: fetchAnalysisError } = await supabase.from('mira_agent_tiled_upscale_tiles').select('id').eq('status', 'pending_analysis').limit(BATCH_SIZE);
     if (fetchAnalysisError) throw fetchAnalysisError;
-
     if (pendingAnalysisTiles && pendingAnalysisTiles.length > 0) {
-      console.log(`${logPrefix} Found ${pendingAnalysisTiles.length} tiles to analyze. Claiming and dispatching...`);
       const tileIds = pendingAnalysisTiles.map(t => t.id);
-      
-      await supabase.from('mira_agent_tiled_upscale_tiles').update({ status: 'analyzing' }).in('id', tileIds);
-
-      const analysisPromises = tileIds.map(tile_id => 
-        supabase.functions.invoke('MIRA-AGENT-worker-tile-analyzer', { body: { tile_id } })
-      );
+      const analysisPromises = tileIds.map(tile_id => supabase.functions.invoke('MIRA-AGENT-worker-tile-analyzer', { body: { tile_id } }));
       await Promise.allSettled(analysisPromises);
       console.log(`${logPrefix} Dispatched ${tileIds.length} analysis workers.`);
-    } else {
-      console.log(`${logPrefix} No tiles pending analysis.`);
     }
 
-    // --- Generation Step ---
-    console.log(`${logPrefix} Checking for tiles pending generation...`);
-    const { data: pendingGenerationTiles, error: fetchGenerationError } = await supabase
-      .from('mira_agent_tiled_upscale_tiles')
-      .select('id')
-      .eq('status', 'pending_generation')
-      .limit(BATCH_SIZE);
-
+    // --- Dispatch Pending Generation ---
+    const { data: pendingGenerationTiles, error: fetchGenerationError } = await supabase.from('mira_agent_tiled_upscale_tiles').select('id').eq('status', 'pending_generation').limit(BATCH_SIZE);
     if (fetchGenerationError) throw fetchGenerationError;
-
     if (pendingGenerationTiles && pendingGenerationTiles.length > 0) {
-      console.log(`${logPrefix} Found ${pendingGenerationTiles.length} tiles to generate. Claiming and dispatching...`);
       const tileIds = pendingGenerationTiles.map(t => t.id);
-
-      await supabase.from('mira_agent_tiled_upscale_tiles').update({ status: 'generating' }).in('id', tileIds);
-
-      const generationPromises = tileIds.map(tile_id =>
-        supabase.functions.invoke('MIRA-AGENT-worker-tile-generator', { body: { tile_id } })
-      );
+      const generationPromises = tileIds.map(tile_id => supabase.functions.invoke('MIRA-AGENT-worker-tile-generator', { body: { tile_id } }));
       await Promise.allSettled(generationPromises);
       console.log(`${logPrefix} Dispatched ${tileIds.length} generation workers.`);
-    } else {
-      console.log(`${logPrefix} No tiles pending generation.`);
     }
 
-    // --- Compositing Step ---
-    console.log(`${logPrefix} Checking for parent jobs ready for compositing...`);
-    const { data: generatingJobs, error: fetchGeneratingError } = await supabase
-      .from('mira_agent_tiled_upscale_jobs')
-      .select('id')
-      .eq('status', 'generating');
-
+    // --- Trigger Compositor ---
+    const { data: generatingJobs, error: fetchGeneratingError } = await supabase.from('mira_agent_tiled_upscale_jobs').select('id').eq('status', 'generating');
     if (fetchGeneratingError) throw fetchGeneratingError;
-
     if (generatingJobs && generatingJobs.length > 0) {
-        const jobIds = generatingJobs.map(j => j.id);
-
-        const { data: allTiles, error: fetchTilesError } = await supabase
-            .from('mira_agent_tiled_upscale_tiles')
-            .select('parent_job_id, status')
-            .in('parent_job_id', jobIds);
-        
-        if (fetchTilesError) throw fetchTilesError;
-
-        const jobCounts = jobIds.reduce((acc, id) => {
-            acc[id] = { total_tiles: 0, completed_tiles: 0 };
-            return acc;
-        }, {} as Record<string, { total_tiles: number, completed_tiles: number }>);
-
-        for (const tile of allTiles) {
-            if (jobCounts[tile.parent_job_id!]) {
-                jobCounts[tile.parent_job_id!].total_tiles++;
-                if (tile.status === 'complete') {
-                    jobCounts[tile.parent_job_id!].completed_tiles++;
-                }
-            }
+      const jobIds = generatingJobs.map(j => j.id);
+      const { data: allTiles, error: fetchTilesError } = await supabase.from('mira_agent_tiled_upscale_tiles').select('parent_job_id, status').in('parent_job_id', jobIds);
+      if (fetchTilesError) throw fetchTilesError;
+      
+      const jobCounts = jobIds.reduce((acc, id) => ({ ...acc, [id]: { total: 0, complete: 0 } }), {} as Record<string, { total: number, complete: number }>);
+      allTiles.forEach(tile => {
+        if (jobCounts[tile.parent_job_id!]) {
+          jobCounts[tile.parent_job_id!].total++;
+          if (tile.status === 'complete') jobCounts[tile.parent_job_id!].complete++;
         }
+      });
 
-        const jobsReadyForCompositing = Object.entries(jobCounts)
-            .filter(([_, counts]) => counts.total_tiles > 0 && counts.total_tiles === counts.completed_tiles)
-            .map(([jobId, _]) => jobId);
-
-        if (jobsReadyForCompositing.length > 0) {
-            console.log(`${logPrefix} Found ${jobsReadyForCompositing.length} job(s) ready for compositing. Claiming and dispatching...`);
-            await supabase.from('mira_agent_tiled_upscale_jobs').update({ status: 'compositing' }).in('id', jobsReadyForCompositing);
-            
-            const compositorPromises = jobsReadyForCompositing.map(jobId =>
-                supabase.functions.invoke('MIRA-AGENT-compositor-tiled-upscale', { body: { parent_job_id: jobId } })
-            );
-            await Promise.allSettled(compositorPromises);
-        } else {
-            console.log(`${logPrefix} No jobs in 'generating' state are ready for compositing yet.`);
-        }
-    } else {
-        console.log(`${logPrefix} No jobs in 'generating' state found.`);
+      const jobsReadyForCompositing = Object.entries(jobCounts).filter(([_, counts]) => counts.total > 0 && counts.total === counts.complete).map(([jobId]) => jobId);
+      if (jobsReadyForCompositing.length > 0) {
+        const compositorPromises = jobsReadyForCompositing.map(jobId => supabase.functions.invoke('MIRA-AGENT-compositor-tiled-upscale', { body: { parent_job_id: jobId } }));
+        await Promise.allSettled(compositorPromises);
+        console.log(`${logPrefix} Dispatched ${jobsReadyForCompositing.length} compositor jobs.`);
+      }
     }
 
     return new Response(JSON.stringify({ success: true, message: "Watchdog check complete." }), { headers: corsHeaders });
