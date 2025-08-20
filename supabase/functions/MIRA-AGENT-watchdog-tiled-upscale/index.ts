@@ -26,13 +26,9 @@ serve(async (req) => {
     }
     console.log(`${logPrefix} Advisory lock acquired. Proceeding with checks.`);
 
-    // Stalled Job Recovery
+    // Stalled Job Recovery for ANALYSIS ONLY
     const stalledThreshold = new Date(Date.now() - STALLED_THRESHOLD_SECONDS * 1000).toISOString();
     await supabase.from('mira_agent_tiled_upscale_tiles').update({ status: 'pending_analysis', error_message: 'Reset by watchdog due to stall.' }).eq('status','analyzing').lt('updated_at', stalledThreshold);
-    await supabase.from('mira_agent_tiled_upscale_tiles').update({ status: 'pending_generation', error_message: 'Reset by watchdog due to stall.' }).eq('status','generating').lt('updated_at', stalledThreshold);
-    
-    // NEW: Correctly handle jobs that are stuck in the queue for too long
-    await supabase.from('mira_agent_tiled_upscale_tiles').update({ status: 'generation_failed', error_message: 'Job timed out in queue after 3 minutes.' }).eq('status','generation_queued').lt('updated_at', stalledThreshold);
 
     // Dispatch Pending Analysis
     const { data: pendingAnalysisTiles, error: fetchAnalysisError } = await supabase.from('mira_agent_tiled_upscale_tiles').select('id').eq('status', 'pending_analysis').not('source_tile_bucket', 'is', null).not('source_tile_path', 'is', null).limit(BATCH_SIZE);
