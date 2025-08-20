@@ -62,32 +62,29 @@ serve(async (req) => {
         const falTileUrl = await fal.storage.upload(tileBlob);
 
         const presetName = Deno.env.get('FAL_PRESET') || 'high_detail_upscale';
-        const payloadPresets: Record<string, any> = {
-          default: { ksampler_denoise: 0.1, imagescaleby_scale_by: 0.5, controlnetapplyadvanced_strength: 0.3, controlnetapplyadvanced_end_percent: 0.9 },
-          high_detail_upscale: { ksampler_denoise: 0.15, imagescaleby_scale_by: 0.75, controlnetapplyadvanced_strength: 0.25, controlnetapplyadvanced_end_percent: 0.8 },
-          creative_variation: { ksampler_denoise: 0.4, imagescaleby_scale_by: 0.5, controlnetapplyadvanced_strength: 0.5, controlnetapplyadvanced_end_percent: 0.7 }
-        };
-        const base = payloadPresets[presetName] || payloadPresets.default;
+        
+        console.log(`${logPrefix} Invoking proxy with preset '${presetName}' and prompt.`);
+        const { data: proxyResponse, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-fal-comfyui', {
+            body: {
+                method: 'submit',
+                user_id: parentJob.user_id,
+                preset: presetName,
+                prompt: generated_prompt,
+                image_url: falTileUrl // Pass the durable Fal storage URL
+            }
+        });
 
-        const comfyInput = {
-          ...base,
-          loadimage_1: falTileUrl,
-          cliptextencode_text: generated_prompt || ""
-        };
-
-        const pipeline = Deno.env.get('FAL_PIPELINE_ID') || 'comfy/research-MIR/test';
-        const submit = await fal.queue.submit(pipeline, { input: comfyInput });
+        if (proxyError) throw new Error(`Proxy invocation failed: ${proxyError.message}`);
+        const comfyJobId = proxyResponse.jobId;
+        if (!comfyJobId) throw new Error("Proxy did not return a valid jobId.");
 
         await supabase.from('mira_agent_tiled_upscale_tiles').update({
           status: 'generation_queued',
-          fal_provider: 'fal',
-          fal_request_id: submit.request_id,
-          generation_payload: comfyInput,
-          generation_started_at: new Date().toISOString()
+          fal_comfyui_job_id: comfyJobId // Link the tile to the new job
         }).eq('id', tile_id);
 
-        console.log(`${logPrefix} Enqueued ComfyUI job ${submit.request_id}.`);
-        return new Response(JSON.stringify({ success: true, enqueued: true }), { headers: corsHeaders });
+        console.log(`${logPrefix} Successfully created ComfyUI job ${comfyJobId} via proxy.`);
+        return new Response(JSON.stringify({ success: true, enqueued: true, jobId: comfyJobId }), { headers: corsHeaders });
 
     } else { // Fallback to existing creative_upscaler logic
         const { data: signedUrlData, error: signedUrlError } = await supabase.storage
