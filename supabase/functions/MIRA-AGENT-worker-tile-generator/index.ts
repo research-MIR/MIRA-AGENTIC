@@ -72,6 +72,8 @@ serve(async (req) => {
       logs: true,
     });
 
+    console.log(`${logPrefix} Full API response from Fal.ai:`, JSON.stringify(result, null, 2));
+
     // Handle both potential output formats from Fal.ai for resilience
     let upscaledImage;
     if (result?.image) {
