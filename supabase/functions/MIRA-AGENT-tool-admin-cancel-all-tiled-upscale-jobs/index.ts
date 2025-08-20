@@ -22,7 +22,7 @@ serve(async (req) => {
     const { data: activeParentJobs, error: fetchError } = await supabase
       .from('mira_agent_tiled_upscale_jobs')
       .select('id')
-      .in('status', ['tiling', 'generating']);
+      .in('status', ['tiling', 'generating', 'compositing', 'queued_for_generation']);
 
     if (fetchError) throw fetchError;
 
@@ -40,7 +40,7 @@ serve(async (req) => {
       .from('mira_agent_tiled_upscale_tiles')
       .update({ status: 'failed', error_message: cancellationReason })
       .in('parent_job_id', parentJobIds)
-      .in('status', ['pending_analysis', 'analyzing', 'pending_generation', 'generating']);
+      .in('status', ['pending_analysis', 'analyzing', 'pending_generation', 'generating', 'generation_queued']);
 
     if (tilesError) throw tilesError;
 
