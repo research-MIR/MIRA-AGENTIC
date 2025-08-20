@@ -1,7 +1,7 @@
-// deno-lint-ignore-file no-explicit-any
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { Image } from "https://deno.land/x/imagescript@1.2.15/mod.ts";
+import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -11,9 +11,14 @@ const TILE_SIZE = 1024;
 const TILE_OVERLAP = 264;
 const STEP = TILE_SIZE - TILE_OVERLAP;
 
+// tune per budget
 const MAX_CONCURRENCY = Number(Deno.env.get("TILE_ANALYSIS_CONCURRENCY") ?? 2);
 const INSERT_BATCH_SIZE = Number(Deno.env.get("TILE_INSERT_BATCH_SIZE") ?? 100);
-const TILE_ANALYSIS_MEM_BUDGET_MB = Number(Deno.env.get("TILE_ANALYSIS_MEM_BUDGET_MB") ?? 256);
+
+// encode settings
+const TILE_ENCODE = (Deno.env.get("TILE_ENCODE") ?? "webp").toLowerCase(); // "webp" | "jpeg" | "png"
+const TILE_QUALITY = Number(Deno.env.get("TILE_QUALITY") ?? 85); // for webp/jpeg
+const ANALYZER_INPUT = (Deno.env.get("ANALYZER_INPUT") ?? "url").toLowerCase(); // "url" | "base64"
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -29,6 +34,12 @@ async function downloadImage(supabase: any, publicUrl: string): Promise<Blob> {
   const { data, error } = await supabase.storage.from(bucketName).download(filePath);
   if (error) throw new Error(`Failed to download from Supabase storage (${filePath}): ${error.message}`);
   return data;
+}
+
+function pickMimeAndFmt() {
+  if (TILE_ENCODE === "webp") return { mime: "image/webp", fmt: 2 }; // imagescript: 0=PNG, 1=JPEG, 2=WEBP
+  if (TILE_ENCODE === "jpeg" || TILE_ENCODE === "jpg") return { mime: "image/jpeg", fmt: 1 };
+  return { mime: "image/png", fmt: 0 };
 }
 
 function toObject(maybeJson: unknown) {
@@ -51,7 +62,7 @@ serve(async (req) => {
     if (!parent_job_id) throw new Error("parent_job_id is required.");
 
     const logPrefix = `[TilingAnalysisWorker][${parent_job_id}]`;
-    console.log(`${logPrefix} Invoked. Concurrency=${MAX_CONCURRENCY}, DB Batch Size=${INSERT_BATCH_SIZE}`);
+    console.log(`${logPrefix} Invoked. Concurrency=${MAX_CONCURRENCY}, DB Batch Size=${INSERT_BATCH_SIZE}, Encode=${TILE_ENCODE}@${TILE_QUALITY}, Input=${ANALYZER_INPUT}`);
 
     const { data: job, error: fetchError } = await supabase
       .from("mira_agent_tiled_upscale_jobs")
@@ -68,29 +79,16 @@ serve(async (req) => {
     const img = await Image.decode(await blob.arrayBuffer());
     console.log(`${logPrefix} Decoded ${img.width}x${img.height}`);
 
-    const scale = job.upscale_factor;
-    const BASE_TILE = Math.ceil(TILE_SIZE / scale);
-    const BASE_OVERLAP = Math.ceil(TILE_OVERLAP / scale);
-    const BASE_STEP = BASE_TILE - BASE_OVERLAP;
+    const targetW = Math.round(img.width * job.upscale_factor);
+    img.resize(targetW, Image.RESIZE_AUTO, Image.RESIZE_BICUBIC);
+    console.log(`${logPrefix} Upscaled -> ${img.width}x${img.height}`);
 
-    const tilesX = img.width <= BASE_TILE ? 1 : 1 + Math.ceil((img.width - BASE_TILE) / BASE_STEP);
-    const tilesY = img.height <= BASE_TILE ? 1 : 1 + Math.ceil((img.height - BASE_TILE) / BASE_STEP);
+    const tilesX = img.width <= TILE_SIZE ? 1 : 1 + Math.ceil((img.width - TILE_SIZE) / STEP);
+    const tilesY = img.height <= TILE_SIZE ? 1 : 1 + Math.ceil((img.height - TILE_SIZE) / STEP);
     const totalTiles = tilesX * tilesY;
-    console.log(`${logPrefix} Tiling at base scale. Base Tile: ${BASE_TILE}px, Total Tiles: ${totalTiles} (${tilesX}x${tilesY})`);
+    console.log(`${logPrefix} totalTiles=${totalTiles} (grid ${tilesX}x${tilesY})`);
 
-    const estImgBytes = img.width * img.height * 4;
-    const perWorkerBytes = (BASE_TILE * BASE_TILE * 4) + (2 * 1024 * 1024);
-    const budget = TILE_ANALYSIS_MEM_BUDGET_MB * 1024 * 1024;
-    if (estImgBytes + perWorkerBytes > budget) {
-        throw new Error(`Source image too large for analysis memory budget (${TILE_ANALYSIS_MEM_BUDGET_MB} MB).`);
-    }
-    const EFFECTIVE_CONCURRENCY = Math.max(1, Math.min(MAX_CONCURRENCY, Math.floor((budget - estImgBytes) / perWorkerBytes)));
-    console.log(`${logPrefix} Effective concurrency set to ${EFFECTIVE_CONCURRENCY} based on memory budget.`);
-
-    const mime = "image/jpeg";
-    const fmt = 1; // JPEG
-    const quality = 85;
-
+    const { mime, fmt } = pickMimeAndFmt();
     let next = 0;
     const batch: any[] = [];
 
@@ -98,6 +96,7 @@ serve(async (req) => {
       if (!batch.length) return;
       const chunk = batch.splice(0, batch.length);
       const t0 = performance.now();
+      // Use upsert for idempotency
       const { error } = await supabase.from("mira_agent_tiled_upscale_tiles").upsert(chunk, { onConflict: "parent_job_id,tile_index" });
       if (error) throw error;
       console.log(`${logPrefix} Upserted ${chunk.length} rows in ${(performance.now() - t0).toFixed(2)}ms`);
@@ -111,57 +110,88 @@ serve(async (req) => {
         const gx = i % tilesX;
         const gy = Math.floor(i / tilesX);
         
-        let srcX = gx * BASE_STEP;
-        if (gx === tilesX - 1) srcX = img.width - BASE_TILE;
-        srcX = Math.max(0, srcX);
+        // --- NEW VARIABLE OVERLAP LOGIC ---
+        let x;
+        if (gx === tilesX - 1) {
+          x = img.width - TILE_SIZE; // Justify to the right edge
+        } else {
+          x = gx * STEP;
+        }
+        x = Math.max(0, x); // Ensure x is not negative if image is smaller than tile
 
-        let srcY = gy * BASE_STEP;
-        if (gy === tilesY - 1) srcY = img.height - BASE_TILE;
-        srcY = Math.max(0, srcY);
+        let y;
+        if (gy === tilesY - 1) {
+          y = img.height - TILE_SIZE; // Justify to the bottom edge
+        } else {
+          y = gy * STEP;
+        }
+        y = Math.max(0, y); // Ensure y is not negative if image is smaller than tile
+        // --- END NEW LOGIC ---
 
-        const tag = `${logPrefix}[W${workerId}][Tile ${i}]`;
+        const idx = i;
+
+        const tag = `${logPrefix}[W${workerId}][Tile ${idx}]`;
         try {
-          const tileImg = new Image(BASE_TILE, BASE_TILE);
-          tileImg.composite(img, -srcX, -srcY);
-          const tileBuffer = await tileImg.encode(fmt, quality);
+          const tile = new Image(TILE_SIZE, TILE_SIZE);
+          // This composite call effectively crops the section from the source image
+          // onto the new 1024x1024 canvas. Because of the new x,y logic, it will
+          // never sample outside the source image bounds, thus creating no padding.
+          tile.composite(img, -x, -y);
 
-          const filePath = `${job.user_id}/${parent_job_id}/tile_${i}.jpeg`;
-          await supabase.storage.from(TILE_UPLOAD_BUCKET).upload(filePath, tileBuffer, { contentType: mime, upsert: true, cacheControl: "31536000, immutable" });
+          const enc0 = performance.now();
+          const tileBuffer = await tile.encode(fmt, TILE_QUALITY);
+          const encMs = (performance.now() - enc0).toFixed(2);
+
+          const fileExt = TILE_ENCODE === "png" ? "png" : TILE_ENCODE === "jpeg" || TILE_ENCODE === "jpg" ? "jpg" : "webp";
+          const filePath = `${job.user_id}/${parent_job_id}/tile_${idx}.${fileExt}`;
+          const up0 = performance.now();
+          await supabase.storage.from(TILE_UPLOAD_BUCKET).upload(filePath, tileBuffer, {
+            contentType: mime,
+            upsert: true,
+          });
           const { data: { publicUrl } } = supabase.storage.from(TILE_UPLOAD_BUCKET).getPublicUrl(filePath);
+          const upMs = (performance.now() - up0).toFixed(2);
 
+          const an0 = performance.now();
           const { data, error } = await supabase.functions.invoke("MIRA-AGENT-worker-tile-analyzer", {
-            body: { tile_url: publicUrl, mime_type: mime }
+            body: ANALYZER_INPUT === "url"
+              ? { tile_url: publicUrl, mime_type: mime }
+              : { tile_base64: encodeBase64(tileBuffer), mime_type: mime }
           });
 
+          console.log(`${tag} Analyzer response: data=${JSON.stringify(data)}, error=${JSON.stringify(error)}`);
           if (error) throw new Error(`Function invocation failed: ${error.message || JSON.stringify(error)}`);
+
           const payload = toObject(data);
-          if (payload && payload.error && !payload.prompt) throw new Error(`Analyzer function returned an error: ${JSON.stringify(payload)}`);
+          if (payload && payload.error && !payload.prompt) {
+            throw new Error(`Analyzer function returned an error shape: ${JSON.stringify(payload)}`);
+          }
           const caption = typeof payload?.prompt === "string" ? payload.prompt : null;
+          const anMs = (performance.now() - an0).toFixed(2);
 
           const tileRecord = {
             parent_job_id,
-            tile_index: i,
-            coordinates: { 
-                x: gx * STEP, y: gy * STEP, width: TILE_SIZE, height: TILE_SIZE,
-                scale: scale,
-                source: { x: srcX, y: srcY, width: BASE_TILE, height: BASE_TILE }
-            },
+            tile_index: idx,
+            coordinates: { x, y, width: TILE_SIZE, height: TILE_SIZE },
             source_tile_url: publicUrl,
             generated_prompt: caption,
             status: "pending_generation",
           };
           batch.push(tileRecord);
-          console.log(`${tag} Record prepared. Prompt length: ${caption ? caption.length : 0}`);
+          console.log(`${tag} Record prepared for DB: ${JSON.stringify(tileRecord)}`);
 
           if (batch.length >= INSERT_BATCH_SIZE) await flushBatch();
-          if ((i & 15) === 0) await new Promise(r => setTimeout(r, 0));
 
+          console.log(`${tag} Encoded(${mime}) ${tileBuffer.length}B in ${encMs}ms, uploaded in ${upMs}ms, analyzed in ${anMs}ms`);
+          await Promise.resolve();
         } catch (e) {
           console.error(`${tag} FAILED:`, e);
           batch.push({
             parent_job_id,
-            tile_index: i,
-            coordinates: { x: gx * STEP, y: gy * STEP, width: TILE_SIZE, height: TILE_SIZE },
+            tile_index: idx,
+            coordinates: { x, y, width: TILE_SIZE, height: TILE_SIZE },
+            source_tile_url: null,
+            generated_prompt: null,
             status: "analysis_failed",
             error_message: String(e?.message ?? e),
           });
@@ -170,7 +200,7 @@ serve(async (req) => {
       }
     }
 
-    const workers = Array.from({ length: EFFECTIVE_CONCURRENCY }, (_, k) => processOne(k + 1));
+    const workers = Array.from({ length: Math.max(1, MAX_CONCURRENCY) }, (_, k) => processOne(k + 1));
     await Promise.all(workers);
     await flushBatch();
 

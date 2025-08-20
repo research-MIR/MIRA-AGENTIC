@@ -185,7 +185,7 @@ async function run(parent_job_id: string) {
   originalImage = null; // Release memory
   console.log(`${logPrefix} Final canvas dimensions will be ${finalW}x${finalH}`);
 
-  const estMB = (finalW * finalH * 4 + actualTileSize * actualTileSize * 4 + 16*1024*1024) / (1024*1024);
+  const estMB = (finalW * finalH * 4 * 2 + 8 * actualTileSize * 4) / (1024 * 1024);
   if (estMB > MEM_HARD_LIMIT_MB) {
     await supabase.from("mira_agent_tiled_upscale_jobs").update({ status: "failed", error_message: `Estimated RAM ${estMB.toFixed(1)}MB exceeds limit ${MEM_HARD_LIMIT_MB}MB.` }).eq("id", parent_job_id);
     throw new Error(`Refused: est ${estMB.toFixed(1)} MB > limit ${MEM_HARD_LIMIT_MB}`);
@@ -229,11 +229,6 @@ async function run(parent_job_id: string) {
     let tile: Image | null = await Image.decode(bytes);
     console.log(`${logPrefix} Processing Tile #${t.tile_index} | Coords: {x:${t.coordinates.x}, y:${t.coordinates.y}} | Decoded Size: ${tile.width}x${tile.height}`);
     
-    if (tile.width !== actualTileSize || tile.height !== actualTileSize) {
-        console.warn(`${logPrefix} Tile #${t.tile_index} has unexpected size ${tile.width}x${tile.height}. Resizing to ${actualTileSize}px.`);
-        tile.resize(actualTileSize, actualTileSize, Image.RESIZE_BICUBIC);
-    }
-
     const tileW = tile.width, tileH = tile.height;
     const ovXlocal = Math.min(ovX, tileW);
     const ovYlocal = Math.min(ovY, tileH);

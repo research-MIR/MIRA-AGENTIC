@@ -4,8 +4,6 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const BATCH_SIZE = 10; // Number of tiles to process per watchdog run
-const STALLED_ANALYZING_THRESHOLD_SECONDS = 120; // 2 minutes
-const STALLED_GENERATING_THRESHOLD_SECONDS = 180; // 3 minutes
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -19,50 +17,6 @@ serve(async (req) => {
   const logPrefix = `[TiledUpscaleWatchdog]`;
 
   try {
-    // --- Stalled Analysis Recovery Step ---
-    console.log(`${logPrefix} Checking for tiles stalled in 'analyzing' state...`);
-    const analyzingThreshold = new Date(Date.now() - STALLED_ANALYZING_THRESHOLD_SECONDS * 1000).toISOString();
-    const { data: stalledAnalyzingTiles, error: fetchStalledAnalysisError } = await supabase
-      .from('mira_agent_tiled_upscale_tiles')
-      .select('id')
-      .eq('status', 'analyzing')
-      .lt('updated_at', analyzingThreshold);
-
-    if (fetchStalledAnalysisError) throw fetchStalledAnalysisError;
-
-    if (stalledAnalyzingTiles && stalledAnalyzingTiles.length > 0) {
-      console.log(`${logPrefix} Found ${stalledAnalyzingTiles.length} stalled analysis tiles. Resetting to 'pending_analysis' for retry.`);
-      const stalledTileIds = stalledAnalyzingTiles.map(t => t.id);
-      await supabase
-        .from('mira_agent_tiled_upscale_tiles')
-        .update({ status: 'pending_analysis', error_message: 'Reset by watchdog due to analysis stall.', updated_at: new Date().toISOString() })
-        .in('id', stalledTileIds);
-    } else {
-      console.log(`${logPrefix} No stalled analysis tiles found.`);
-    }
-
-    // --- Stalled Generation Recovery Step ---
-    console.log(`${logPrefix} Checking for tiles stalled in 'generating' state...`);
-    const generatingThreshold = new Date(Date.now() - STALLED_GENERATING_THRESHOLD_SECONDS * 1000).toISOString();
-    const { data: stalledGeneratingTiles, error: fetchStalledGeneratingError } = await supabase
-      .from('mira_agent_tiled_upscale_tiles')
-      .select('id')
-      .eq('status', 'generating')
-      .lt('updated_at', generatingThreshold);
-
-    if (fetchStalledGeneratingError) throw fetchStalledGeneratingError;
-
-    if (stalledGeneratingTiles && stalledGeneratingTiles.length > 0) {
-      console.log(`${logPrefix} Found ${stalledGeneratingTiles.length} stalled generation tiles. Resetting to 'pending_generation' for retry.`);
-      const stalledTileIds = stalledGeneratingTiles.map(t => t.id);
-      await supabase
-        .from('mira_agent_tiled_upscale_tiles')
-        .update({ status: 'pending_generation', error_message: 'Reset by watchdog due to generation stall.', updated_at: new Date().toISOString() })
-        .in('id', stalledTileIds);
-    } else {
-      console.log(`${logPrefix} No stalled generating tiles found.`);
-    }
-
     // --- Analysis Step ---
     console.log(`${logPrefix} Checking for tiles pending analysis...`);
     const { data: pendingAnalysisTiles, error: fetchAnalysisError } = await supabase
@@ -77,7 +31,7 @@ serve(async (req) => {
       console.log(`${logPrefix} Found ${pendingAnalysisTiles.length} tiles to analyze. Claiming and dispatching...`);
       const tileIds = pendingAnalysisTiles.map(t => t.id);
       
-      await supabase.from('mira_agent_tiled_upscale_tiles').update({ status: 'analyzing', updated_at: new Date().toISOString() }).in('id', tileIds);
+      await supabase.from('mira_agent_tiled_upscale_tiles').update({ status: 'analyzing' }).in('id', tileIds);
 
       const analysisPromises = tileIds.map(tile_id => 
         supabase.functions.invoke('MIRA-AGENT-worker-tile-analyzer', { body: { tile_id } })
@@ -102,7 +56,7 @@ serve(async (req) => {
       console.log(`${logPrefix} Found ${pendingGenerationTiles.length} tiles to generate. Claiming and dispatching...`);
       const tileIds = pendingGenerationTiles.map(t => t.id);
 
-      await supabase.from('mira_agent_tiled_upscale_tiles').update({ status: 'generating', updated_at: new Date().toISOString() }).in('id', tileIds);
+      await supabase.from('mira_agent_tiled_upscale_tiles').update({ status: 'generating' }).in('id', tileIds);
 
       const generationPromises = tileIds.map(tile_id =>
         supabase.functions.invoke('MIRA-AGENT-worker-tile-generator', { body: { tile_id } })
