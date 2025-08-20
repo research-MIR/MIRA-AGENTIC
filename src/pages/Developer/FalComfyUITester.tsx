@@ -138,7 +138,7 @@ const FalComfyUITester = () => {
       setRequestId(newRequestId);
       addLog(`Job submitted. Request ID: ${newRequestId}. Opening log stream...`);
 
-      const streamUrl = `${SUPABASE_URL}/functions/v1/MIRA-AGENT-proxy-fal-comfyui-stream?requestId=${newRequestId}`;
+      const streamUrl = `${supabase.supabaseUrl}/functions/v1/MIRA-AGENT-proxy-fal-comfyui-stream?requestId=${newRequestId}`;
       const eventSource = new EventSource(streamUrl);
       eventSourceRef.current = eventSource;
 
