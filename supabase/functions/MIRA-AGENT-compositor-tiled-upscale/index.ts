@@ -168,7 +168,7 @@ serve(async (req) => {
       log(`Batch complete. Saving checkpoint to ${STATE_BUCKET}/${statePath}`);
       const stateBuffer = await canvas.encode(0); // PNG encoding
       await supabase.storage.from(STATE_BUCKET).upload(statePath, stateBuffer, { contentType: 'image/png', upsert: true });
-      await supabase.from("mira_agent_tiled_upscale_jobs").update({ comp_next_index: endIndex, comp_state_bucket: STATE_BUCKET, comp_state_path: statePath, comp_lease_expires_at: new Date(Date.now() + 3 * 60000).toISOString() }).eq("id", parent_job_id);
+      await supabase.from("mira_agent_tiled_upscale_jobs").update({ comp_next_index: endIndex, comp_state_bucket: STATE_BUCKET, comp_state_path: statePath, comp_lease_expires_at: new Date(Date.now() + 1 * 60000).toISOString() }).eq("id", parent_job_id);
       log(`Checkpoint saved. Next index is ${endIndex}. Re-invoking self to continue.`);
       // Asynchronously invoke self to process the next batch
       supabase.functions.invoke('MIRA-AGENT-compositor-tiled-upscale', {
