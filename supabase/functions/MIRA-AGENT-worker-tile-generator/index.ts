@@ -57,12 +57,13 @@ serve(async (req) => {
     let imageBuffer: ArrayBuffer;
     let finalFilePath: string;
 
-    if (upscaler_engine === 'mock_upscaler') {
-        console.log(`${logPrefix} Running in MOCK mode. Bypassing AI model and using original tile.`);
+    if (upscaler_engine === 'mock_upscaler' || upscaler_engine === 'comfyui_fal_upscaler') {
+        const mode = upscaler_engine === 'mock_upscaler' ? 'MOCK' : 'COMFYUI_FAL (MOCKED)';
+        console.log(`${logPrefix} Running in ${mode} mode. Bypassing AI model and using original tile.`);
         const { data: imageBlob, error: downloadError } = await supabase.storage.from(source_tile_bucket).download(source_tile_path);
         if (downloadError) throw downloadError;
         imageBuffer = await imageBlob.arrayBuffer();
-        finalFilePath = `${parentJob.user_id}/${parent_job_id}/generated_tile_${tile_id}_mock.png`;
+        finalFilePath = `${parentJob.user_id}/${parent_job_id}/generated_tile_${tile_id}_${upscaler_engine}.png`;
     } else {
         // This is the existing 'creative_upscaler' logic
         const { data: signedUrlData, error: signedUrlError } = await supabase.storage
