@@ -19,6 +19,24 @@ serve(async (req) => {
   const logPrefix = `[TiledUpscaleWatchdog]`;
 
   try {
+    // --- ADVISORY LOCK ---
+    const { data: lockAcquired, error: lockError } = await supabase.rpc('try_acquire_watchdog_lock');
+
+    if (lockError) {
+      console.error(`${logPrefix} Error acquiring advisory lock:`, lockError.message);
+      throw lockError;
+    }
+
+    if (!lockAcquired) {
+      console.log(`${logPrefix} Advisory lock is held by another process. Exiting gracefully.`);
+      return new Response(JSON.stringify({ message: "Lock held, skipping execution." }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 200,
+      });
+    }
+    console.log(`${logPrefix} Advisory lock acquired. Proceeding with checks.`);
+    // --- END ADVISORY LOCK ---
+
     // --- Stalled Job Recovery ---
     const stalledThreshold = new Date(Date.now() - STALLED_THRESHOLD_SECONDS * 1000).toISOString();
     
