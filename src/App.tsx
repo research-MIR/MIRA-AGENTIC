@@ -35,6 +35,7 @@ import VtoReportDetail from "./pages/VtoReportDetail.tsx";
 import Wardrobe from "./pages/Wardrobe.tsx";
 import WardrobePacks from "./pages/WardrobePacks.tsx";
 import WardrobePackDetail from "./pages/WardrobePackDetail.tsx";
+import FalComfyUITester from "./pages/Developer/FalComfyUITester.tsx";
 
 const App = () => {
   const { isTourOpen, closeTour, isTourPending, openTour, startTour } = useOnboardingTour();
@@ -124,6 +125,7 @@ const App = () => {
             <Route path="/developer/segmentation" element={<SegmentationTool />} />
             <Route path="/developer/bounding-box-tester" element={<BoundingBoxTester />} />
             <Route path="/developer/upscale-tiling-visualizer" element={<UpscaleTilingVisualizer />} />
+            <Route path="/developer/fal-comfyui-tester" element={<FalComfyUITester />} />
             <Route path="/model-packs" element={<ModelPacks />} />
             <Route path="/model-packs/:packId" element={<ModelPackDetail />} />
             <Route path="/experimental" element={<Experimental />} />

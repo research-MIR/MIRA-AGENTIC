@@ -3,7 +3,7 @@ import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useLanguage } from "@/context/LanguageContext";
-import { Loader2, AlertTriangle, RefreshCw, Layers, Skull, BoxSelect, ClipboardCheck, Grid3x3 } from "lucide-react";
+import { Loader2, AlertTriangle, RefreshCw, Layers, Skull, BoxSelect, ClipboardCheck, Grid3x3, FlaskConical } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
@@ -449,6 +449,12 @@ const Developer = () => {
                     <Button variant="outline">
                         <Grid3x3 className="mr-2 h-4 w-4" />
                         Upscale Tiling Visualizer
+                    </Button>
+                </Link>
+                <Link to="/developer/fal-comfyui-tester">
+                    <Button variant="outline">
+                        <FlaskConical className="mr-2 h-4 w-4" />
+                        Fal.ai ComfyUI Tester
                     </Button>
                 </Link>
             </CardContent>
