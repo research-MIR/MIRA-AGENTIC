@@ -21,6 +21,23 @@ const fileToBase64 = (file: File): Promise<string> => {
   });
 };
 
+const findImageUrlInResult = (result: any): string | null => {
+  if (!result?.data?.outputs) {
+    return null;
+  }
+  const outputs = result.data.outputs;
+  for (const nodeId in outputs) {
+    const node = outputs[nodeId];
+    if (node?.images && Array.isArray(node.images) && node.images.length > 0) {
+      const imageUrl = node.images[0]?.url;
+      if (imageUrl) {
+        return imageUrl;
+      }
+    }
+  }
+  return null;
+};
+
 const FalComfyUITester = () => {
   const { supabase, session } = useSession();
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -60,7 +77,7 @@ const FalComfyUITester = () => {
           addLog(`[REALTIME] Job status updated: ${newJob.status}`);
           setJobStatus(newJob.status);
           if (newJob.status === 'complete') {
-            const imageUrl = newJob.final_result?.data?.images?.[0]?.url;
+            const imageUrl = findImageUrlInResult(newJob.final_result);
             if (imageUrl) {
               setResultImageUrl(imageUrl);
               showSuccess("Job complete!");
