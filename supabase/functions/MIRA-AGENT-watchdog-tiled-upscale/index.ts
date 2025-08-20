@@ -6,6 +6,7 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const BATCH_SIZE = 10;
 const STALLED_THRESHOLD_SECONDS = 180;
 const MAX_RETRIES = 3;
+const GENERATED_IMAGES_BUCKET = 'mira-agent-upscale-tiles';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -86,17 +87,24 @@ serve(async (req) => {
 
             if (job.status === 'complete') {
                 const result = job.final_result;
-                const imgAny = result?.image || result?.data?.image || (result?.data?.images && result.data.images[0]) || (result?.images && result.images[0]);
-                const url = imgAny?.url || imgAny?.signed_url || imgAny?.href;
+                const url = result?.data?.outputs?.['283']?.images?.[0]?.url;
                 if (!url) {
                     await supabase.from('mira_agent_tiled_upscale_tiles').update({ status: 'generation_failed', error_message: 'Fal job completed but no image URL found.' }).eq('id', tile.id);
                     continue;
                 }
-                // We don't need to re-upload, the poller already did. We just need to link to it.
-                // This part assumes the poller stores the final result in a predictable way.
-                // For now, we'll just mark as complete and the compositor will use the result from the fal_comfyui_jobs table.
-                // A more robust solution would be to copy the final URL here.
+                
+                const imageResponse = await fetch(url);
+                if (!imageResponse.ok) throw new Error(`Download failed: HTTP ${imageResponse.status}`);
+                const imageBuffer = await imageResponse.arrayBuffer();
+
+                const outBucket = 'mira-agent-upscale-tiles';
+                const outPath = `${job.id}/final.png`;
+                await supabase.storage.from(outBucket).upload(outPath, imageBuffer, { contentType: 'image/png', upsert: true });
+
                 await supabase.from('mira_agent_tiled_upscale_tiles').update({
+                    generated_tile_bucket: outBucket,
+                    generated_tile_path: outPath,
+                    generated_tile_mime: 'image/png',
                     status: 'complete',
                     generation_result: result,
                     generation_completed_at: new Date().toISOString()
