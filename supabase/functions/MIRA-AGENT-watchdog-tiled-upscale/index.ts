@@ -5,8 +5,6 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const BATCH_SIZE = 10;
 const STALLED_THRESHOLD_SECONDS = 180;
-const MAX_RETRIES = 3;
-const GENERATED_IMAGES_BUCKET = 'mira-agent-upscale-tiles';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -28,31 +26,10 @@ serve(async (req) => {
     }
     console.log(`${logPrefix} Advisory lock acquired. Proceeding with checks.`);
 
-    // Stalled Job Recovery
+    // Stalled Job Recovery (This is still useful)
     const stalledThreshold = new Date(Date.now() - STALLED_THRESHOLD_SECONDS * 1000).toISOString();
     await supabase.from('mira_agent_tiled_upscale_tiles').update({ status: 'pending_analysis', error_message: 'Reset by watchdog due to stall.' }).eq('status','analyzing').lt('updated_at', stalledThreshold);
     await supabase.from('mira_agent_tiled_upscale_tiles').update({ status: 'pending_generation', error_message: 'Reset by watchdog due to stall.' }).eq('status','generating').lt('updated_at', stalledThreshold);
-
-    // Failed Job Retry
-    const { data: failedTiles, error: fetchFailedError } = await supabase.from('mira_agent_tiled_upscale_tiles').select('id, status, analysis_retry_count, generation_retry_count').in('status', ['analysis_failed', 'generation_failed']).or(`next_attempt_at.is.null,next_attempt_at.lte.${new Date().toISOString()}`);
-    if (fetchFailedError) throw fetchFailedError;
-    if (failedTiles && failedTiles.length > 0) {
-        for (const tile of failedTiles) {
-            const isAnalysis = tile.status === 'analysis_failed';
-            const currentRetries = (isAnalysis ? tile.analysis_retry_count : tile.generation_retry_count) || 0;
-            if (currentRetries >= MAX_RETRIES) continue;
-            const newRetryCount = currentRetries + 1;
-            const backoffSeconds = 300 * Math.pow(2, newRetryCount - 1);
-            const nextAttempt = new Date(Date.now() + backoffSeconds * 1000).toISOString();
-            await supabase.from('mira_agent_tiled_upscale_tiles').update({
-                status: isAnalysis ? 'pending_analysis' : 'pending_generation',
-                error_message: `Retrying after previous failure (Attempt ${newRetryCount}).`,
-                analysis_retry_count: isAnalysis ? newRetryCount : tile.analysis_retry_count,
-                generation_retry_count: !isAnalysis ? newRetryCount : tile.generation_retry_count,
-                next_attempt_at: nextAttempt
-            }).eq('id', tile.id);
-        }
-    }
 
     // Dispatch Pending Analysis
     const { data: pendingAnalysisTiles, error: fetchAnalysisError } = await supabase.from('mira_agent_tiled_upscale_tiles').select('id').eq('status', 'pending_analysis').not('source_tile_bucket', 'is', null).not('source_tile_path', 'is', null).limit(BATCH_SIZE);
