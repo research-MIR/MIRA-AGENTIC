@@ -41,7 +41,6 @@ serve(async (req) => {
 
     const { parent_job_id, source_tile_bucket, source_tile_path, generated_prompt } = claimedTile;
 
-    // Fetch parent job to get the upscaler engine choice
     const { data: parentJob, error: parentFetchError } = await supabase
       .from('mira_agent_tiled_upscale_jobs')
       .select('user_id, metadata')
@@ -51,24 +50,49 @@ serve(async (req) => {
     if (parentFetchError) throw new Error(`Could not fetch parent job ${parent_job_id}: ${parentFetchError.message}`);
     if (!parentJob) throw new Error(`Parent job ${parent_job_id} not found.`);
 
-    const upscaler_engine = parentJob.metadata?.upscaler_engine || 'creative_upscaler';
+    const upscaler_engine = parentJob.metadata?.upscaler_engine || 'comfyui_fal_upscaler';
     console.log(`${logPrefix} Using upscaler engine: '${upscaler_engine}'.`);
 
-    let imageBuffer: ArrayBuffer;
-    let finalFilePath: string;
-
-    if (upscaler_engine === 'mock_upscaler' || upscaler_engine === 'comfyui_fal_upscaler') {
-        const mode = upscaler_engine === 'mock_upscaler' ? 'MOCK' : 'COMFYUI_FAL (MOCKED)';
-        console.log(`${logPrefix} Running in ${mode} mode. Bypassing AI model and using original tile.`);
+    if (upscaler_engine === 'comfyui_fal_upscaler') {
         const { data: imageBlob, error: downloadError } = await supabase.storage.from(source_tile_bucket).download(source_tile_path);
         if (downloadError) throw downloadError;
-        imageBuffer = await imageBlob.arrayBuffer();
-        finalFilePath = `${parentJob.user_id}/${parent_job_id}/generated_tile_${tile_id}_${upscaler_engine}.png`;
-    } else {
-        // This is the existing 'creative_upscaler' logic
+
+        fal.config({ credentials: FAL_KEY! });
+        const tileBlob = new Blob([await imageBlob.arrayBuffer()], { type: imageBlob.type || 'image/webp' });
+        const falTileUrl = await fal.storage.upload(tileBlob);
+
+        const presetName = Deno.env.get('FAL_PRESET') || 'high_detail_upscale';
+        const payloadPresets: Record<string, any> = {
+          default: { ksampler_denoise: 0.1, imagescaleby_scale_by: 0.5, controlnetapplyadvanced_strength: 0.3, controlnetapplyadvanced_end_percent: 0.9 },
+          high_detail_upscale: { ksampler_denoise: 0.15, imagescaleby_scale_by: 0.75, controlnetapplyadvanced_strength: 0.25, controlnetapplyadvanced_end_percent: 0.8 },
+          creative_variation: { ksampler_denoise: 0.4, imagescaleby_scale_by: 0.5, controlnetapplyadvanced_strength: 0.5, controlnetapplyadvanced_end_percent: 0.7 }
+        };
+        const base = payloadPresets[presetName] || payloadPresets.default;
+
+        const comfyInput = {
+          ...base,
+          loadimage_1: falTileUrl,
+          cliptextencode_text: generated_prompt || ""
+        };
+
+        const pipeline = Deno.env.get('FAL_PIPELINE_ID') || 'comfy/research-MIR/test';
+        const submit = await fal.queue.submit(pipeline, { input: comfyInput });
+
+        await supabase.from('mira_agent_tiled_upscale_tiles').update({
+          status: 'generation_queued',
+          fal_provider: 'fal',
+          fal_request_id: submit.request_id,
+          generation_payload: comfyInput,
+          generation_started_at: new Date().toISOString()
+        }).eq('id', tile_id);
+
+        console.log(`${logPrefix} Enqueued ComfyUI job ${submit.request_id}.`);
+        return new Response(JSON.stringify({ success: true, enqueued: true }), { headers: corsHeaders });
+
+    } else { // Fallback to existing creative_upscaler logic
         const { data: signedUrlData, error: signedUrlError } = await supabase.storage
           .from(source_tile_bucket)
-          .createSignedUrl(source_tile_path, 300); // 5 minute validity
+          .createSignedUrl(source_tile_path, 300);
         if (signedUrlError) throw signedUrlError;
 
         fal.config({ credentials: FAL_KEY! });
@@ -92,44 +116,29 @@ serve(async (req) => {
             additional_lora_url: "https://civitai.com/api/download/models/532451?type=Model&format=SafeTensor",
         };
 
-        const result: any = await fal.subscribe("fal-ai/creative-upscaler", {
-          input: falInput,
-          logs: true,
-        });
-
-        console.log(`${logPrefix} Full API response from Fal.ai:`, JSON.stringify(result, null, 2));
-
-        let upscaledImage;
-        if (result?.image) {
-            upscaledImage = result.image;
-        } else if (result?.data?.image) {
-            upscaledImage = result.data.image;
-        } else if (result?.data?.images?.[0]) {
-            upscaledImage = result.data.images[0];
-        }
-
+        const result: any = await fal.subscribe("fal-ai/creative-upscaler", { input: falInput, logs: true });
+        let upscaledImage = result?.image || result?.data?.image || result?.data?.images?.[0];
         if (!upscaledImage || !upscaledImage.url) throw new Error("Upscaling service did not return a valid image URL.");
 
         const imageResponse = await fetch(upscaledImage.url);
         if (!imageResponse.ok) throw new Error(`Failed to download generated image from ${upscaledImage.url}`);
-        imageBuffer = await imageResponse.arrayBuffer();
-        finalFilePath = `${parentJob.user_id}/${parent_job_id}/generated_tile_${tile_id}.png`;
+        const imageBuffer = await imageResponse.arrayBuffer();
+        const finalFilePath = `${parentJob.user_id}/${parent_job_id}/generated_tile_${tile_id}.png`;
+
+        await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(finalFilePath, imageBuffer, { contentType: 'image/png', upsert: true });
+        
+        await supabase
+          .from('mira_agent_tiled_upscale_tiles')
+          .update({ 
+            generated_tile_bucket: GENERATED_IMAGES_BUCKET,
+            generated_tile_path: finalFilePath,
+            status: 'complete' 
+          })
+          .eq('id', tile_id);
+
+        console.log(`${logPrefix} Job complete.`);
+        return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
     }
-
-    await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(finalFilePath, imageBuffer, { contentType: 'image/png', upsert: true });
-    
-    await supabase
-      .from('mira_agent_tiled_upscale_tiles')
-      .update({ 
-        generated_tile_bucket: GENERATED_IMAGES_BUCKET,
-        generated_tile_path: finalFilePath,
-        status: 'complete' 
-      })
-      .eq('id', tile_id);
-
-    console.log(`${logPrefix} Job complete.`);
-    return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
-
   } catch (error) {
     console.error(`${logPrefix} Error:`, error);
     await supabase
