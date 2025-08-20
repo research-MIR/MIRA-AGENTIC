@@ -119,8 +119,7 @@ async function run(supabase: SupabaseClient, parent_job_id: string) {
   log(`Final canvas ${finalW}x${finalH}`);
 
   const ovScaled = Math.min(Math.max(1, Math.round(TILE_OVERLAP * scaleFactor)), actualTileSize - 1);
-  const stepScaled = actualTileSize - ovScaled;
-  if (stepScaled <= 0) throw new Error(`Invalid stepScaled ${stepScaled}; check TILE_OVERLAP vs tile size.`);
+  if (ovScaled <= 0) throw new Error(`Invalid ovScaled ${ovScaled}; check TILE_OVERLAP vs tile size.`);
 
   const bytesCanvas = finalW * finalH * 4;
   const bytesTile = actualTileSize * actualTileSize * 4;
@@ -152,12 +151,13 @@ async function run(supabase: SupabaseClient, parent_job_id: string) {
     let tile = await Image.decode(arr);
     if (tile.width !== actualTileSize) tile.resize(actualTileSize, actualTileSize, Image.RESIZE_BICUBIC);
 
-    const gx = gridX(t), gy = gridY(t);
-    const x = gx * stepScaled;
-    const y = gy * stepScaled;
+    const x = Math.round(t.coordinates.x * scaleFactor);
+    const y = Math.round(t.coordinates.y * scaleFactor);
 
+    const gx = gridX(t), gy = gridY(t);
     const n = { left: hasAt(gx-1,gy), right: hasAt(gx+1,gy), top: hasAt(gx,gy-1), bottom: hasAt(gx,gy+1) };
-    if (n.left || n.right || n.top || n.bottom) featherBandsLUT(tile, ovScaled, n);
+    const incoming = { left: n.left, right: false, top: n.top, bottom: false };
+    if (incoming.left || incoming.top) featherBandsLUT(tile, ovScaled, incoming);
 
     canvas.composite(tile, x, y);
     // @ts-ignore
