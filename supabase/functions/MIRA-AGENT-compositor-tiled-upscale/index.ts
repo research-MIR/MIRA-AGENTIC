@@ -12,15 +12,8 @@ const TILE_SIZE = 1024;
 const TILE_OVERLAP = 264;
 const STEP = TILE_SIZE - TILE_OVERLAP;
 const JPEG_QUALITY = Number(Deno.env.get("COMPOSITOR_JPEG_QUALITY") ?? 85);
-const MEM_HARD_LIMIT_MB = Number(Deno.env.get("COMPOSITOR_MEM_LIMIT_MB") ?? 360);
-const MAX_FEATHER = Number(Deno.env.get("COMPOSITOR_MAX_FEATHER") ?? 256);
-const MAX_PIXELS = Number(Deno.env.get("COMPOSITOR_MAX_PX") ?? 80e6);
 const BATCH_SIZE = Number(Deno.env.get("COMPOSITOR_BATCH") ?? 12);
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+const MAX_FEATHER = Number(Deno.env.get("COMPOSITOR_MAX_FEATHER") ?? 256);
 
 const q = (v:number, step:number) => Math.floor((v + step * 0.5) / step);
 function normalizeCoords(c:any) {
@@ -78,43 +71,57 @@ serve(async (req) => {
   const { parent_job_id } = await req.json();
   if (!parent_job_id) return new Response("Missing parent_job_id", { status: 400 });
 
+  const logPrefix = `[Compositor][${parent_job_id}]`;
+  const log = (m:string)=>console.log(`${logPrefix} ${m}`);
+  
+  log("Function invoked.");
+
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { global: { fetch }, auth: { persistSession: false } });
-  const log = (m:string)=>console.log(`[Compositor][${parent_job_id}] ${m}`);
   const workerId = crypto.randomUUID();
 
   try {
+    log(`Attempting to claim job with worker ID: ${workerId}`);
     const { data: claimedJobs, error: claimError } = await supabase.rpc('claim_compositor_job', { p_job_id: parent_job_id, p_worker_id: workerId });
     if (claimError) throw new Error(`Failed to claim job: ${claimError.message}`);
     
     const claimedJob = claimedJobs?.[0];
     if (!claimedJob) { 
-        log("Job is locked by another worker, not ready, or does not exist. Exiting."); 
+        log("Job is locked by another worker, not ready, or does not exist. Exiting gracefully."); 
         return new Response("ok"); 
     }
+    log(`Job claimed successfully. Details: ${JSON.stringify(claimedJob)}`);
 
     const { data: tilesRaw, error: e2 } = await supabase.from("mira_agent_tiled_upscale_tiles").select("coordinates,generated_tile_bucket,generated_tile_path,generated_tile_url,status").eq("parent_job_id", parent_job_id).eq("status", "complete");
     if (e2) throw e2;
 
     const completeTiles = (tilesRaw ?? []).filter(isValidTile);
+    log(`Found ${completeTiles.length} valid completed tiles.`);
     if (!completeTiles.length) throw new Error("No valid completed tiles found.");
     completeTiles.sort((a,b) => gridY(a) - gridY(b) || gridX(a) - gridX(b));
 
     const startIndex = claimedJob.comp_next_index || 0;
+    log(`Processing starts at index: ${startIndex}. Batch size: ${BATCH_SIZE}.`);
     if (startIndex >= completeTiles.length) { log("All tiles already processed. Moving to finalization."); }
 
+    log(`Validating job parameters: upscale_factor=${claimedJob.upscale_factor}, canvas_w=${claimedJob.canvas_w}, canvas_h=${claimedJob.canvas_h}`);
     const actualTileSize = TILE_SIZE * (claimedJob.upscale_factor || 2.0);
     const scaleFactor = actualTileSize / TILE_SIZE;
     const finalW = claimedJob.canvas_w;
     const finalH = claimedJob.canvas_h;
     const ovScaled = Math.min(Math.max(1, Math.round(TILE_OVERLAP * scaleFactor)), MAX_FEATHER, actualTileSize - 1);
+    log(`Calculated parameters: actualTileSize=${actualTileSize}, scaleFactor=${scaleFactor}, finalW=${finalW}, finalH=${finalH}, ovScaled=${ovScaled}`);
 
     let canvas: Image;
     if (startIndex === 0) {
+      log(`Creating new canvas with dimensions: ${finalW}x${finalH}`);
+      if (finalW < 1 || finalH < 1) throw new Error(`Invalid canvas dimensions before creation: ${finalW}x${finalH}`);
       canvas = new Image(finalW, finalH);
     } else {
+      log(`Loading canvas state from: ${claimedJob.comp_state_bucket}/${claimedJob.comp_state_path}`);
       const { data: stateBlob, error: downloadError } = await supabase.storage.from(claimedJob.comp_state_bucket).download(claimedJob.comp_state_path);
       if (downloadError) throw downloadError;
       canvas = await Image.decode(await stateBlob.arrayBuffer());
+      log(`Canvas state loaded successfully. Dimensions: ${canvas.width}x${canvas.height}`);
     }
 
     const occupy = new Set<string>();
@@ -122,18 +129,34 @@ serve(async (req) => {
     const hasAt = (gx:number,gy:number)=>occupy.has(`${gx}:${gy}`);
 
     const endIndex = Math.min(startIndex + BATCH_SIZE, completeTiles.length);
+    log(`Processing batch from index ${startIndex} to ${endIndex-1}.`);
     for (let i = startIndex; i < endIndex; i++) {
       const t = completeTiles[i];
+      const gx = gridX(t), gy = gridY(t);
+      log(`[Tile ${i}] Processing tile at grid pos (${gx}, ${gy}).`);
+      
       const arr = await downloadTileBytes(supabase, t);
+      log(`[Tile ${i}] Downloaded ${arr.byteLength} bytes.`);
+      
       let tile = await Image.decode(arr);
-      if (tile.width !== actualTileSize) tile.resize(actualTileSize, actualTileSize);
+      log(`[Tile ${i}] Decoded image. Original dims: ${tile.width}x${tile.height}. Expected: ${actualTileSize}x${actualTileSize}`);
+      if (tile.width !== actualTileSize) {
+        log(`[Tile ${i}] Resizing tile to ${actualTileSize}x${actualTileSize}.`);
+        tile.resize(actualTileSize, actualTileSize);
+      }
 
       const x = Math.round(t.coordinates.x * scaleFactor);
       const y = Math.round(t.coordinates.y * scaleFactor);
-      const gx = gridX(t), gy = gridY(t);
       const n = { left: hasAt(gx-1,gy), right: hasAt(gx+1,gy), top: hasAt(gx,gy-1), bottom: hasAt(gx,gy+1) };
+      log(`[Tile ${i}] Feather neighbors: ${JSON.stringify(n)}`);
+      
       const incoming = { left: n.left, right: false, top: n.top, bottom: false };
-      if (incoming.left || incoming.top) featherBandsLUT(tile, ovScaled, incoming);
+      if (incoming.left || incoming.top) {
+        log(`[Tile ${i}] Applying feathering with overlap ${ovScaled}.`);
+        featherBandsLUT(tile, ovScaled, incoming);
+      }
+      
+      log(`[Tile ${i}] Compositing onto canvas at (${x}, ${y}).`);
       canvas.composite(tile, x, y);
       // @ts-ignore
       tile = null;
@@ -142,25 +165,29 @@ serve(async (req) => {
 
     if (endIndex < completeTiles.length) {
       const statePath = `${claimedJob.user_id}/${parent_job_id}/compositor_state.png`;
-      const stateBuffer = await canvas.encode(0);
+      log(`Batch complete. Saving checkpoint to ${STATE_BUCKET}/${statePath}`);
+      const stateBuffer = await canvas.encode(0); // PNG encoding
       await supabase.storage.from(STATE_BUCKET).upload(statePath, stateBuffer, { contentType: 'image/png', upsert: true });
       await supabase.from("mira_agent_tiled_upscale_jobs").update({ comp_next_index: endIndex, comp_state_bucket: STATE_BUCKET, comp_state_path: statePath, comp_lease_expires_at: new Date(Date.now() + 3 * 60000).toISOString() }).eq("id", parent_job_id);
-      log(`Checkpoint saved. Processed tiles ${startIndex}-${endIndex-1}.`);
+      log(`Checkpoint saved. Next index is ${endIndex}.`);
     } else {
       log("All tiles composited. Finalizing image...");
       const px = finalW * finalH;
       const effQ = px > 64e6 ? Math.min(75, JPEG_QUALITY) : px > 36e6 ? Math.min(80, JPEG_QUALITY) : JPEG_QUALITY;
+      log(`Encoding final JPEG (${finalW}x${finalH}) with quality ${effQ}.`);
       const outBytes = await canvas.encodeJPEG(effQ);
       const outPath = `${claimedJob.user_id}/${parent_job_id}/tiled-upscale-final-${finalW}x${finalH}.jpg`;
+      log(`Uploading final image to ${BUCKET_OUT}/${outPath}`);
       await supabase.storage.from(BUCKET_OUT).upload(outPath, outBytes, { contentType: "image/jpeg", upsert: true });
       const { data: pub } = supabase.storage.from(BUCKET_OUT).getPublicUrl(outPath);
       await supabase.from("mira_agent_tiled_upscale_jobs").update({ status: "complete", final_image_url: pub.publicUrl, comp_next_index: endIndex, comp_state_path: null, comp_state_bucket: null, compositor_worker_id: null, comp_lease_expires_at: null }).eq("id", parent_job_id);
       log(`Compositing complete. Final URL: ${pub.publicUrl}`);
+      log(`Cleaning up state file...`);
       await supabase.storage.from(STATE_BUCKET).remove([`${claimedJob.user_id}/${parent_job_id}/compositor_state.png`]);
     }
     return new Response("ok");
   } catch (err:any) {
-    console.error(`[Compositor][${parent_job_id}] FATAL ERROR:`, err);
+    console.error(`${logPrefix} FATAL ERROR:`, err);
     await supabase.from("mira_agent_tiled_upscale_jobs").update({ status: "failed", error_message: `Compositor failed: ${err.message}` }).eq("id", parent_job_id);
     return new Response(String(err?.message ?? err), { status: 500 });
   }
