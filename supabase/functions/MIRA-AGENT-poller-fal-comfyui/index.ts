@@ -5,6 +5,7 @@ import { fal } from 'npm:@fal-ai/client@1.5.0';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const FAL_KEY = Deno.env.get('FAL_KEY');
+const GENERATED_IMAGES_BUCKET = 'mira-agent-upscale-tiles';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -74,6 +75,40 @@ serve(async (req) => {
           
           console.log(`${logPrefix}[${job.id}] Successfully fetched result. Raw data:`, JSON.stringify(finalResult, null, 2));
           await supabase.from('fal_comfyui_jobs').update({ status: 'complete', final_result: finalResult }).eq('id', job.id);
+
+          // --- NEW LOGIC: Find and update the corresponding tile ---
+          const { data: tile, error: tileError } = await supabase
+            .from('mira_agent_tiled_upscale_tiles')
+            .select('id')
+            .eq('fal_comfyui_job_id', job.id)
+            .maybeSingle();
+
+          if (tileError) {
+            console.error(`${logPrefix}[${job.id}] Error finding linked tile:`, tileError);
+          } else if (tile) {
+            console.log(`${logPrefix}[${job.id}] Found linked tile ${tile.id}. Finalizing...`);
+            const imageUrl = finalResult.data.outputs['283'].images[0].url;
+            const imageResponse = await fetch(imageUrl);
+            if (!imageResponse.ok) throw new Error(`Download failed: HTTP ${imageResponse.status}`);
+            const imageBuffer = await imageResponse.arrayBuffer();
+
+            const outBucket = 'mira-agent-upscale-tiles';
+            const outPath = `${job.id}/final.png`;
+            await supabase.storage.from(outBucket).upload(outPath, imageBuffer, { contentType: 'image/png', upsert: true });
+
+            await supabase.from('mira_agent_tiled_upscale_tiles').update({
+                generated_tile_bucket: outBucket,
+                generated_tile_path: outPath,
+                generated_tile_mime: 'image/png',
+                status: 'complete',
+                generation_result: finalResult,
+                generation_completed_at: new Date().toISOString()
+            }).eq('id', tile.id);
+            console.log(`${logPrefix}[${job.id}] Tile ${tile.id} successfully finalized.`);
+          } else {
+            console.log(`${logPrefix}[${job.id}] Job is complete, but no linked tile found. This is normal for non-tiled jobs.`);
+          }
+          // --- END NEW LOGIC ---
 
         } else if (status.status === 'ERROR') {
           console.error(`${logPrefix}[${job.id}] Job failed. Error:`, status.error);

@@ -26,7 +26,7 @@ serve(async (req) => {
     }
     console.log(`${logPrefix} Advisory lock acquired. Proceeding with checks.`);
 
-    // Stalled Job Recovery (This is still useful)
+    // Stalled Job Recovery
     const stalledThreshold = new Date(Date.now() - STALLED_THRESHOLD_SECONDS * 1000).toISOString();
     await supabase.from('mira_agent_tiled_upscale_tiles').update({ status: 'pending_analysis', error_message: 'Reset by watchdog due to stall.' }).eq('status','analyzing').lt('updated_at', stalledThreshold);
     await supabase.from('mira_agent_tiled_upscale_tiles').update({ status: 'pending_generation', error_message: 'Reset by watchdog due to stall.' }).eq('status','generating').lt('updated_at', stalledThreshold);
@@ -45,51 +45,6 @@ serve(async (req) => {
     if (pendingGenerationTiles && pendingGenerationTiles.length > 0) {
       const generationPromises = pendingGenerationTiles.map(t => supabase.functions.invoke('MIRA-AGENT-worker-tile-generator', { body: { tile_id: t.id } }));
       await Promise.allSettled(generationPromises);
-    }
-
-    // Check status of queued ComfyUI generations by joining tables
-    const { data: queuedTiles, error: fetchQueuedError } = await supabase
-      .from('mira_agent_tiled_upscale_tiles')
-      .select('id, fal_comfyui_jobs ( id, status, final_result, error_message )')
-      .eq('status', 'generation_queued')
-      .not('fal_comfyui_job_id', 'is', null)
-      .limit(BATCH_SIZE);
-
-    if (fetchQueuedError) throw fetchQueuedError;
-
-    if (queuedTiles && queuedTiles.length > 0) {
-        for (const tile of queuedTiles) {
-            const job: any = tile.fal_comfyui_jobs;
-            if (!job) continue;
-
-            if (job.status === 'complete') {
-                const result = job.final_result;
-                const url = result?.data?.outputs?.['283']?.images?.[0]?.url;
-                if (!url) {
-                    await supabase.from('mira_agent_tiled_upscale_tiles').update({ status: 'generation_failed', error_message: 'Fal job completed but no image URL found.' }).eq('id', tile.id);
-                    continue;
-                }
-                
-                const imageResponse = await fetch(url);
-                if (!imageResponse.ok) throw new Error(`Download failed: HTTP ${imageResponse.status}`);
-                const imageBuffer = await imageResponse.arrayBuffer();
-
-                const outBucket = 'mira-agent-upscale-tiles';
-                const outPath = `${job.id}/final.png`;
-                await supabase.storage.from(outBucket).upload(outPath, imageBuffer, { contentType: 'image/png', upsert: true });
-
-                await supabase.from('mira_agent_tiled_upscale_tiles').update({
-                    generated_tile_bucket: outBucket,
-                    generated_tile_path: outPath,
-                    generated_tile_mime: 'image/png',
-                    status: 'complete',
-                    generation_result: result,
-                    generation_completed_at: new Date().toISOString()
-                }).eq('id', tile.id);
-            } else if (job.status === 'failed') {
-                await supabase.from('mira_agent_tiled_upscale_tiles').update({ status: 'generation_failed', error_message: job.error_message || 'Linked Fal job failed.' }).eq('id', tile.id);
-            }
-        }
     }
 
     // Trigger Compositor
