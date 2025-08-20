@@ -1,4 +1,3 @@
-status -> result workflow, removing all real-time streaming logic.">
 import { useState, useRef, useCallback } from 'react';
 import { useSession } from '@/components/Auth/SessionContextProvider';
 import { Button } from '@/components/ui/button';
