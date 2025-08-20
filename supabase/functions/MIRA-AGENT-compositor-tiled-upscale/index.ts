@@ -8,8 +8,8 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const BUCKET_OUT = "mira-generations";
 const STATE_BUCKET = "mira-agent-compositor-state";
 
-const TILE_SIZE = 256; // Halved from 512
-const TILE_OVERLAP = 32; // Reduced from 128
+const TILE_SIZE = 256;
+const TILE_OVERLAP = 32;
 const STEP = TILE_SIZE - TILE_OVERLAP;
 const JPEG_QUALITY = Number(Deno.env.get("COMPOSITOR_JPEG_QUALITY") ?? 85);
 const BATCH_SIZE = Number(Deno.env.get("COMPOSITOR_BATCH") ?? 12);
@@ -169,7 +169,13 @@ serve(async (req) => {
       const stateBuffer = await canvas.encode(0); // PNG encoding
       await supabase.storage.from(STATE_BUCKET).upload(statePath, stateBuffer, { contentType: 'image/png', upsert: true });
       await supabase.from("mira_agent_tiled_upscale_jobs").update({ comp_next_index: endIndex, comp_state_bucket: STATE_BUCKET, comp_state_path: statePath, comp_lease_expires_at: new Date(Date.now() + 3 * 60000).toISOString() }).eq("id", parent_job_id);
-      log(`Checkpoint saved. Next index is ${endIndex}.`);
+      log(`Checkpoint saved. Next index is ${endIndex}. Re-invoking self to continue.`);
+      // Asynchronously invoke self to process the next batch
+      supabase.functions.invoke('MIRA-AGENT-compositor-tiled-upscale', {
+        body: { parent_job_id: parent_job_id }
+      }).catch(err => {
+        console.error(`${logPrefix} CRITICAL: Failed to re-invoke self for next batch. The watchdog will need to recover this job. Error:`, err);
+      });
     } else {
       log("All tiles composited. Finalizing image...");
       const px = finalW * finalH;
