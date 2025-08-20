@@ -6,8 +6,8 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const TILE_UPLOAD_BUCKET = "mira-agent-upscale-tiles";
 
-const TILE_SIZE = 1024;
-const TILE_OVERLAP = 264;
+const TILE_SIZE = 512;
+const TILE_OVERLAP = 128;
 const STEP = TILE_SIZE - TILE_OVERLAP;
 const INSERT_BATCH_SIZE = 100;
 

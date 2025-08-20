@@ -15,7 +15,7 @@ const corsHeaders = {
 // Centralized presets as requested
 const payloadPresets: Record<string, any> = {
   default: { ksampler_denoise: 0.1, imagescaleby_scale_by: 0.5, controlnetapplyadvanced_strength: 0.3, controlnetapplyadvanced_end_percent: 0.9 },
-  high_detail_upscale: { ksampler_denoise: 0.15, imagescaleby_scale_by: 0.75, controlnetapplyadvanced_strength: 0.25, controlnetapplyadvanced_end_percent: 0.8 },
+  high_detail_upscale: { ksampler_denoise: 0.25, imagescaleby_scale_by: 0.5, controlnetapplyadvanced_strength: 0.3, controlnetapplyadvanced_end_percent: 0.75 },
   creative_variation: { ksampler_denoise: 0.4, imagescaleby_scale_by: 0.5, controlnetapplyadvanced_strength: 0.5, controlnetapplyadvanced_end_percent: 0.7 }
 };
 
@@ -37,12 +37,8 @@ serve(async (req) => {
       if (!user_id) throw new Error("user_id is required for submission.");
       if (!image_url && !image_base64) throw new Error("Either image_url or image_base64 is required.");
 
-      const basePayload = payloadPresets[preset] || payloadPresets['default'];
-      
-      let finalInput = {
-        ...basePayload,
-        cliptextencode_text: prompt || "",
-      };
+      const { data: presetData } = await supabase.from('fal_comfyui_presets').select('payload').eq('name', preset || 'default').single();
+      const basePayload = presetData?.payload || payloadPresets[preset] || payloadPresets['default'];
 
       let finalImageUrl = image_url;
       if (image_base64) {
@@ -50,17 +46,21 @@ serve(async (req) => {
         finalImageUrl = await fal.storage.upload(imageBlob);
       }
       
-      finalInput.loadimage_1 = finalImageUrl;
-      
       const pipeline = Deno.env.get('FAL_PIPELINE_ID') || 'comfy/research-MIR/test';
-      const falResult = await fal.queue.submit(pipeline, { input: finalInput });
+      const falResult = await fal.queue.submit(pipeline, { 
+          input: {
+              ...basePayload,
+              cliptextencode_text: prompt || "",
+              loadimage_1: finalImageUrl
+          }
+      });
       
       const { data: newJob, error: insertError } = await supabase
         .from('fal_comfyui_jobs')
         .insert({
           user_id: user_id,
           fal_request_id: falResult.request_id,
-          input_payload: finalInput,
+          input_payload: { ...basePayload, cliptextencode_text: prompt || "", loadimage_1: finalImageUrl },
           status: 'queued'
         })
         .select('id')
