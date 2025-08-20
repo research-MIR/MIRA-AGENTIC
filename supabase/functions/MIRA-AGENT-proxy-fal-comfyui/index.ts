@@ -12,6 +12,13 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Centralized presets as requested
+const payloadPresets: Record<string, any> = {
+  default: { ksampler_denoise: 0.1, imagescaleby_scale_by: 0.5, controlnetapplyadvanced_strength: 0.3, controlnetapplyadvanced_end_percent: 0.9 },
+  high_detail_upscale: { ksampler_denoise: 0.15, imagescaleby_scale_by: 0.75, controlnetapplyadvanced_strength: 0.25, controlnetapplyadvanced_end_percent: 0.8 },
+  creative_variation: { ksampler_denoise: 0.4, imagescaleby_scale_by: 0.5, controlnetapplyadvanced_strength: 0.5, controlnetapplyadvanced_end_percent: 0.7 }
+};
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -24,19 +31,29 @@ serve(async (req) => {
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
 
   try {
-    const { method, input, image_base64, mime_type, user_id } = await req.json();
+    const { method, preset, prompt, image_base64, mime_type, image_url, user_id } = await req.json();
 
     if (method === 'submit') {
       if (!user_id) throw new Error("user_id is required for submission.");
+      if (!image_url && !image_base64) throw new Error("Either image_url or image_base64 is required.");
+
+      const basePayload = payloadPresets[preset] || payloadPresets['default'];
       
-      let finalInput = { ...input };
+      let finalInput = {
+        ...basePayload,
+        cliptextencode_text: prompt || "",
+      };
+
+      let finalImageUrl = image_url;
       if (image_base64) {
         const imageBlob = new Blob([decodeBase64(image_base64)], { type: mime_type || 'image/jpeg' });
-        const imageUrl = await fal.storage.upload(imageBlob);
-        finalInput.loadimage_1 = imageUrl;
+        finalImageUrl = await fal.storage.upload(imageBlob);
       }
       
-      const falResult = await fal.queue.submit("comfy/research-MIR/test", { input: finalInput });
+      finalInput.loadimage_1 = finalImageUrl;
+      
+      const pipeline = Deno.env.get('FAL_PIPELINE_ID') || 'comfy/research-MIR/test';
+      const falResult = await fal.queue.submit(pipeline, { input: finalInput });
       
       const { data: newJob, error: insertError } = await supabase
         .from('fal_comfyui_jobs')

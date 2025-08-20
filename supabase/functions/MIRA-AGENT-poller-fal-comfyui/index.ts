@@ -11,6 +11,8 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+const RETRY_DELAYS = [1000, 3000, 6000]; // 1s, 3s, 6s
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
 
@@ -35,18 +37,43 @@ serve(async (req) => {
 
     const pollPromises = jobs.map(async (job) => {
       try {
-        const status = await fal.queue.status("comfy/research-MIR/test", { requestId: job.fal_request_id, logs: false });
+        const pipeline = Deno.env.get('FAL_PIPELINE_ID') || 'comfy/research-MIR/test';
+        const status = await fal.queue.status(pipeline, { requestId: job.fal_request_id, logs: false });
 
         if (status.status === 'COMPLETED') {
-          console.log(`${logPrefix}[${job.id}] Job complete. Fetching result...`);
-          const result = await fal.queue.result("comfy/research-MIR/test", { requestId: job.fal_request_id });
-          
-          // Log the raw response to help debug the structure
-          console.log(`${logPrefix}[${job.id}] Raw result from Fal.ai:`, JSON.stringify(result, null, 2));
+          console.log(`${logPrefix}[${job.id}] Job complete. Fetching result with retries...`);
+          let finalResult = null;
+          let lastResultError = null;
 
-          await supabase.from('fal_comfyui_jobs').update({ status: 'complete', final_result: result }).eq('id', job.id);
+          for (let i = 0; i < RETRY_DELAYS.length + 1; i++) {
+            try {
+              const result: any = await fal.queue.result(pipeline, { requestId: job.fal_request_id });
+              const imageUrl = result?.data?.outputs?.['283']?.images?.[0]?.url;
+
+              if (imageUrl) {
+                finalResult = result;
+                lastResultError = null;
+                break;
+              }
+              lastResultError = new Error("Result fetched but final image URL was not found in the payload.");
+            } catch (e) {
+              lastResultError = e;
+            }
+            if (i < RETRY_DELAYS.length) {
+              console.log(`${logPrefix}[${job.id}] Result not ready yet. Retrying in ${RETRY_DELAYS[i]}ms...`);
+              await new Promise(resolve => setTimeout(resolve, RETRY_DELAYS[i]));
+            }
+          }
+
+          if (lastResultError || !finalResult) {
+            throw lastResultError || new Error("Failed to fetch valid result after all retries.");
+          }
+          
+          console.log(`${logPrefix}[${job.id}] Successfully fetched result. Raw data:`, JSON.stringify(finalResult, null, 2));
+          await supabase.from('fal_comfyui_jobs').update({ status: 'complete', final_result: finalResult }).eq('id', job.id);
+
         } else if (status.status === 'ERROR') {
-          console.error(`${logPrefix}[${job.id}] Job failed. Error: ${status.error}`);
+          console.error(`${logPrefix}[${job.id}] Job failed. Error:`, status.error);
           await supabase.from('fal_comfyui_jobs').update({ status: 'failed', error_message: status.error?.toString() }).eq('id', job.id);
         } else {
           await supabase.from('fal_comfyui_jobs').update({ status: 'processing', last_polled_at: new Date().toISOString() }).eq('id', job.id);
