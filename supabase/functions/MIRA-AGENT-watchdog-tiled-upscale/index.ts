@@ -44,17 +44,13 @@ serve(async (req) => {
     if (fetchFailedError) throw fetchFailedError;
 
     if (failedTiles && failedTiles.length > 0) {
-        console.log(`${logPrefix} Found ${failedTiles.length} failed tiles eligible for retry. Processing individually...`);
         for (const tile of failedTiles) {
             const isAnalysis = tile.status === 'analysis_failed';
             const currentRetries = (isAnalysis ? tile.analysis_retry_count : tile.generation_retry_count) || 0;
-            
             if (currentRetries >= MAX_RETRIES) continue;
-
             const newRetryCount = currentRetries + 1;
-            const backoffSeconds = 300 * Math.pow(2, newRetryCount - 1); // 5m, 10m, 20m
+            const backoffSeconds = 300 * Math.pow(2, newRetryCount - 1);
             const nextAttempt = new Date(Date.now() + backoffSeconds * 1000).toISOString();
-
             await supabase.from('mira_agent_tiled_upscale_tiles').update({
                 status: isAnalysis ? 'pending_analysis' : 'pending_generation',
                 error_message: `Retrying after previous failure (Attempt ${newRetryCount}).`,
@@ -78,7 +74,6 @@ serve(async (req) => {
       const tileIds = pendingAnalysisTiles.map(t => t.id);
       const analysisPromises = tileIds.map(tile_id => supabase.functions.invoke('MIRA-AGENT-worker-tile-analyzer', { body: { tile_id } }));
       await Promise.allSettled(analysisPromises);
-      console.log(`${logPrefix} Dispatched ${tileIds.length} analysis workers.`);
     }
 
     // --- Dispatch Pending Generation ---
@@ -93,11 +88,10 @@ serve(async (req) => {
       const tileIds = pendingGenerationTiles.map(t => t.id);
       const generationPromises = tileIds.map(tile_id => supabase.functions.invoke('MIRA-AGENT-worker-tile-generator', { body: { tile_id } }));
       await Promise.allSettled(generationPromises);
-      console.log(`${logPrefix} Dispatched ${tileIds.length} generation workers.`);
     }
 
     // --- Trigger Compositor ---
-    const { data: generatingJobs, error: fetchGeneratingError } = await supabase.from('mira_agent_tiled_upscale_jobs').select('id, total_tiles').in('status', ['generating', 'queued_for_generation']);
+    const { data: generatingJobs, error: fetchGeneratingError } = await supabase.from('mira_agent_tiled_upscale_jobs').select('id, total_tiles, comp_next_index, compositor_worker_id, comp_lease_expires_at').in('status', ['generating', 'queued_for_generation', 'compositing']);
     if (fetchGeneratingError) throw fetchGeneratingError;
     if (generatingJobs && generatingJobs.length > 0) {
       const jobIds = generatingJobs.map(j => j.id);
@@ -112,17 +106,22 @@ serve(async (req) => {
         }
       });
 
-      const jobsReadyForCompositing = generatingJobs.filter(job => {
-          const total = job.total_tiles || 0;
-          const completed = jobCounts[job.id]?.complete || 0;
-          return total > 0 && total === completed;
-      }).map(job => job.id);
+      const compositorInvocations = [];
+      for (const job of generatingJobs) {
+        const total = job.total_tiles || 0;
+        const completed = jobCounts[job.id]?.complete || 0;
+        const isReady = total > 0 && total === completed;
+        const isStalled = job.compositor_worker_id && new Date(job.comp_lease_expires_at) < new Date();
+        const isUnclaimed = !job.compositor_worker_id;
+
+        if (isReady && (isStalled || isUnclaimed || job.comp_next_index < total)) {
+            compositorInvocations.push(supabase.functions.invoke('MIRA-AGENT-compositor-tiled-upscale', { body: { parent_job_id: job.id } }));
+        }
+      }
       
-      if (jobsReadyForCompositing.length > 0) {
-        await supabase.from('mira_agent_tiled_upscale_jobs').update({ status: 'compositing' }).in('id', jobsReadyForCompositing);
-        const compositorPromises = jobsReadyForCompositing.map(jobId => supabase.functions.invoke('MIRA-AGENT-compositor-tiled-upscale', { body: { parent_job_id: jobId } }));
-        await Promise.allSettled(compositorPromises);
-        console.log(`${logPrefix} Dispatched ${jobsReadyForCompositing.length} compositor jobs.`);
+      if (compositorInvocations.length > 0) {
+        await Promise.allSettled(compositorInvocations);
+        console.log(`${logPrefix} Dispatched ${compositorInvocations.length} compositor jobs.`);
       }
     }
 
