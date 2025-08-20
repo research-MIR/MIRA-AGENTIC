@@ -37,8 +37,8 @@ serve(async (req) => {
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
     
-    // New logic for selecting the engine, with a new default
-    const finalEngine = upscaler_engine || Deno.env.get('DEFAULT_UPSCALER_ENGINE') || 'comfyui_fal_upscaler';
+    // New logic for selecting the engine
+    const finalEngine = upscaler_engine || Deno.env.get('DEFAULT_UPSCALER_ENGINE') || 'creative_upscaler';
 
     const logPrefix = `[TiledUpscaleOrchestrator]`;
     console.log(`${logPrefix} Creating new upscale job record with engine: ${finalEngine}.`);
