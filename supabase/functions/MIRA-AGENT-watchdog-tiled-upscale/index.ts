@@ -151,6 +151,9 @@ serve(async (req) => {
     return new Response(JSON.stringify({ success: true, message: "Watchdog check complete." }), { headers: corsHeaders });
   } catch (error) {
     console.error(`${logPrefix} Error:`, error);
-    return new Response(JSON.stringify({ error: error.message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
+    return new Response(JSON.stringify({ error: error.message }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      status: 500,
+    });
   }
 });
