@@ -1,8 +1,9 @@
+status -> result workflow, removing all real-time streaming logic.">
 import { useState, useRef, useCallback } from 'react';
 import { useSession } from '@/components/Auth/SessionContextProvider';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Loader2, UploadCloud, Wand2, Play, FileClock, CheckSquare } from 'lucide-react';
+import { Loader2, UploadCloud, Play, FileClock, CheckSquare } from 'lucide-react';
 import { showError, showSuccess } from '@/utils/toast';
 import { useDropzone } from '@/hooks/useDropzone';
 import { cn } from '@/lib/utils';
@@ -10,7 +11,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { SUPABASE_PUBLISHABLE_KEY } from '@/integrations/supabase/client';
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -36,10 +36,9 @@ const FalComfyUITester = () => {
     controlnetapplyadvanced_end_percent: 0.9,
   });
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const eventSourceRef = useRef<EventSource | null>(null);
 
   const addLog = (message: string) => {
-    setLogs(prev => [...prev, `${new Date().toLocaleTimeString()}: ${message}`]);
+    setLogs(prev => [`${new Date().toLocaleTimeString()}: ${message}`, ...prev]);
   };
 
   const handleFileSelect = useCallback((file: File | null) => {
@@ -57,6 +56,9 @@ const FalComfyUITester = () => {
   const handleSubmit = async () => {
     if (!imageFile) return showError("Please upload an image.");
     setIsLoading(true);
+    setLogs([]);
+    setResultImageUrl(null);
+    setRequestId(null);
     addLog("Submitting job...");
     try {
       const image_base64 = await fileToBase64(imageFile);
@@ -108,64 +110,12 @@ const FalComfyUITester = () => {
         setResultImageUrl(imageUrl);
         showSuccess("Result image loaded!");
       } else {
-        showError("Result did not contain an image URL.");
+        showError("Result did not contain an image URL. It may still be processing.");
       }
     } catch (err: any) {
       addLog(`Error fetching result: ${err.message}`);
       showError(err.message);
     } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleSubscribe = async () => {
-    if (!imageFile) return showError("Please upload an image.");
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-      addLog("Closed previous log stream.");
-    }
-    setIsLoading(true);
-    setLogs([]);
-    setResultImageUrl(null);
-    addLog("Submitting job for subscription...");
-    try {
-      const image_base64 = await fileToBase64(imageFile);
-      const { data: submitData, error: submitError } = await supabase.functions.invoke('MIRA-AGENT-proxy-fal-comfyui', {
-        body: { method: 'submit', input: params, image_base64, mime_type: imageFile.type }
-      });
-      if (submitError) throw submitError;
-      
-      const newRequestId = submitData.request_id;
-      setRequestId(newRequestId);
-      addLog(`Job submitted. Request ID: ${newRequestId}. Opening log stream...`);
-
-      const streamUrl = `${supabase.supabaseUrl}/functions/v1/MIRA-AGENT-proxy-fal-comfyui-stream?requestId=${newRequestId}&apikey=${SUPABASE_PUBLISHABLE_KEY}`;
-      const eventSource = new EventSource(streamUrl);
-      eventSourceRef.current = eventSource;
-
-      eventSource.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        addLog(`[STREAM] Status: ${data.status}, Position: ${data.queue_position || 'N/A'}`);
-        if (data.logs) {
-          data.logs.forEach((log: any) => addLog(`[WORKER] ${log.message}`));
-        }
-        if (data.status === "COMPLETED") {
-          addLog("Stream complete. Fetching final result...");
-          eventSource.close();
-          handleResult(); // Automatically fetch result on completion
-        }
-      };
-
-      eventSource.onerror = (err) => {
-        addLog(`Stream error: ${JSON.stringify(err)}`);
-        showError("Log stream encountered an error.");
-        eventSource.close();
-        setIsLoading(false);
-      };
-
-    } catch (err: any) {
-      addLog(`Error during subscribe: ${err.message}`);
-      showError(err.message);
       setIsLoading(false);
     }
   };
@@ -205,16 +155,10 @@ const FalComfyUITester = () => {
           </Card>
           <Card>
             <CardHeader><CardTitle>2. Actions</CardTitle></CardHeader>
-            <CardContent className="space-y-2">
-              <Button className="w-full" onClick={handleSubscribe} disabled={isLoading || !imageFile}>
-                <Wand2 className="mr-2 h-4 w-4" /> Subscribe (Recommended)
-              </Button>
-              <p className="text-xs text-muted-foreground text-center">Manual Controls</p>
-              <div className="grid grid-cols-3 gap-2">
-                <Button variant="outline" onClick={handleSubmit} disabled={isLoading || !imageFile}><Play className="mr-2 h-4 w-4" />Submit</Button>
-                <Button variant="outline" onClick={handleStatus} disabled={isLoading || !requestId}><FileClock className="mr-2 h-4 w-4" />Status</Button>
-                <Button variant="outline" onClick={handleResult} disabled={isLoading || !requestId}><CheckSquare className="mr-2 h-4 w-4" />Result</Button>
-              </div>
+            <CardContent className="grid grid-cols-3 gap-2">
+              <Button variant="default" onClick={handleSubmit} disabled={isLoading || !imageFile} className="col-span-3"><Play className="mr-2 h-4 w-4" />Submit Job</Button>
+              <Button variant="outline" onClick={handleStatus} disabled={isLoading || !requestId}><FileClock className="mr-2 h-4 w-4" />Check Status</Button>
+              <Button variant="outline" onClick={handleResult} disabled={isLoading || !requestId} className="col-span-2"><CheckSquare className="mr-2 h-4 w-4" />Get Result</Button>
             </CardContent>
           </Card>
         </div>
