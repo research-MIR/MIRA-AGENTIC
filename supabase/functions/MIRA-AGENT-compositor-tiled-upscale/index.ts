@@ -173,19 +173,13 @@ async function run(parent_job_id: string) {
   const scaleFactor = actualTileSize / TILE_SIZE;
   console.log(`${logPrefix} Detected upscale factor of ${scaleFactor}x (Tiles are ${actualTileSize}px)`);
 
-  const { bucket, path } = parseStorageURL(parentRow.source_image_url);
-  const { data: sourceBlob, error: dlError } = await supabase.storage.from(bucket).download(path);
-  if (dlError) throw new Error(`Failed to download original source image: ${dlError.message}`);
-  
-  let originalImage: Image | null = await Image.decode(await sourceBlob.arrayBuffer());
-  const upW = Math.round(originalImage.width * parentRow.upscale_factor);
-  const upH = Math.round(originalImage.height * parentRow.upscale_factor);
-  const finalW = Math.round(upW * scaleFactor);
-  const finalH = Math.round(upH * scaleFactor);
-  originalImage = null; // Release memory
-  console.log(`${logPrefix} Final canvas dimensions will be ${finalW}x${finalH}`);
+  const maxX = Math.max(...completeTiles.map(t => t.coordinates.x));
+  const maxY = Math.max(...completeTiles.map(t => t.coordinates.y));
+  const finalW = Math.round((maxX + TILE_SIZE) * scaleFactor);
+  const finalH = Math.round((maxY + TILE_SIZE) * scaleFactor);
+  console.log(`${logPrefix} Final canvas dimensions calculated from tiles: ${finalW}x${finalH}`);
 
-  const estMB = (finalW * finalH * 4 * 2 + 8 * actualTileSize * 4) / (1024 * 1024);
+  const estMB = (finalW * finalH * 4 + actualTileSize * actualTileSize * 4 + 16*1024*1024) / (1024*1024);
   if (estMB > MEM_HARD_LIMIT_MB) {
     await supabase.from("mira_agent_tiled_upscale_jobs").update({ status: "failed", error_message: `Estimated RAM ${estMB.toFixed(1)}MB exceeds limit ${MEM_HARD_LIMIT_MB}MB.` }).eq("id", parent_job_id);
     throw new Error(`Refused: est ${estMB.toFixed(1)} MB > limit ${MEM_HARD_LIMIT_MB}`);
