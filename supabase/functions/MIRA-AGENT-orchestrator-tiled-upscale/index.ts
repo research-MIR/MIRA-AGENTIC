@@ -30,14 +30,18 @@ serve(async (req) => {
   }
 
   try {
-    const { source_image_url, user_id, upscale_factor = 2.0, source_job_id, upscaler_engine = 'creative_upscaler' } = await req.json();
+    const { source_image_url, user_id, upscale_factor = 2.0, source_job_id, upscaler_engine } = await req.json();
     if (!source_image_url || !user_id) {
       throw new Error("source_image_url and user_id are required.");
     }
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
+    
+    // New logic for selecting the engine
+    const finalEngine = upscaler_engine || Deno.env.get('DEFAULT_UPSCALER_ENGINE') || 'creative_upscaler';
+
     const logPrefix = `[TiledUpscaleOrchestrator]`;
-    console.log(`${logPrefix} Creating new upscale job record with engine: ${upscaler_engine}.`);
+    console.log(`${logPrefix} Creating new upscale job record with engine: ${finalEngine}.`);
 
     const { bucket, path } = parseStorageURL(source_image_url);
 
@@ -51,7 +55,7 @@ serve(async (req) => {
         upscale_factor,
         source_job_id,
         status: 'tiling',
-        metadata: { upscaler_engine }
+        metadata: { upscaler_engine: finalEngine }
       })
       .select('id')
       .single();
