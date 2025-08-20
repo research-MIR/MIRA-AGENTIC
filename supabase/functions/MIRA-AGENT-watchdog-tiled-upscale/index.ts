@@ -130,24 +130,20 @@ serve(async (req) => {
         const completed = jobCounts[job.id]?.complete || 0;
         const isReadyForCompositing = total > 0 && total === completed;
 
-        if (isReadyForCompositing && job.status !== 'compositing' && job.status !== 'complete' && job.status !== 'failed') {
-            console.log(`${logPrefix} Job ${job.id} is ready for compositing. Attempting to claim by setting status to 'compositing'.`);
-            const { count, error: updateError } = await supabase
-                .from('mira_agent_tiled_upscale_jobs')
-                .update({ status: 'compositing' })
-                .eq('id', job.id)
-                .in('status', ['generating', 'queued_for_generation']);
+        if (isReadyForCompositing && (job.status === 'generating' || job.status === 'queued_for_generation')) {
+            console.log(`${logPrefix} Job ${job.id} is ready for compositing. Attempting to claim via RPC...`);
+            const { data: claimed, error: rpcError } = await supabase.rpc('try_set_job_to_compositing', { p_job_id: job.id });
 
-            if (updateError) {
-                console.error(`${logPrefix} Failed to update job ${job.id} to 'compositing':`, updateError.message);
+            if (rpcError) {
+                console.error(`${logPrefix} RPC try_set_job_to_compositing failed for job ${job.id}:`, rpcError.message);
                 continue;
             }
 
-            if (count && count > 0) {
-                console.log(`${logPrefix} Successfully claimed job ${job.id}. Invoking compositor.`);
+            if (claimed) {
+                console.log(`${logPrefix} Successfully claimed job ${job.id} via RPC. Invoking compositor.`);
                 compositorInvocations.push(supabase.functions.invoke('MIRA-AGENT-compositor-tiled-upscale', { body: { parent_job_id: job.id } }));
             } else {
-                console.log(`${logPrefix} Job ${job.id} was likely claimed by another watchdog instance. Skipping invocation.`);
+                console.log(`${logPrefix} Job ${job.id} was claimed by another instance. Skipping invocation.`);
             }
         } else if (job.status === 'compositing') {
             const isStalled = job.compositor_worker_id && new Date(job.comp_lease_expires_at) < new Date();
