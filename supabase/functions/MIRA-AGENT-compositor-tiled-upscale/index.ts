@@ -8,253 +8,158 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const BUCKET_OUT = "mira-generations";
 
 const TILE_SIZE = 1024;
-const JPEG_QUALITY = 90;
-const MEM_HARD_LIMIT_MB = 360;
+const TILE_OVERLAP = 264;
+const STEP = TILE_SIZE - TILE_OVERLAP;
+const JPEG_QUALITY = Number(Deno.env.get("COMPOSITOR_JPEG_QUALITY") ?? 85);
+const MEM_HARD_LIMIT_MB = Number(Deno.env.get("COMPOSITOR_MEM_LIMIT_MB") ?? 360);
 
-type Tile = {
-  tile_index: number;
-  coordinates: { x: number; y: number; width: number; height: number };
-  generated_tile_url: string | null;
-  generated_tile_bucket: string | null;
-  generated_tile_path: string | null;
-  status: "complete" | string;
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-type TileRef = { bucket: string; path: string } | { url: string };
+// feather only when needed; touch bands not full tile
+function featherBands(tile: Image, ov: number, n: {left:boolean;right:boolean;top:boolean;bottom:boolean}) {
+  const bmp = tile.bitmap; // Uint8ClampedArray RGBA
+  const W = tile.width, H = tile.height;
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-  global: { fetch }, auth: { persistSession: false }
-});
-
-async function fetchBytes(ref: TileRef, signal: AbortSignal): Promise<Uint8Array> {
-  if ('bucket' in ref && ref.bucket && ref.path) {
-    const { data, error } = await supabase.storage.from(ref.bucket).download(ref.path);
-    if (error) throw new Error(`Storage download failed (${ref.bucket}/${ref.path}): ${error.message}`);
-    return new Uint8Array(await data.arrayBuffer());
-  }
-  if ('url' in ref && ref.url) {
-    const res = await fetch(ref.url, { signal });
-    if (!res.ok) throw new Error(`HTTP ${res.status} for ${ref.url}`);
-    return new Uint8Array(await res.arrayBuffer());
-  }
-  throw new Error('Tile reference has neither (bucket,path) nor url');
-}
-
-function buildRamp(n: number, invert = false): Float32Array {
-  const r = new Float32Array(n);
-  if (n <= 1) return r.fill(1);
-  for (let i = 0; i < n; i++) {
-    let t = i / (n - 1);
-    t = t * t * (3 - 2 * t); // smoothstep
-    r[i] = invert ? 1 - t : t;
-  }
-  return r;
-}
-
-function ramps1D(size: number, ov: number) {
-  const L = buildRamp(ov, false), R = buildRamp(ov, true);
-  const left = new Float32Array(size), right = new Float32Array(size);
-  for (let x=0; x<size; x++) {
-    left[x]  = x < ov ? L[x] : 1;
-    right[x] = x >= size-ov ? R[x-(size-ov)] : 1;
-  }
-  const mk = (hasNeg:boolean, hasPos:boolean) => {
-    const v = new Float32Array(size);
-    for (let x=0; x<size; x++) {
-      let g = 1;
-      if (hasNeg) g = Math.min(g, left[x]);
-      if (hasPos) g = Math.min(g, right[x]);
-      v[x] = g;
+  // Horizontal bands
+  if (n.left) {
+    for (let y=0; y<H; y++) {
+      const base = (y*W)*4;
+      for (let x=0; x<ov; x++) {
+        const aIdx = base + x*4 + 3;
+        const w = (x/(ov-1));
+        const s = w*w*(3-2*w); // smoothstep
+        bmp[aIdx] = (bmp[aIdx] * s) | 0;
+      }
     }
-    return v;
-  };
-  return { h00: mk(false,false), h10: mk(true,false), h01: mk(false,true), h11: mk(true,true) };
-}
-
-function rampsY(size:number, ov:number) {
-  const T = buildRamp(ov,false), B = buildRamp(ov,true);
-  const top = new Float32Array(size), bot = new Float32Array(size);
-  for (let y=0; y<size; y++) {
-    top[y] = y < ov ? T[y] : 1;
-    bot[y] = y >= size-ov ? B[y-(size-ov)] : 1;
   }
-  const mk = (hasNeg:boolean, hasPos:boolean) => {
-    const v = new Float32Array(size);
-    for (let y=0; y<size; y++) {
-      let g = 1;
-      if (hasNeg) g = Math.min(g, top[y]);
-      if (hasPos) g = Math.min(g, bot[y]);
-      v[y] = g;
+  if (n.right) {
+    for (let y=0; y<H; y++) {
+      const base = (y*W)*4;
+      for (let x=W-ov; x<W; x++) {
+        const aIdx = base + x*4 + 3;
+        const u = (W-1 - x)/(ov-1);
+        const s = u*u*(3-2*u);
+        bmp[aIdx] = (bmp[aIdx] * s) | 0;
+      }
     }
-    return v;
-  };
-  return { v00: mk(false,false), v10: mk(true,false), v01: mk(false,true), v11: mk(true,true) };
-}
+  }
 
-const rampCache = new Map<string, {HR:any, VR:any}>();
-function getRamps(w:number,h:number,ovx:number,ovy:number){
-  const key = `${w}x${h}:${ovx},${ovy}`;
-  let r = rampCache.get(key);
-  if (!r) { r = { HR: ramps1D(w, ovx), VR: rampsY(h, ovy) }; rampCache.set(key, r); }
-  return r;
-}
-
-function blendWeighted(canvas: Image, tile: Image, x0: number, y0: number, hx: Float32Array, vy: Float32Array) {
-  const cb = canvas.bitmap, tb = tile.bitmap;
-  const W = canvas.width, tw = tile.width, th = tile.height;
-
-  for (let y = 0; y < th; y++) {
-    const absY = y0 + y;
-    if (absY < 0 || absY >= canvas.height) continue;
-    const wy = vy[y];
-    const cy = absY * W;
-    const ty = y * tw;
-    for (let x = 0; x < tw; x++) {
-      const absX = x0 + x;
-      if (absX < 0 || absX >= canvas.width) continue;
-
-      const w = hx[x] * wy;
-      if (w <= 0) continue;
-
-      const cidx = ((cy + absX) << 2);
-      const tidx = ((ty + x) << 2);
-
-      const wOld = cb[cidx + 3] / 255;
-      const wNew = wOld + w;
-      if (wNew < 1e-8) continue;
-
-      const scaleOld = wOld > 0 ? (wOld / wNew) : 0;
-      const scaleAdd = w / wNew;
-
-      cb[cidx    ] = Math.round(cb[cidx    ] * scaleOld + tb[tidx    ] * scaleAdd);
-      cb[cidx + 1] = Math.round(cb[cidx + 1] * scaleOld + tb[tidx + 1] * scaleAdd);
-      cb[cidx + 2] = Math.round(cb[cidx + 2] * scaleOld + tb[tidx + 2] * scaleAdd);
-      cb[cidx + 3] = Math.min(255, Math.round(wNew * 255));
+  // Vertical bands
+  if (n.top) {
+    for (let y=0; y<ov; y++) {
+      const v = (y/(ov-1)); const s = v*v*(3-2*v);
+      let row = (y*W)*4 + 3;
+      for (let x=0; x<W; x++, row+=4) bmp[row] = (bmp[row] * s) | 0;
+    }
+  }
+  if (n.bottom) {
+    for (let y=H-ov; y<H; y++) {
+      const v = (H-1 - y)/(ov-1); const s = v*v*(3-2*v);
+      let row = (y*W)*4 + 3;
+      for (let x=0; x<W; x++, row+=4) bmp[row] = (bmp[row] * s) | 0;
     }
   }
 }
 
-async function run(parent_job_id: string) {
+function gridX(t:any){ return Math.round(t.coordinates.x / STEP); }
+function gridY(t:any){ return Math.round(t.coordinates.y / STEP); }
+
+async function run(supabase: SupabaseClient, parent_job_id: string) {
   const logPrefix = `[Compositor][${parent_job_id}]`;
   console.log(`${logPrefix} Starting run.`);
 
   const { data: parentRow, error: e1 } = await supabase
     .from("mira_agent_tiled_upscale_jobs")
-    .select("id,user_id,source_bucket,source_path,status,final_image_url,upscale_factor")
-    .eq("id", parent_job_id)
-    .single();
+    .select("id,user_id,final_image_url")
+    .eq("id", parent_job_id).single();
   if (e1 || !parentRow) throw new Error(`Parent not found: ${e1?.message}`);
-
-  if (parentRow.final_image_url) {
-    console.log(`${logPrefix} Job already has a final image URL. Exiting.`);
-    return;
-  }
+  if (parentRow.final_image_url) { console.log(`${logPrefix} Already complete.`); return; }
 
   const { data: tiles, error: e2 } = await supabase
     .from("mira_agent_tiled_upscale_tiles")
-    .select("tile_index,coordinates,generated_tile_url,generated_tile_bucket,generated_tile_path,status")
+    .select("tile_index,coordinates,generated_tile_bucket,generated_tile_path,generated_tile_url,status")
     .eq("parent_job_id", parent_job_id)
-    .eq("status", "complete")
-    .order("tile_index", { ascending: true });
+    .order("tile_index",{ascending:true});
   if (e2) throw new Error(e2.message);
 
-  const completeTiles: Tile[] = (tiles ?? []).filter(t => (t.generated_tile_bucket && t.generated_tile_path) || t.generated_tile_url);
-  if (!completeTiles.length) throw new Error("No completed tiles with valid image references found for this job.");
+  const completeTiles = (tiles ?? []).filter(t => t.status === "complete" && (t.generated_tile_url || (t.generated_tile_bucket && t.generated_tile_path)));
+  if (!completeTiles.length) throw new Error("No completed tiles found with valid image references.");
 
-  const firstTileRef: TileRef = completeTiles[0].generated_tile_bucket 
-    ? { bucket: completeTiles[0].generated_tile_bucket!, path: completeTiles[0].generated_tile_path! }
-    : { url: completeTiles[0].generated_tile_url! };
-
-  const firstTileCtl = new AbortController();
-  const firstTileTimeout = setTimeout(() => firstTileCtl.abort(), 25_000);
-  const firstTileBytes = await fetchBytes(firstTileRef, firstTileCtl.signal);
-  clearTimeout(firstTileTimeout);
-
-  const firstTileImage = await Image.decode(firstTileBytes);
+  // detect tile size
+  const firstTile = completeTiles[0];
+  const anyUrl = firstTile.generated_tile_url;
+  const signed = !anyUrl
+    ? (await supabase.storage.from(firstTile.generated_tile_bucket!)
+        .createSignedUrl(firstTile.generated_tile_path!, 120)).data!.signedUrl
+    : anyUrl;
+  const firstTileImage = await Image.decode(await (await fetch(signed)).arrayBuffer());
   const actualTileSize = firstTileImage.width;
   const scaleFactor = actualTileSize / TILE_SIZE;
   console.log(`${logPrefix} Detected upscale factor of ${scaleFactor}x (Tiles are ${actualTileSize}px)`);
 
-  const { data: sourceBlob, error: dlError } = await supabase.storage.from(parentRow.source_bucket!).download(parentRow.source_path!);
-  if (dlError) throw new Error(`Failed to download original source image: ${dlError.message}`);
-  
-  let originalImage: Image | null = await Image.decode(await sourceBlob.arrayBuffer());
-  const finalW = Math.round(originalImage.width * scaleFactor);
-  const finalH = Math.round(originalImage.height * scaleFactor);
-  originalImage = null; // Release memory
+  // final canvas from tiles
+  const maxX = Math.max(...completeTiles.map(t => t.coordinates.x));
+  const maxY = Math.max(...completeTiles.map(t => t.coordinates.y));
+  const finalW = Math.round((maxX + TILE_SIZE) * scaleFactor);
+  const finalH = Math.round((maxY + TILE_SIZE) * scaleFactor);
   console.log(`${logPrefix} Final canvas dimensions will be ${finalW}x${finalH}`);
 
-  const estMB = (finalW * finalH * 4 * 2 + 8 * actualTileSize * 4) / (1024 * 1024);
+  const ovScaled = Math.min(Math.max(1, Math.round(TILE_OVERLAP * scaleFactor)), actualTileSize - 1);
+  const stepScaled = actualTileSize - ovScaled;
+
+  const estMB = (finalW * finalH * 4 + actualTileSize * actualTileSize * 4) / (1024*1024);
   if (estMB > MEM_HARD_LIMIT_MB) {
     await supabase.from("mira_agent_tiled_upscale_jobs").update({ status: "failed", error_message: `Estimated RAM ${estMB.toFixed(1)}MB exceeds limit ${MEM_HARD_LIMIT_MB}MB.` }).eq("id", parent_job_id);
     throw new Error(`Refused: est ${estMB.toFixed(1)} MB > limit ${MEM_HARD_LIMIT_MB}`);
   }
 
   const canvas = new Image(finalW, finalH);
-  console.log(`${logPrefix} Created empty canvas for normalized blending.`);
 
-  const EPS_PRE = Math.max(1, Math.floor(TILE_SIZE / 64));
-  const q = (v:number)=> Math.round(v / EPS_PRE) * EPS_PRE;
-  const xs = [...new Set(completeTiles.map(t => q(t.coordinates.x)))].sort((a,b)=>a-b);
-  const ys = [...new Set(completeTiles.map(t => q(t.coordinates.y)))].sort((a,b)=>a-b);
-  const dx = xs.length > 1 ? Math.min(...xs.slice(1).map((v,i)=> v - xs[i])) : 0;
-  const dy = ys.length > 1 ? Math.min(...ys.slice(1).map((v,i)=> v - ys[i])) : 0;
-  const stepX = dx > 0 ? Math.round(dx * scaleFactor) : Number.POSITIVE_INFINITY;
-  const stepY = dy > 0 ? Math.round(dy * scaleFactor) : Number.POSITIVE_INFINITY;
-  const ovX = Number.isFinite(stepX) ? Math.max(0, actualTileSize - stepX) : 0;
-  const ovY = Number.isFinite(stepY) ? Math.max(0, actualTileSize - stepY) : 0;
-  console.log(`${logPrefix} Inferred scaled steps: {x: ${stepX}, y: ${stepY}}. Overlaps: {x: ${ovX}, y: ${ovY}}`);
+  // neighbor lookup on grid
+  const positions = new Map<string, boolean>();
+  for (const t of completeTiles) positions.set(`${gridX(t)}:${gridY(t)}`, true);
+  const hasAt = (gx:number, gy:number) => positions.has(`${gx}:${gy}`);
 
-  const EPSX = Math.max(1, Math.floor(actualTileSize / 64));
-  const EPSY = Math.max(1, Math.floor(actualTileSize / 64));
-  const key = (x:number,y:number)=> `${Math.round(x/EPSX)},${Math.round(y/EPSY)}`;
-  const idx = new Set(completeTiles.map(t => key(Math.round(t.coordinates.x*scaleFactor), Math.round(t.coordinates.y*scaleFactor))));
-  function flags(x:number,y:number) {
-    const k = (xx:number,yy:number)=> idx.has(key(xx,yy));
-    return {
-      left:   Number.isFinite(stepX) ? k(x - stepX, y) : false,
-      right:  Number.isFinite(stepX) ? k(x + stepX, y) : false,
-      top:    Number.isFinite(stepY) ? k(x, y - stepY) : false,
-      bottom: Number.isFinite(stepY) ? k(x, y + stepY) : false,
-    };
-  }
-
+  let processed = 0;
   for (const t of completeTiles) {
-    const tileRef: TileRef = t.generated_tile_bucket
-        ? { bucket: t.generated_tile_bucket, path: t.generated_tile_path! }
-        : { url: t.generated_tile_url! };
-
     const ctl = new AbortController();
     const timeout = setTimeout(() => ctl.abort(), 25_000);
-    const bytes = await fetchBytes(tileRef, ctl.signal);
+
+    const url = t.generated_tile_url ?? (await supabase.storage
+      .from(t.generated_tile_bucket!).createSignedUrl(t.generated_tile_path!, 120)).data!.signedUrl;
+
+    const bytes = new Uint8Array(await (await fetch(url, { signal: ctl.signal })).arrayBuffer());
     clearTimeout(timeout);
 
-    let tile: Image | null = await Image.decode(bytes);
-    console.log(`${logPrefix} Processing Tile #${t.tile_index} | Coords: {x:${t.coordinates.x}, y:${t.coordinates.y}} | Decoded Size: ${tile.width}x${tile.height}`);
-    
-    const tileW = tile.width, tileH = tile.height;
-    const ovXlocal = Math.min(ovX, tileW);
-    const ovYlocal = Math.min(ovY, tileH);
-    const { HR, VR } = getRamps(tileW, tileH, ovXlocal, ovYlocal);
+    let tile = await Image.decode(bytes);
 
-    const scaledX = Math.round(t.coordinates.x * scaleFactor);
-    const scaledY = Math.round(t.coordinates.y * scaleFactor);
-    const f = flags(scaledX, scaledY);
-    const hx = HR[`h${f.left?1:0}${f.right?1:0}` as const];
-    const vy = VR[`v${f.top?1:0}${f.bottom?1:0}` as const];
+    const gx = gridX(t), gy = gridY(t);
+    const scaledX = gx * stepScaled;
+    const scaledY = gy * stepScaled;
 
-    blendWeighted(canvas, tile, scaledX, scaledY, hx, vy);
-    
-    tile = null; // Help GC
+    const n = {
+      left:   hasAt(gx-1, gy),
+      right:  hasAt(gx+1, gy),
+      top:    hasAt(gx, gy-1),
+      bottom: hasAt(gx, gy+1),
+    };
+
+    if (n.left || n.right || n.top || n.bottom) featherBands(tile, ovScaled, n);
+
+    canvas.composite(tile, scaledX, scaledY);
+    // @ts-ignore
+    tile = null;
+
+    if ((++processed % 6) === 0) await new Promise(r => setTimeout(r, 0));
   }
-
-  for (let i = 0; i < canvas.bitmap.length; i += 4) canvas.bitmap[i + 3] = 255;
 
   const jpeg = await canvas.encodeJPEG(JPEG_QUALITY);
   const outPath = `${parentRow.user_id}/${parent_job_id}/tiled-upscale-final-${finalW}x${finalH}.jpg`;
   await supabase.storage.from(BUCKET_OUT).upload(outPath, jpeg, { contentType: "image/jpeg", upsert: true });
   const { data: pub } = supabase.storage.from(BUCKET_OUT).getPublicUrl(outPath);
-
   await supabase.from("mira_agent_tiled_upscale_jobs").update({ status: "complete", final_image_url: pub.publicUrl }).eq("id", parent_job_id);
   console.log(`${logPrefix} Compositing complete. Final URL: ${pub.publicUrl}`);
 }
@@ -262,8 +167,13 @@ async function run(parent_job_id: string) {
 serve(async (req) => {
   const { parent_job_id } = await req.json();
   if (!parent_job_id) return new Response("Missing parent_job_id", { status: 400 });
+  
+  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    global: { fetch }, auth: { persistSession: false }
+  });
+
   try {
-    await run(parent_job_id);
+    await run(supabase, parent_job_id);
     return new Response("ok");
   } catch (err) {
     console.error(`[Compositor][${parent_job_id}] FATAL ERROR:`, err);
