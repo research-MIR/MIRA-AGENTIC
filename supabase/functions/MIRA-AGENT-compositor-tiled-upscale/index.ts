@@ -12,6 +12,9 @@ const TILE_OVERLAP = 264;
 const STEP = TILE_SIZE - TILE_OVERLAP;
 const JPEG_QUALITY = Number(Deno.env.get("COMPOSITOR_JPEG_QUALITY") ?? 85);
 const MEM_HARD_LIMIT_MB = Number(Deno.env.get("COMPOSITOR_MEM_LIMIT_MB") ?? 360);
+const MAX_FEATHER = Number(Deno.env.get("COMPOSITOR_MAX_FEATHER") ?? 256);
+const MAX_PIXELS = Number(Deno.env.get("COMPOSITOR_MAX_PX") ?? 80e6);
+const OUTPUT_FORMAT = (Deno.env.get("COMPOSITOR_OUTPUT") ?? "jpeg").toLowerCase();
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -69,6 +72,17 @@ function featherBandsLUT(tile: Image, ov: number, n: {left:boolean;right:boolean
   if (n.bottom) for (let y=H-ov,i=0; y<H; y++, i++) { const s=R[i]; let a=(y*W)*4+3; for (let x=0; x<W; x++, a+=4) bmp[a]=(bmp[a]*s)>>>8; }
 }
 
+async function downloadTileBytes(supabase: SupabaseClient, t: any): Promise<Uint8Array> {
+  if (t.generated_tile_bucket && t.generated_tile_path) {
+    const { data, error } = await supabase.storage.from(t.generated_tile_bucket).download(t.generated_tile_path);
+    if (error) throw new Error(`Storage download failed: ${error.message}`);
+    return new Uint8Array(await data.arrayBuffer());
+  }
+  const res = await fetch(t.generated_tile_url);
+  if (!res.ok) throw new Error(`HTTP ${res.status} for ${t.generated_tile_url}`);
+  return new Uint8Array(await res.arrayBuffer());
+}
+
 async function run(supabase: SupabaseClient, parent_job_id: string) {
   const log = (m:string)=>console.log(`[Compositor][${parent_job_id}] ${m}`);
 
@@ -79,7 +93,6 @@ async function run(supabase: SupabaseClient, parent_job_id: string) {
   if (e1 || !parent) throw new Error(`Parent not found: ${e1?.message}`);
   if (parent.final_image_url) { log("Already complete."); return; }
 
-  // 1) Fetch and VALIDATE tiles
   const { data: tilesRaw, error: e2 } = await supabase
     .from("mira_agent_tiled_upscale_tiles")
     .select("tile_index,coordinates,generated_tile_bucket,generated_tile_path,generated_tile_url,status")
@@ -89,72 +102,58 @@ async function run(supabase: SupabaseClient, parent_job_id: string) {
 
   const completeTiles = (tilesRaw ?? []).filter(isValidTile);
   if (!completeTiles.length) throw new Error("No valid completed tiles with coordinates and image refs.");
-  // Row-major sort
   completeTiles.sort((a,b) => gridY(a) - gridY(b) || gridX(a) - gridX(b));
 
-  // 2) Detect actual tile size on first valid tile
-  const urlCache = new Map<string,string>();
-  const urlFor = async (t:any) => {
-    if (t.generated_tile_url) return t.generated_tile_url;
-    const key = `${t.generated_tile_bucket}/${t.generated_tile_path}`;
-    const cached = urlCache.get(key);
-    if (cached) return cached;
-    const { data } = await supabase.storage.from(t.generated_tile_bucket)
-      .createSignedUrl(t.generated_tile_path, 180);
-    if (!data || !data.signedUrl) throw new Error(`Failed to create signed URL for ${key}`);
-    urlCache.set(key, data.signedUrl);
-    return data.signedUrl;
-  };
-  const firstUrl = await urlFor(completeTiles[0]);
-  const firstTileImage = await Image.decode(await (await fetch(firstUrl)).arrayBuffer());
+  const firstBytes = await downloadTileBytes(supabase, completeTiles[0]);
+  const firstTileImage = await Image.decode(firstBytes);
   const actualTileSize = firstTileImage.width;
   const scaleFactor = actualTileSize / TILE_SIZE;
   log(`Detected upscale factor ${scaleFactor}x (tile ${actualTileSize}px)`);
 
-  // 3) Canvas sizing from layout
   const maxX = Math.max(...completeTiles.map(t => t.coordinates.x));
   const maxY = Math.max(...completeTiles.map(t => t.coordinates.y));
   const finalW = Math.round((maxX + TILE_SIZE) * scaleFactor);
   const finalH = Math.round((maxY + TILE_SIZE) * scaleFactor);
   log(`Final canvas ${finalW}x${finalH}`);
 
-  const ovScaled = Math.min(Math.max(1, Math.round(TILE_OVERLAP * scaleFactor)), actualTileSize - 1);
-  if (ovScaled <= 0) throw new Error(`Invalid ovScaled ${ovScaled}; check TILE_OVERLAP vs tile size.`);
+  if ((finalW * finalH) > MAX_PIXELS) {
+    throw new Error(`Refused: Final image dimensions ${finalW}x${finalH} exceed the maximum pixel limit of ${MAX_PIXELS}.`);
+  }
+
+  const ovScaled = Math.min(Math.max(1, Math.round(TILE_OVERLAP * scaleFactor)), MAX_FEATHER, actualTileSize - 1);
+  const stepScaled = actualTileSize - ovScaled;
+  if (stepScaled <= 0) throw new Error(`Invalid stepScaled ${stepScaled}; check TILE_OVERLAP vs tile size.`);
 
   const bytesCanvas = finalW * finalH * 4;
   const bytesTile = actualTileSize * actualTileSize * 4;
   const estMB = (bytesCanvas + bytesTile)/(1024*1024) + 32;
   if (estMB > MEM_HARD_LIMIT_MB) {
-    await supabase.from("mira_agent_tiled_upscale_jobs")
-      .update({ status: "failed", error_message: `Estimated RAM ${estMB.toFixed(1)}MB > ${MEM_HARD_LIMIT_MB}MB` })
-      .eq("id", parent_job_id);
+    await supabase.from("mira_agent_tiled_upscale_jobs").update({ status: "failed", error_message: `Estimated RAM ${estMB.toFixed(1)}MB > ${MEM_HARD_LIMIT_MB}MB` }).eq("id", parent_job_id);
     throw new Error(`Refused: est ${estMB.toFixed(1)} MB > limit ${MEM_HARD_LIMIT_MB}`);
   }
 
   const canvas = new Image(finalW, finalH);
 
-  // Occupancy set for neighbor checks
   const occupy = new Set<string>();
   const k = (gx:number,gy:number)=>`${gx}:${gy}`;
   for (const t of completeTiles) occupy.add(k(gridX(t), gridY(t)));
   const hasAt = (gx:number,gy:number)=>occupy.has(k(gx,gy));
 
-  // 4) Process tiles (with tiny event-loop yields)
-  let processed = 0;
   for (const t of completeTiles) {
-    // fetch & decode
-    const ctl = new AbortController();
-    const timer = setTimeout(() => ctl.abort(), 25_000);
-    const url = await urlFor(t);
-    const arr = new Uint8Array(await (await fetch(url, { signal: ctl.signal })).arrayBuffer());
-    clearTimeout(timer);
+    const arr = await downloadTileBytes(supabase, t);
     let tile = await Image.decode(arr);
-    if (tile.width !== actualTileSize) tile.resize(actualTileSize, actualTileSize, Image.RESIZE_BICUBIC);
-
-    const x = Math.round(t.coordinates.x * scaleFactor);
-    const y = Math.round(t.coordinates.y * scaleFactor);
+    if (tile.width !== actualTileSize || tile.height !== actualTileSize) {
+        const fixed = new Image(actualTileSize, actualTileSize);
+        const dx = Math.floor((actualTileSize - tile.width) / 2);
+        const dy = Math.floor((actualTileSize - tile.height) / 2);
+        fixed.composite(tile, dx, dy);
+        tile = fixed;
+    }
 
     const gx = gridX(t), gy = gridY(t);
+    const x = gx * stepScaled;
+    const y = gy * stepScaled;
+
     const n = { left: hasAt(gx-1,gy), right: hasAt(gx+1,gy), top: hasAt(gx,gy-1), bottom: hasAt(gx,gy+1) };
     const incoming = { left: n.left, right: false, top: n.top, bottom: false };
     if (incoming.left || incoming.top) featherBandsLUT(tile, ovScaled, incoming);
@@ -163,14 +162,28 @@ async function run(supabase: SupabaseClient, parent_job_id: string) {
     // @ts-ignore
     tile = null;
 
-    if ((++processed % 6) === 0) await new Promise(r => setTimeout(r, 0));
+    await new Promise(r => setTimeout(r, 0));
   }
 
   const px = finalW * finalH;
-  const effQ = px > 64e6 ? Math.min(75, JPEG_QUALITY) : px > 36e6 ? Math.min(80, JPEG_QUALITY) : JPEG_QUALITY;
-  const jpeg = await canvas.encodeJPEG(effQ);
-  const outPath = `${parent.user_id}/${parent_job_id}/tiled-upscale-final-${finalW}x${finalH}.jpg`;
-  await supabase.storage.from(BUCKET_OUT).upload(outPath, jpeg, { contentType: "image/jpeg", upsert: true });
+  const effQ = px > 64e6 ? Math.min(70, JPEG_QUALITY) : px > 36e6 ? Math.min(78, JPEG_QUALITY) : JPEG_QUALITY;
+  
+  let outBytes: Uint8Array;
+  let mimeType: string;
+  let fileExtension: string;
+
+  if (OUTPUT_FORMAT === "webp") {
+    outBytes = await canvas.encode(2, Math.min(80, effQ));
+    mimeType = "image/webp";
+    fileExtension = "webp";
+  } else {
+    outBytes = await canvas.encodeJPEG(effQ);
+    mimeType = "image/jpeg";
+    fileExtension = "jpg";
+  }
+
+  const outPath = `${parent.user_id}/${parent_job_id}/tiled-upscale-final-${finalW}x${finalH}.${fileExtension}`;
+  await supabase.storage.from(BUCKET_OUT).upload(outPath, outBytes, { contentType: mimeType, upsert: true });
   const { data: pub } = supabase.storage.from(BUCKET_OUT).getPublicUrl(outPath);
   await supabase.from("mira_agent_tiled_upscale_jobs").update({ status: "complete", final_image_url: pub.publicUrl }).eq("id", parent_job_id);
   log(`Compositing complete. Final URL: ${pub.publicUrl}`);
