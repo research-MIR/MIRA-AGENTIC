@@ -18,48 +18,51 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// feather only when needed; touch bands not full tile
-function featherBands(tile: Image, ov: number, n: {left:boolean;right:boolean;top:boolean;bottom:boolean}) {
-  const bmp = tile.bitmap; // Uint8ClampedArray RGBA
-  const W = tile.width, H = tile.height;
+function makeSmoothstepLUT(ov: number, invert = false) {
+  const lut = new Uint8Array(ov);
+  if (ov <= 1) { lut.fill(255); return lut; }
+  for (let i = 0; i < ov; i++) {
+    let t = i / (ov - 1);
+    t = invert ? 1 - t : t;
+    const s = t * t * (3 - 2 * t); // smoothstep
+    lut[i] = Math.max(0, Math.min(255, (s * 255) | 0));
+  }
+  return lut;
+}
 
-  // Horizontal bands
+function featherBandsLUT(tile: Image, ov: number, n: {left:boolean;right:boolean;top:boolean;bottom:boolean}) {
+  if (ov <= 0) return;
+  const W = tile.width, H = tile.height, bmp = tile.bitmap;
+  const L = makeSmoothstepLUT(ov, false);
+  const R = makeSmoothstepLUT(ov, true);
+
+  // Horz bands (use LUT)
   if (n.left) {
     for (let y=0; y<H; y++) {
-      const base = (y*W)*4;
-      for (let x=0; x<ov; x++) {
-        const aIdx = base + x*4 + 3;
-        const w = (x/(ov-1));
-        const s = w*w*(3-2*w); // smoothstep
-        bmp[aIdx] = (bmp[aIdx] * s) | 0;
-      }
+      let a = (y*W)*4 + 3;
+      for (let x=0; x<ov; x++, a+=4) bmp[a] = (bmp[a] * L[x]) >>> 8;
     }
   }
   if (n.right) {
     for (let y=0; y<H; y++) {
-      const base = (y*W)*4;
-      for (let x=W-ov; x<W; x++) {
-        const aIdx = base + x*4 + 3;
-        const u = (W-1 - x)/(ov-1);
-        const s = u*u*(3-2*u);
-        bmp[aIdx] = (bmp[aIdx] * s) | 0;
-      }
+      let a = (y*W + (W-ov))*4 + 3;
+      for (let x=0; x<ov; x++, a+=4) bmp[a] = (bmp[a] * R[x]) >>> 8;
     }
   }
 
-  // Vertical bands
+  // Vert bands
   if (n.top) {
     for (let y=0; y<ov; y++) {
-      const v = (y/(ov-1)); const s = v*v*(3-2*v);
-      let row = (y*W)*4 + 3;
-      for (let x=0; x<W; x++, row+=4) bmp[row] = (bmp[row] * s) | 0;
+      const s = L[y];
+      let a = (y*W)*4 + 3;
+      for (let x=0; x<W; x++, a+=4) bmp[a] = (bmp[a] * s) >>> 8;
     }
   }
   if (n.bottom) {
-    for (let y=H-ov; y<H; y++) {
-      const v = (H-1 - y)/(ov-1); const s = v*v*(3-2*v);
-      let row = (y*W)*4 + 3;
-      for (let x=0; x<W; x++, row+=4) bmp[row] = (bmp[row] * s) | 0;
+    for (let y=H-ov, i=0; y<H; y++, i++) {
+      const s = R[i];
+      let a = (y*W)*4 + 3;
+      for (let x=0; x<W; x++, a+=4) bmp[a] = (bmp[a] * s) >>> 8;
     }
   }
 }
@@ -88,7 +91,15 @@ async function run(supabase: SupabaseClient, parent_job_id: string) {
   const completeTiles = (tiles ?? []).filter(t => t.status === "complete" && (t.generated_tile_url || (t.generated_tile_bucket && t.generated_tile_path)));
   if (!completeTiles.length) throw new Error("No completed tiles found with valid image references.");
 
-  // detect tile size
+  completeTiles.sort((a,b) => {
+    const gyA = gridY(a);
+    const gyB = gridY(b);
+    if (gyA !== gyB) return gyA - gyB;
+    const gxA = gridX(a);
+    const gxB = gridX(b);
+    return gxA - gxB;
+  });
+
   const firstTile = completeTiles[0];
   const anyUrl = firstTile.generated_tile_url;
   const signed = !anyUrl
@@ -100,7 +111,6 @@ async function run(supabase: SupabaseClient, parent_job_id: string) {
   const scaleFactor = actualTileSize / TILE_SIZE;
   console.log(`${logPrefix} Detected upscale factor of ${scaleFactor}x (Tiles are ${actualTileSize}px)`);
 
-  // final canvas from tiles
   const maxX = Math.max(...completeTiles.map(t => t.coordinates.x));
   const maxY = Math.max(...completeTiles.map(t => t.coordinates.y));
   const finalW = Math.round((maxX + TILE_SIZE) * scaleFactor);
@@ -109,8 +119,12 @@ async function run(supabase: SupabaseClient, parent_job_id: string) {
 
   const ovScaled = Math.min(Math.max(1, Math.round(TILE_OVERLAP * scaleFactor)), actualTileSize - 1);
   const stepScaled = actualTileSize - ovScaled;
+  if (stepScaled <= 0) throw new Error(`Invalid stepScaled ${stepScaled}. Check TILE_OVERLAP vs tile size.`);
 
-  const estMB = (finalW * finalH * 4 + actualTileSize * actualTileSize * 4) / (1024*1024);
+  const bytesCanvas = finalW * finalH * 4;
+  const bytesTile = actualTileSize * actualTileSize * 4;
+  const safetyMB = 32;
+  const estMB = (bytesCanvas + bytesTile) / (1024*1024) + safetyMB;
   if (estMB > MEM_HARD_LIMIT_MB) {
     await supabase.from("mira_agent_tiled_upscale_jobs").update({ status: "failed", error_message: `Estimated RAM ${estMB.toFixed(1)}MB exceeds limit ${MEM_HARD_LIMIT_MB}MB.` }).eq("id", parent_job_id);
     throw new Error(`Refused: est ${estMB.toFixed(1)} MB > limit ${MEM_HARD_LIMIT_MB}`);
@@ -118,10 +132,10 @@ async function run(supabase: SupabaseClient, parent_job_id: string) {
 
   const canvas = new Image(finalW, finalH);
 
-  // neighbor lookup on grid
-  const positions = new Map<string, boolean>();
-  for (const t of completeTiles) positions.set(`${gridX(t)}:${gridY(t)}`, true);
-  const hasAt = (gx:number, gy:number) => positions.has(`${gx}:${gy}`);
+  const occupied = new Set<string>();
+  const key = (gx:number,gy:number)=>`${gx}:${gy}`;
+  for (const t of completeTiles) occupied.add(key(gridX(t), gridY(t)));
+  const hasAt = (gx:number,gy:number)=>occupied.has(key(gx,gy));
 
   let processed = 0;
   for (const t of completeTiles) {
@@ -147,7 +161,7 @@ async function run(supabase: SupabaseClient, parent_job_id: string) {
       bottom: hasAt(gx, gy+1),
     };
 
-    if (n.left || n.right || n.top || n.bottom) featherBands(tile, ovScaled, n);
+    if (n.left || n.right || n.top || n.bottom) featherBandsLUT(tile, ovScaled, n);
 
     canvas.composite(tile, scaledX, scaledY);
     // @ts-ignore
@@ -156,7 +170,8 @@ async function run(supabase: SupabaseClient, parent_job_id: string) {
     if ((++processed % 6) === 0) await new Promise(r => setTimeout(r, 0));
   }
 
-  const jpeg = await canvas.encodeJPEG(JPEG_QUALITY);
+  const effQuality = (finalW*finalH > 36e6) ? Math.min(80, JPEG_QUALITY) : JPEG_QUALITY;
+  const jpeg = await canvas.encodeJPEG(effQuality);
   const outPath = `${parentRow.user_id}/${parent_job_id}/tiled-upscale-final-${finalW}x${finalH}.jpg`;
   await supabase.storage.from(BUCKET_OUT).upload(outPath, jpeg, { contentType: "image/jpeg", upsert: true });
   const { data: pub } = supabase.storage.from(BUCKET_OUT).getPublicUrl(outPath);
