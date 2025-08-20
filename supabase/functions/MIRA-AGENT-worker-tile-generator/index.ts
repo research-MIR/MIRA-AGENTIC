@@ -29,19 +29,17 @@ serve(async (req) => {
       .update({ status: 'generating' })
       .eq('id', tile_id)
       .eq('status', 'pending_generation')
+      .not('generated_prompt', 'is', null)
       .select('id, parent_job_id, source_tile_bucket, source_tile_path, generated_prompt')
       .single();
 
     if (claimError) throw new Error(`Claiming tile failed: ${claimError.message}`);
     if (!claimedTile) {
-      console.log(`${logPrefix} Tile already claimed or not in 'pending_generation' state. Exiting.`);
-      return new Response(JSON.stringify({ success: true, message: "Tile already processed." }), { headers: corsHeaders });
+      console.log(`${logPrefix} Tile already claimed, not in 'pending_generation' state, or missing prompt. Exiting.`);
+      return new Response(JSON.stringify({ success: true, message: "Tile not eligible for generation." }), { headers: corsHeaders });
     }
 
     const { parent_job_id, source_tile_bucket, source_tile_path, generated_prompt } = claimedTile;
-    if (!source_tile_bucket || !source_tile_path || !generated_prompt) {
-      throw new Error("Tile record is missing required data for generation.");
-    }
 
     const { data: signedUrlData, error: signedUrlError } = await supabase.storage
       .from(source_tile_bucket)

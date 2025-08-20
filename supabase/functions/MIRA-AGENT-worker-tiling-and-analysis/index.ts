@@ -94,7 +94,7 @@ serve(async (req) => {
         if (error) throw error;
     }
 
-    await supabase.from("mira_agent_tiled_upscale_jobs").update({ status: "generating", total_tiles: totalTiles }).eq("id", parent_job_id);
+    await supabase.from("mira_agent_tiled_upscale_jobs").update({ status: "queued_for_generation", total_tiles: totalTiles }).eq("id", parent_job_id);
     console.log(`${logPrefix} Tiling complete. All tiles queued for analysis.`);
 
     return new Response(JSON.stringify({ success: true, tileCount: totalTiles }), { headers: corsHeaders });

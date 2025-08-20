@@ -66,7 +66,13 @@ serve(async (req) => {
     }
 
     // --- Dispatch Pending Analysis ---
-    const { data: pendingAnalysisTiles, error: fetchAnalysisError } = await supabase.from('mira_agent_tiled_upscale_tiles').select('id').eq('status', 'pending_analysis').limit(BATCH_SIZE);
+    const { data: pendingAnalysisTiles, error: fetchAnalysisError } = await supabase
+        .from('mira_agent_tiled_upscale_tiles')
+        .select('id')
+        .eq('status', 'pending_analysis')
+        .not('source_tile_bucket', 'is', null)
+        .not('source_tile_path', 'is', null)
+        .limit(BATCH_SIZE);
     if (fetchAnalysisError) throw fetchAnalysisError;
     if (pendingAnalysisTiles && pendingAnalysisTiles.length > 0) {
       const tileIds = pendingAnalysisTiles.map(t => t.id);
@@ -76,7 +82,12 @@ serve(async (req) => {
     }
 
     // --- Dispatch Pending Generation ---
-    const { data: pendingGenerationTiles, error: fetchGenerationError } = await supabase.from('mira_agent_tiled_upscale_tiles').select('id').eq('status', 'pending_generation').limit(BATCH_SIZE);
+    const { data: pendingGenerationTiles, error: fetchGenerationError } = await supabase
+        .from('mira_agent_tiled_upscale_tiles')
+        .select('id')
+        .eq('status', 'pending_generation')
+        .not('generated_prompt', 'is', null)
+        .limit(BATCH_SIZE);
     if (fetchGenerationError) throw fetchGenerationError;
     if (pendingGenerationTiles && pendingGenerationTiles.length > 0) {
       const tileIds = pendingGenerationTiles.map(t => t.id);
@@ -86,7 +97,7 @@ serve(async (req) => {
     }
 
     // --- Trigger Compositor ---
-    const { data: generatingJobs, error: fetchGeneratingError } = await supabase.from('mira_agent_tiled_upscale_jobs').select('id, total_tiles').eq('status', 'generating');
+    const { data: generatingJobs, error: fetchGeneratingError } = await supabase.from('mira_agent_tiled_upscale_jobs').select('id, total_tiles').in('status', ['generating', 'queued_for_generation']);
     if (fetchGeneratingError) throw fetchGeneratingError;
     if (generatingJobs && generatingJobs.length > 0) {
       const jobIds = generatingJobs.map(j => j.id);
@@ -101,7 +112,12 @@ serve(async (req) => {
         }
       });
 
-      const jobsReadyForCompositing = Object.entries(jobCounts).filter(([_, counts]) => counts.total > 0 && counts.total === counts.complete).map(([jobId]) => jobId);
+      const jobsReadyForCompositing = generatingJobs.filter(job => {
+          const total = job.total_tiles || 0;
+          const completed = jobCounts[job.id]?.complete || 0;
+          return total > 0 && total === completed;
+      }).map(job => job.id);
+      
       if (jobsReadyForCompositing.length > 0) {
         await supabase.from('mira_agent_tiled_upscale_jobs').update({ status: 'compositing' }).in('id', jobsReadyForCompositing);
         const compositorPromises = jobsReadyForCompositing.map(jobId => supabase.functions.invoke('MIRA-AGENT-compositor-tiled-upscale', { body: { parent_job_id: jobId } }));

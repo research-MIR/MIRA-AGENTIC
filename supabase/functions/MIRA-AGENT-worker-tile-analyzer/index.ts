@@ -32,19 +32,18 @@ serve(async (req) => {
       .update({ status: 'analyzing' })
       .eq('id', tile_id)
       .eq('status', 'pending_analysis')
+      .not('source_tile_bucket', 'is', null)
+      .not('source_tile_path', 'is', null)
       .select('source_tile_bucket, source_tile_path')
       .single();
 
     if (claimError) throw new Error(`Claiming tile failed: ${claimError.message}`);
     if (!claimedTile) {
-      console.log(`${logPrefix} Tile already claimed or not in 'pending_analysis' state. Exiting.`);
-      return new Response(JSON.stringify({ success: true, message: "Tile already processed." }), { headers: corsHeaders });
+      console.log(`${logPrefix} Tile already claimed, not in 'pending_analysis' state, or missing storage info. Exiting.`);
+      return new Response(JSON.stringify({ success: true, message: "Tile not eligible for analysis." }), { headers: corsHeaders });
     }
 
     const { source_tile_bucket, source_tile_path } = claimedTile;
-    if (!source_tile_bucket || !source_tile_path) {
-      throw new Error("Tile record is missing storage bucket or path information.");
-    }
 
     const { data: imageBlob, error: downloadError } = await supabase.storage.from(source_tile_bucket).download(source_tile_path);
     if (downloadError) throw downloadError;
