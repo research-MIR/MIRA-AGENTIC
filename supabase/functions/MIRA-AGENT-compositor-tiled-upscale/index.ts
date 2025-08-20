@@ -8,8 +8,8 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const BUCKET_OUT = "mira-generations";
 const STATE_BUCKET = "mira-agent-compositor-state";
 
-const TILE_SIZE = 512;
-const TILE_OVERLAP = 128;
+const TILE_SIZE = 256; // Halved from 512
+const TILE_OVERLAP = 32; // Reduced from 128
 const STEP = TILE_SIZE - TILE_OVERLAP;
 const JPEG_QUALITY = Number(Deno.env.get("COMPOSITOR_JPEG_QUALITY") ?? 85);
 const BATCH_SIZE = Number(Deno.env.get("COMPOSITOR_BATCH") ?? 12);
