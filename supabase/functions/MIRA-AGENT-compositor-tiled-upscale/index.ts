@@ -67,18 +67,49 @@ function featherBandsLUT(tile: Image, ov: number, n: {left:boolean;right:boolean
   }
 }
 
-function gridX(t:any){ return Math.round(t.coordinates.x / STEP); }
-function gridY(t:any){ return Math.round(t.coordinates.y / STEP); }
+const q = (v:number, step:number) => Math.floor((v + step * 0.5) / step);
+function gridX(t:any){ return q(t.coordinates.x, STEP); }
+function gridY(t:any){ return q(t.coordinates.y, STEP); }
+
+async function* prefetch(tiles:any[], getUrl:(t:any)=>Promise<string>) {
+  if (tiles.length === 0) return;
+  let i = 0;
+  let next = (async () => {
+    const url = await getUrl(tiles[0]);
+    const arr = new Uint8Array(await (await fetch(url)).arrayBuffer());
+    return { i: 0, img: await Image.decode(arr) };
+  })();
+
+  for (; i < tiles.length; i++) {
+    const cur = await next;
+    if (i + 1 < tiles.length) {
+      next = (async () => {
+        const url = await getUrl(tiles[i+1]);
+        const arr = new Uint8Array(await (await fetch(url)).arrayBuffer());
+        return { i: i+1, img: await Image.decode(arr) };
+      })();
+    }
+    yield cur;
+  }
+}
 
 async function run(supabase: SupabaseClient, parent_job_id: string) {
   const logPrefix = `[Compositor][${parent_job_id}]`;
   console.log(`${logPrefix} Starting run.`);
 
-  const { data: parentRow, error: e1 } = await supabase
-    .from("mira_agent_tiled_upscale_jobs")
-    .select("id,user_id,final_image_url")
-    .eq("id", parent_job_id).single();
-  if (e1 || !parentRow) throw new Error(`Parent not found: ${e1?.message}`);
+  const { data: claimed, error: claimError } = await supabase
+    .from('mira_agent_tiled_upscale_jobs')
+    .update({ status: 'compositing' })
+    .eq('id', parent_job_id)
+    .in('status', ['generating', 'queued_for_generation', 'compositing'])
+    .select('id, user_id, final_image_url')
+    .single();
+
+  if (claimError || !claimed) {
+    console.log(`${logPrefix} Could not claim job. It might be locked by another process or in an invalid state. Exiting.`);
+    return;
+  }
+  const parentRow = claimed;
   if (parentRow.final_image_url) { console.log(`${logPrefix} Already complete.`); return; }
 
   const { data: tiles, error: e2 } = await supabase
@@ -100,13 +131,20 @@ async function run(supabase: SupabaseClient, parent_job_id: string) {
     return gxA - gxB;
   });
 
-  const firstTile = completeTiles[0];
-  const anyUrl = firstTile.generated_tile_url;
-  const signed = !anyUrl
-    ? (await supabase.storage.from(firstTile.generated_tile_bucket!)
-        .createSignedUrl(firstTile.generated_tile_path!, 120)).data!.signedUrl
-    : anyUrl;
-  const firstTileImage = await Image.decode(await (await fetch(signed)).arrayBuffer());
+  const urlCache = new Map<string,string>();
+  const urlFor = async (t:any) => {
+    if (t.generated_tile_url) return t.generated_tile_url;
+    const key = `${t.generated_tile_bucket}/${t.generated_tile_path}`;
+    const cached = urlCache.get(key);
+    if (cached) return cached;
+    const { data } = await supabase.storage.from(t.generated_tile_bucket)
+      .createSignedUrl(t.generated_tile_path, 180);
+    if (!data || !data.signedUrl) throw new Error(`Failed to create signed URL for ${key}`);
+    urlCache.set(key, data.signedUrl);
+    return data.signedUrl;
+  };
+
+  const firstTileImage = await Image.decode(await (await fetch(await urlFor(completeTiles[0]))).arrayBuffer());
   const actualTileSize = firstTileImage.width;
   const scaleFactor = actualTileSize / TILE_SIZE;
   console.log(`${logPrefix} Detected upscale factor of ${scaleFactor}x (Tiles are ${actualTileSize}px)`);
@@ -137,19 +175,8 @@ async function run(supabase: SupabaseClient, parent_job_id: string) {
   for (const t of completeTiles) occupied.add(key(gridX(t), gridY(t)));
   const hasAt = (gx:number,gy:number)=>occupied.has(key(gx,gy));
 
-  let processed = 0;
-  for (const t of completeTiles) {
-    const ctl = new AbortController();
-    const timeout = setTimeout(() => ctl.abort(), 25_000);
-
-    const url = t.generated_tile_url ?? (await supabase.storage
-      .from(t.generated_tile_bucket!).createSignedUrl(t.generated_tile_path!, 120)).data!.signedUrl;
-
-    const bytes = new Uint8Array(await (await fetch(url, { signal: ctl.signal })).arrayBuffer());
-    clearTimeout(timeout);
-
-    let tile = await Image.decode(bytes);
-
+  for await (const { i, img } of prefetch(completeTiles, urlFor)) {
+    const t = completeTiles[i];
     const gx = gridX(t), gy = gridY(t);
     const scaledX = gx * stepScaled;
     const scaledY = gy * stepScaled;
@@ -161,16 +188,17 @@ async function run(supabase: SupabaseClient, parent_job_id: string) {
       bottom: hasAt(gx, gy+1),
     };
 
-    if (n.left || n.right || n.top || n.bottom) featherBandsLUT(tile, ovScaled, n);
+    if (n.left || n.right || n.top || n.bottom) featherBandsLUT(img, ovScaled, n);
 
-    canvas.composite(tile, scaledX, scaledY);
-    // @ts-ignore
-    tile = null;
+    canvas.composite(img, scaledX, scaledY);
 
-    if ((++processed % 6) === 0) await new Promise(r => setTimeout(r, 0));
+    if ((i + 1) % 6 === 0) await new Promise(r => setTimeout(r, 0));
   }
 
-  const effQuality = (finalW*finalH > 36e6) ? Math.min(80, JPEG_QUALITY) : JPEG_QUALITY;
+  const px = finalW * finalH;
+  const effQuality = px > 64e6 ? Math.min(75, JPEG_QUALITY)
+                   : px > 36e6 ? Math.min(80, JPEG_QUALITY)
+                   : JPEG_QUALITY;
   const jpeg = await canvas.encodeJPEG(effQuality);
   const outPath = `${parentRow.user_id}/${parent_job_id}/tiled-upscale-final-${finalW}x${finalH}.jpg`;
   await supabase.storage.from(BUCKET_OUT).upload(outPath, jpeg, { contentType: "image/jpeg", upsert: true });
