@@ -91,7 +91,7 @@ serve(async (req) => {
     }
 
     // --- Trigger Compositor ---
-    const { data: generatingJobs, error: fetchGeneratingError } = await supabase.from('mira_agent_tiled_upscale_jobs').select('id, total_tiles, comp_next_index, compositor_worker_id, comp_lease_expires_at').in('status', ['generating', 'queued_for_generation', 'compositing']);
+    const { data: generatingJobs, error: fetchGeneratingError } = await supabase.from('mira_agent_tiled_upscale_jobs').select('id, total_tiles, comp_next_index, compositor_worker_id, comp_lease_expires_at, status').in('status', ['generating', 'queued_for_generation', 'compositing']);
     if (fetchGeneratingError) throw fetchGeneratingError;
     if (generatingJobs && generatingJobs.length > 0) {
       const jobIds = generatingJobs.map(j => j.id);
@@ -110,12 +110,33 @@ serve(async (req) => {
       for (const job of generatingJobs) {
         const total = job.total_tiles || 0;
         const completed = jobCounts[job.id]?.complete || 0;
-        const isReady = total > 0 && total === completed;
-        const isStalled = job.compositor_worker_id && new Date(job.comp_lease_expires_at) < new Date();
-        const isUnclaimed = !job.compositor_worker_id;
+        const isReadyForCompositing = total > 0 && total === completed;
 
-        if (isReady && (isStalled || isUnclaimed || job.comp_next_index < total)) {
-            compositorInvocations.push(supabase.functions.invoke('MIRA-AGENT-compositor-tiled-upscale', { body: { parent_job_id: job.id } }));
+        if (isReadyForCompositing && job.status !== 'compositing' && job.status !== 'complete' && job.status !== 'failed') {
+            console.log(`${logPrefix} Job ${job.id} is ready for compositing. Attempting to claim by setting status to 'compositing'.`);
+            const { count, error: updateError } = await supabase
+                .from('mira_agent_tiled_upscale_jobs')
+                .update({ status: 'compositing' })
+                .eq('id', job.id)
+                .in('status', ['generating', 'queued_for_generation']);
+
+            if (updateError) {
+                console.error(`${logPrefix} Failed to update job ${job.id} to 'compositing':`, updateError.message);
+                continue;
+            }
+
+            if (count && count > 0) {
+                console.log(`${logPrefix} Successfully claimed job ${job.id}. Invoking compositor.`);
+                compositorInvocations.push(supabase.functions.invoke('MIRA-AGENT-compositor-tiled-upscale', { body: { parent_job_id: job.id } }));
+            } else {
+                console.log(`${logPrefix} Job ${job.id} was likely claimed by another watchdog instance. Skipping invocation.`);
+            }
+        } else if (job.status === 'compositing') {
+            const isStalled = job.compositor_worker_id && new Date(job.comp_lease_expires_at) < new Date();
+            if (isStalled) {
+                console.warn(`${logPrefix} Stalled compositor job ${job.id} detected. Re-invoking compositor.`);
+                compositorInvocations.push(supabase.functions.invoke('MIRA-AGENT-compositor-tiled-upscale', { body: { parent_job_id: job.id } }));
+            }
         }
       }
       
