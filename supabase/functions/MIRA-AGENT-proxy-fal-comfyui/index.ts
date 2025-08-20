@@ -14,11 +14,12 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Centralized presets as requested
-const payloadPresets: Record<string, any> = {
-  default: { ksampler_denoise: 0.1, imagescaleby_scale_by: 0.5, controlnetapplyadvanced_strength: 0.3, controlnetapplyadvanced_end_percent: 0.9 },
-  high_detail_upscale: { ksampler_denoise: 0.25, imagescaleby_scale_by: 0.5, controlnetapplyadvanced_strength: 0.3, controlnetapplyadvanced_end_percent: 0.75 },
-  creative_variation: { ksampler_denoise: 0.4, imagescaleby_scale_by: 0.5, controlnetapplyadvanced_strength: 0.5, controlnetapplyadvanced_end_percent: 0.7 }
+// A single, omnipresent set of parameters as requested.
+const omnipresentPayload = {
+  ksampler_denoise: 0.20000000000000004,
+  imagescaleby_scale_by: 0.5,
+  controlnetapplyadvanced_strength: 0.4,
+  controlnetapplyadvanced_end_percent: 0.8000000000000002
 };
 
 serve(async (req) => {
@@ -33,14 +34,11 @@ serve(async (req) => {
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
 
   try {
-    const { method, preset, prompt, image_base64, mime_type, image_url, user_id, tile_id } = await req.json();
+    const { method, image_base64, mime_type, image_url, user_id, tile_id } = await req.json();
 
     if (method === 'submit') {
       if (!user_id) throw new Error("user_id is required for submission.");
       if (!image_url && !image_base64) throw new Error("Either image_url or image_base64 is required.");
-
-      const { data: presetData } = await supabase.from('fal_comfyui_presets').select('payload').eq('name', preset || 'default').single();
-      const basePayload = presetData?.payload || payloadPresets[preset] || payloadPresets['default'];
 
       let finalImageUrl = image_url;
       if (image_base64) {
@@ -53,14 +51,16 @@ serve(async (req) => {
       let falResult: any;
       let lastError: Error | null = null;
 
+      const finalPayload = {
+        ...omnipresentPayload,
+        cliptextencode_text: "", // Always use an empty prompt as requested
+        loadimage_1: finalImageUrl
+      };
+
       for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
           falResult = await fal.queue.submit(pipeline, { 
-              input: {
-                  ...basePayload,
-                  cliptextencode_text: prompt || "",
-                  loadimage_1: finalImageUrl
-              }
+              input: finalPayload
           });
           lastError = null;
           break; // Success
@@ -81,9 +81,9 @@ serve(async (req) => {
         .insert({
           user_id: user_id,
           fal_request_id: falResult.request_id,
-          input_payload: { ...basePayload, cliptextencode_text: prompt || "", loadimage_1: finalImageUrl },
+          input_payload: finalPayload,
           status: 'queued',
-          metadata: { tile_id: tile_id } // Store the direct link to the tile
+          metadata: { tile_id: tile_id }
         })
         .select('id')
         .single();
