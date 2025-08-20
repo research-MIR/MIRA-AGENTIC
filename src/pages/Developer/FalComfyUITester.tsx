@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { RealtimeChannel } from '@supabase/supabase-js';
+import { Textarea } from '@/components/ui/textarea';
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -47,6 +48,7 @@ const FalComfyUITester = () => {
   const [jobId, setJobId] = useState<string | null>(null);
   const [jobStatus, setJobStatus] = useState<string | null>(null);
   const [resultImageUrl, setResultImageUrl] = useState<string | null>(null);
+  const [prompt, setPrompt] = useState<string>('');
   const [params, setParams] = useState({
     ksampler_denoise: 0.1,
     imagescaleby_scale_by: 0.5,
@@ -133,8 +135,12 @@ const FalComfyUITester = () => {
     addLog("Submitting job...");
     try {
       const image_base64 = await fileToBase64(imageFile);
+      const inputPayload = {
+        ...params,
+        cliptextencode_text: prompt,
+      };
       const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-fal-comfyui', {
-        body: { method: 'submit', input: params, image_base64, mime_type: imageFile.type, user_id: session.user.id }
+        body: { method: 'submit', input: inputPayload, image_base64, mime_type: imageFile.type, user_id: session.user.id }
       });
       if (error) throw error;
       setJobId(data.jobId);
@@ -177,6 +183,10 @@ const FalComfyUITester = () => {
               <div {...dropzoneProps} onClick={() => fileInputRef.current?.click()} className={cn("p-4 border-2 border-dashed rounded-lg text-center cursor-pointer", isDraggingOver && "border-primary")}>
                 {imagePreview ? <img src={imagePreview} alt="Preview" className="max-h-40 mx-auto rounded-md" /> : <><UploadCloud className="mx-auto h-8 w-8 text-muted-foreground" /><p className="mt-2 text-xs font-medium">Click or drag source image</p></>}
                 <Input ref={fileInputRef} type="file" className="hidden" accept="image/*" onChange={(e) => handleFileSelect(e.target.files?.[0] || null)} />
+              </div>
+              <div>
+                <Label>Prompt</Label>
+                <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="e.g., a photorealistic image of..." />
               </div>
               <div>
                 <Label>Denoise: {params.ksampler_denoise.toFixed(2)}</Label>
