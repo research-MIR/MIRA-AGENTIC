@@ -5,7 +5,6 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const BATCH_SIZE = 10;
 const STALLED_THRESHOLD_SECONDS = 180;
-const FAILED_RETRY_THRESHOLD_SECONDS = 300;
 const MAX_RETRIES = 3;
 
 const corsHeaders = {
@@ -22,23 +21,18 @@ serve(async (req) => {
   try {
     // --- Stalled Job Recovery ---
     const stalledThreshold = new Date(Date.now() - STALLED_THRESHOLD_SECONDS * 1000).toISOString();
-    const { data: stalledTiles, error: fetchStalledError } = await supabase
+    
+    await supabase
       .from('mira_agent_tiled_upscale_tiles')
-      .select('id, status')
-      .in('status', ['analyzing', 'generating'])
+      .update({ status: 'pending_analysis', error_message: 'Reset by watchdog due to stall.' })
+      .eq('status','analyzing')
       .lt('updated_at', stalledThreshold);
 
-    if (fetchStalledError) throw fetchStalledError;
-
-    if (stalledTiles && stalledTiles.length > 0) {
-      console.log(`${logPrefix} Found ${stalledTiles.length} stalled tiles. Resetting them...`);
-      const updates = stalledTiles.map(tile => ({
-        id: tile.id,
-        status: tile.status === 'analyzing' ? 'pending_analysis' : 'pending_generation',
-        error_message: 'Reset by watchdog due to stall.'
-      }));
-      await supabase.from('mira_agent_tiled_upscale_tiles').update(updates);
-    }
+    await supabase
+      .from('mira_agent_tiled_upscale_tiles')
+      .update({ status: 'pending_generation', error_message: 'Reset by watchdog due to stall.' })
+      .eq('status','generating')
+      .lt('updated_at', stalledThreshold);
 
     // --- Failed Job Retry ---
     const { data: failedTiles, error: fetchFailedError } = await supabase
@@ -50,31 +44,24 @@ serve(async (req) => {
     if (fetchFailedError) throw fetchFailedError;
 
     if (failedTiles && failedTiles.length > 0) {
-        console.log(`${logPrefix} Found ${failedTiles.length} failed tiles eligible for retry. Resetting...`);
-        const updates = failedTiles.map(tile => {
+        console.log(`${logPrefix} Found ${failedTiles.length} failed tiles eligible for retry. Processing individually...`);
+        for (const tile of failedTiles) {
             const isAnalysis = tile.status === 'analysis_failed';
             const currentRetries = (isAnalysis ? tile.analysis_retry_count : tile.generation_retry_count) || 0;
             
-            if (currentRetries >= MAX_RETRIES) {
-                return null; // Skip update if max retries reached
-            }
+            if (currentRetries >= MAX_RETRIES) continue;
 
             const newRetryCount = currentRetries + 1;
             const backoffSeconds = 300 * Math.pow(2, newRetryCount - 1); // 5m, 10m, 20m
-            const nextAttempt = new Date(Date.now() + backoffSeconds * 1000);
+            const nextAttempt = new Date(Date.now() + backoffSeconds * 1000).toISOString();
 
-            return {
-                id: tile.id,
+            await supabase.from('mira_agent_tiled_upscale_tiles').update({
                 status: isAnalysis ? 'pending_analysis' : 'pending_generation',
                 error_message: `Retrying after previous failure (Attempt ${newRetryCount}).`,
                 analysis_retry_count: isAnalysis ? newRetryCount : tile.analysis_retry_count,
                 generation_retry_count: !isAnalysis ? newRetryCount : tile.generation_retry_count,
-                next_attempt_at: nextAttempt.toISOString()
-            };
-        }).filter(Boolean);
-
-        if (updates.length > 0) {
-            await supabase.from('mira_agent_tiled_upscale_tiles').update(updates as any);
+                next_attempt_at: nextAttempt
+            }).eq('id', tile.id);
         }
     }
 
@@ -103,24 +90,18 @@ serve(async (req) => {
     if (fetchGeneratingError) throw fetchGeneratingError;
     if (generatingJobs && generatingJobs.length > 0) {
       const jobIds = generatingJobs.map(j => j.id);
-      const { data: completedTiles, error: fetchTilesError } = await supabase
-        .from('mira_agent_tiled_upscale_tiles')
-        .select('parent_job_id', { count: 'exact' })
-        .in('parent_job_id', jobIds)
-        .eq('status', 'complete');
+      const { data: allTiles, error: fetchTilesError } = await supabase.from('mira_agent_tiled_upscale_tiles').select('parent_job_id, status').in('parent_job_id', jobIds);
       if (fetchTilesError) throw fetchTilesError;
-
-      const completedCounts = (completedTiles as any[]).reduce((acc, tile) => {
-          acc[tile.parent_job_id] = (acc[tile.parent_job_id] || 0) + 1;
-          return acc;
-      }, {} as Record<string, number>);
-
-      const jobsReadyForCompositing = generatingJobs.filter(job => {
-          const total = job.total_tiles || 0;
-          const completed = completedCounts[job.id] || 0;
-          return total > 0 && total === completed;
-      }).map(job => job.id);
       
+      const jobCounts = jobIds.reduce((acc, id) => ({ ...acc, [id]: { total: 0, complete: 0 } }), {} as Record<string, { total: number, complete: number }>);
+      allTiles.forEach(tile => {
+        if (jobCounts[tile.parent_job_id!]) {
+          jobCounts[tile.parent_job_id!].total++;
+          if (tile.status === 'complete') jobCounts[tile.parent_job_id!].complete++;
+        }
+      });
+
+      const jobsReadyForCompositing = Object.entries(jobCounts).filter(([_, counts]) => counts.total > 0 && counts.total === counts.complete).map(([jobId]) => jobId);
       if (jobsReadyForCompositing.length > 0) {
         await supabase.from('mira_agent_tiled_upscale_jobs').update({ status: 'compositing' }).in('id', jobsReadyForCompositing);
         const compositorPromises = jobsReadyForCompositing.map(jobId => supabase.functions.invoke('MIRA-AGENT-compositor-tiled-upscale', { body: { parent_job_id: jobId } }));

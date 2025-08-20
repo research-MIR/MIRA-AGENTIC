@@ -36,6 +36,9 @@ serve(async (req) => {
       .eq("id", parent_job_id)
       .single();
     if (fetchError) throw fetchError;
+    if (!job.source_bucket || !job.source_path) {
+        throw new Error("Parent job is missing source_bucket or source_path.");
+    }
 
     const { data: blob, error: downloadError } = await supabase.storage.from(job.source_bucket).download(job.source_path);
     if (downloadError) throw downloadError;
