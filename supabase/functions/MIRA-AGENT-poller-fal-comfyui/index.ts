@@ -40,6 +40,10 @@ serve(async (req) => {
         if (status.status === 'COMPLETED') {
           console.log(`${logPrefix}[${job.id}] Job complete. Fetching result...`);
           const result = await fal.queue.result("comfy/research-MIR/test", { requestId: job.fal_request_id });
+          
+          // Log the raw response to help debug the structure
+          console.log(`${logPrefix}[${job.id}] Raw result from Fal.ai:`, JSON.stringify(result, null, 2));
+
           await supabase.from('fal_comfyui_jobs').update({ status: 'complete', final_result: result }).eq('id', job.id);
         } else if (status.status === 'ERROR') {
           console.error(`${logPrefix}[${job.id}] Job failed. Error: ${status.error}`);
