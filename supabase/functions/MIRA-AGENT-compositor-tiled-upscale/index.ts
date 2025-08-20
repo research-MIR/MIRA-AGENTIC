@@ -83,9 +83,14 @@ serve(async (req) => {
   const workerId = crypto.randomUUID();
 
   try {
-    const { data: claimedJob, error: claimError } = await supabase.rpc('claim_compositor_job', { p_job_id: parent_job_id, p_worker_id: workerId });
+    const { data: claimedJobs, error: claimError } = await supabase.rpc('claim_compositor_job', { p_job_id: parent_job_id, p_worker_id: workerId });
     if (claimError) throw new Error(`Failed to claim job: ${claimError.message}`);
-    if (!claimedJob) { log("Job is locked by another worker or not ready. Exiting."); return new Response("ok"); }
+    
+    const claimedJob = claimedJobs?.[0];
+    if (!claimedJob) { 
+        log("Job is locked by another worker, not ready, or does not exist. Exiting."); 
+        return new Response("ok"); 
+    }
 
     const { data: tilesRaw, error: e2 } = await supabase.from("mira_agent_tiled_upscale_tiles").select("coordinates,generated_tile_bucket,generated_tile_path,generated_tile_url,status").eq("parent_job_id", parent_job_id).eq("status", "complete");
     if (e2) throw e2;
@@ -97,12 +102,11 @@ serve(async (req) => {
     const startIndex = claimedJob.comp_next_index || 0;
     if (startIndex >= completeTiles.length) { log("All tiles already processed. Moving to finalization."); }
 
-    const actualTileSize = claimedJob.tile_size || TILE_SIZE * (claimedJob.upscale_factor || 2.0);
+    const actualTileSize = TILE_SIZE * (claimedJob.upscale_factor || 2.0);
     const scaleFactor = actualTileSize / TILE_SIZE;
     const finalW = claimedJob.canvas_w;
     const finalH = claimedJob.canvas_h;
     const ovScaled = Math.min(Math.max(1, Math.round(TILE_OVERLAP * scaleFactor)), MAX_FEATHER, actualTileSize - 1);
-    const stepScaled = actualTileSize - ovScaled;
 
     let canvas: Image;
     if (startIndex === 0) {
