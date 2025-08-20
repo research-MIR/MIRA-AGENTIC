@@ -6,6 +6,8 @@ import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 const FAL_KEY = Deno.env.get('FAL_KEY');
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 2000;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -47,13 +49,32 @@ serve(async (req) => {
       }
       
       const pipeline = Deno.env.get('FAL_PIPELINE_ID') || 'comfy/research-MIR/test';
-      const falResult = await fal.queue.submit(pipeline, { 
-          input: {
-              ...basePayload,
-              cliptextencode_text: prompt || "",
-              loadimage_1: finalImageUrl
+      
+      let falResult: any;
+      let lastError: Error | null = null;
+
+      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          falResult = await fal.queue.submit(pipeline, { 
+              input: {
+                  ...basePayload,
+                  cliptextencode_text: prompt || "",
+                  loadimage_1: finalImageUrl
+              }
+          });
+          lastError = null;
+          break; // Success
+        } catch (error) {
+          lastError = error;
+          console.warn(`[FalComfyUIProxy] Attempt ${attempt} failed:`, error.message);
+          if (attempt < MAX_RETRIES) {
+            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS * attempt));
           }
-      });
+        }
+      }
+
+      if (lastError) throw lastError;
+      if (!falResult) throw new Error("Fal.ai submission failed after all retries without a specific error.");
       
       const { data: newJob, error: insertError } = await supabase
         .from('fal_comfyui_jobs')
