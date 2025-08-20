@@ -34,7 +34,7 @@ serve(async (req) => {
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
 
   try {
-    const { method, image_base64, mime_type, image_url, user_id, tile_id } = await req.json();
+    const { method, prompt, image_base64, mime_type, image_url, user_id, tile_id } = await req.json();
 
     if (method === 'submit') {
       if (!user_id) throw new Error("user_id is required for submission.");
@@ -53,7 +53,7 @@ serve(async (req) => {
 
       const finalPayload = {
         ...omnipresentPayload,
-        cliptextencode_text: "", // Always use an empty prompt as requested
+        cliptextencode_text: prompt || "", // Use the provided prompt
         loadimage_1: finalImageUrl
       };
 

@@ -71,7 +71,7 @@ serve(async (req) => {
                 preset: presetName,
                 prompt: generated_prompt,
                 image_url: falTileUrl,
-                tile_id: tile_id // Pass the tile_id for a direct link
+                tile_id: tile_id
             }
         });
 
@@ -81,7 +81,7 @@ serve(async (req) => {
 
         await supabase.from('mira_agent_tiled_upscale_tiles').update({
           status: 'generation_queued',
-          fal_comfyui_job_id: comfyJobId // Still useful for debugging
+          fal_comfyui_job_id: comfyJobId
         }).eq('id', tile_id);
 
         console.log(`${logPrefix} Successfully created ComfyUI job ${comfyJobId} via proxy.`);
