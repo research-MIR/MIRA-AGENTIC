@@ -76,17 +76,11 @@ serve(async (req) => {
           console.log(`${logPrefix}[${job.id}] Successfully fetched result. Raw data:`, JSON.stringify(finalResult, null, 2));
           await supabase.from('fal_comfyui_jobs').update({ status: 'complete', final_result: finalResult }).eq('id', job.id);
 
-          // --- NEW LOGIC: Find and update the corresponding tile ---
-          const { data: tile, error: tileError } = await supabase
-            .from('mira_agent_tiled_upscale_tiles')
-            .select('id')
-            .eq('fal_comfyui_job_id', job.id)
-            .maybeSingle();
+          // --- NEW LOGIC: Use the direct link from metadata ---
+          const tileId = job.metadata?.tile_id;
 
-          if (tileError) {
-            console.error(`${logPrefix}[${job.id}] Error finding linked tile:`, tileError);
-          } else if (tile) {
-            console.log(`${logPrefix}[${job.id}] Found linked tile ${tile.id}. Finalizing...`);
+          if (tileId) {
+            console.log(`${logPrefix}[${job.id}] Found linked tile ${tileId}. Finalizing...`);
             const imageUrl = finalResult.data.outputs['283'].images[0].url;
             const imageResponse = await fetch(imageUrl);
             if (!imageResponse.ok) throw new Error(`Download failed: HTTP ${imageResponse.status}`);
@@ -103,8 +97,8 @@ serve(async (req) => {
                 status: 'complete',
                 generation_result: finalResult,
                 generation_completed_at: new Date().toISOString()
-            }).eq('id', tile.id);
-            console.log(`${logPrefix}[${job.id}] Tile ${tile.id} successfully finalized.`);
+            }).eq('id', tileId);
+            console.log(`${logPrefix}[${job.id}] Tile ${tileId} successfully finalized.`);
           } else {
             console.log(`${logPrefix}[${job.id}] Job is complete, but no linked tile found. This is normal for non-tiled jobs.`);
           }

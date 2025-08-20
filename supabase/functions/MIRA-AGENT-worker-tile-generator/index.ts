@@ -30,7 +30,7 @@ serve(async (req) => {
       .eq('id', tile_id)
       .eq('status', 'pending_generation')
       .not('generated_prompt', 'is', null)
-      .select('id, parent_job_id, source_tile_bucket, source_tile_path, generated_prompt, fal_comfyui_job_id')
+      .select('id, parent_job_id, source_tile_bucket, source_tile_path, generated_prompt')
       .single();
 
     if (claimError) throw new Error(`Claiming tile failed: ${claimError.message}`);
@@ -38,14 +38,6 @@ serve(async (req) => {
       console.log(`${logPrefix} Tile already claimed, not in 'pending_generation' state, or missing prompt. Exiting.`);
       return new Response(JSON.stringify({ success: true, message: "Tile not eligible for generation." }), { headers: corsHeaders });
     }
-
-    // --- IDEMPOTENCY CHECK ---
-    if (claimedTile.fal_comfyui_job_id) {
-        console.warn(`${logPrefix} Idempotency check passed: This tile has already been submitted. Job ID: ${claimedTile.fal_comfyui_job_id}. Setting status to 'generation_queued' and exiting.`);
-        await supabase.from('mira_agent_tiled_upscale_tiles').update({ status: 'generation_queued' }).eq('id', tile_id);
-        return new Response(JSON.stringify({ success: true, message: "Job already submitted." }), { headers: corsHeaders });
-    }
-    // --- END IDEMPOTENCY CHECK ---
 
     const { parent_job_id, source_tile_bucket, source_tile_path, generated_prompt } = claimedTile;
 
@@ -78,7 +70,8 @@ serve(async (req) => {
                 user_id: parentJob.user_id,
                 preset: presetName,
                 prompt: generated_prompt,
-                image_url: falTileUrl
+                image_url: falTileUrl,
+                tile_id: tile_id // Pass the tile_id for a direct link
             }
         });
 
@@ -88,7 +81,7 @@ serve(async (req) => {
 
         await supabase.from('mira_agent_tiled_upscale_tiles').update({
           status: 'generation_queued',
-          fal_comfyui_job_id: comfyJobId
+          fal_comfyui_job_id: comfyJobId // Still useful for debugging
         }).eq('id', tile_id);
 
         console.log(`${logPrefix} Successfully created ComfyUI job ${comfyJobId} via proxy.`);

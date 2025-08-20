@@ -33,7 +33,7 @@ serve(async (req) => {
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
 
   try {
-    const { method, preset, prompt, image_base64, mime_type, image_url, user_id } = await req.json();
+    const { method, preset, prompt, image_base64, mime_type, image_url, user_id, tile_id } = await req.json();
 
     if (method === 'submit') {
       if (!user_id) throw new Error("user_id is required for submission.");
@@ -82,7 +82,8 @@ serve(async (req) => {
           user_id: user_id,
           fal_request_id: falResult.request_id,
           input_payload: { ...basePayload, cliptextencode_text: prompt || "", loadimage_1: finalImageUrl },
-          status: 'queued'
+          status: 'queued',
+          metadata: { tile_id: tile_id } // Store the direct link to the tile
         })
         .select('id')
         .single();
