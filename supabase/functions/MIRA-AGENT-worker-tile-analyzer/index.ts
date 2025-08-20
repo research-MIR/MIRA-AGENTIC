@@ -29,7 +29,7 @@ serve(async (req) => {
   try {
     const { data: claimedTile, error: claimError } = await supabase
       .from('mira_agent_tiled_upscale_tiles')
-      .update({ status: 'analyzing', updated_at: new Date().toISOString() })
+      .update({ status: 'analyzing' })
       .eq('id', tile_id)
       .eq('status', 'pending_analysis')
       .select('source_tile_bucket, source_tile_path')

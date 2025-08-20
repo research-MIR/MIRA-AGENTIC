@@ -41,12 +41,11 @@ serve(async (req) => {
     }
 
     // --- Failed Job Retry ---
-    const failedThreshold = new Date(Date.now() - FAILED_RETRY_THRESHOLD_SECONDS * 1000).toISOString();
     const { data: failedTiles, error: fetchFailedError } = await supabase
       .from('mira_agent_tiled_upscale_tiles')
       .select('id, status, analysis_retry_count, generation_retry_count')
       .in('status', ['analysis_failed', 'generation_failed'])
-      .lt('next_attempt_at', new Date().toISOString());
+      .or(`next_attempt_at.is.null,next_attempt_at.lte.${new Date().toISOString()}`);
     
     if (fetchFailedError) throw fetchFailedError;
 
@@ -100,22 +99,28 @@ serve(async (req) => {
     }
 
     // --- Trigger Compositor ---
-    const { data: generatingJobs, error: fetchGeneratingError } = await supabase.from('mira_agent_tiled_upscale_jobs').select('id').eq('status', 'generating');
+    const { data: generatingJobs, error: fetchGeneratingError } = await supabase.from('mira_agent_tiled_upscale_jobs').select('id, total_tiles').eq('status', 'generating');
     if (fetchGeneratingError) throw fetchGeneratingError;
     if (generatingJobs && generatingJobs.length > 0) {
       const jobIds = generatingJobs.map(j => j.id);
-      const { data: allTiles, error: fetchTilesError } = await supabase.from('mira_agent_tiled_upscale_tiles').select('parent_job_id, status').in('parent_job_id', jobIds);
+      const { data: completedTiles, error: fetchTilesError } = await supabase
+        .from('mira_agent_tiled_upscale_tiles')
+        .select('parent_job_id', { count: 'exact' })
+        .in('parent_job_id', jobIds)
+        .eq('status', 'complete');
       if (fetchTilesError) throw fetchTilesError;
-      
-      const jobCounts = jobIds.reduce((acc, id) => ({ ...acc, [id]: { total: 0, complete: 0 } }), {} as Record<string, { total: number, complete: number }>);
-      allTiles.forEach(tile => {
-        if (jobCounts[tile.parent_job_id!]) {
-          jobCounts[tile.parent_job_id!].total++;
-          if (tile.status === 'complete') jobCounts[tile.parent_job_id!].complete++;
-        }
-      });
 
-      const jobsReadyForCompositing = Object.entries(jobCounts).filter(([_, counts]) => counts.total > 0 && counts.total === counts.complete).map(([jobId]) => jobId);
+      const completedCounts = (completedTiles as any[]).reduce((acc, tile) => {
+          acc[tile.parent_job_id] = (acc[tile.parent_job_id] || 0) + 1;
+          return acc;
+      }, {} as Record<string, number>);
+
+      const jobsReadyForCompositing = generatingJobs.filter(job => {
+          const total = job.total_tiles || 0;
+          const completed = completedCounts[job.id] || 0;
+          return total > 0 && total === completed;
+      }).map(job => job.id);
+      
       if (jobsReadyForCompositing.length > 0) {
         await supabase.from('mira_agent_tiled_upscale_jobs').update({ status: 'compositing' }).in('id', jobsReadyForCompositing);
         const compositorPromises = jobsReadyForCompositing.map(jobId => supabase.functions.invoke('MIRA-AGENT-compositor-tiled-upscale', { body: { parent_job_id: jobId } }));
@@ -127,6 +132,9 @@ serve(async (req) => {
     return new Response(JSON.stringify({ success: true, message: "Watchdog check complete." }), { headers: corsHeaders });
   } catch (error) {
     console.error(`${logPrefix} Error:`, error);
-    return new Response(JSON.stringify({ error: error.message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
+    return new Response(JSON.stringify({ error: error.message }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      status: 500,
+    });
   }
 });
