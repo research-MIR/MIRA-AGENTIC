@@ -47,18 +47,41 @@ serve(async (req) => {
     if (signedUrlError) throw signedUrlError;
 
     fal.config({ credentials: FAL_KEY! });
-    const result: any = await fal.subscribe("fal-ai/ideogram/upscale", {
-      input: {
+
+    const falInput = {
+        model_type: "SDXL",
         image_url: signedUrlData.signedUrl,
         prompt: generated_prompt,
-        resemblance: 75,
-        detail: 60,
-        expand_prompt: false,
-      },
+        scale: 2,
+        creativity: 0.045,
+        detail: 2.5,
+        shape_preservation: 2.5,
+        prompt_suffix: " high quality, highly detailed, high resolution, sharp",
+        negative_prompt: "blurry, low resolution, bad, ugly, low quality, pixelated, interpolated, compression artifacts, noisey, grainy",
+        seed: Math.floor(Math.random() * 1000000000),
+        guidance_scale: 7.5,
+        num_inference_steps: 20,
+        enable_safety_checks: false,
+        additional_lora_scale: 1,
+        base_model_url: "https://huggingface.co/RunDiffusion/Juggernaut-XL-v9/resolve/main/Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors",
+        additional_lora_url: "https://civitai.com/api/download/models/532451?type=Model&format=SafeTensor",
+    };
+
+    const result: any = await fal.subscribe("fal-ai/creative-upscaler", {
+      input: falInput,
       logs: true,
     });
 
-    const upscaledImage = result?.data?.images?.[0];
+    // Handle both potential output formats from Fal.ai for resilience
+    let upscaledImage;
+    if (result?.image) {
+        // New creative-upscaler format
+        upscaledImage = result.image;
+    } else if (result?.data?.images?.[0]) {
+        // Old format (e.g., ideogram)
+        upscaledImage = result.data.images[0];
+    }
+
     if (!upscaledImage || !upscaledImage.url) throw new Error("Upscaling service did not return a valid image URL.");
 
     const imageResponse = await fetch(upscaledImage.url);
