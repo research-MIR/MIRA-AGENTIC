@@ -74,13 +74,13 @@ serve(async (req) => {
 
     console.log(`${logPrefix} Full API response from Fal.ai:`, JSON.stringify(result, null, 2));
 
-    // Handle both potential output formats from Fal.ai for resilience
+    // Handle multiple potential output formats from Fal.ai for resilience
     let upscaledImage;
-    if (result?.image) {
-        // New creative-upscaler format
+    if (result?.image) { // Direct image object at the top level
         upscaledImage = result.image;
-    } else if (result?.data?.images?.[0]) {
-        // Old format (e.g., ideogram)
+    } else if (result?.data?.image) { // Image object inside a 'data' object
+        upscaledImage = result.data.image;
+    } else if (result?.data?.images?.[0]) { // Array of images inside a 'data' object
         upscaledImage = result.data.images[0];
     }
 
