@@ -38,7 +38,7 @@ serve(async (req) => {
     // Cancel child tiles first
     const { count: tilesCount, error: tilesError } = await supabase
       .from('mira_agent_tiled_upscale_tiles')
-      .update({ status: 'failed', error_message: cancellationReason })
+      .update({ status: 'generation_failed', error_message: cancellationReason })
       .in('parent_job_id', parentJobIds)
       .in('status', ['pending_analysis', 'analyzing', 'pending_generation', 'generating', 'generation_queued']);
 
