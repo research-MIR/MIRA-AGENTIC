@@ -9,6 +9,21 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+function parseStorageURL(url: string) {
+    const u = new URL(url);
+    const pathSegments = u.pathname.split('/');
+    const objectSegmentIndex = pathSegments.indexOf('object');
+    if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) {
+        throw new Error(`Invalid Supabase storage URL format: ${url}`);
+    }
+    const bucket = pathSegments[objectSegmentIndex + 2];
+    const path = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
+    if (!bucket || !path) {
+        throw new Error(`Could not parse bucket or path from Supabase URL: ${url}`);
+    }
+    return { bucket, path };
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -24,11 +39,15 @@ serve(async (req) => {
     const logPrefix = `[TiledUpscaleOrchestrator]`;
     console.log(`${logPrefix} Creating new upscale job record.`);
 
+    const { bucket, path } = parseStorageURL(source_image_url);
+
     const { data: newJob, error: insertError } = await supabase
       .from('mira_agent_tiled_upscale_jobs')
       .insert({
         user_id,
-        source_image_url,
+        source_image_url, // Keep original for reference
+        source_bucket: bucket,
+        source_path: path,
         upscale_factor,
         source_job_id,
         status: 'tiling'
@@ -38,14 +57,12 @@ serve(async (req) => {
 
     if (insertError) throw insertError;
     const parentJobId = newJob.id;
-    console.log(`${logPrefix} Parent job ${parentJobId} created. Invoking tiling and analysis worker.`);
+    console.log(`${logPrefix} Parent job ${parentJobId} created. Invoking tiling worker.`);
 
-    // Asynchronously invoke the new, all-in-one worker.
     supabase.functions.invoke('MIRA-AGENT-worker-tiling-and-analysis', {
       body: { parent_job_id: parentJobId }
     }).catch(err => {
       console.error(`${logPrefix} Failed to invoke tiling worker for job ${parentJobId}:`, err);
-      // Attempt to set an error state on the job
       supabase.from('mira_agent_tiled_upscale_jobs').update({
         status: 'failed',
         error_message: 'Failed to start the tiling process.'

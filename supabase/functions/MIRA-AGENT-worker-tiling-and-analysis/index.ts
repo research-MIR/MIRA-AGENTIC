@@ -16,17 +16,6 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-async function downloadImage(supabase: any, publicUrl: string): Promise<Blob> {
-  const url = new URL(publicUrl);
-  const segs = url.pathname.split("/");
-  const publicIdx = segs.indexOf("public");
-  const bucketName = segs[publicIdx + 1];
-  const filePath = decodeURIComponent(segs.slice(segs.indexOf(bucketName) + 1).join("/"));
-  const { data, error } = await supabase.storage.from(bucketName).download(filePath);
-  if (error) throw new Error(`Failed to download from Supabase storage (${filePath}): ${error.message}`);
-  return data;
-}
-
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -43,12 +32,14 @@ serve(async (req) => {
 
     const { data: job, error: fetchError } = await supabase
       .from("mira_agent_tiled_upscale_jobs")
-      .select("source_image_url, user_id")
+      .select("source_bucket, source_path, user_id")
       .eq("id", parent_job_id)
       .single();
     if (fetchError) throw fetchError;
 
-    const blob = await downloadImage(supabase, job.source_image_url);
+    const { data: blob, error: downloadError } = await supabase.storage.from(job.source_bucket).download(job.source_path);
+    if (downloadError) throw downloadError;
+
     const img = await Image.decode(await blob.arrayBuffer());
     console.log(`${logPrefix} Decoded original image: ${img.width}x${img.height}`);
 
@@ -100,7 +91,7 @@ serve(async (req) => {
         if (error) throw error;
     }
 
-    await supabase.from("mira_agent_tiled_upscale_jobs").update({ status: "generating" }).eq("id", parent_job_id);
+    await supabase.from("mira_agent_tiled_upscale_jobs").update({ status: "generating", total_tiles: totalTiles }).eq("id", parent_job_id);
     console.log(`${logPrefix} Tiling complete. All tiles queued for analysis.`);
 
     return new Response(JSON.stringify({ success: true, tileCount: totalTiles }), { headers: corsHeaders });

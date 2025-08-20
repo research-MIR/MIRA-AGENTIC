@@ -26,7 +26,7 @@ serve(async (req) => {
   try {
     const { data: claimedTile, error: claimError } = await supabase
       .from('mira_agent_tiled_upscale_tiles')
-      .update({ status: 'generating', updated_at: new Date().toISOString() })
+      .update({ status: 'generating' })
       .eq('id', tile_id)
       .eq('status', 'pending_generation')
       .select('id, parent_job_id, source_tile_bucket, source_tile_path, generated_prompt')
@@ -43,12 +43,15 @@ serve(async (req) => {
       throw new Error("Tile record is missing required data for generation.");
     }
 
-    const { data: { publicUrl: source_tile_url } } = supabase.storage.from(source_tile_bucket).getPublicUrl(source_tile_path);
+    const { data: signedUrlData, error: signedUrlError } = await supabase.storage
+      .from(source_tile_bucket)
+      .createSignedUrl(source_tile_path, 300); // 5 minute validity
+    if (signedUrlError) throw signedUrlError;
 
     fal.config({ credentials: FAL_KEY! });
     const result: any = await fal.subscribe("fal-ai/ideogram/upscale", {
       input: {
-        image_url: source_tile_url,
+        image_url: signedUrlData.signedUrl,
         prompt: generated_prompt,
         resemblance: 75,
         detail: 60,

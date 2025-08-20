@@ -4,8 +4,9 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const BATCH_SIZE = 10;
-const STALLED_THRESHOLD_SECONDS = 180; // 3 minutes for any in-progress task
-const FAILED_RETRY_THRESHOLD_SECONDS = 300; // 5 minutes for a failed task
+const STALLED_THRESHOLD_SECONDS = 180;
+const FAILED_RETRY_THRESHOLD_SECONDS = 300;
+const MAX_RETRIES = 3;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -34,31 +35,48 @@ serve(async (req) => {
       const updates = stalledTiles.map(tile => ({
         id: tile.id,
         status: tile.status === 'analyzing' ? 'pending_analysis' : 'pending_generation',
-        error_message: 'Reset by watchdog due to stall.',
-        updated_at: new Date().toISOString()
+        error_message: 'Reset by watchdog due to stall.'
       }));
-      await supabase.from('mira_agent_tiled_upscale_tiles').upsert(updates);
+      await supabase.from('mira_agent_tiled_upscale_tiles').update(updates);
     }
 
     // --- Failed Job Retry ---
     const failedThreshold = new Date(Date.now() - FAILED_RETRY_THRESHOLD_SECONDS * 1000).toISOString();
     const { data: failedTiles, error: fetchFailedError } = await supabase
       .from('mira_agent_tiled_upscale_tiles')
-      .select('id, status')
+      .select('id, status, analysis_retry_count, generation_retry_count')
       .in('status', ['analysis_failed', 'generation_failed'])
-      .lt('updated_at', failedThreshold);
+      .lt('next_attempt_at', new Date().toISOString());
     
     if (fetchFailedError) throw fetchFailedError;
 
     if (failedTiles && failedTiles.length > 0) {
         console.log(`${logPrefix} Found ${failedTiles.length} failed tiles eligible for retry. Resetting...`);
-        const updates = failedTiles.map(tile => ({
-            id: tile.id,
-            status: tile.status === 'analysis_failed' ? 'pending_analysis' : 'pending_generation',
-            error_message: 'Retrying after previous failure.',
-            updated_at: new Date().toISOString()
-        }));
-        await supabase.from('mira_agent_tiled_upscale_tiles').upsert(updates);
+        const updates = failedTiles.map(tile => {
+            const isAnalysis = tile.status === 'analysis_failed';
+            const currentRetries = (isAnalysis ? tile.analysis_retry_count : tile.generation_retry_count) || 0;
+            
+            if (currentRetries >= MAX_RETRIES) {
+                return null; // Skip update if max retries reached
+            }
+
+            const newRetryCount = currentRetries + 1;
+            const backoffSeconds = 300 * Math.pow(2, newRetryCount - 1); // 5m, 10m, 20m
+            const nextAttempt = new Date(Date.now() + backoffSeconds * 1000);
+
+            return {
+                id: tile.id,
+                status: isAnalysis ? 'pending_analysis' : 'pending_generation',
+                error_message: `Retrying after previous failure (Attempt ${newRetryCount}).`,
+                analysis_retry_count: isAnalysis ? newRetryCount : tile.analysis_retry_count,
+                generation_retry_count: !isAnalysis ? newRetryCount : tile.generation_retry_count,
+                next_attempt_at: nextAttempt.toISOString()
+            };
+        }).filter(Boolean);
+
+        if (updates.length > 0) {
+            await supabase.from('mira_agent_tiled_upscale_tiles').update(updates as any);
+        }
     }
 
     // --- Dispatch Pending Analysis ---
@@ -99,6 +117,7 @@ serve(async (req) => {
 
       const jobsReadyForCompositing = Object.entries(jobCounts).filter(([_, counts]) => counts.total > 0 && counts.total === counts.complete).map(([jobId]) => jobId);
       if (jobsReadyForCompositing.length > 0) {
+        await supabase.from('mira_agent_tiled_upscale_jobs').update({ status: 'compositing' }).in('id', jobsReadyForCompositing);
         const compositorPromises = jobsReadyForCompositing.map(jobId => supabase.functions.invoke('MIRA-AGENT-compositor-tiled-upscale', { body: { parent_job_id: jobId } }));
         await Promise.allSettled(compositorPromises);
         console.log(`${logPrefix} Dispatched ${jobsReadyForCompositing.length} compositor jobs.`);
