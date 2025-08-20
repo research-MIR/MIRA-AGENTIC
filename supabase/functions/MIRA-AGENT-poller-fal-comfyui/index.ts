@@ -37,8 +37,11 @@ serve(async (req) => {
 
     const pollPromises = jobs.map(async (job) => {
       try {
+        console.log(`${logPrefix}[${job.id}] Checking status...`);
         const pipeline = Deno.env.get('FAL_PIPELINE_ID') || 'comfy/research-MIR/test';
         const status = await fal.queue.status(pipeline, { requestId: job.fal_request_id, logs: false });
+        
+        console.log(`${logPrefix}[${job.id}] Status from Fal.ai: ${status.status}`);
 
         if (status.status === 'COMPLETED') {
           console.log(`${logPrefix}[${job.id}] Job complete. Fetching result with retries...`);
@@ -76,10 +79,12 @@ serve(async (req) => {
           console.error(`${logPrefix}[${job.id}] Job failed. Error:`, status.error);
           await supabase.from('fal_comfyui_jobs').update({ status: 'failed', error_message: status.error?.toString() }).eq('id', job.id);
         } else {
+          // This handles 'IN_PROGRESS' and 'IN_QUEUE'
+          console.log(`${logPrefix}[${job.id}] Job is still running. Updating last_polled_at.`);
           await supabase.from('fal_comfyui_jobs').update({ status: 'processing', last_polled_at: new Date().toISOString() }).eq('id', job.id);
         }
       } catch (error) {
-        console.error(`${logPrefix}[${job.id}] Error polling job:`, error);
+        console.error(`${logPrefix}[${job.id}] An unexpected error occurred while polling this job:`, error);
         await supabase.from('fal_comfyui_jobs').update({ status: 'failed', error_message: error.message }).eq('id', job.id);
       }
     });
