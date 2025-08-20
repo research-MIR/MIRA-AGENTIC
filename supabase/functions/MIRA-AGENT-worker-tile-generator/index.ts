@@ -41,59 +41,80 @@ serve(async (req) => {
 
     const { parent_job_id, source_tile_bucket, source_tile_path, generated_prompt } = claimedTile;
 
-    const { data: signedUrlData, error: signedUrlError } = await supabase.storage
-      .from(source_tile_bucket)
-      .createSignedUrl(source_tile_path, 300); // 5 minute validity
-    if (signedUrlError) throw signedUrlError;
-
-    fal.config({ credentials: FAL_KEY! });
-
-    const falInput = {
-        model_type: "SDXL",
-        image_url: signedUrlData.signedUrl,
-        prompt: generated_prompt,
-        scale: 2,
-        creativity: 0.045,
-        detail: 2.5,
-        shape_preservation: 2.5,
-        prompt_suffix: " high quality, highly detailed, high resolution, sharp",
-        negative_prompt: "blurry, low resolution, bad, ugly, low quality, pixelated, interpolated, compression artifacts, noisey, grainy",
-        seed: Math.floor(Math.random() * 1000000000),
-        guidance_scale: 7.5,
-        num_inference_steps: 20,
-        enable_safety_checks: false,
-        additional_lora_scale: 1,
-        base_model_url: "https://huggingface.co/RunDiffusion/Juggernaut-XL-v9/resolve/main/Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors",
-        additional_lora_url: "https://civitai.com/api/download/models/532451?type=Model&format=SafeTensor",
-    };
-
-    const result: any = await fal.subscribe("fal-ai/creative-upscaler", {
-      input: falInput,
-      logs: true,
-    });
-
-    console.log(`${logPrefix} Full API response from Fal.ai:`, JSON.stringify(result, null, 2));
-
-    // Handle multiple potential output formats from Fal.ai for resilience
-    let upscaledImage;
-    if (result?.image) { // Direct image object at the top level
-        upscaledImage = result.image;
-    } else if (result?.data?.image) { // Image object inside a 'data' object
-        upscaledImage = result.data.image;
-    } else if (result?.data?.images?.[0]) { // Array of images inside a 'data' object
-        upscaledImage = result.data.images[0];
-    }
-
-    if (!upscaledImage || !upscaledImage.url) throw new Error("Upscaling service did not return a valid image URL.");
-
-    const imageResponse = await fetch(upscaledImage.url);
-    if (!imageResponse.ok) throw new Error(`Failed to download generated image from ${upscaledImage.url}`);
-    const imageBuffer = await imageResponse.arrayBuffer();
-
-    const { data: parentJob } = await supabase.from('mira_agent_tiled_upscale_jobs').select('user_id').eq('id', parent_job_id).single();
+    // Fetch parent job to get the upscaler engine choice
+    const { data: parentJob, error: parentFetchError } = await supabase
+      .from('mira_agent_tiled_upscale_jobs')
+      .select('user_id, metadata')
+      .eq('id', parent_job_id)
+      .single();
+    
+    if (parentFetchError) throw new Error(`Could not fetch parent job ${parent_job_id}: ${parentFetchError.message}`);
     if (!parentJob) throw new Error(`Parent job ${parent_job_id} not found.`);
 
-    const finalFilePath = `${parentJob.user_id}/${parent_job_id}/generated_tile_${tile_id}.png`;
+    const upscaler_engine = parentJob.metadata?.upscaler_engine || 'creative_upscaler';
+    console.log(`${logPrefix} Using upscaler engine: '${upscaler_engine}'.`);
+
+    let imageBuffer: ArrayBuffer;
+    let finalFilePath: string;
+
+    if (upscaler_engine === 'mock_upscaler') {
+        console.log(`${logPrefix} Running in MOCK mode. Bypassing AI model and using original tile.`);
+        const { data: imageBlob, error: downloadError } = await supabase.storage.from(source_tile_bucket).download(source_tile_path);
+        if (downloadError) throw downloadError;
+        imageBuffer = await imageBlob.arrayBuffer();
+        finalFilePath = `${parentJob.user_id}/${parent_job_id}/generated_tile_${tile_id}_mock.png`;
+    } else {
+        // This is the existing 'creative_upscaler' logic
+        const { data: signedUrlData, error: signedUrlError } = await supabase.storage
+          .from(source_tile_bucket)
+          .createSignedUrl(source_tile_path, 300); // 5 minute validity
+        if (signedUrlError) throw signedUrlError;
+
+        fal.config({ credentials: FAL_KEY! });
+
+        const falInput = {
+            model_type: "SDXL",
+            image_url: signedUrlData.signedUrl,
+            prompt: generated_prompt,
+            scale: 2,
+            creativity: 0.045,
+            detail: 2.5,
+            shape_preservation: 2.5,
+            prompt_suffix: " high quality, highly detailed, high resolution, sharp",
+            negative_prompt: "blurry, low resolution, bad, ugly, low quality, pixelated, interpolated, compression artifacts, noisey, grainy",
+            seed: Math.floor(Math.random() * 1000000000),
+            guidance_scale: 7.5,
+            num_inference_steps: 20,
+            enable_safety_checks: false,
+            additional_lora_scale: 1,
+            base_model_url: "https://huggingface.co/RunDiffusion/Juggernaut-XL-v9/resolve/main/Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors",
+            additional_lora_url: "https://civitai.com/api/download/models/532451?type=Model&format=SafeTensor",
+        };
+
+        const result: any = await fal.subscribe("fal-ai/creative-upscaler", {
+          input: falInput,
+          logs: true,
+        });
+
+        console.log(`${logPrefix} Full API response from Fal.ai:`, JSON.stringify(result, null, 2));
+
+        let upscaledImage;
+        if (result?.image) {
+            upscaledImage = result.image;
+        } else if (result?.data?.image) {
+            upscaledImage = result.data.image;
+        } else if (result?.data?.images?.[0]) {
+            upscaledImage = result.data.images[0];
+        }
+
+        if (!upscaledImage || !upscaledImage.url) throw new Error("Upscaling service did not return a valid image URL.");
+
+        const imageResponse = await fetch(upscaledImage.url);
+        if (!imageResponse.ok) throw new Error(`Failed to download generated image from ${upscaledImage.url}`);
+        imageBuffer = await imageResponse.arrayBuffer();
+        finalFilePath = `${parentJob.user_id}/${parent_job_id}/generated_tile_${tile_id}.png`;
+    }
+
     await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(finalFilePath, imageBuffer, { contentType: 'image/png', upsert: true });
     
     await supabase

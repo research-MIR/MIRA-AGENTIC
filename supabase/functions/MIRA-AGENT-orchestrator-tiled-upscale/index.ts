@@ -30,14 +30,14 @@ serve(async (req) => {
   }
 
   try {
-    const { source_image_url, user_id, upscale_factor = 2.0, source_job_id } = await req.json();
+    const { source_image_url, user_id, upscale_factor = 2.0, source_job_id, upscaler_engine = 'creative_upscaler' } = await req.json();
     if (!source_image_url || !user_id) {
       throw new Error("source_image_url and user_id are required.");
     }
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
     const logPrefix = `[TiledUpscaleOrchestrator]`;
-    console.log(`${logPrefix} Creating new upscale job record.`);
+    console.log(`${logPrefix} Creating new upscale job record with engine: ${upscaler_engine}.`);
 
     const { bucket, path } = parseStorageURL(source_image_url);
 
@@ -45,12 +45,13 @@ serve(async (req) => {
       .from('mira_agent_tiled_upscale_jobs')
       .insert({
         user_id,
-        source_image_url, // Keep original for reference
+        source_image_url,
         source_bucket: bucket,
         source_path: path,
         upscale_factor,
         source_job_id,
-        status: 'tiling'
+        status: 'tiling',
+        metadata: { upscaler_engine }
       })
       .select('id')
       .single();
