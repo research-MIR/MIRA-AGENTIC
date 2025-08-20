@@ -78,6 +78,7 @@ async function downloadTileBytes(supabase: SupabaseClient, t: any): Promise<Uint
     if (error) throw new Error(`Storage download failed: ${error.message}`);
     return new Uint8Array(await data.arrayBuffer());
   }
+  // legacy fallback
   const res = await fetch(t.generated_tile_url);
   if (!res.ok) throw new Error(`HTTP ${res.status} for ${t.generated_tile_url}`);
   return new Uint8Array(await res.arrayBuffer());
@@ -139,6 +140,7 @@ async function run(supabase: SupabaseClient, parent_job_id: string) {
   for (const t of completeTiles) occupy.add(k(gridX(t), gridY(t)));
   const hasAt = (gx:number,gy:number)=>occupy.has(k(gx,gy));
 
+  let processed = 0;
   for (const t of completeTiles) {
     const arr = await downloadTileBytes(supabase, t);
     let tile = await Image.decode(arr);
@@ -151,8 +153,8 @@ async function run(supabase: SupabaseClient, parent_job_id: string) {
     }
 
     const gx = gridX(t), gy = gridY(t);
-    const x = gx * stepScaled;
-    const y = gy * stepScaled;
+    const x = Math.round(t.coordinates.x * scaleFactor);
+    const y = Math.round(t.coordinates.y * scaleFactor);
 
     const n = { left: hasAt(gx-1,gy), right: hasAt(gx+1,gy), top: hasAt(gx,gy-1), bottom: hasAt(gx,gy+1) };
     const incoming = { left: n.left, right: false, top: n.top, bottom: false };
@@ -162,7 +164,7 @@ async function run(supabase: SupabaseClient, parent_job_id: string) {
     // @ts-ignore
     tile = null;
 
-    await new Promise(r => setTimeout(r, 0));
+    if ((++processed % 6) === 0) await new Promise(r => setTimeout(r, 0));
   }
 
   const px = finalW * finalH;
