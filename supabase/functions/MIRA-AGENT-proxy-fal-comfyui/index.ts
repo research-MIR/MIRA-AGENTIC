@@ -4,6 +4,8 @@ import { fal } from 'npm:@fal-ai/client@1.5.0';
 import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const FAL_KEY = Deno.env.get('FAL_KEY');
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -19,33 +21,39 @@ serve(async (req) => {
     return new Response(JSON.stringify({ error: "FAL_KEY is not set in environment variables." }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
   fal.config({ credentials: FAL_KEY });
+  const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
 
   try {
-    const { method, requestId, input, image_base64, mime_type } = await req.json();
+    const { method, input, image_base64, mime_type, user_id } = await req.json();
 
-    switch (method) {
-      case 'submit': {
-        let finalInput = { ...input };
-        if (image_base64) {
-          const imageBlob = new Blob([decodeBase64(image_base64)], { type: mime_type || 'image/jpeg' });
-          const imageUrl = await fal.storage.upload(imageBlob);
-          finalInput.loadimage_1 = imageUrl;
-        }
-        const result = await fal.queue.submit("comfy/research-MIR/test", { input: finalInput });
-        return new Response(JSON.stringify(result), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    if (method === 'submit') {
+      if (!user_id) throw new Error("user_id is required for submission.");
+      
+      let finalInput = { ...input };
+      if (image_base64) {
+        const imageBlob = new Blob([decodeBase64(image_base64)], { type: mime_type || 'image/jpeg' });
+        const imageUrl = await fal.storage.upload(imageBlob);
+        finalInput.loadimage_1 = imageUrl;
       }
-      case 'status': {
-        if (!requestId) throw new Error("requestId is required for status check.");
-        const result = await fal.queue.status("comfy/research-MIR/test", { requestId, logs: true });
-        return new Response(JSON.stringify(result), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-      }
-      case 'result': {
-        if (!requestId) throw new Error("requestId is required to fetch result.");
-        const result = await fal.queue.result("comfy/research-MIR/test", { requestId });
-        return new Response(JSON.stringify(result), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-      }
-      default:
-        throw new Error(`Invalid method: ${method}`);
+      
+      const falResult = await fal.queue.submit("comfy/research-MIR/test", { input: finalInput });
+      
+      const { data: newJob, error: insertError } = await supabase
+        .from('fal_comfyui_jobs')
+        .insert({
+          user_id: user_id,
+          fal_request_id: falResult.request_id,
+          input_payload: finalInput,
+          status: 'queued'
+        })
+        .select('id')
+        .single();
+
+      if (insertError) throw insertError;
+
+      return new Response(JSON.stringify({ jobId: newJob.id }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    } else {
+      throw new Error(`Invalid method: ${method}. This proxy now only supports 'submit'.`);
     }
   } catch (error) {
     console.error("[FalComfyUIProxy] Error:", error);

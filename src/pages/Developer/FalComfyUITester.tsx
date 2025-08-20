@@ -1,8 +1,8 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { useSession } from '@/components/Auth/SessionContextProvider';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Loader2, UploadCloud, Play, FileClock, CheckSquare } from 'lucide-react';
+import { Loader2, UploadCloud, Play, Check, X, Hourglass } from 'lucide-react';
 import { showError, showSuccess } from '@/utils/toast';
 import { useDropzone } from '@/hooks/useDropzone';
 import { cn } from '@/lib/utils';
@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { RealtimeChannel } from '@supabase/supabase-js';
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -21,12 +22,13 @@ const fileToBase64 = (file: File): Promise<string> => {
 };
 
 const FalComfyUITester = () => {
-  const { supabase } = useSession();
+  const { supabase, session } = useSession();
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
-  const [requestId, setRequestId] = useState<string | null>(null);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [jobStatus, setJobStatus] = useState<string | null>(null);
   const [resultImageUrl, setResultImageUrl] = useState<string | null>(null);
   const [params, setParams] = useState({
     ksampler_denoise: 0.1,
@@ -35,10 +37,51 @@ const FalComfyUITester = () => {
     controlnetapplyadvanced_end_percent: 0.9,
   });
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const channelRef = useRef<RealtimeChannel | null>(null);
 
   const addLog = (message: string) => {
     setLogs(prev => [`${new Date().toLocaleTimeString()}: ${message}`, ...prev]);
   };
+
+  useEffect(() => {
+    if (channelRef.current) {
+      supabase.removeChannel(channelRef.current);
+      channelRef.current = null;
+    }
+
+    if (jobId) {
+      const channel = supabase.channel(`fal_job_${jobId}`);
+      channel.on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'fal_comfyui_jobs', filter: `id=eq.${jobId}` },
+        (payload) => {
+          const newJob = payload.new as any;
+          addLog(`Job status updated: ${newJob.status}`);
+          setJobStatus(newJob.status);
+          if (newJob.status === 'complete') {
+            const imageUrl = newJob.final_result?.data?.images?.[0]?.url;
+            if (imageUrl) {
+              setResultImageUrl(imageUrl);
+              showSuccess("Job complete!");
+            } else {
+              showError("Job completed but no image URL found in result.");
+            }
+            setIsLoading(false);
+          } else if (newJob.status === 'failed') {
+            showError(`Job failed: ${newJob.error_message}`);
+            setIsLoading(false);
+          }
+        }
+      ).subscribe();
+      channelRef.current = channel;
+    }
+
+    return () => {
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+      }
+    };
+  }, [jobId, supabase]);
 
   const handleFileSelect = useCallback((file: File | null) => {
     if (!file || !file.type.startsWith('image/')) return;
@@ -53,77 +96,48 @@ const FalComfyUITester = () => {
   });
 
   const handleSubmit = async () => {
-    if (!imageFile) return showError("Please upload an image.");
+    if (!imageFile || !session?.user) return showError("Please upload an image and be logged in.");
     setIsLoading(true);
     setLogs([]);
     setResultImageUrl(null);
-    setRequestId(null);
+    setJobId(null);
+    setJobStatus(null);
     addLog("Submitting job...");
     try {
       const image_base64 = await fileToBase64(imageFile);
       const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-fal-comfyui', {
-        body: { method: 'submit', input: params, image_base64, mime_type: imageFile.type }
+        body: { method: 'submit', input: params, image_base64, mime_type: imageFile.type, user_id: session.user.id }
       });
       if (error) throw error;
-      setRequestId(data.request_id);
-      addLog(`Job submitted successfully. Request ID: ${data.request_id}`);
-      showSuccess("Job submitted!");
+      setJobId(data.jobId);
+      setJobStatus('queued');
+      addLog(`Job submitted successfully. DB Job ID: ${data.jobId}`);
+      showSuccess("Job submitted and is now being monitored.");
     } catch (err: any) {
       addLog(`Error submitting job: ${err.message}`);
       showError(err.message);
-    } finally {
       setIsLoading(false);
     }
   };
 
-  const handleStatus = async () => {
-    if (!requestId) return showError("Submit a job first to get a Request ID.");
-    setIsLoading(true);
-    addLog(`Checking status for ${requestId}...`);
-    try {
-      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-fal-comfyui', {
-        body: { method: 'status', requestId }
-      });
-      if (error) throw error;
-      addLog(`Status: ${JSON.stringify(data, null, 2)}`);
-    } catch (err: any) {
-      addLog(`Error checking status: ${err.message}`);
-      showError(err.message);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleResult = async () => {
-    if (!requestId) return showError("Submit a job first to get a Request ID.");
-    setIsLoading(true);
-    addLog(`Fetching result for ${requestId}...`);
-    try {
-      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-fal-comfyui', {
-        body: { method: 'result', requestId }
-      });
-      if (error) throw error;
-      addLog(`Result: ${JSON.stringify(data, null, 2)}`);
-      const imageUrl = data?.data?.images?.[0]?.url;
-      if (imageUrl) {
-        setResultImageUrl(imageUrl);
-        showSuccess("Result image loaded!");
-      } else {
-        showError("Result did not contain an image URL. It may still be processing.");
-      }
-    } catch (err: any) {
-      addLog(`Error fetching result: ${err.message}`);
-      showError(err.message);
-    } finally {
-      setIsLoading(false);
+  const getStatusIcon = () => {
+    if (isLoading) return <Loader2 className="h-4 w-4 animate-spin" />;
+    switch (jobStatus) {
+      case 'complete': return <Check className="h-4 w-4 text-green-500" />;
+      case 'failed': return <X className="h-4 w-4 text-destructive" />;
+      case 'processing':
+      case 'queued':
+        return <Hourglass className="h-4 w-4 text-blue-500" />;
+      default:
+        return null;
     }
   };
 
   return (
     <div className="p-4 md:p-8 h-full overflow-y-auto">
       <header className="pb-4 mb-8 border-b">
-        <h1 className="text-3xl font-bold">Fal.ai ComfyUI Tester</h1>
-        <p className="text-muted-foreground">A developer tool to test the `comfy/research-MIR/test` endpoint.</p>
+        <h1 className="text-3xl font-bold">Fal.ai ComfyUI Tester (Autonomous)</h1>
+        <p className="text-muted-foreground">Submit a job and the backend will automatically monitor it and fetch the result.</p>
       </header>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-1 space-y-6">
@@ -153,11 +167,17 @@ const FalComfyUITester = () => {
             </CardContent>
           </Card>
           <Card>
-            <CardHeader><CardTitle>2. Actions</CardTitle></CardHeader>
-            <CardContent className="grid grid-cols-3 gap-2">
-              <Button variant="default" onClick={handleSubmit} disabled={isLoading || !imageFile} className="col-span-3"><Play className="mr-2 h-4 w-4" />Submit Job</Button>
-              <Button variant="outline" onClick={handleStatus} disabled={isLoading || !requestId}><FileClock className="mr-2 h-4 w-4" />Check Status</Button>
-              <Button variant="outline" onClick={handleResult} disabled={isLoading || !requestId} className="col-span-2"><CheckSquare className="mr-2 h-4 w-4" />Get Result</Button>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle>2. Action</CardTitle>
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  {getStatusIcon()}
+                  <span>{jobStatus || 'Idle'}</span>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <Button variant="default" onClick={handleSubmit} disabled={isLoading || !imageFile} className="w-full"><Play className="mr-2 h-4 w-4" />Submit & Monitor Job</Button>
             </CardContent>
           </Card>
         </div>
