@@ -6,6 +6,8 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const FAL_KEY = Deno.env.get('FAL_KEY');
 const GENERATED_IMAGES_BUCKET = 'mira-agent-upscale-tiles';
+const MAX_SUBMISSION_RETRIES = 3;
+const SUBMISSION_RETRY_DELAY_MS = 5000;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -63,24 +65,44 @@ serve(async (req) => {
 
         const presetName = Deno.env.get('FAL_PRESET') || 'high_detail_upscale';
         
-        console.log(`${logPrefix} Invoking proxy with preset '${presetName}' and prompt.`);
-        const { data: proxyResponse, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-fal-comfyui', {
-            body: {
-                method: 'submit',
-                user_id: parentJob.user_id,
-                preset: presetName,
-                prompt: generated_prompt,
-                image_url: falTileUrl // Pass the durable Fal storage URL
-            }
-        });
+        let proxyResponse = null;
+        let lastProxyError = null;
 
-        if (proxyError) throw new Error(`Proxy invocation failed: ${proxyError.message}`);
+        for (let attempt = 1; attempt <= MAX_SUBMISSION_RETRIES; attempt++) {
+            try {
+                console.log(`${logPrefix} Invoking proxy with preset '${presetName}', attempt ${attempt}/${MAX_SUBMISSION_RETRIES}...`);
+                const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-fal-comfyui', {
+                    body: {
+                        method: 'submit',
+                        user_id: parentJob.user_id,
+                        preset: presetName,
+                        prompt: generated_prompt,
+                        image_url: falTileUrl
+                    }
+                });
+                if (error) throw error;
+                proxyResponse = data;
+                lastProxyError = null;
+                break; // Success!
+            } catch (err) {
+                lastProxyError = err;
+                console.warn(`${logPrefix} Proxy invocation attempt ${attempt} failed: ${err.message}`);
+                if (attempt < MAX_SUBMISSION_RETRIES) {
+                    await new Promise(resolve => setTimeout(resolve, SUBMISSION_RETRY_DELAY_MS * attempt));
+                }
+            }
+        }
+
+        if (lastProxyError) {
+            throw lastProxyError; // All submission retries failed, now we can fail the tile.
+        }
+
         const comfyJobId = proxyResponse.jobId;
         if (!comfyJobId) throw new Error("Proxy did not return a valid jobId.");
 
         await supabase.from('mira_agent_tiled_upscale_tiles').update({
           status: 'generation_queued',
-          fal_comfyui_job_id: comfyJobId // Link the tile to the new job
+          fal_comfyui_job_id: comfyJobId
         }).eq('id', tile_id);
 
         console.log(`${logPrefix} Successfully created ComfyUI job ${comfyJobId} via proxy.`);
