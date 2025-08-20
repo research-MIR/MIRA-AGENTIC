@@ -50,13 +50,14 @@ const FalComfyUITester = () => {
     }
 
     if (jobId) {
+      addLog(`Subscribing to real-time updates for job ${jobId}...`);
       const channel = supabase.channel(`fal_job_${jobId}`);
       channel.on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'fal_comfyui_jobs', filter: `id=eq.${jobId}` },
         (payload) => {
           const newJob = payload.new as any;
-          addLog(`Job status updated: ${newJob.status}`);
+          addLog(`[REALTIME] Job status updated: ${newJob.status}`);
           setJobStatus(newJob.status);
           if (newJob.status === 'complete') {
             const imageUrl = newJob.final_result?.data?.images?.[0]?.url;
@@ -64,15 +65,25 @@ const FalComfyUITester = () => {
               setResultImageUrl(imageUrl);
               showSuccess("Job complete!");
             } else {
+              addLog("[ERROR] Job completed but no image URL found in result.");
               showError("Job completed but no image URL found in result.");
             }
             setIsLoading(false);
           } else if (newJob.status === 'failed') {
+            addLog(`[ERROR] Job failed: ${newJob.error_message}`);
             showError(`Job failed: ${newJob.error_message}`);
             setIsLoading(false);
           }
         }
-      ).subscribe();
+      ).subscribe((status, err) => {
+        if (status === 'SUBSCRIBED') {
+          addLog("Successfully subscribed to real-time updates.");
+        }
+        if (status === 'CHANNEL_ERROR') {
+          addLog(`[ERROR] Realtime connection failed: ${err?.message}`);
+          showError("Could not connect to real-time updates. You may need to enable Realtime for the 'fal_comfyui_jobs' table in your Supabase dashboard.");
+        }
+      });
       channelRef.current = channel;
     }
 
@@ -101,7 +112,7 @@ const FalComfyUITester = () => {
     setLogs([]);
     setResultImageUrl(null);
     setJobId(null);
-    setJobStatus(null);
+    setJobStatus('submitting');
     addLog("Submitting job...");
     try {
       const image_base64 = await fileToBase64(imageFile);
@@ -116,18 +127,20 @@ const FalComfyUITester = () => {
     } catch (err: any) {
       addLog(`Error submitting job: ${err.message}`);
       showError(err.message);
+      setJobStatus('failed');
+    } finally {
       setIsLoading(false);
     }
   };
 
   const getStatusIcon = () => {
-    if (isLoading) return <Loader2 className="h-4 w-4 animate-spin" />;
+    if (isLoading && jobStatus === 'submitting') return <Loader2 className="h-4 w-4 animate-spin" />;
     switch (jobStatus) {
       case 'complete': return <Check className="h-4 w-4 text-green-500" />;
       case 'failed': return <X className="h-4 w-4 text-destructive" />;
       case 'processing':
       case 'queued':
-        return <Hourglass className="h-4 w-4 text-blue-500" />;
+        return <Hourglass className="h-4 w-4 text-blue-500 animate-pulse" />;
       default:
         return null;
     }
@@ -194,7 +207,7 @@ const FalComfyUITester = () => {
             <CardHeader><CardTitle>Result Image</CardTitle></CardHeader>
             <CardContent>
               <div className="aspect-square bg-muted rounded-md flex items-center justify-center">
-                {isLoading && <Loader2 className="h-8 w-8 animate-spin" />}
+                {isLoading && jobStatus !== 'submitting' && <Loader2 className="h-8 w-8 animate-spin" />}
                 {resultImageUrl && <img src={resultImageUrl} alt="Final result" className="max-w-full max-h-full object-contain" />}
               </div>
             </CardContent>
