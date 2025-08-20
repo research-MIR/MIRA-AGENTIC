@@ -32,7 +32,7 @@ serve(async (req) => {
 
     const { data: job, error: fetchError } = await supabase
       .from("mira_agent_tiled_upscale_jobs")
-      .select("source_bucket, source_path, user_id")
+      .select("source_bucket, source_path, user_id, upscale_factor")
       .eq("id", parent_job_id)
       .single();
     if (fetchError) throw fetchError;
@@ -45,6 +45,11 @@ serve(async (req) => {
 
     const img = await Image.decode(await blob.arrayBuffer());
     console.log(`${logPrefix} Decoded original image: ${img.width}x${img.height}`);
+
+    const upscale_factor = job.upscale_factor || 2.0;
+    const finalW = Math.round(img.width * upscale_factor);
+    const finalH = Math.round(img.height * upscale_factor);
+    console.log(`${logPrefix} Calculated final dimensions: ${finalW}x${finalH} (factor: ${upscale_factor})`);
 
     const tilesX = img.width <= TILE_SIZE ? 1 : 1 + Math.ceil((img.width - TILE_SIZE) / STEP);
     const tilesY = img.height <= TILE_SIZE ? 1 : 1 + Math.ceil((img.height - TILE_SIZE) / STEP);
@@ -94,7 +99,12 @@ serve(async (req) => {
         if (error) throw error;
     }
 
-    await supabase.from("mira_agent_tiled_upscale_jobs").update({ status: "queued_for_generation", total_tiles: totalTiles }).eq("id", parent_job_id);
+    await supabase.from("mira_agent_tiled_upscale_jobs").update({ 
+        status: "queued_for_generation", 
+        total_tiles: totalTiles,
+        canvas_w: finalW,
+        canvas_h: finalH
+    }).eq("id", parent_job_id);
     console.log(`${logPrefix} Tiling complete. All tiles queued for analysis.`);
 
     return new Response(JSON.stringify({ success: true, tileCount: totalTiles }), { headers: corsHeaders });
