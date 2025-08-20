@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { SUPABASE_PUBLISHABLE_KEY } from '@/integrations/supabase/client';
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -138,7 +139,7 @@ const FalComfyUITester = () => {
       setRequestId(newRequestId);
       addLog(`Job submitted. Request ID: ${newRequestId}. Opening log stream...`);
 
-      const streamUrl = `${supabase.supabaseUrl}/functions/v1/MIRA-AGENT-proxy-fal-comfyui-stream?requestId=${newRequestId}`;
+      const streamUrl = `${supabase.supabaseUrl}/functions/v1/MIRA-AGENT-proxy-fal-comfyui-stream?requestId=${newRequestId}&apikey=${SUPABASE_PUBLISHABLE_KEY}`;
       const eventSource = new EventSource(streamUrl);
       eventSourceRef.current = eventSource;
 
