@@ -1,40 +1,43 @@
 // deno-lint-ignore-file no-explicit-any
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { Image } from "https://deno.land/x/imagescript@1.2.15/mod.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const BUCKET_OUT = "mira-generations";
 
-const TILE_SIZE = 1024; // The base logical tile size before upscaling
-const JPEG_QUALITY = Number(Deno.env.get("COMPOSITOR_JPEG_QUALITY") ?? 90);
-const MEM_HARD_LIMIT_MB = Number(Deno.env.get("COMPOSITOR_MEM_LIMIT_MB") ?? 360);
+const TILE_SIZE = 1024;
+const JPEG_QUALITY = 90;
+const MEM_HARD_LIMIT_MB = 360;
 
 type Tile = {
   tile_index: number;
   coordinates: { x: number; y: number; width: number; height: number };
-  generated_tile_url: string;
+  generated_tile_url: string | null;
+  generated_tile_bucket: string | null;
+  generated_tile_path: string | null;
   status: "complete" | string;
 };
+
+type TileRef = { bucket: string; path: string } | { url: string };
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   global: { fetch }, auth: { persistSession: false }
 });
 
-function parseStorageURL(url: string) {
-    const u = new URL(url);
-    const pathSegments = u.pathname.split('/');
-    const objectSegmentIndex = pathSegments.indexOf('object');
-    if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) {
-        throw new Error(`Invalid Supabase storage URL format: ${url}`);
-    }
-    const bucket = pathSegments[objectSegmentIndex + 2];
-    const path = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
-    if (!bucket || !path) {
-        throw new Error(`Could not parse bucket or path from Supabase URL: ${url}`);
-    }
-    return { bucket, path };
+async function fetchBytes(ref: TileRef, signal: AbortSignal): Promise<Uint8Array> {
+  if ('bucket' in ref && ref.bucket && ref.path) {
+    const { data, error } = await supabase.storage.from(ref.bucket).download(ref.path);
+    if (error) throw new Error(`Storage download failed (${ref.bucket}/${ref.path}): ${error.message}`);
+    return new Uint8Array(await data.arrayBuffer());
+  }
+  if ('url' in ref && ref.url) {
+    const res = await fetch(ref.url, { signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status} for ${ref.url}`);
+    return new Uint8Array(await res.arrayBuffer());
+  }
+  throw new Error('Tile reference has neither (bucket,path) nor url');
 }
 
 function buildRamp(n: number, invert = false): Float32Array {
@@ -131,19 +134,13 @@ function blendWeighted(canvas: Image, tile: Image, x0: number, y0: number, hx: F
   }
 }
 
-async function fetchBytes(url: string, signal: AbortSignal): Promise<Uint8Array> {
-  const res = await fetch(url, { signal });
-  if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
-  return new Uint8Array(await res.arrayBuffer());
-}
-
 async function run(parent_job_id: string) {
   const logPrefix = `[Compositor][${parent_job_id}]`;
   console.log(`${logPrefix} Starting run.`);
 
   const { data: parentRow, error: e1 } = await supabase
     .from("mira_agent_tiled_upscale_jobs")
-    .select("id,user_id,source_image_url,status,final_image_url,upscale_factor")
+    .select("id,user_id,source_bucket,source_path,status,final_image_url,upscale_factor")
     .eq("id", parent_job_id)
     .single();
   if (e1 || !parentRow) throw new Error(`Parent not found: ${e1?.message}`);
@@ -155,17 +152,22 @@ async function run(parent_job_id: string) {
 
   const { data: tiles, error: e2 } = await supabase
     .from("mira_agent_tiled_upscale_tiles")
-    .select("tile_index,coordinates,generated_tile_url,status")
+    .select("tile_index,coordinates,generated_tile_url,generated_tile_bucket,generated_tile_path,status")
     .eq("parent_job_id", parent_job_id)
+    .eq("status", "complete")
     .order("tile_index", { ascending: true });
   if (e2) throw new Error(e2.message);
 
-  const completeTiles: Tile[] = (tiles ?? []).filter(t => t.status === "complete");
-  if (!completeTiles.length) throw new Error("No completed tiles found for this job.");
+  const completeTiles: Tile[] = (tiles ?? []).filter(t => (t.generated_tile_bucket && t.generated_tile_path) || t.generated_tile_url);
+  if (!completeTiles.length) throw new Error("No completed tiles with valid image references found for this job.");
+
+  const firstTileRef: TileRef = completeTiles[0].generated_tile_bucket 
+    ? { bucket: completeTiles[0].generated_tile_bucket!, path: completeTiles[0].generated_tile_path! }
+    : { url: completeTiles[0].generated_tile_url! };
 
   const firstTileCtl = new AbortController();
   const firstTileTimeout = setTimeout(() => firstTileCtl.abort(), 25_000);
-  const firstTileBytes = await fetchBytes(completeTiles[0].generated_tile_url, firstTileCtl.signal);
+  const firstTileBytes = await fetchBytes(firstTileRef, firstTileCtl.signal);
   clearTimeout(firstTileTimeout);
 
   const firstTileImage = await Image.decode(firstTileBytes);
@@ -173,15 +175,12 @@ async function run(parent_job_id: string) {
   const scaleFactor = actualTileSize / TILE_SIZE;
   console.log(`${logPrefix} Detected upscale factor of ${scaleFactor}x (Tiles are ${actualTileSize}px)`);
 
-  const { bucket, path } = parseStorageURL(parentRow.source_image_url);
-  const { data: sourceBlob, error: dlError } = await supabase.storage.from(bucket).download(path);
+  const { data: sourceBlob, error: dlError } = await supabase.storage.from(parentRow.source_bucket!).download(parentRow.source_path!);
   if (dlError) throw new Error(`Failed to download original source image: ${dlError.message}`);
   
   let originalImage: Image | null = await Image.decode(await sourceBlob.arrayBuffer());
-  const upW = Math.round(originalImage.width * parentRow.upscale_factor);
-  const upH = Math.round(originalImage.height * parentRow.upscale_factor);
-  const finalW = Math.round(upW * scaleFactor);
-  const finalH = Math.round(upH * scaleFactor);
+  const finalW = Math.round(originalImage.width * scaleFactor);
+  const finalH = Math.round(originalImage.height * scaleFactor);
   originalImage = null; // Release memory
   console.log(`${logPrefix} Final canvas dimensions will be ${finalW}x${finalH}`);
 
@@ -221,9 +220,13 @@ async function run(parent_job_id: string) {
   }
 
   for (const t of completeTiles) {
+    const tileRef: TileRef = t.generated_tile_bucket
+        ? { bucket: t.generated_tile_bucket, path: t.generated_tile_path! }
+        : { url: t.generated_tile_url! };
+
     const ctl = new AbortController();
     const timeout = setTimeout(() => ctl.abort(), 25_000);
-    const bytes = await fetchBytes(t.generated_tile_url, ctl.signal);
+    const bytes = await fetchBytes(tileRef, ctl.signal);
     clearTimeout(timeout);
 
     let tile: Image | null = await Image.decode(bytes);
