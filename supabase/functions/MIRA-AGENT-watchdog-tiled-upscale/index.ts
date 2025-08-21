@@ -4,7 +4,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const BATCH_SIZE = 10;
-const STALLED_THRESHOLD_SECONDS = 180;
+const STALLED_GENERATION_THRESHOLD_SECONDS = 180; // 3 minutes
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -25,6 +25,16 @@ serve(async (req) => {
       return new Response(JSON.stringify({ message: "Lock held, skipping execution." }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
     }
     console.log(`${logPrefix} Advisory lock acquired. Proceeding with checks.`);
+
+    // Stalled Job Recovery for GENERATION
+    const stalledThreshold = new Date(Date.now() - STALLED_GENERATION_THRESHOLD_SECONDS * 1000).toISOString();
+    const { error: updateStalledError } = await supabase
+        .from('mira_agent_tiled_upscale_tiles')
+        .update({ status: 'generation_failed', error_message: 'Reset by watchdog due to stall in generation.' })
+        .eq('status', 'generating')
+        .lt('updated_at', stalledThreshold);
+    if (updateStalledError) console.error(`${logPrefix} Error updating stalled generation jobs:`, updateStalledError);
+
 
     // Dispatch Pending Generation
     const { data: pendingGenerationTiles, error: fetchGenerationError } = await supabase.from('mira_agent_tiled_upscale_tiles').select('id').eq('status', 'pending_generation').not('source_tile_bucket', 'is', null).not('source_tile_path', 'is', null).limit(BATCH_SIZE);
