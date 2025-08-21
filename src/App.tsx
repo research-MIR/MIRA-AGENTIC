@@ -22,7 +22,7 @@ import { useOnboardingTour } from "@/context/OnboardingTourContext";
 import { TourProvider as ReactourProvider, StepType } from '@reactour/tour';
 import SegmentationTool from "./pages/Developer/Segmentation.tsx";
 import BoundingBoxTester from "./pages/Developer/BoundingBoxTester.tsx";
-import EnhancorAITester from "./pages/Developer/EnhancorAITester.tsx";
+import UpscaleTilingVisualizer from "./pages/Developer/UpscaleTilingVisualizer.tsx";
 import ModelPacks from "./pages/ModelPacks.tsx";
 import ModelPackDetail from "./pages/ModelPackDetail.tsx";
 import VirtualTryOnPacks from "./pages/VirtualTryOnPacks.tsx";
@@ -124,7 +124,7 @@ const App = () => {
             <Route path="/developer" element={<Developer />} />
             <Route path="/developer/segmentation" element={<SegmentationTool />} />
             <Route path="/developer/bounding-box-tester" element={<BoundingBoxTester />} />
-            <Route path="/developer/enhancor-ai-tester" element={<EnhancorAITester />} />
+            <Route path="/developer/upscale-tiling-visualizer" element={<UpscaleTilingVisualizer />} />
             <Route path="/developer/fal-comfyui-tester" element={<FalComfyUITester />} />
             <Route path="/model-packs" element={<ModelPacks />} />
             <Route path="/model-packs/:packId" element={<ModelPackDetail />} />

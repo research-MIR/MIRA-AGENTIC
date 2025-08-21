@@ -445,10 +445,10 @@ const Developer = () => {
                         Bounding Box Tester
                     </Button>
                 </Link>
-                <Link to="/developer/enhancor-ai-tester">
+                <Link to="/developer/upscale-tiling-visualizer">
                     <Button variant="outline">
                         <Grid3x3 className="mr-2 h-4 w-4" />
-                        EnhancorAI Tester
+                        Upscale Tiling Visualizer
                     </Button>
                 </Link>
                 <Link to="/developer/fal-comfyui-tester">
