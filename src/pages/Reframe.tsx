@@ -12,7 +12,6 @@ import { useLanguage } from "@/context/LanguageContext";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { ImageCompareModal } from "@/components/ImageCompareModal";
 import { Slider } from "@/components/ui/slider";
-import { RecentJobThumbnail } from "@/components/Jobs/RecentJobThumbnail";
 import { useDropzone } from "@/hooks/useDropzone";
 import { cn } from "@/lib/utils";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -238,7 +237,7 @@ const Reframe = () => {
               <CardHeader><CardTitle>1. Setup</CardTitle></CardHeader>
               <CardContent className="space-y-4">
                 <div className="max-w-xs mx-auto">
-                  <ImageUploader onFileSelect={setBaseFile} title={t('baseImage')} imageUrl={basePreviewUrl} onClear={() => setBaseFile(null)} />
+                  <ImageUploader onFileSelect={(files) => files && setBaseFile(files[0])} title={t('baseImage')} imageUrl={basePreviewUrl} onClear={() => setBaseFile(null)} />
                 </div>
                 <div>
                   <Label htmlFor="prompt">{t('prompt')}</Label>
@@ -345,11 +344,19 @@ const Reframe = () => {
                     <CarouselContent className="-ml-4">
                       {recentJobs.map(job => (
                         <CarouselItem key={job.id} className="pl-4 basis-auto">
-                          <RecentJobThumbnail
-                            job={{...job, metadata: { source_image_url: job.context?.base_image_url }}}
+                          <button
                             onClick={() => setSelectedJobId(job.id)}
-                            isSelected={selectedJobId === job.id}
-                          />
+                            className={cn(
+                                "border-2 rounded-lg p-1 flex-shrink-0 w-24 h-24",
+                                selectedJobId === job.id ? "border-primary" : "border-transparent"
+                            )}
+                          >
+                            <SecureImageDisplay
+                                imageUrl={job.final_result?.images?.[0]?.publicUrl || job.context?.base_image_url || null}
+                                alt="Recent job"
+                                className="w-full h-full object-cover rounded-md"
+                            />
+                          </button>
                         </CarouselItem>
                       ))}
                     </CarouselContent>
