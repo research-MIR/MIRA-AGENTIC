@@ -88,19 +88,23 @@ serve(async (req) => {
           throw new Error(`Invalid enhancor_mode: ${enhancor_mode}`);
       }
 
-      // --- ADDED DETAILED LOGGING ---
       const fullApiUrl = `${API_BASE}${endpoint}`;
+      const headers = {
+        'Content-Type': 'application/json',
+        'x-api-key': ENHANCOR_API_KEY,
+      };
+
+      // --- ADDED DETAILED LOGGING ---
       console.log(`${logPrefix} Preparing to call EnhancorAI.`);
       console.log(`${logPrefix} Full API URL: ${fullApiUrl}`);
+      console.log(`${logPrefix} Verifying API Key. First 5 chars: ${ENHANCOR_API_KEY?.substring(0, 5)}...`);
+      console.log(`${logPrefix} Sending request with headers:`, JSON.stringify(headers, null, 2));
       console.log(`${logPrefix} Request Payload: ${JSON.stringify(payload, null, 2)}`);
       // --- END OF LOGGING ---
 
       const apiResponse = await fetch(fullApiUrl, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': ENHANCOR_API_KEY,
-        },
+        headers: headers,
         body: JSON.stringify(payload),
       });
 
