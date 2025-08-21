@@ -10,33 +10,20 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const ENHANCOR_API_KEY = Deno.env.get('ENHANCOR_API_KEY');
 const API_BASE = 'https://api.enhancor.ai/api';
-const UPLOAD_BUCKET = 'enhancor-ai-uploads';
 
-const processJob = async (supabase: any, originalImageUrl: string, user_id: string, enhancor_mode: string, enhancor_params: any, batch_job_id: string | null, webhookUrl: string, tile_id: string | null) => {
-    const logPrefix = `[EnhancorAIProxy][${originalImageUrl.split('/').pop()}]`;
+const processJob = async (supabase: any, imageUrl: string, user_id: string, enhancor_mode: string, enhancor_params: any, batch_job_id: string | null, webhookUrl: string, tile_id: string | null, metadata: any) => {
+    const logPrefix = `[EnhancorAIProxy][${imageUrl.split('/').pop()}]`;
     console.log(`${logPrefix} Starting processing.`);
-
-    const transformedUrl = `${originalImageUrl}?format=jpeg&quality=95`;
-    const response = await fetch(transformedUrl);
-    if (!response.ok) throw new Error(`Failed to fetch and convert image from Supabase Storage. Status: ${response.status}`);
-    const imageBlob = await response.blob();
-
-    const convertedFilePath = `${user_id}/enhancor-sources/converted/${Date.now()}-converted.jpeg`;
-    const { error: uploadError } = await supabase.storage.from(UPLOAD_BUCKET).upload(convertedFilePath, imageBlob, { contentType: 'image/jpeg', upsert: true });
-    if (uploadError) throw uploadError;
-
-    const { data: { publicUrl: convertedImageUrl } } = supabase.storage.from(UPLOAD_BUCKET).getPublicUrl(convertedFilePath);
-    console.log(`${logPrefix} Converted image stored at: ${convertedImageUrl}`);
 
     const { data: newJob, error: insertError } = await supabase
       .from('enhancor_ai_jobs')
       .insert({
         user_id,
-        source_image_url: convertedImageUrl,
+        source_image_url: imageUrl, // This is now the pre-converted URL
         status: 'queued',
         enhancor_mode,
         enhancor_params,
-        metadata: { original_source_url: originalImageUrl, batch_job_id: batch_job_id, tile_id: tile_id }
+        metadata: { ...metadata, batch_job_id: batch_job_id, tile_id: tile_id }
       })
       .select('id')
       .single();
@@ -50,7 +37,7 @@ const processJob = async (supabase: any, originalImageUrl: string, user_id: stri
     }
 
     const payload: any = {
-      img_url: convertedImageUrl,
+      img_url: imageUrl,
       webhookUrl: finalWebhookUrl,
     };
 
@@ -107,7 +94,7 @@ serve(async (req) => {
       throw new Error("The ENHANCOR_API_KEY is not set in the server environment.");
     }
 
-    const { user_id, source_image_urls, enhancor_mode, enhancor_params, batch_job_id, tile_id } = await req.json();
+    const { user_id, source_image_urls, enhancor_mode, enhancor_params, batch_job_id, tile_id, metadata } = await req.json();
     if (!user_id || !source_image_urls || !Array.isArray(source_image_urls) || source_image_urls.length === 0 || !enhancor_mode) {
       throw new Error("user_id, a non-empty source_image_urls array, and enhancor_mode are required.");
     }
@@ -118,7 +105,7 @@ serve(async (req) => {
     // Fire-and-forget: Start processing but don't wait for it to finish.
     Promise.allSettled(
       source_image_urls.map(url => 
-        processJob(supabase, url, user_id, enhancor_mode, enhancor_params, batch_job_id, webhookUrl, tile_id)
+        processJob(supabase, url, user_id, enhancor_mode, enhancor_params, batch_job_id, webhookUrl, tile_id, metadata)
       )
     ).then(results => {
       const failedCount = results.filter(r => r.status === 'rejected').length;

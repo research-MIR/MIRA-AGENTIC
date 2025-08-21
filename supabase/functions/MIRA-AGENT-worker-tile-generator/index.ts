@@ -3,6 +3,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+const UPLOAD_BUCKET = 'enhancor-ai-uploads';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -45,16 +46,30 @@ serve(async (req) => {
     
     if (fetchParentError) throw new Error(`Failed to fetch parent job: ${fetchParentError.message}`);
 
-    const { data: { publicUrl } } = supabase.storage.from(source_tile_bucket).getPublicUrl(source_tile_path);
+    const { data: { publicUrl: originalTileUrl } } = supabase.storage.from(source_tile_bucket).getPublicUrl(source_tile_path);
+
+    // Prepare the image for EnhancorAI
+    const transformedUrl = `${originalTileUrl}?format=jpeg&quality=95`;
+    const response = await fetch(transformedUrl);
+    if (!response.ok) throw new Error(`Failed to fetch and convert image from Supabase Storage. Status: ${response.status}`);
+    const imageBlob = await response.blob();
+
+    const convertedFilePath = `${parentJob.user_id}/enhancor-sources/converted/${Date.now()}-tile-${tile_id}.jpeg`;
+    const { error: uploadError } = await supabase.storage.from(UPLOAD_BUCKET).upload(convertedFilePath, imageBlob, { contentType: 'image/jpeg', upsert: true });
+    if (uploadError) throw uploadError;
+
+    const { data: { publicUrl: convertedImageUrl } } = supabase.storage.from(UPLOAD_BUCKET).getPublicUrl(convertedFilePath);
+    console.log(`${logPrefix} Converted image stored at: ${convertedImageUrl}`);
 
     const enhancor_mode = parentJob.metadata?.upscaler_engine || 'enhancor_detailed';
 
     const { error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-enhancor-ai', {
       body: {
         user_id: parentJob.user_id,
-        source_image_urls: [publicUrl],
+        source_image_urls: [convertedImageUrl], // Pass the ready-to-use URL
         enhancor_mode: enhancor_mode,
         tile_id: tile_id,
+        metadata: { original_tile_url: originalTileUrl }
       }
     });
 
