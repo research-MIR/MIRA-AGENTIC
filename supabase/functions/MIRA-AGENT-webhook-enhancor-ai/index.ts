@@ -68,15 +68,24 @@ serve(async (req) => {
     if (tileId) {
         console.log(`[EnhancorWebhook] Received tile_id: ${tileId}. Updating tile status.`);
         if (status === 'success' && result) {
-            const { bucket, path } = parseStorageURL(result);
+            const updatePayload: any = {
+                status: 'complete',
+                generated_tile_url: result,
+            };
+
+            if (result.includes('supabase.co')) {
+                const { bucket, path } = parseStorageURL(result);
+                updatePayload.generated_tile_bucket = bucket;
+                updatePayload.generated_tile_path = path;
+            } else {
+                // It's an external URL, so bucket and path are null
+                updatePayload.generated_tile_bucket = null;
+                updatePayload.generated_tile_path = null;
+            }
+
             await supabase
                 .from('mira_agent_tiled_upscale_tiles')
-                .update({
-                    status: 'complete',
-                    generated_tile_url: result,
-                    generated_tile_bucket: bucket,
-                    generated_tile_path: path,
-                })
+                .update(updatePayload)
                 .eq('id', tileId);
         } else {
             await supabase
