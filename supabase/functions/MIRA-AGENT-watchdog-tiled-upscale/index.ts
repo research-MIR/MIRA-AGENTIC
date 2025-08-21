@@ -26,10 +26,6 @@ serve(async (req) => {
     }
     console.log(`${logPrefix} Advisory lock acquired. Proceeding with checks.`);
 
-    // Stalled Job Recovery for GENERATION
-    const stalledThreshold = new Date(Date.now() - STALLED_THRESHOLD_SECONDS * 1000).toISOString();
-    await supabase.from('mira_agent_tiled_upscale_tiles').update({ status: 'pending_generation', error_message: 'Reset by watchdog due to stall.' }).eq('status','generating').lt('updated_at', stalledThreshold);
-
     // Dispatch Pending Generation
     const { data: pendingGenerationTiles, error: fetchGenerationError } = await supabase.from('mira_agent_tiled_upscale_tiles').select('id').eq('status', 'pending_generation').not('source_tile_bucket', 'is', null).not('source_tile_path', 'is', null).limit(BATCH_SIZE);
     if (fetchGenerationError) throw fetchGenerationError;
