@@ -26,20 +26,12 @@ serve(async (req) => {
     }
     console.log(`${logPrefix} Advisory lock acquired. Proceeding with checks.`);
 
-    // Stalled Job Recovery for ANALYSIS ONLY
+    // Stalled Job Recovery for GENERATION
     const stalledThreshold = new Date(Date.now() - STALLED_THRESHOLD_SECONDS * 1000).toISOString();
-    await supabase.from('mira_agent_tiled_upscale_tiles').update({ status: 'pending_analysis', error_message: 'Reset by watchdog due to stall.' }).eq('status','analyzing').lt('updated_at', stalledThreshold);
-
-    // Dispatch Pending Analysis
-    const { data: pendingAnalysisTiles, error: fetchAnalysisError } = await supabase.from('mira_agent_tiled_upscale_tiles').select('id').eq('status', 'pending_analysis').not('source_tile_bucket', 'is', null).not('source_tile_path', 'is', null).limit(BATCH_SIZE);
-    if (fetchAnalysisError) throw fetchAnalysisError;
-    if (pendingAnalysisTiles && pendingAnalysisTiles.length > 0) {
-      const analysisPromises = pendingAnalysisTiles.map(t => supabase.functions.invoke('MIRA-AGENT-worker-tile-analyzer', { body: { tile_id: t.id } }));
-      await Promise.allSettled(analysisPromises);
-    }
+    await supabase.from('mira_agent_tiled_upscale_tiles').update({ status: 'pending_generation', error_message: 'Reset by watchdog due to stall.' }).eq('status','generating').lt('updated_at', stalledThreshold);
 
     // Dispatch Pending Generation
-    const { data: pendingGenerationTiles, error: fetchGenerationError } = await supabase.from('mira_agent_tiled_upscale_tiles').select('id').eq('status', 'pending_generation').not('generated_prompt', 'is', null).limit(BATCH_SIZE);
+    const { data: pendingGenerationTiles, error: fetchGenerationError } = await supabase.from('mira_agent_tiled_upscale_tiles').select('id').eq('status', 'pending_generation').not('source_tile_bucket', 'is', null).not('source_tile_path', 'is', null).limit(BATCH_SIZE);
     if (fetchGenerationError) throw fetchGenerationError;
     if (pendingGenerationTiles && pendingGenerationTiles.length > 0) {
       const generationPromises = pendingGenerationTiles.map(t => supabase.functions.invoke('MIRA-AGENT-worker-tile-generator', { body: { tile_id: t.id } }));

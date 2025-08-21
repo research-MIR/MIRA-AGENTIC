@@ -28,7 +28,7 @@ serve(async (req) => {
     if (!parent_job_id) throw new Error("parent_job_id is required.");
 
     const logPrefix = `[TilingWorker][${parent_job_id}]`;
-    console.log(`${logPrefix} Invoked. Tiling on base image and queuing for analysis.`);
+    console.log(`${logPrefix} Invoked. Tiling on base image and queuing for generation.`);
 
     const { data: job, error: fetchError } = await supabase
       .from("mira_agent_tiled_upscale_jobs")
@@ -84,7 +84,7 @@ serve(async (req) => {
             coordinates: { x, y, width: TILE_SIZE, height: TILE_SIZE },
             source_tile_bucket: TILE_UPLOAD_BUCKET,
             source_tile_path: filePath,
-            status: "pending_analysis",
+            status: "pending_generation", // Changed from pending_analysis
         });
 
         if (batch.length >= INSERT_BATCH_SIZE) {
@@ -105,7 +105,7 @@ serve(async (req) => {
         canvas_w: finalW,
         canvas_h: finalH
     }).eq("id", parent_job_id);
-    console.log(`${logPrefix} Tiling complete. All tiles queued for analysis.`);
+    console.log(`${logPrefix} Tiling complete. All tiles queued for generation.`);
 
     return new Response(JSON.stringify({ success: true, tileCount: totalTiles }), { headers: corsHeaders });
   } catch (error) {
