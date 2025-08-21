@@ -36,6 +36,7 @@ import Wardrobe from "./pages/Wardrobe.tsx";
 import WardrobePacks from "./pages/WardrobePacks.tsx";
 import WardrobePackDetail from "./pages/WardrobePackDetail.tsx";
 import FalComfyUITester from "./pages/Developer/FalComfyUITester.tsx";
+import TiledUpscaleTester from "./pages/Developer/TiledUpscaleTester.tsx";
 
 const App = () => {
   const { isTourOpen, closeTour, isTourPending, openTour, startTour } = useOnboardingTour();
@@ -126,6 +127,7 @@ const App = () => {
             <Route path="/developer/bounding-box-tester" element={<BoundingBoxTester />} />
             <Route path="/developer/enhancor-ai-tester" element={<EnhancorAITester />} />
             <Route path="/developer/fal-comfyui-tester" element={<FalComfyUITester />} />
+            <Route path="/developer/tiled-upscale-tester" element={<TiledUpscaleTester />} />
             <Route path="/model-packs" element={<ModelPacks />} />
             <Route path="/model-packs/:packId" element={<ModelPackDetail />} />
             <Route path="/experimental" element={<Experimental />} />

@@ -457,6 +457,12 @@ const Developer = () => {
                         Fal.ai ComfyUI Tester
                     </Button>
                 </Link>
+                <Link to="/developer/tiled-upscale-tester">
+                    <Button variant="outline">
+                        <Grid3x3 className="mr-2 h-4 w-4" />
+                        Tiled Upscale Tester
+                    </Button>
+                </Link>
             </CardContent>
           </Card>
         </div>
