@@ -10,7 +10,7 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const ENHANCOR_API_KEY = Deno.env.get('ENHANCOR_API_KEY');
 const API_BASE = 'https://api.enhancor.ai/api';
-const UPLOAD_BUCKET = 'enhancor-ai-uploads'; // CORRECTED BUCKET
+const UPLOAD_BUCKET = 'enhancor-ai-uploads';
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -34,45 +34,39 @@ serve(async (req) => {
       const logPrefix = `[EnhancorAIProxy][${originalImageUrl.split('/').pop()}]`;
       console.log(`${logPrefix} Starting processing.`);
 
-      // 1. Create transformed URL to get a JPEG from Supabase Storage
       const transformedUrl = `${originalImageUrl}?format=jpeg&quality=95`;
       console.log(`${logPrefix} Fetching converted image from: ${transformedUrl}`);
 
-      // 2. Fetch the converted image data
       const response = await fetch(transformedUrl);
       if (!response.ok) {
         throw new Error(`Failed to fetch and convert image from Supabase Storage. Status: ${response.status}`);
       }
       const imageBlob = await response.blob();
 
-      // 3. Upload the converted JPEG to a new path for a permanent record
       const convertedFilePath = `${user_id}/enhancor-sources/converted/${Date.now()}-converted.jpeg`;
       const { error: uploadError } = await supabase.storage
         .from(UPLOAD_BUCKET)
         .upload(convertedFilePath, imageBlob, { contentType: 'image/jpeg', upsert: true });
       if (uploadError) throw uploadError;
 
-      // 4. Get the public URL of the converted image
       const { data: { publicUrl: convertedImageUrl } } = supabase.storage.from(UPLOAD_BUCKET).getPublicUrl(convertedFilePath);
       console.log(`${logPrefix} Converted image stored at: ${convertedImageUrl}`);
 
-      // 5. Create a job record in our database
       const { data: newJob, error: insertError } = await supabase
         .from('enhancor_ai_jobs')
         .insert({
           user_id,
-          source_image_url: convertedImageUrl, // Use the converted URL for Enhancor
+          source_image_url: convertedImageUrl,
           status: 'queued',
           enhancor_mode,
           enhancor_params,
-          metadata: { original_source_url: originalImageUrl } // Store original for reference
+          metadata: { original_source_url: originalImageUrl }
         })
         .select('id')
         .single();
       if (insertError) throw new Error(`Failed to create job record: ${insertError.message}`);
       const jobId = newJob.id;
 
-      // 6. Construct the API call to EnhancorAI
       let endpoint = '';
       const payload: any = {
         img_url: convertedImageUrl,
@@ -94,9 +88,14 @@ serve(async (req) => {
           throw new Error(`Invalid enhancor_mode: ${enhancor_mode}`);
       }
 
-      // 7. Call the EnhancorAI API
-      console.log(`${logPrefix} Calling EnhancorAI endpoint: ${endpoint}`);
-      const apiResponse = await fetch(`${API_BASE}${endpoint}`, {
+      // --- ADDED DETAILED LOGGING ---
+      const fullApiUrl = `${API_BASE}${endpoint}`;
+      console.log(`${logPrefix} Preparing to call EnhancorAI.`);
+      console.log(`${logPrefix} Full API URL: ${fullApiUrl}`);
+      console.log(`${logPrefix} Request Payload: ${JSON.stringify(payload, null, 2)}`);
+      // --- END OF LOGGING ---
+
+      const apiResponse = await fetch(fullApiUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -115,7 +114,6 @@ serve(async (req) => {
         throw new Error("EnhancorAI did not return a successful response or requestId.");
       }
 
-      // 8. Update our job with the external ID
       await supabase
         .from('enhancor_ai_jobs')
         .update({ external_request_id: result.requestId, status: 'processing' })
