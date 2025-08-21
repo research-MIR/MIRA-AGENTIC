@@ -17,6 +17,8 @@ serve(async (req) => {
   try {
     const url = new URL(req.url);
     const jobId = url.searchParams.get('job_id');
+    const tileId = url.searchParams.get('tile_id'); // Check for tile_id
+
     if (!jobId) {
       throw new Error("Webhook received without a job_id in the query parameters.");
     }
@@ -26,6 +28,7 @@ serve(async (req) => {
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
 
+    // Update the main Enhancor job table
     if (status === 'success' && result) {
       await supabase
         .from('enhancor_ai_jobs')
@@ -46,7 +49,29 @@ serve(async (req) => {
         .eq('id', jobId);
     }
 
-    // Handle batch job update
+    // If a tile_id is present, also update the tiled pipeline table
+    if (tileId) {
+        console.log(`[EnhancorWebhook] Received tile_id: ${tileId}. Updating tile status.`);
+        if (status === 'success' && result) {
+            await supabase
+                .from('mira_agent_tiled_upscale_tiles')
+                .update({
+                    status: 'complete',
+                    generated_tile_url: result,
+                })
+                .eq('id', tileId);
+        } else {
+            await supabase
+                .from('mira_agent_tiled_upscale_tiles')
+                .update({
+                    status: 'generation_failed',
+                    error_message: `EnhancorAI reported failure for this tile. Status: ${status}.`
+                })
+                .eq('id', tileId);
+        }
+    }
+
+    // Handle batch job update (for the batch test feature)
     const { data: job } = await supabase.from('enhancor_ai_jobs').select('metadata, enhancor_mode').eq('id', jobId).single();
     if (job?.metadata?.batch_job_id) {
       const { error: rpcError } = await supabase.rpc('update_enhancor_batch_job_result', {
