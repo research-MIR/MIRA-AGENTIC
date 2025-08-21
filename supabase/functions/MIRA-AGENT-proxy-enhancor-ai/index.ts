@@ -11,7 +11,7 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const ENHANCOR_API_KEY = Deno.env.get('ENHANCOR_API_KEY');
 const API_BASE = 'https://api.enhancor.ai/api';
 
-const fetchWithRetry = async (url: string, options: any, maxRetries = 3, delay = 2000) => {
+const fetchWithRetry = async (url: string, options: any, maxRetries = 3, initialDelay = 2000) => {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
             const response = await fetch(url, options);
@@ -28,7 +28,11 @@ const fetchWithRetry = async (url: string, options: any, maxRetries = 3, delay =
                 throw error;
             }
         }
-        await new Promise(resolve => setTimeout(resolve, delay * attempt));
+        // Exponential backoff with jitter
+        const jitter = Math.random() * 1000; // Add up to 1 second of randomness
+        const backoffDelay = initialDelay * Math.pow(2, attempt - 1);
+        console.log(`[FetchRetry] Retrying in ${(backoffDelay + jitter).toFixed(0)}ms...`);
+        await new Promise(resolve => setTimeout(resolve, backoffDelay + jitter));
     }
     throw new Error("Fetch with retry failed unexpectedly.");
 };
