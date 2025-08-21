@@ -9,6 +9,21 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+function parseStorageURL(url: string) {
+    const u = new URL(url);
+    const pathSegments = u.pathname.split('/');
+    const objectSegmentIndex = pathSegments.indexOf('object');
+    if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) {
+        throw new Error(`Invalid Supabase storage URL format: ${url}`);
+    }
+    const bucket = pathSegments[objectSegmentIndex + 2];
+    const path = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
+    if (!bucket || !path) {
+        throw new Error(`Could not parse bucket or path from Supabase URL: ${url}`);
+    }
+    return { bucket, path };
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -53,11 +68,14 @@ serve(async (req) => {
     if (tileId) {
         console.log(`[EnhancorWebhook] Received tile_id: ${tileId}. Updating tile status.`);
         if (status === 'success' && result) {
+            const { bucket, path } = parseStorageURL(result);
             await supabase
                 .from('mira_agent_tiled_upscale_tiles')
                 .update({
                     status: 'complete',
                     generated_tile_url: result,
+                    generated_tile_bucket: bucket,
+                    generated_tile_path: path,
                 })
                 .eq('id', tileId);
         } else {
