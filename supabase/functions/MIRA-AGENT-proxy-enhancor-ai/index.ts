@@ -10,7 +10,7 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const ENHANCOR_API_KEY = Deno.env.get('ENHANCOR_API_KEY');
 const API_BASE = 'https://api.enhancor.ai/api';
-const UPLOAD_BUCKET = 'mira-agent-user-uploads';
+const UPLOAD_BUCKET = 'enhancor-ai-uploads'; // CORRECTED BUCKET
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
