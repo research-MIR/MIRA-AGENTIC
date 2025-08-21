@@ -30,7 +30,7 @@ const EnhancorAITester = () => {
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [isCompareModalOpen, setIsCompareModalOpen] = useState(false);
   const [enhancorMode, setEnhancorMode] = useState<'portrait' | 'general' | 'detailed'>('portrait');
-  const [portraitMode, setPortraitMode] = useState<'fast' | 'professional'>('professional');
+  const [portraitMode, setPortraitMode] = useState<'fast'>('fast');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
   const channelRef = useRef<RealtimeChannel | null>(null);
@@ -177,7 +177,6 @@ const EnhancorAITester = () => {
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="fast">Fast</SelectItem>
-                        <SelectItem value="professional">Professional</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
