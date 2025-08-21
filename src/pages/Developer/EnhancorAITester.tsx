@@ -1,21 +1,26 @@
-import { useState, useRef, useCallback, useMemo, useEffect } from 'react';
-import { useSession } from '@/components/Auth/SessionContextProvider';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Loader2, UploadCloud, AlertTriangle, Image as ImageIcon, PlusCircle, Wand2 } from 'lucide-react';
-import { showError, showLoading, dismissToast, showSuccess } from '@/utils/toast';
-import { useDropzone } from '@/hooks/useDropzone';
-import { cn } from '@/lib/utils';
-import { Input } from '@/components/ui/input';
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ImageCompareModal } from '@/components/ImageCompareModal';
-import { RecentJobThumbnail } from '@/components/Jobs/RecentJobThumbnail';
-import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel";
-import { Skeleton } from '@/components/ui/skeleton';
+import { useState, useMemo, useRef, useEffect } from 'react';
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSession } from "@/components/Auth/SessionContextProvider";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Loader2, Image as ImageIcon, Wand2, UploadCloud, X, PlusCircle, AlertTriangle, Info } from "lucide-react";
+import { useLanguage } from "@/context/LanguageContext";
+import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
+import { useFileUpload } from "@/hooks/useFileUpload";
+import { ImageCompareModal } from "@/components/ImageCompareModal";
+import { Slider } from "@/components/ui/slider";
+import { RecentJobThumbnail } from "@/components/Jobs/RecentJobThumbnail";
+import { useSecureImage } from "@/hooks/useSecureImage";
+import { useDropzone } from "@/hooks/useDropzone";
+import { cn } from "@/lib/utils";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { RealtimeChannel } from "@supabase/supabase-js";
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { RealtimeChannel } from '@supabase/supabase-js';
+import { Input } from '@/components/ui/input';
+import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel";
+
+const UPLOAD_BUCKET = 'enhancor-ai-uploads';
 
 const EnhancorAITester = () => {
   const { supabase, session } = useSession();
@@ -81,9 +86,9 @@ const EnhancorAITester = () => {
     try {
       const uploadPromises = files.map(async (file) => {
         const filePath = `${session.user.id}/enhancor-sources/${Date.now()}-${file.name}`;
-        const { error } = await supabase.storage.from('mira-agent-user-uploads').upload(filePath, file, { upsert: true });
+        const { error } = await supabase.storage.from(UPLOAD_BUCKET).upload(filePath, file, { upsert: true });
         if (error) throw new Error(`Upload failed for ${file.name}: ${error.message}`);
-        const { data: { publicUrl } } = supabase.storage.from('mira-agent-user-uploads').getPublicUrl(filePath);
+        const { data: { publicUrl } } = supabase.storage.from(UPLOAD_BUCKET).getPublicUrl(filePath);
         return publicUrl;
       });
 
@@ -137,7 +142,7 @@ const EnhancorAITester = () => {
               <CardContent>
                 <div {...dropzoneProps} onClick={() => fileInputRef.current?.click()} className={cn("p-4 border-2 border-dashed rounded-lg text-center cursor-pointer hover:border-primary transition-colors", isDraggingOver && "border-primary bg-primary/10")}>
                   <UploadCloud className="mx-auto h-8 w-8 text-muted-foreground" />
-                  <p className="mt-2 text-xs font-medium">Click or drag images (batch supported)</p>
+                  <p className="mt-2 text-sm font-medium">Click or drag images (batch supported)</p>
                   <Input ref={fileInputRef} type="file" multiple className="hidden" accept="image/*" onChange={(e) => handleFileSelect(e.target.files)} />
                 </div>
                 {previews.length > 0 && (
