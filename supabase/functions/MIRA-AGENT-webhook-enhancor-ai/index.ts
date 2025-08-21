@@ -22,7 +22,7 @@ serve(async (req) => {
     }
 
     const payload = await req.json();
-    const { request_id, result, status } = payload;
+    const { result, status } = payload;
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
 
@@ -44,6 +44,18 @@ serve(async (req) => {
           updated_at: new Date().toISOString(),
         })
         .eq('id', jobId);
+    }
+
+    // Handle batch job update
+    const { data: job } = await supabase.from('enhancor_ai_jobs').select('metadata, enhancor_mode').eq('id', jobId).single();
+    if (job?.metadata?.batch_job_id) {
+      const { error: rpcError } = await supabase.rpc('update_enhancor_batch_job_result', {
+        p_batch_job_id: job.metadata.batch_job_id,
+        p_original_url: job.metadata.original_source_url,
+        p_result_type: job.enhancor_mode,
+        p_result_url: result || `FAILED: ${status}`
+      });
+      if (rpcError) console.error(`[EnhancorWebhook] Failed to update batch job:`, rpcError);
     }
 
     return new Response(JSON.stringify({ success: true }), {

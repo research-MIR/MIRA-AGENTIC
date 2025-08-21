@@ -22,7 +22,7 @@ serve(async (req) => {
       throw new Error("The ENHANCOR_API_KEY is not set in the server environment.");
     }
 
-    const { user_id, source_image_urls, enhancor_mode, enhancor_params } = await req.json();
+    const { user_id, source_image_urls, enhancor_mode, enhancor_params, batch_job_id } = await req.json();
     if (!user_id || !source_image_urls || !Array.isArray(source_image_urls) || source_image_urls.length === 0 || !enhancor_mode) {
       throw new Error("user_id, a non-empty source_image_urls array, and enhancor_mode are required.");
     }
@@ -60,7 +60,10 @@ serve(async (req) => {
           status: 'queued',
           enhancor_mode,
           enhancor_params,
-          metadata: { original_source_url: originalImageUrl }
+          metadata: { 
+            original_source_url: originalImageUrl,
+            batch_job_id: batch_job_id 
+          }
         })
         .select('id')
         .single();
@@ -94,13 +97,11 @@ serve(async (req) => {
         'x-api-key': ENHANCOR_API_KEY,
       };
 
-      // --- ADDED DETAILED LOGGING ---
       console.log(`${logPrefix} Preparing to call EnhancorAI.`);
       console.log(`${logPrefix} Full API URL: ${fullApiUrl}`);
       console.log(`${logPrefix} Verifying API Key. First 5 chars: ${ENHANCOR_API_KEY?.substring(0, 5)}...`);
       console.log(`${logPrefix} Sending request with headers:`, JSON.stringify(headers, null, 2));
       console.log(`${logPrefix} Request Payload: ${JSON.stringify(payload, null, 2)}`);
-      // --- END OF LOGGING ---
 
       const apiResponse = await fetch(fullApiUrl, {
         method: 'POST',
