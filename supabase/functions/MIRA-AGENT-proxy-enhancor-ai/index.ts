@@ -110,7 +110,7 @@ serve(async (req) => {
         throw new Error(`EnhancorAI API failed with status ${apiResponse.status}: ${errorBody}`);
       }
 
-      const result = await apiResponse.json.
+      const result = await apiResponse.json();
       if (!result.success || !result.requestId) {
         throw new Error("EnhancorAI did not return a successful response or requestId.");
       }
