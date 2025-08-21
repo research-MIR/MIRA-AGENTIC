@@ -4,7 +4,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const BATCH_SIZE = 10;
-const STALLED_GENERATION_THRESHOLD_SECONDS = 180; // 3 minutes
+const STALLED_GENERATION_THRESHOLD_SECONDS = 900; // 15 minutes
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
