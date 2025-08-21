@@ -11,6 +11,28 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const ENHANCOR_API_KEY = Deno.env.get('ENHANCOR_API_KEY');
 const API_BASE = 'https://api.enhancor.ai/api';
 
+const fetchWithRetry = async (url: string, options: any, maxRetries = 3, delay = 2000) => {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            const response = await fetch(url, options);
+            if (response.ok) {
+                return response;
+            }
+            console.warn(`[FetchRetry] Attempt ${attempt} failed with status ${response.status}.`);
+            if (attempt === maxRetries) {
+                throw new Error(`API call failed after ${maxRetries} attempts. Status: ${response.status}, Body: ${await response.text()}`);
+            }
+        } catch (error) {
+            console.warn(`[FetchRetry] Attempt ${attempt} failed with network error: ${error.message}`);
+            if (attempt === maxRetries) {
+                throw error;
+            }
+        }
+        await new Promise(resolve => setTimeout(resolve, delay * attempt));
+    }
+    throw new Error("Fetch with retry failed unexpectedly.");
+};
+
 const processJob = async (supabase: any, imageUrl: string, user_id: string, enhancor_mode: string, enhancor_params: any, batch_job_id: string | null, webhookUrl: string, tile_id: string | null, metadata: any) => {
     const logPrefix = `[EnhancorAIProxy][${imageUrl.split('/').pop()}]`;
     let jobId: string | null = null;
@@ -53,7 +75,10 @@ const processJob = async (supabase: any, imageUrl: string, user_id: string, enha
           webhookUrl: finalWebhookUrl,
         };
 
-        switch (enhancor_mode) {
+        const mode = String(enhancor_mode).trim();
+        console.log(`${logPrefix} Sanitized enhancor_mode for switch: '${mode}'`);
+
+        switch (mode) {
           case 'portrait':
             endpoint = '/upscaler/v1/queue';
             apiPayload.mode = enhancor_params?.mode || 'professional';
@@ -75,17 +100,11 @@ const processJob = async (supabase: any, imageUrl: string, user_id: string, enha
         console.log(`${logPrefix} Preparing to call EnhancorAI API. URL: ${fullApiUrl}`);
         console.log(`${logPrefix} API Payload: ${JSON.stringify(apiPayload, null, 2)}`);
 
-        const apiResponse = await fetch(fullApiUrl, {
+        const apiResponse = await fetchWithRetry(fullApiUrl, {
           method: 'POST',
           headers: headers,
           body: JSON.stringify(apiPayload),
         });
-
-        if (!apiResponse.ok) {
-          const errorBody = await apiResponse.text();
-          console.error(`${logPrefix} EnhancorAI API call failed with status ${apiResponse.status}. Body: ${errorBody}`);
-          throw new Error(`EnhancorAI API failed with status ${apiResponse.status}: ${errorBody}`);
-        }
 
         const result = await apiResponse.json();
         console.log(`${logPrefix} EnhancorAI API call successful. Response:`, JSON.stringify(result));
