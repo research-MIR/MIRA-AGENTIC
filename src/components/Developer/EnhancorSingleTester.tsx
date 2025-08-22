@@ -16,6 +16,7 @@ import { RealtimeChannel } from "@supabase/supabase-js";
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel";
+import { Switch } from '@/components/ui/switch';
 
 const UPLOAD_BUCKET = 'enhancor-ai-uploads';
 
@@ -40,17 +41,24 @@ export const EnhancorSingleTester = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
   const channelRef = useRef<RealtimeChannel | null>(null);
+  const [showFailed, setShowFailed] = useState(false);
 
   const { data: recentJobs, isLoading: isLoadingRecent } = useQuery({
-    queryKey: ['recentEnhancorJobs', session?.user?.id],
+    queryKey: ['recentEnhancorJobs', session?.user?.id, showFailed],
     queryFn: async () => {
       if (!session?.user) return [];
-      const { data, error } = await supabase
+      let query = supabase
         .from('enhancor_ai_jobs')
         .select('*')
         .eq('user_id', session.user.id)
         .order('created_at', { ascending: false })
         .limit(50);
+
+      if (!showFailed) {
+        query = query.eq('status', 'complete');
+      }
+      
+      const { data, error } = await query;
       if (error) throw error;
       return data;
     },
@@ -66,13 +74,13 @@ export const EnhancorSingleTester = () => {
     const channel = supabase.channel(`enhancor-jobs-tracker-${session.user.id}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'enhancor_ai_jobs', filter: `user_id=eq.${session.user.id}` },
         () => {
-          queryClient.invalidateQueries({ queryKey: ['recentEnhancorJobs', session.user.id] });
+          queryClient.invalidateQueries({ queryKey: ['recentEnhancorJobs', session.user.id, showFailed] });
         }
       ).subscribe();
     channelRef.current = channel;
 
     return () => { if (channelRef.current) supabase.removeChannel(channelRef.current); };
-  }, [session?.user?.id, supabase, queryClient]);
+  }, [session?.user?.id, supabase, queryClient, showFailed]);
 
   const handleFileSelect = useCallback((selectedFiles: FileList | null) => {
     if (!selectedFiles) return;
@@ -225,7 +233,19 @@ export const EnhancorSingleTester = () => {
             </CardContent>
           </Card>
           <Card>
-            <CardHeader><CardTitle>Recent Jobs</CardTitle></CardHeader>
+            <CardHeader>
+              <div className="flex justify-between items-center">
+                <CardTitle>Recent Jobs</CardTitle>
+                <div className="flex items-center space-x-2">
+                  <Label htmlFor="show-failed-switch" className="text-sm">Show Failed</Label>
+                  <Switch
+                    id="show-failed-switch"
+                    checked={showFailed}
+                    onCheckedChange={setShowFailed}
+                  />
+                </div>
+              </div>
+            </CardHeader>
             <CardContent>
               {isLoadingRecent ? <Skeleton className="h-24 w-full" /> : recentJobs && recentJobs.length > 0 ? (
                 <Carousel opts={{ align: "start" }} className="w-full">
