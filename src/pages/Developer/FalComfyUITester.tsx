@@ -1,26 +1,18 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useSession } from '@/components/Auth/SessionContextProvider';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Loader2, UploadCloud, Play, Check, X, Hourglass } from 'lucide-react';
-import { showError, showSuccess } from '@/utils/toast';
+import { showError, showSuccess, showLoading, dismissToast } from '@/utils/toast';
 import { useDropzone } from '@/hooks/useDropzone';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Slider } from '@/components/ui/slider';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { RealtimeChannel } from '@supabase/supabase-js';
 import { Textarea } from '@/components/ui/textarea';
 
-const fileToBase64 = (file: File): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = () => resolve((reader.result as string).split(',')[1]);
-    reader.onerror = (error) => reject(error);
-  });
-};
+const UPLOAD_BUCKET = 'enhancor-ai-uploads';
 
 const findImageUrlInResult = (result: any): string | null => {
   if (!result?.data?.outputs) {
@@ -49,12 +41,6 @@ const FalComfyUITester = () => {
   const [jobStatus, setJobStatus] = useState<string | null>(null);
   const [resultImageUrl, setResultImageUrl] = useState<string | null>(null);
   const [prompt, setPrompt] = useState<string>('');
-  const [params, setParams] = useState({
-    ksampler_denoise: 0.1,
-    imagescaleby_scale_by: 0.5,
-    controlnetapplyadvanced_strength: 0.3,
-    controlnetapplyadvanced_end_percent: 0.9,
-  });
   const fileInputRef = useRef<HTMLInputElement>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
 
@@ -132,17 +118,33 @@ const FalComfyUITester = () => {
     setResultImageUrl(null);
     setJobId(null);
     setJobStatus('submitting');
-    addLog("Submitting job...");
+    addLog("Uploading source image...");
+
     try {
-      const image_base64 = await fileToBase64(imageFile);
-      const inputPayload = {
-        ...params,
-        cliptextencode_text: prompt,
-      };
-      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-fal-comfyui', {
-        body: { method: 'submit', input: inputPayload, image_base64, mime_type: imageFile.type, user_id: session.user.id }
+      const filePath = `${session.user.id}/fal-comfy-tests/${Date.now()}-${imageFile.name}`;
+      const { error: uploadError } = await supabase.storage
+        .from(UPLOAD_BUCKET)
+        .upload(filePath, imageFile, { upsert: true });
+      if (uploadError) throw uploadError;
+      const { data: { publicUrl: source_image_url } } = supabase.storage
+        .from(UPLOAD_BUCKET)
+        .getPublicUrl(filePath);
+      addLog(`Image uploaded: ${source_image_url}`);
+
+      const tile_id = crypto.randomUUID();
+      addLog(`Using dummy tile_id: ${tile_id}`);
+
+      addLog("Submitting job to proxy...");
+      const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-comfyui-tiled-upscale', {
+        body: { 
+          user_id: session.user.id,
+          source_image_url,
+          prompt,
+          tile_id
+        }
       });
       if (error) throw error;
+
       setJobId(data.jobId);
       setJobStatus('queued');
       addLog(`Job submitted successfully. DB Job ID: ${data.jobId}`);
@@ -187,22 +189,6 @@ const FalComfyUITester = () => {
               <div>
                 <Label>Prompt</Label>
                 <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="e.g., a photorealistic image of..." />
-              </div>
-              <div>
-                <Label>Denoise: {params.ksampler_denoise.toFixed(2)}</Label>
-                <Slider value={[params.ksampler_denoise]} onValueChange={(v) => setParams(p => ({ ...p, ksampler_denoise: v[0] }))} min={0} max={1} step={0.01} />
-              </div>
-              <div>
-                <Label>Scale By: {params.imagescaleby_scale_by.toFixed(2)}</Label>
-                <Slider value={[params.imagescaleby_scale_by]} onValueChange={(v) => setParams(p => ({ ...p, imagescaleby_scale_by: v[0] }))} min={0.1} max={2} step={0.01} />
-              </div>
-              <div>
-                <Label>Strength: {params.controlnetapplyadvanced_strength.toFixed(2)}</Label>
-                <Slider value={[params.controlnetapplyadvanced_strength]} onValueChange={(v) => setParams(p => ({ ...p, controlnetapplyadvanced_strength: v[0] }))} min={0} max={1} step={0.01} />
-              </div>
-              <div>
-                <Label>End Percent: {params.controlnetapplyadvanced_end_percent.toFixed(2)}</Label>
-                <Slider value={[params.controlnetapplyadvanced_end_percent]} onValueChange={(v) => setParams(p => ({ ...p, controlnetapplyadvanced_end_percent: v[0] }))} min={0} max={1} step={0.01} />
               </div>
             </CardContent>
           </Card>
