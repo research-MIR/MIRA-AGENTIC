@@ -8,9 +8,9 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const BUCKET_OUT = "mira-generations";
 const STATE_BUCKET = "mira-agent-compositor-state";
 
-const TILE_SIZE = 768;
+const TILE_SIZE_DEFAULT = 768;
 const TILE_OVERLAP = 96;
-const STEP = TILE_SIZE - TILE_OVERLAP;
+const STEP = TILE_SIZE_DEFAULT - TILE_OVERLAP;
 const JPEG_QUALITY = Number(Deno.env.get("COMPOSITOR_JPEG_QUALITY") ?? 85);
 const BATCH_SIZE = Number(Deno.env.get("COMPOSITOR_BATCH") ?? 12);
 const MAX_FEATHER = Number(Deno.env.get("COMPOSITOR_MAX_FEATHER") ?? 256);
@@ -21,7 +21,7 @@ function normalizeCoords(c:any) {
   if (typeof c === "string") { try { c = JSON.parse(c); } catch { return null; } }
   const x = Number((c as any).x), y = Number((c as any).y);
   if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-  return { x, y, width: TILE_SIZE, height: TILE_SIZE };
+  return { x, y, width: TILE_SIZE_DEFAULT, height: TILE_SIZE_DEFAULT };
 }
 function isValidTile(t:any) {
   if (!t) return false;
@@ -104,6 +104,23 @@ serve(async (req) => {
     if (startIndex >= completeTiles.length) { log("All tiles already processed. Moving to finalization."); }
 
     log(`Validating job parameters: upscale_factor=${claimedJob.upscale_factor}, canvas_w=${claimedJob.canvas_w}, canvas_h=${claimedJob.canvas_h}`);
+    
+    const TILE_SIZE_FROM_META = claimedJob.metadata?.tile_size;
+    let TILE_SIZE = TILE_SIZE_DEFAULT;
+    let isFullSizeMode = false;
+    let originalW = 0;
+    let originalH = 0;
+
+    if (typeof TILE_SIZE_FROM_META === 'number') {
+        TILE_SIZE = TILE_SIZE_FROM_META;
+    } else if (TILE_SIZE_FROM_META === 'full_size') {
+        isFullSizeMode = true;
+        originalW = Math.round(claimedJob.canvas_w / claimedJob.upscale_factor);
+        originalH = Math.round(claimedJob.canvas_h / claimedJob.upscale_factor);
+        TILE_SIZE = Math.max(originalW, originalH);
+    }
+    log(`Using TILE_SIZE: ${TILE_SIZE} based on job metadata. Full size mode: ${isFullSizeMode}`);
+
     const actualTileSize = TILE_SIZE * (claimedJob.upscale_factor || 2.0);
     const scaleFactor = actualTileSize / TILE_SIZE;
     const finalW = claimedJob.canvas_w;
@@ -139,10 +156,22 @@ serve(async (req) => {
       log(`[Tile ${i}] Downloaded ${arr.byteLength} bytes.`);
       
       let tile = await Image.decode(arr);
-      log(`[Tile ${i}] Decoded image. Original dims: ${tile.width}x${tile.height}. Expected: ${actualTileSize}x${actualTileSize}`);
-      if (tile.width !== actualTileSize) {
-        log(`[Tile ${i}] Resizing tile to ${actualTileSize}x${actualTileSize}.`);
-        tile.resize(actualTileSize, actualTileSize);
+      log(`[Tile ${i}] Decoded image. Original dims: ${tile.width}x${tile.height}.`);
+
+      if (isFullSizeMode) {
+          const expectedW = Math.round(originalW * claimedJob.upscale_factor);
+          const expectedH = Math.round(originalH * claimedJob.upscale_factor);
+          log(`[Tile ${i}] Full size mode. Expected dims: ${expectedW}x${expectedH}.`);
+          if (tile.width !== expectedW || tile.height !== expectedH) {
+              log(`[Tile ${i}] Resizing tile to ${expectedW}x${expectedH}.`);
+              tile.resize(expectedW, expectedH);
+          }
+      } else {
+          log(`[Tile ${i}] Tiled mode. Expected square dims: ${actualTileSize}x${actualTileSize}.`);
+          if (tile.width !== actualTileSize || tile.height !== actualTileSize) {
+              log(`[Tile ${i}] Resizing tile to ${actualTileSize}x${actualTileSize}.`);
+              tile.resize(actualTileSize, actualTileSize);
+          }
       }
 
       const x = Math.round(t.coordinates.x * scaleFactor);

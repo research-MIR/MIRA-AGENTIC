@@ -92,11 +92,17 @@ serve(async (req) => {
         const gx = i % tilesX;
         const gy = Math.floor(i / tilesX);
         
-        let x = (gx === tilesX - 1) ? img.width - TILE_SIZE : gx * STEP;
-        x = Math.max(0, x);
+        let x, y;
+        if (isFullSizeMode) {
+            x = 0;
+            y = 0;
+        } else {
+            x = (gx === tilesX - 1) ? img.width - TILE_SIZE : gx * STEP;
+            x = Math.max(0, x);
 
-        let y = (gy === tilesY - 1) ? img.height - TILE_SIZE : gy * STEP;
-        y = Math.max(0, y);
+            y = (gy === tilesY - 1) ? img.height - TILE_SIZE : gy * STEP;
+            y = Math.max(0, y);
+        }
 
         const tile = isFullSizeMode ? new Image(img.width, img.height) : new Image(TILE_SIZE, TILE_SIZE);
         tile.composite(img, -x, -y);
