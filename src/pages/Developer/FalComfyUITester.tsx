@@ -139,7 +139,13 @@ const FalComfyUITester = () => {
       addLog("Creating tile record in database...");
       const { data: tile, error: tileError } = await supabase
         .from('mira_agent_tiled_upscale_tiles')
-        .insert({ parent_job_id: parentJob.id, status: 'pending_generation', source_tile_bucket: UPLOAD_BUCKET, source_tile_path: filePath })
+        .insert({ 
+          parent_job_id: parentJob.id, 
+          status: 'pending_generation', 
+          source_tile_bucket: UPLOAD_BUCKET, 
+          source_tile_path: filePath,
+          tile_index: 0
+        })
         .select('id')
         .single();
       if (tileError) throw tileError;
