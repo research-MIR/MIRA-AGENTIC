@@ -20,6 +20,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { BatchJobCard } from '@/components/Developer/BatchJobCard';
 import { BatchDetailView } from '@/components/Developer/BatchDetailView';
 import { TiledUpscaleJobThumbnail } from '@/components/Developer/TiledUpscaleJobThumbnail';
+import { SecureImageDisplay } from '@/components/VTO/SecureImageDisplay';
 
 const UPLOAD_BUCKET = 'mira-agent-user-uploads';
 
