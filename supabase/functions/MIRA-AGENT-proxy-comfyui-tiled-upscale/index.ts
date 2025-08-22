@@ -30,9 +30,10 @@ serve(async (req) => {
 
   try {
     const { user_id, source_image_url, prompt, tile_id, metadata } = await req.json();
-    if (!user_id || !source_image_url || !prompt || !tile_id) {
-      throw new Error("user_id, source_image_url, prompt, and tile_id are required.");
+    if (!user_id || !source_image_url || !tile_id) {
+      throw new Error("user_id, source_image_url, and tile_id are required.");
     }
+    const finalPrompt = prompt || "a high-quality, detailed image";
     console.log(`${logPrefix} Received request for tile ${tile_id}.`);
 
     const { data: newJob, error: insertError } = await supabase
@@ -40,7 +41,7 @@ serve(async (req) => {
       .insert({
         user_id,
         status: 'queued',
-        input_payload: { prompt, source_image_url },
+        input_payload: { prompt: finalPrompt, source_image_url },
         metadata: {
           ...metadata,
           tile_id: tile_id,
@@ -59,7 +60,7 @@ serve(async (req) => {
 
     const finalPayload = {
       ...omnipresentPayload,
-      cliptextencode_text: prompt,
+      cliptextencode_text: finalPrompt,
       loadimage_1: source_image_url,
     };
 
