@@ -4,7 +4,7 @@ import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Loader2, Image as ImageIcon, Wand2, UploadCloud, X, PlusCircle } from "lucide-react";
+import { Loader2, Image as ImageIcon, Wand2, UploadCloud, X, PlusCircle, AlertTriangle, Info } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { ImageCompareModal } from "@/components/ImageCompareModal";
@@ -299,6 +299,7 @@ const TiledUpscaleTester = () => {
                       <SelectItem value="1024">1024px</SelectItem>
                       <SelectItem value="896">896px</SelectItem>
                       <SelectItem value="768">768px</SelectItem>
+                      <SelectItem value="512">512px</SelectItem>
                       <SelectItem value="256">256px</SelectItem>
                       <SelectItem value="128">128px</SelectItem>
                     </SelectContent>
@@ -313,7 +314,12 @@ const TiledUpscaleTester = () => {
           </div>
           <div className="lg:col-span-2 space-y-6">
             <Card>
-              <CardHeader><CardTitle>Result</CardTitle></CardHeader>
+              <CardHeader>
+                <div className="flex justify-between items-center">
+                  <CardTitle>{t('result')}</CardTitle>
+                  {selectedJobId && <Button variant="outline" onClick={() => startNewJob()}>{t('newJob')}</Button>}
+                </div>
+              </CardHeader>
               <CardContent className="min-h-[400px]">
                 {selectedJob?.isBatch ? (
                   <BatchDetailView 
@@ -326,13 +332,13 @@ const TiledUpscaleTester = () => {
                   <div className="space-y-4">
                     <div className="grid grid-cols-2 gap-4">
                       <div className="w-full aspect-square bg-muted rounded-md overflow-hidden flex justify-center items-center relative">
-                        <h3 className="font-semibold mb-2 absolute top-2 left-2 bg-background/80 px-2 py-1 rounded-full text-xs">Original</h3>
+                        <h3 className="font-semibold mb-2 absolute top-2 left-2 bg-background/80 px-2 py-1 rounded-full text-xs">{t('originalImage')}</h3>
                         <SecureImageDisplay imageUrl={selectedJob.source_image_url} alt="Original" />
                       </div>
                       <div className="w-full aspect-square bg-muted rounded-md overflow-hidden flex justify-center items-center relative">
-                        <h3 className="font-semibold mb-2 absolute top-2 left-2 bg-background/80 px-2 py-1 rounded-full text-xs">Upscaled</h3>
+                        <h3 className="font-semibold mb-2 absolute top-2 left-2 bg-background/80 px-2 py-1 rounded-full text-xs">{t('generatedImage')}</h3>
                         {selectedJob.status === 'complete' && selectedJob.final_image_url ? (
-                          <SecureImageDisplay imageUrl={selectedJob.final_image_url} alt="Final Result" />
+                          <SecureImageDisplay imageUrl={selectedJob.final_image_url} alt="Result" />
                         ) : (
                           <div className="w-full h-full flex flex-col items-center justify-center text-muted-foreground">
                             <Loader2 className="h-8 w-8 animate-spin" />
@@ -341,12 +347,12 @@ const TiledUpscaleTester = () => {
                         )}
                       </div>
                     </div>
-                    {selectedJob.status === 'complete' && <Button className="w-full mt-4" onClick={() => setIsCompareModalOpen(true)}>Compare</Button>}
+                    {selectedJob.status === 'complete' && <Button className="w-full mt-4" onClick={() => setIsCompareModalOpen(true)}>{t('compareResults')}</Button>}
                   </div>
                 ) : (
                   <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
                     <ImageIcon className="h-16 w-16" />
-                    <p className="mt-4">Your result will appear here.</p>
+                    <p className="mt-4">{t('uploadAnImageToStart')}</p>
                   </div>
                 )}
               </CardContent>
@@ -354,7 +360,7 @@ const TiledUpscaleTester = () => {
             <Card>
               <CardHeader><CardTitle>Recent Batches & Jobs</CardTitle></CardHeader>
               <CardContent>
-                {isLoadingRecent ? <Skeleton className="h-48 w-full" /> : combinedJobs.length > 0 ? (
+                {isLoadingRecent ? <Skeleton className="h-24 w-full" /> : combinedJobs.length > 0 ? (
                   <ScrollArea className="h-48">
                     <div className="space-y-2 pr-2">
                       {combinedJobs.map(job => (
