@@ -2,24 +2,24 @@ import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useSession } from '@/components/Auth/SessionContextProvider';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Loader2, UploadCloud, Wand2, Image as ImageIcon, X, Grid3x3, PlusCircle } from 'lucide-react';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Loader2, Image as ImageIcon, Wand2, UploadCloud, X, PlusCircle } from 'lucide-react';
+import { useLanguage } from '@/context/LanguageContext';
 import { showError, showLoading, dismissToast, showSuccess } from '@/utils/toast';
+import { ImageCompareModal } from '@/components/ImageCompareModal';
+import { Slider } from '@/components/ui/slider';
+import { RecentJobThumbnail } from '@/components/Jobs/RecentJobThumbnail';
 import { useDropzone } from '@/hooks/useDropzone';
 import { cn } from '@/lib/utils';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Slider } from '@/components/ui/slider';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { RealtimeChannel } from '@supabase/supabase-js';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Skeleton } from '@/components/ui/skeleton';
-import { ImageCompareModal } from '@/components/ImageCompareModal';
-import { TileDetailModal } from '@/components/Developer/TileDetailModal';
-import { Progress } from '@/components/ui/progress';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { RecentJobThumbnail } from '@/components/Jobs/RecentJobThumbnail';
+import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from '@/components/ui/carousel';
 import { SecureImageDisplay } from '@/components/VTO/SecureImageDisplay';
+import { TileDetailModal } from '@/components/Developer/TileDetailModal';
+import { Progress } from '@/components/ui/progress';
 
 const UPLOAD_BUCKET = 'mira-agent-user-uploads';
 
@@ -48,10 +48,12 @@ interface TiledUpscaleJob {
 
 const TiledUpscaleTester = () => {
   const { supabase, session } = useSession();
+  const { t } = useLanguage();
   const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [sourcePreview, setSourcePreview] = useState<string | null>(null);
   const [upscaleFactor, setUpscaleFactor] = useState(2.0);
   const [engine, setEngine] = useState('comfyui_tiled_upscaler');
+  const [tileSize, setTileSize] = useState<string | number>('default');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [selectedTile, setSelectedTile] = useState<Tile | null>(null);
@@ -129,7 +131,13 @@ const TiledUpscaleTester = () => {
       showLoading("Starting upscale job...");
 
       const { data, error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-tiled-upscale', {
-        body: { user_id: session.user.id, source_image_url: publicUrl, upscale_factor: upscaleFactor, upscaler_engine: engine }
+        body: { 
+            user_id: session.user.id, 
+            source_image_url: publicUrl, 
+            upscale_factor: upscaleFactor, 
+            upscaler_engine: engine,
+            tile_size: tileSize === 'default' ? null : tileSize
+        }
       });
       if (error) throw error;
 
@@ -188,6 +196,19 @@ const TiledUpscaleTester = () => {
                       <SelectItem value="comfyui_tiled_upscaler">ComfyUI (Prompt-based)</SelectItem>
                       <SelectItem value="enhancor_detailed">Enhancor (Detailed)</SelectItem>
                       <SelectItem value="enhancor_general">Enhancor (General)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Tile Size</Label>
+                  <Select value={String(tileSize)} onValueChange={(v) => setTileSize(v === 'full_size' ? v : Number(v))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="default">Default (768px)</SelectItem>
+                      <SelectItem value="full_size">Full Size (Single Tile)</SelectItem>
+                      <SelectItem value="768">768px</SelectItem>
+                      <SelectItem value="896">896px</SelectItem>
+                      <SelectItem value="1024">1024px</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -262,8 +283,8 @@ const TiledUpscaleTester = () => {
                         </CarouselItem>
                       ))}
                     </CarouselContent>
-                    <CarouselPrevious />
-                    <CarouselNext />
+                    <CarouselPrevious className="left-2" />
+                    <CarouselNext className="right-2" />
                   </Carousel>
                 ) : (
                   <p className="text-sm text-muted-foreground">No recent jobs found.</p>
@@ -275,7 +296,12 @@ const TiledUpscaleTester = () => {
       </div>
       <TileDetailModal isOpen={!!selectedTile} onClose={() => setSelectedTile(null)} tile={selectedTile} supabase={supabase} />
       {isCompareModalOpen && selectedJob?.source_image_url && selectedJob?.final_image_url && (
-        <ImageCompareModal isOpen={isCompareModalOpen} onClose={() => setIsCompareModalOpen(false)} beforeUrl={selectedJob.source_image_url} afterUrl={selectedJob.final_image_url} />
+        <ImageCompareModal 
+          isOpen={isCompareModalOpen}
+          onClose={() => setIsCompareModalOpen(false)}
+          beforeUrl={selectedJob.source_image_url}
+          afterUrl={selectedJob.final_image_url}
+        />
       )}
     </>
   );
