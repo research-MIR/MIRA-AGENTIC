@@ -30,20 +30,14 @@ serve(async (req) => {
   }
 
   try {
-    const { source_image_url, user_id, upscale_factor = 2.0, source_job_id, upscaler_engine } = await req.json();
+    const { source_image_url, user_id, upscale_factor = 2.0, source_job_id, upscaler_engine, tile_size } = await req.json();
     if (!source_image_url || !user_id) {
       throw new Error("source_image_url and user_id are required.");
     }
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
     
-    // --- SYSTEM OVERRIDE ---
-    // Set SYSTEM_OVERRIDE to true to force a specific engine, bypassing the UI choice.
-    // Set to false to allow the 'upscaler_engine' parameter from the request to be used.
     const SYSTEM_OVERRIDE = true; 
-    
-    // Define the engine to use when SYSTEM_OVERRIDE is true.
-    // Possible values: 'enhancor_detailed', 'enhancor_general', 'comfyui_tiled_upscaler'
     const OVERRIDE_ENGINE_CHOICE = 'comfyui_tiled_upscaler'; 
 
     const finalEngine = SYSTEM_OVERRIDE 
@@ -51,7 +45,7 @@ serve(async (req) => {
       : upscaler_engine || Deno.env.get('DEFAULT_UPSCALER_ENGINE') || 'enhancor_detailed';
 
     const logPrefix = `[TiledUpscaleOrchestrator]`;
-    console.log(`${logPrefix} Creating new upscale job record with engine: ${finalEngine}.`);
+    console.log(`${logPrefix} Creating new upscale job record with engine: ${finalEngine} and tile size: ${tile_size || 'default'}.`);
 
     const { bucket, path } = parseStorageURL(source_image_url);
 
@@ -65,7 +59,10 @@ serve(async (req) => {
         upscale_factor,
         source_job_id,
         status: 'tiling',
-        metadata: { upscaler_engine: finalEngine }
+        metadata: { 
+            upscaler_engine: finalEngine,
+            tile_size: tile_size
+        }
       })
       .select('id')
       .single();

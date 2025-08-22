@@ -6,9 +6,6 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const TILE_UPLOAD_BUCKET = "mira-agent-upscale-tiles";
 
-const TILE_SIZE = 768;
-const TILE_OVERLAP = 96;
-const STEP = TILE_SIZE - TILE_OVERLAP;
 const INSERT_BATCH_SIZE = 100;
 
 const corsHeaders = {
@@ -50,6 +47,34 @@ serve(async (req) => {
     const img = await Image.decode(await blob.arrayBuffer());
     console.log(`${logPrefix} Decoded original image: ${img.width}x${img.height}`);
 
+    const USE_HARDCODED_OVERRIDE = false;
+    const HARDCODED_TILE_SIZE = 768;
+
+    let TILE_SIZE = 768;
+    let TILE_OVERLAP = 96;
+
+    if (USE_HARDCODED_OVERRIDE) {
+        TILE_SIZE = HARDCODED_TILE_SIZE;
+        console.log(`${logPrefix} Using hardcoded override tile size: ${TILE_SIZE}`);
+    } else if (job.metadata?.tile_size) {
+        const userTileSize = job.metadata.tile_size;
+        if (userTileSize === 'full_size') {
+            TILE_SIZE = Math.max(img.width, img.height);
+            console.log(`${logPrefix} Using 'full_size' option. Tile size set to largest dimension: ${TILE_SIZE}`);
+        } else if (typeof userTileSize === 'number' && userTileSize >= 128 && userTileSize <= 1024) {
+            TILE_SIZE = userTileSize;
+            console.log(`${logPrefix} Using user-selected tile size: ${TILE_SIZE}`);
+        } else {
+            console.warn(`${logPrefix} Invalid tile_size in metadata: '${userTileSize}'. Falling back to default ${TILE_SIZE}.`);
+        }
+    } else {
+        console.log(`${logPrefix} No tile_size in metadata. Using default: ${TILE_SIZE}`);
+    }
+    
+    TILE_OVERLAP = Math.round(TILE_SIZE * 0.125);
+    const STEP = TILE_SIZE - TILE_OVERLAP;
+    console.log(`${logPrefix} Final tiling parameters -> Size: ${TILE_SIZE}, Overlap: ${TILE_OVERLAP}, Step: ${STEP}`);
+
     const upscale_factor = job.upscale_factor || 2.0;
     const finalW = Math.round(img.width * upscale_factor);
     const finalH = Math.round(img.height * upscale_factor);
@@ -74,7 +99,7 @@ serve(async (req) => {
         const tile = new Image(TILE_SIZE, TILE_SIZE);
         tile.composite(img, -x, -y);
 
-        const tileBuffer = await tile.encode(2, 85); // WEBP at 85% quality
+        const tileBuffer = await tile.encode(2, 85);
         const filePath = `${job.user_id}/${parent_job_id}/tile_${i}.webp`;
         
         await supabase.storage.from(TILE_UPLOAD_BUCKET).upload(filePath, tileBuffer, {
