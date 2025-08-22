@@ -118,6 +118,40 @@ serve(async (req) => {
     const completeTiles = (tilesRaw ?? []).filter(isValidTile);
     log(`Found ${completeTiles.length} valid completed tiles.`);
     if (!completeTiles.length) throw new Error("No valid completed tiles found.");
+
+    // --- SINGLE-TILE FAST PATH ---
+    const engine = claimedJob.metadata?.upscaler_engine;
+    if (engine?.startsWith('enhancor') && completeTiles.length === 1) {
+        log("Single-tile Enhancor job detected. Executing fast path.");
+        const singleTile = completeTiles[0];
+        let finalUrl = singleTile.generated_tile_url;
+        if (!finalUrl) {
+            const { data: pub } = supabase.storage.from(singleTile.generated_tile_bucket).getPublicUrl(singleTile.generated_tile_path);
+            finalUrl = pub.publicUrl;
+        }
+
+        if (!finalUrl) {
+            throw new Error("Single tile is missing its final URL.");
+        }
+
+        await retry(() => 
+            supabase.from("mira_agent_tiled_upscale_jobs").update({ 
+                status: "complete", 
+                final_image_url: finalUrl, 
+                comp_next_index: 1,
+                comp_state_path: null, 
+                comp_state_bucket: null, 
+                compositor_worker_id: null, 
+                comp_lease_expires_at: null 
+            }).eq("id", parent_job_id)
+            .then(res => { if (res.error) throw res.error; return res; }),
+            3, 1000, logPrefix
+        );
+        log(`Fast path complete. Final URL set to: ${finalUrl}`);
+        return new Response("ok");
+    }
+    // --- END FAST PATH ---
+
     completeTiles.sort((a,b) => gridY(a) - gridY(b) || gridX(a) - gridX(b));
 
     const startIndex = claimedJob.comp_next_index || 0;
