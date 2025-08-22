@@ -20,13 +20,59 @@ serve(async (req) => {
   const logPrefix = `[TiledUpscaleWatchdog]`;
 
   try {
-    const { data: lockAcquired, error: lockError } = await supabase.rpc('try_acquire_watchdog_lock');
+    const { data: lockAcquired, error: lockError } = await supabase.rpc('try_acquire_tiled_upscale_watchdog_lock');
     if (lockError) throw lockError;
     if (!lockAcquired) {
       console.log(`${logPrefix} Advisory lock is held by another process. Exiting gracefully.`);
       return new Response(JSON.stringify({ message: "Lock held, skipping execution." }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
     }
     console.log(`${logPrefix} Advisory lock acquired. Proceeding with checks.`);
+
+    // --- START NEW CONCURRENCY LOGIC ---
+    const { data: config, error: configError } = await supabase.from('mira-agent-config').select('value').eq('key', 'TILED_UPSCALE_CONCURRENCY_LIMIT').single();
+    if (configError) throw new Error(`Failed to fetch concurrency limit: ${configError.message}`);
+    const concurrencyLimit = config?.value?.limit || 1;
+
+    const { count: activeJobsCount, error: countError } = await supabase
+        .from('mira_agent_tiled_upscale_jobs')
+        .select('*', { count: 'exact', head: true })
+        .in('status', ['tiling', 'compositing', 'generating', 'queued_for_generation']);
+    if (countError) throw countError;
+
+    const availableSlots = concurrencyLimit - (activeJobsCount || 0);
+    console.log(`${logPrefix} Concurrency check: Limit=${concurrencyLimit}, Active=${activeJobsCount}, Available=${availableSlots}`);
+
+    if (availableSlots > 0) {
+        const { data: jobsToStart, error: claimError } = await supabase
+            .from('mira_agent_tiled_upscale_jobs')
+            .select('id')
+            .eq('status', 'pending')
+            .order('created_at', { ascending: true })
+            .limit(availableSlots);
+        
+        if (claimError) throw claimError;
+
+        if (jobsToStart && jobsToStart.length > 0) {
+            const jobIdsToClaim = jobsToStart.map(j => j.id);
+            console.log(`${logPrefix} Claiming ${jobIdsToClaim.length} pending jobs...`);
+            
+            const { error: updateError } = await supabase
+                .from('mira_agent_tiled_upscale_jobs')
+                .update({ status: 'tiling' })
+                .in('id', jobIdsToClaim);
+            
+            if (updateError) throw updateError;
+
+            const workerPromises = jobIdsToClaim.map(jobId => 
+                supabase.functions.invoke('MIRA-AGENT-worker-tiling-and-analysis', { body: { parent_job_id: jobId } })
+            );
+            await Promise.allSettled(workerPromises);
+            console.log(`${logPrefix} Invoked tiling workers for ${jobIdsToClaim.length} jobs.`);
+        } else {
+            console.log(`${logPrefix} No pending jobs to start.`);
+        }
+    }
+    // --- END NEW CONCURRENCY LOGIC ---
 
     // Stalled Job Recovery for ANALYSIS
     const stalledAnalysisThreshold = new Date(Date.now() - STALLED_ANALYSIS_THRESHOLD_SECONDS * 1000).toISOString();

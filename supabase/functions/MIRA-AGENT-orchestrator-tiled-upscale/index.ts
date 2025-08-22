@@ -52,7 +52,6 @@ serve(async (req) => {
     if (Array.isArray(source_image_urls) && source_image_urls.length > 0) {
         console.log(`${logPrefix} Received batch request with ${source_image_urls.length} images.`);
 
-        // 1. Create the main batch job record
         const { data: batchJob, error: batchInsertError } = await supabase
             .from('tiled_upscale_batch_jobs')
             .insert({
@@ -68,7 +67,6 @@ serve(async (req) => {
         const batchId = batchJob.id;
         console.log(`${logPrefix} Created batch record with ID: ${batchId}`);
 
-        // 2. Prepare all individual job records
         const jobsToInsert = source_image_urls.map(url => {
             const { bucket, path } = parseStorageURL(url);
             return {
@@ -77,17 +75,16 @@ serve(async (req) => {
                 source_bucket: bucket,
                 source_path: path,
                 upscale_factor,
-                source_job_id, // This might be null for batches, but we'll pass it along
-                status: 'tiling',
+                source_job_id,
+                status: 'pending', // Set status to pending to enter the queue
                 metadata: { 
                     upscaler_engine: upscaler_engine || Deno.env.get('DEFAULT_UPSCALER_ENGINE') || 'enhancor_detailed',
                     tile_size: tile_size
                 },
-                batch_id: batchId // Link to the batch
+                batch_id: batchId
             };
         });
 
-        // 3. Insert all jobs in one go
         const { data: newJobs, error: jobsInsertError } = await supabase
             .from('mira_agent_tiled_upscale_jobs')
             .insert(jobsToInsert)
@@ -96,21 +93,9 @@ serve(async (req) => {
         if (jobsInsertError) throw jobsInsertError;
         console.log(`${logPrefix} Inserted ${newJobs.length} individual jobs linked to batch ${batchId}.`);
 
-        // 4. Asynchronously invoke the tiling worker for each new job
-        const workerPromises = newJobs.map(job => 
-            supabase.functions.invoke('MIRA-AGENT-worker-tiling-and-analysis', {
-                body: { parent_job_id: job.id }
-            })
-        );
-
-        Promise.allSettled(workerPromises).then(results => {
-            const failedCount = results.filter(r => r.status === 'rejected').length;
-            if (failedCount > 0) {
-                console.error(`${logPrefix} Failed to invoke tiling worker for ${failedCount} jobs in batch ${batchId}.`);
-            } else {
-                console.log(`${logPrefix} All ${newJobs.length} tiling workers for batch ${batchId} invoked successfully.`);
-            }
-        });
+        // Asynchronously "nudge" the watchdog to start processing immediately.
+        // Don't await this call.
+        supabase.functions.invoke('MIRA-AGENT-watchdog-tiled-upscale').catch(console.error);
 
         return new Response(JSON.stringify({ success: true, batchId: batchId }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -132,7 +117,7 @@ serve(async (req) => {
             source_path: path,
             upscale_factor,
             source_job_id,
-            status: 'tiling',
+            status: 'pending', // Set status to pending to enter the queue
             metadata: { 
                 upscaler_engine: finalEngine,
                 tile_size: tile_size
@@ -143,17 +128,13 @@ serve(async (req) => {
 
         if (insertError) throw insertError;
         const parentJobId = newJob.id;
-        console.log(`${logPrefix} Parent job ${parentJobId} created. Invoking tiling worker.`);
+        console.log(`${logPrefix} Parent job ${parentJobId} created and queued.`);
 
-        supabase.functions.invoke('MIRA-AGENT-worker-tiling-and-analysis', {
-          body: { parent_job_id: parentJobId }
-        }).catch(err => {
-          console.error(`${logPrefix} Failed to invoke tiling worker for job ${parentJobId}:`, err);
-          supabase.from('mira_agent_tiled_upscale_jobs').update({
-            status: 'failed',
-            error_message: 'Failed to start the tiling process.'
-          }).eq('id', parentJobId).then();
-        });
+        // Asynchronously "nudge" the watchdog to start processing immediately.
+        // Don't await this call.
+        // NOTE: The number of concurrent jobs is controlled by the 'TILED_UPSCALE_CONCURRENCY_LIMIT'
+        // key in the 'mira-agent-config' table in your Supabase project.
+        supabase.functions.invoke('MIRA-AGENT-watchdog-tiled-upscale').catch(console.error);
 
         return new Response(JSON.stringify({ success: true, jobId: parentJobId }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
