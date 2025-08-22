@@ -194,8 +194,8 @@ serve(async (req) => {
 
     const positions: Pos[] = completeTiles.map(t => ({
         t,
-        xs: Math.round(t.coordinates.x * scaleFactor),
-        ys: Math.round(t.coordinates.y * scaleFactor),
+        xs: t.coordinates.x * scaleFactor,
+        ys: t.coordinates.y * scaleFactor,
     }));
 
     const detectStep = (vals: number[]) => {
@@ -218,18 +218,47 @@ serve(async (req) => {
 
     const xs = positions.map(p => p.xs);
     const ys = positions.map(p => p.ys);
-    const x0 = Math.min(...xs);
-    const y0 = Math.min(...ys);
+    
     const stepX = detectStep(xs);
     const stepY = detectStep(ys);
     if (!stepX || !stepY) throw new Error("Could not detect tile step.");
+
+    function chooseOriginAxis(vals: number[], step: number, tile: number, limit: number) {
+        let origin = Math.min(...vals);
+        const idx = (v: number) => Math.floor((v - origin + step * 0.5) / step);
+        let snapped = vals.map(v => origin + idx(v) * step);
+        let minS = Math.min(...snapped);
+        let maxS = Math.max(...snapped);
+        let shift = 0;
+        if (minS < 0) {
+            shift += Math.ceil(-minS / step) * step;
+        }
+        if (maxS + tile > limit) {
+            shift -= Math.ceil((maxS + tile - limit) / step) * step;
+        }
+        origin += shift;
+        const idx2 = (v: number) => Math.floor((v - origin + step * 0.5) / step);
+        snapped = vals.map(v => origin + idx2(v) * step);
+        minS = Math.min(...snapped);
+        maxS = Math.max(...snapped);
+        if (minS < 0 || maxS + tile > limit) {
+            const overTop = Math.max(0, -minS);
+            const overBot = Math.max(0, (maxS + tile) - limit);
+            const net = Math.ceil((overTop - overBot) / step) * step;
+            origin += net;
+        }
+        return origin;
+    }
+
+    const x0 = chooseOriginAxis(xs, stepX, actualTileSize, finalW);
+    const y0 = chooseOriginAxis(ys, stepY, actualTileSize, finalH);
     
     if (Math.abs(stepX - stepY) > 2) {
         log(`[WARN] Significant difference between detected steps. stepX=${stepX}, stepY=${stepY}`);
     }
     const ovX = Math.min(Math.max(1, actualTileSize - stepX), actualTileSize / 2, MAX_FEATHER);
     const ovY = Math.min(Math.max(1, actualTileSize - stepY), actualTileSize / 2, MAX_FEATHER);
-    log(`[DBG] tileSize=${actualTileSize}, stepX=${stepX}, stepY=${stepY}, ovX=${ovX}, ovY=${ovY}`);
+    log(`[DBG] tileSize=${actualTileSize}, stepX=${stepX}, stepY=${stepY}, ovX=${ovX}, ovY=${ovY}, x0=${x0}, y0=${y0}`);
 
     const idx = (v:number, origin:number, step:number) => Math.floor((v - origin + step*0.5) / step);
     const gxOf = (x:number) => idx(x, x0, stepX);
