@@ -297,9 +297,11 @@ const TiledUpscaleTester = () => {
                     <SelectContent>
                       <SelectItem value="default">Default (768px)</SelectItem>
                       <SelectItem value="full_size">Full Size (Single Tile)</SelectItem>
-                      <SelectItem value="768">768px</SelectItem>
-                      <SelectItem value="896">896px</SelectItem>
                       <SelectItem value="1024">1024px</SelectItem>
+                      <SelectItem value="896">896px</SelectItem>
+                      <SelectItem value="768">768px</SelectItem>
+                      <SelectItem value="256">256px</SelectItem>
+                      <SelectItem value="128">128px</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
