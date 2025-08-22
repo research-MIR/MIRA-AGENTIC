@@ -16,15 +16,12 @@ interface SecureImageDisplayProps {
 
 const SecureImageWithHook = ({ imageUrl, alt, onClick, className, style, width, height, resize }: SecureImageDisplayProps) => {
     const { displayUrl, isLoading, error } = useSecureImage(imageUrl, { width, height, resize });
+    const hasClickHandler = !!onClick;
   
     if (isLoading) return <div className={cn("w-full h-full bg-muted rounded-md flex items-center justify-center", className)} style={style}><Loader2 className="h-6 w-6 animate-spin" /></div>;
     if (error) return <div className={cn("w-full h-full bg-muted rounded-md flex items-center justify-center", className)} style={style}><AlertTriangle className="h-6 w-6 text-destructive" /></div>;
     
-    if (!displayUrl) {
-        return <div className={cn("w-full h-full bg-muted rounded-md flex items-center justify-center", className)} style={style}><ImageIcon className="h-6 w-6 text-muted-foreground" /></div>;
-    }
-
-    return <img src={displayUrl} alt={alt} className={cn("max-w-full max-h-full object-contain rounded-md", !!onClick && "cursor-pointer", className)} onClick={onClick} style={style} />;
+    return <img src={displayUrl || ''} alt={alt} className={cn("max-w-full max-h-full object-contain rounded-md", hasClickHandler && "cursor-pointer", className)} onClick={onClick} style={style} />;
 };
 
 export const SecureImageDisplay = (props: SecureImageDisplayProps) => {

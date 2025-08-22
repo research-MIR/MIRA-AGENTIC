@@ -35,13 +35,12 @@ export const useSecureImage = (
         }
         
         if (imageUrl.includes('supabase.co')) {
-          if (imageUrl.includes('/storage/v1/object/public/')) {
+          if (imageUrl.includes('/mira-agent-generations/')) {
             console.log(`${logPrefix} URL is in a public bucket. Setting directly.`);
             setDisplayUrl(imageUrl);
             return;
           }
 
-          console.log(`${logPrefix} URL is a private Supabase URL. Proceeding with download.`);
           const url = new URL(imageUrl);
           const pathSegments = url.pathname.split('/');
           
@@ -57,12 +56,10 @@ export const useSecureImage = (
           if (!bucketName || !storagePath) {
             throw new Error(`Could not parse bucket or path from URL: ${imageUrl}`);
           }
-          console.log(`${logPrefix} Parsed path: Bucket='${bucketName}', Path='${storagePath}'`);
 
           const transformOptions = options?.width && options?.height
             ? { width: options.width, height: options.height, resize: options.resize || 'cover' }
             : undefined;
-          console.log(`${logPrefix} Using transform options:`, transformOptions);
 
           const MAX_RETRIES = 3;
           const RETRY_DELAY = 1000;
@@ -81,14 +78,13 @@ export const useSecureImage = (
 
             if (attempt < MAX_RETRIES) {
               const delay = RETRY_DELAY * attempt;
-              console.warn(`${logPrefix} Failed to download ${storagePath} (attempt ${attempt}/${MAX_RETRIES}). Retrying in ${delay}ms... Error:`, downloadError);
+              console.warn(`${logPrefix} Failed to download ${storagePath} (attempt ${attempt}/${MAX_RETRIES}). Retrying in ${delay}ms...`);
               await new Promise(resolve => setTimeout(resolve, delay));
             } else {
               throw new Error(`Failed to download image after ${MAX_RETRIES} attempts: ${downloadError.message}`);
             }
           }
         } else {
-          console.log(`${logPrefix} URL is external. Using proxy function.`);
           const { data, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-image-download', { body: { url: imageUrl } });
           if (proxyError) throw new Error(`Proxy failed: ${proxyError.message}`);
           if (data.base64 && data.mimeType) {

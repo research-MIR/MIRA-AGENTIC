@@ -206,7 +206,7 @@ const TiledUpscaleTester = () => {
                   <div>
                     <h3 className="font-semibold mb-2">Original</h3>
                     <div className="aspect-square bg-muted rounded-md flex items-center justify-center">
-                      {selectedJob?.source_image_url ? <SecureImageDisplay imageUrl={selectedJob.source_image_url} alt="Original" width={512} height={512} resize="contain" /> : sourcePreview ? <img src={sourcePreview} alt="Original" className="max-w-full max-h-full object-contain" /> : <ImageIcon />}
+                      {selectedJob?.source_image_url ? <SecureImageDisplay imageUrl={selectedJob.source_image_url} alt="Original" /> : sourcePreview ? <img src={sourcePreview} alt="Original" className="max-w-full max-h-full object-contain" /> : <ImageIcon />}
                     </div>
                   </div>
                   <div>
