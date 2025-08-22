@@ -13,6 +13,8 @@ const JPEG_QUALITY = Number(Deno.env.get("COMPOSITOR_JPEG_QUALITY") ?? 85);
 const BATCH_SIZE = Number(Deno.env.get("COMPOSITOR_BATCH") ?? 12);
 const MAX_FEATHER = Number(Deno.env.get("COMPOSITOR_MAX_FEATHER") ?? 256);
 
+type Pos = { t: any; xs: number; ys: number; err?: number };
+
 // --- Resilience Helper ---
 async function retry<T>(fn: () => Promise<T>, retries = 3, delay = 1000, logPrefix = ""): Promise<T> {
     let lastError: Error | null = null;
@@ -127,8 +129,8 @@ serve(async (req) => {
 
     // Deterministic Sort for stable processing order
     completeTiles.sort((a, b) => {
-        const pathA = a.generated_tile_path || a.generated_tile_url;
-        const pathB = b.generated_tile_path || b.generated_tile_url;
+        const pathA = a.generated_tile_path || a.generated_tile_url || "";
+        const pathB = b.generated_tile_path || b.generated_tile_url || "";
         return pathA.localeCompare(pathB);
     });
 
@@ -190,7 +192,7 @@ serve(async (req) => {
     const finalW = claimedJob.canvas_w;
     const finalH = claimedJob.canvas_h;
 
-    const positions = completeTiles.map(t => ({
+    const positions: Pos[] = completeTiles.map(t => ({
         t,
         xs: Math.round(t.coordinates.x * scaleFactor),
         ys: Math.round(t.coordinates.y * scaleFactor),
@@ -208,7 +210,7 @@ serve(async (req) => {
         return Math.max(1, Math.round(diffs[Math.floor(diffs.length/2)]));
     };
 
-    const sampleBytes = await downloadTileBytes(supabase, completeTiles[0].t);
+    const sampleBytes = await downloadTileBytes(supabase, completeTiles[0]);
     const sample = await Image.decode(sampleBytes);
     const expectedTileDim = Math.round(TILE_SIZE * scaleFactor);
     if (sample.width !== expectedTileDim) sample.resize(expectedTileDim, expectedTileDim);
@@ -233,20 +235,19 @@ serve(async (req) => {
     const gxOf = (x:number) => idx(x, x0, stepX);
     const gyOf = (y:number) => idx(y, y0, stepY);
 
-    const byCell = new Map<string, typeof positions[0]>();
+    const byCell = new Map<string, Pos>();
     for (const p of positions) {
         const gx = gxOf(p.xs), gy = gyOf(p.ys);
         const key = `${gx}:${gy}`;
         const xSnap = x0 + gx * stepX, ySnap = y0 + gy * stepY;
         const err = Math.abs(p.xs - xSnap) + Math.abs(p.ys - ySnap);
         const best = byCell.get(key);
-        const currentPath = p.t.generated_tile_path || p.t.generated_tile_url;
-
+        const currentPath = p.t.generated_tile_path || p.t.generated_tile_url || "";
         if (!best || err < (best as any).err) {
             if (best) log(`[DEDUPE] Replacing tile for cell ${key}. New tile is closer to grid. Dropped: ${best.t.generated_tile_path || best.t.generated_tile_url}`);
             (p as any).err = err;
             byCell.set(key, p);
-        } else if (err === (best as any).err && currentPath < (best.t.generated_tile_path || best.t.generated_tile_url)) {
+        } else if (err === (best as any).err && currentPath < (best.t.generated_tile_path || best.t.generated_tile_url || "")) {
             log(`[DEDUPE] Replacing tile for cell ${key}. Same error, new tile path is lexicographically smaller. Dropped: ${best.t.generated_tile_path || best.t.generated_tile_url}`);
             byCell.set(key, p);
         } else {
@@ -278,7 +279,6 @@ serve(async (req) => {
       canvas = flattenOpaqueWhite(loadedCanvas);
     }
 
-    const occupy = new Set(dedupedPositions.map(p => `${gxOf(p.xs)}:${gyOf(p.ys)}`));
     const processed = new Set<string>(
         dedupedPositions.slice(0, startIndex).map(p => `${gxOf(p.xs)}:${gyOf(p.ys)}`)
     );
