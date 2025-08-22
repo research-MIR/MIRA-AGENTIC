@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useSession } from '@/components/Auth/SessionContextProvider';
 
 export const useSecureImage = (
@@ -7,7 +7,7 @@ export const useSecureImage = (
 ) => {
   const { supabase } = useSession();
   const [displayUrl, setDisplayUrl] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -15,76 +15,38 @@ export const useSecureImage = (
     const logPrefix = `[useSecureImage]`;
 
     const loadImage = async () => {
-      console.log(`${logPrefix} Hook triggered. Received URL:`, imageUrl);
-
       if (!imageUrl) {
         setDisplayUrl(null);
-        console.log(`${logPrefix} URL is null or undefined. Clearing display URL.`);
+        setIsLoading(false);
         return;
       }
       
       setIsLoading(true);
       setError(null);
-      console.log(`${logPrefix} Set loading to true for URL: ${imageUrl}`);
 
       try {
         if (imageUrl.startsWith('data:image') || imageUrl.startsWith('blob:')) {
           setDisplayUrl(imageUrl);
-          console.log(`${logPrefix} URL is a data/blob URL. Set directly.`);
-          return;
-        }
-        
-        // Treat Supabase public URLs and CloudFront URLs as safe to load directly
-        if (imageUrl.includes('supabase.co/storage/v1/object/public/') || imageUrl.includes('cloudfront.net')) {
-          console.log(`${logPrefix} URL is a public Supabase or CloudFront URL. Setting directly.`);
+        } else if (imageUrl.includes('supabase.co/storage/v1/object/public/') || imageUrl.includes('cloudfront.net')) {
           setDisplayUrl(imageUrl);
-          return;
-        }
-        
-        if (imageUrl.includes('supabase.co')) {
+        } else if (imageUrl.includes('supabase.co')) {
           const url = new URL(imageUrl);
           const pathSegments = url.pathname.split('/');
-          
           const objectIndex = pathSegments.indexOf('object');
-          if (objectIndex === -1 || objectIndex + 2 > pathSegments.length) {
-            throw new Error("Invalid Supabase URL format. Cannot find 'object' segment.");
-          }
+          if (objectIndex === -1 || objectIndex + 2 > pathSegments.length) throw new Error("Invalid Supabase URL format.");
           
           const bucketName = pathSegments[objectIndex + 2];
           const pathStartIndex = url.pathname.indexOf(bucketName) + bucketName.length + 1;
           const storagePath = decodeURIComponent(url.pathname.substring(pathStartIndex));
+          if (!bucketName || !storagePath) throw new Error(`Could not parse bucket or path from URL: ${imageUrl}`);
 
-          if (!bucketName || !storagePath) {
-            throw new Error(`Could not parse bucket or path from URL: ${imageUrl}`);
-          }
+          const transformOptions = options?.width && options?.height ? { width: options.width, height: options.height, resize: options.resize || 'cover' } : undefined;
 
-          const transformOptions = options?.width && options?.height
-            ? { width: options.width, height: options.height, resize: options.resize || 'cover' }
-            : undefined;
+          const { data, error: downloadError } = await supabase.storage.from(bucketName).download(storagePath, transformOptions ? { transform: transformOptions } : undefined);
+          if (downloadError) throw downloadError;
 
-          const MAX_RETRIES = 3;
-          const RETRY_DELAY = 1000;
-
-          for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-            const { data, error: downloadError } = await supabase.storage
-              .from(bucketName)
-              .download(storagePath, transformOptions ? { transform: transformOptions } : undefined);
-
-            if (!downloadError) {
-              objectUrl = URL.createObjectURL(data);
-              setDisplayUrl(objectUrl);
-              console.log(`${logPrefix} Successfully downloaded and created object URL for ${storagePath}.`);
-              return;
-            }
-
-            if (attempt < MAX_RETRIES) {
-              const delay = RETRY_DELAY * attempt;
-              console.warn(`${logPrefix} Failed to download ${storagePath} (attempt ${attempt}/${MAX_RETRIES}). Retrying in ${delay}ms...`);
-              await new Promise(resolve => setTimeout(resolve, delay));
-            } else {
-              throw new Error(`Failed to download image after ${MAX_RETRIES} attempts: ${downloadError.message}`);
-            }
-          }
+          objectUrl = URL.createObjectURL(data);
+          setDisplayUrl(objectUrl);
         } else {
           const { data, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-image-download', { body: { url: imageUrl } });
           if (proxyError) throw new Error(`Proxy failed: ${proxyError.message}`);
@@ -100,7 +62,6 @@ export const useSecureImage = (
         setDisplayUrl(null);
       } finally {
         setIsLoading(false);
-        console.log(`${logPrefix} Set loading to false for URL: ${imageUrl}`);
       }
     };
 
@@ -108,7 +69,6 @@ export const useSecureImage = (
 
     return () => {
       if (objectUrl) {
-        console.log(`${logPrefix} Revoking object URL: ${objectUrl}`);
         URL.revokeObjectURL(objectUrl);
       }
     };

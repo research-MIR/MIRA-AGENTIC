@@ -19,7 +19,6 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { BatchJobCard } from '@/components/Developer/BatchJobCard';
 import { BatchDetailView } from '@/components/Developer/BatchDetailView';
-import { TiledUpscaleJobThumbnail } from '@/components/Developer/TiledUpscaleJobThumbnail';
 import { SecureImageDisplay } from '@/components/VTO/SecureImageDisplay';
 import JSZip from 'jszip';
 
