@@ -33,7 +33,7 @@ function normalizeCoords(c:any) {
   if (typeof c === "string") { try { c = JSON.parse(c); } catch { return null; } }
   const x = Number((c as any).x), y = Number((c as any).y);
   if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-  return { x, y, width: TILE_SIZE_DEFAULT, height: TILE_SIZE_DEFAULT };
+  return { x, y };
 }
 function isValidTile(t:any) {
   if (!t) return false;
@@ -56,14 +56,18 @@ function featherLUT(ov: number, invert = false) {
   }
   return lut;
 }
-function featherBandsLUT(tile: Image, ov: number, n: {left:boolean;right:boolean;top:boolean;bottom:boolean}) {
-  if (ov <= 0) return;
+function featherBandsLUT2(tile: Image, ovX: number, ovY: number, n: {left:boolean;right:boolean;top:boolean;bottom:boolean}) {
   const W = tile.width, H = tile.height, bmp = tile.bitmap;
-  const L = featherLUT(ov, false), R = featherLUT(ov, true);
-  if (n.left) for (let y=0; y<H; y++) { let a=(y*W)*4+3; for (let x=0; x<ov; x++, a+=4) bmp[a] = (bmp[a]*L[x])>>>8; }
-  if (n.right) for (let y=0; y<H; y++) { let a=(y*W + (W-ov))*4+3; for (let x=0; x<ov; x++, a+=4) bmp[a] = (bmp[a]*R[x])>>>8; }
-  if (n.top) for (let y=0; y<ov; y++) { const s=L[y]; let a=(y*W)*4+3; for (let x=0; x<W; x++, a+=4) bmp[a]=(bmp[a]*s)>>>8; }
-  if (n.bottom) for (let y=H-ov,i=0; y<H; y++, i++) { const s=R[i]; let a=(y*W)*4+3; for (let x=0; x<W; x++, a+=4) bmp[a]=(bmp[a]*s)>>>8; }
+  if (ovX > 0) {
+    const Lx = featherLUT(ovX, false), Rx = featherLUT(ovX, true);
+    if (n.left)  for (let y=0; y<H; y++) { let a=y*W*4+3;               for (let x=0; x<ovX; x++, a+=4) bmp[a] = (bmp[a]*Lx[x])>>>8; }
+    if (n.right) for (let y=0; y<H; y++) { let a=(y*W + (W-ovX))*4+3;   for (let x=0; x<ovX; x++, a+=4) bmp[a] = (bmp[a]*Rx[x])>>>8; }
+  }
+  if (ovY > 0) {
+    const Ty = featherLUT(ovY, false), By = featherLUT(ovY, true);
+    if (n.top)    for (let y=0; y<ovY; y++)   { const s=Ty[y]; let a=y*W*4+3;                 for (let x=0; x<W; x++, a+=4) bmp[a]=(bmp[a]*s)>>>8; }
+    if (n.bottom) for (let y=H-ovY,i=0; y<H; y++, i++) { const s=By[i]; let a=y*W*4+3;        for (let x=0; x<W; x++, a+=4) bmp[a]=(bmp[a]*s)>>>8; }
+  }
 }
 
 async function downloadTileBytes(supabase: SupabaseClient, t: any): Promise<Uint8Array> {
@@ -198,7 +202,8 @@ serve(async (req) => {
         return Math.max(1, Math.round(diffs[Math.floor(diffs.length/2)]));
     };
 
-    const sample = await Image.decode(await downloadTileBytes(supabase, completeTiles[0]));
+    const sampleBytes = await downloadTileBytes(supabase, completeTiles[0]);
+    const sample = await Image.decode(sampleBytes);
     const expectedTileDim = Math.round(TILE_SIZE * scaleFactor);
     if (sample.width !== expectedTileDim) sample.resize(expectedTileDim, expectedTileDim);
     const actualTileSize = sample.width;
@@ -210,13 +215,14 @@ serve(async (req) => {
     const stepX = detectStep(xs);
     const stepY = detectStep(ys);
     if (!stepX || !stepY) throw new Error("Could not detect tile step.");
-    const stepScaled = Math.min(stepX, stepY);
-    const ovScaled = Math.max(1, Math.min(actualTileSize - stepScaled, MAX_FEATHER));
-    log(`[DBG] tileSize=${actualTileSize}, stepScaled=${stepScaled}, ovScaled=${ovScaled}, cols≈${1+Math.round((finalW-actualTileSize)/stepScaled)}, rows≈${1+Math.round((finalH-actualTileSize)/stepScaled)}`);
+    
+    const ovX = Math.max(1, Math.min(actualTileSize - stepX, MAX_FEATHER));
+    const ovY = Math.max(1, Math.min(actualTileSize - stepY, MAX_FEATHER));
+    log(`[DBG] tileSize=${actualTileSize}, stepX=${stepX}, stepY=${stepY}, ovX=${ovX}, ovY=${ovY}`);
 
-    const idx = (v: number, step: number) => Math.round(v / step);
-    const gxOf = (x:number) => idx(x - x0, stepScaled);
-    const gyOf = (y:number) => idx(y - y0, stepScaled);
+    const idx = (v:number, origin:number, step:number) => Math.floor((v - origin + step*0.5) / step);
+    const gxOf = (x:number) => idx(x, x0, stepX);
+    const gyOf = (y:number) => idx(y, y0, stepY);
 
     const occupy = new Set(positions.map(p => `${gxOf(p.xs)}:${gyOf(p.ys)}`));
     log(`[DBG] gx/gy uniques -> x:${new Set(xs.map(v=>gxOf(v))).size}, y:${new Set(ys.map(v=>gyOf(v))).size}`);
@@ -255,7 +261,7 @@ serve(async (req) => {
       const gx = gxOf(p.xs), gy = gyOf(p.ys);
       log(`[Tile ${i}] Processing tile at grid pos (${gx}, ${gy}) and canvas pos (${p.xs}, ${p.ys}).`);
       
-      const arr = await retry(() => downloadTileBytes(supabase, t), 3, 2000, `${logPrefix} [Tile ${i}]`);
+      const arr = (i === 0 && startIndex === 0) ? sampleBytes : await retry(() => downloadTileBytes(supabase, t), 3, 2000, `${logPrefix} [Tile ${i}]`);
       log(`[Tile ${i}] Downloaded ${arr.byteLength} bytes.`);
       
       let tile = await Image.decode(arr);
@@ -275,8 +281,8 @@ serve(async (req) => {
       log(`[Tile ${i}] Feather neighbors: ${JSON.stringify(n)}`);
       
       if (n.left || n.top) {
-        log(`[Tile ${i}] Applying feathering with overlap ${ovScaled}.`);
-        featherBandsLUT(tile, ovScaled, n);
+        log(`[Tile ${i}] Applying feathering with overlap X=${ovX}, Y=${ovY}.`);
+        featherBandsLUT2(tile, ovX, ovY, n);
       }
       
       log(`[Tile ${i}] Compositing onto canvas at (${p.xs}, ${p.ys}).`);
