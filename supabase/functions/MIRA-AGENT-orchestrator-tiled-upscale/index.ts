@@ -24,6 +24,21 @@ function parseStorageURL(url: string) {
     return { bucket, path };
 }
 
+// --- Resilience Helper ---
+async function retry<T>(fn: () => Promise<T>, retries = 3, delay = 1000, logPrefix = ""): Promise<T> {
+    let lastError: Error | null = null;
+    for (let i = 0; i < retries; i++) {
+        try {
+            return await fn();
+        } catch (error) {
+            lastError = error;
+            console.warn(`${logPrefix} Attempt ${i + 1}/${retries} failed: ${error.message}. Retrying in ${delay}ms...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+        }
+    }
+    throw lastError;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -52,7 +67,8 @@ serve(async (req) => {
     if (Array.isArray(source_image_urls) && source_image_urls.length > 0) {
         console.log(`${logPrefix} Received batch request with ${source_image_urls.length} images.`);
 
-        const { data: batchJob, error: batchInsertError } = await supabase
+        const { data: batchJob } = await retry(() => 
+            supabase
             .from('tiled_upscale_batch_jobs')
             .insert({
                 user_id,
@@ -61,9 +77,11 @@ serve(async (req) => {
                 status: 'processing'
             })
             .select('id')
-            .single();
+            .single()
+            .then(res => { if (res.error) throw res.error; return res; }),
+            3, 1000, logPrefix
+        );
         
-        if (batchInsertError) throw batchInsertError;
         const batchId = batchJob.id;
         console.log(`${logPrefix} Created batch record with ID: ${batchId}`);
 
@@ -76,7 +94,7 @@ serve(async (req) => {
                 source_path: path,
                 upscale_factor,
                 source_job_id,
-                status: 'pending', // Set status to pending to enter the queue
+                status: 'pending',
                 metadata: { 
                     upscaler_engine: upscaler_engine || Deno.env.get('DEFAULT_UPSCALER_ENGINE') || 'enhancor_detailed',
                     tile_size: tile_size
@@ -85,16 +103,17 @@ serve(async (req) => {
             };
         });
 
-        const { data: newJobs, error: jobsInsertError } = await supabase
+        const { data: newJobs } = await retry(() =>
+            supabase
             .from('mira_agent_tiled_upscale_jobs')
             .insert(jobsToInsert)
-            .select('id');
+            .select('id')
+            .then(res => { if (res.error) throw res.error; return res; }),
+            3, 1000, logPrefix
+        );
 
-        if (jobsInsertError) throw jobsInsertError;
         console.log(`${logPrefix} Inserted ${newJobs.length} individual jobs linked to batch ${batchId}.`);
 
-        // Asynchronously "nudge" the watchdog to start processing immediately.
-        // Don't await this call.
         supabase.functions.invoke('MIRA-AGENT-watchdog-tiled-upscale').catch(console.error);
 
         return new Response(JSON.stringify({ success: true, batchId: batchId }), {
@@ -108,32 +127,31 @@ serve(async (req) => {
         const { bucket, path } = parseStorageURL(source_image_url);
         const finalEngine = upscaler_engine || Deno.env.get('DEFAULT_UPSCALER_ENGINE') || 'enhancor_detailed';
 
-        const { data: newJob, error: insertError } = await supabase
-          .from('mira_agent_tiled_upscale_jobs')
-          .insert({
-            user_id,
-            source_image_url,
-            source_bucket: bucket,
-            source_path: path,
-            upscale_factor,
-            source_job_id,
-            status: 'pending', // Set status to pending to enter the queue
-            metadata: { 
-                upscaler_engine: finalEngine,
-                tile_size: tile_size
-            }
-          })
-          .select('id')
-          .single();
+        const { data: newJob } = await retry(() =>
+            supabase
+            .from('mira_agent_tiled_upscale_jobs')
+            .insert({
+                user_id,
+                source_image_url,
+                source_bucket: bucket,
+                source_path: path,
+                upscale_factor,
+                source_job_id,
+                status: 'pending',
+                metadata: { 
+                    upscaler_engine: finalEngine,
+                    tile_size: tile_size
+                }
+            })
+            .select('id')
+            .single()
+            .then(res => { if (res.error) throw res.error; return res; }),
+            3, 1000, logPrefix
+        );
 
-        if (insertError) throw insertError;
         const parentJobId = newJob.id;
         console.log(`${logPrefix} Parent job ${parentJobId} created and queued.`);
 
-        // Asynchronously "nudge" the watchdog to start processing immediately.
-        // Don't await this call.
-        // NOTE: The number of concurrent jobs is controlled by the 'TILED_UPSCALE_CONCURRENCY_LIMIT'
-        // key in the 'mira-agent-config' table in your Supabase project.
         supabase.functions.invoke('MIRA-AGENT-watchdog-tiled-upscale').catch(console.error);
 
         return new Response(JSON.stringify({ success: true, jobId: parentJobId }), {
