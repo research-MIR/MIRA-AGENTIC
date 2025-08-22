@@ -10,7 +10,6 @@ const STATE_BUCKET = "mira-agent-compositor-state";
 
 const TILE_SIZE_DEFAULT = 768;
 const TILE_OVERLAP = 96;
-const STEP = TILE_SIZE_DEFAULT - TILE_OVERLAP;
 const JPEG_QUALITY = Number(Deno.env.get("COMPOSITOR_JPEG_QUALITY") ?? 85);
 const BATCH_SIZE = Number(Deno.env.get("COMPOSITOR_BATCH") ?? 12);
 const MAX_FEATHER = Number(Deno.env.get("COMPOSITOR_MAX_FEATHER") ?? 256);
@@ -30,7 +29,6 @@ async function retry<T>(fn: () => Promise<T>, retries = 3, delay = 1000, logPref
     throw lastError;
 }
 
-const q = (v:number, step:number) => Math.floor((v + step * 0.5) / step);
 function normalizeCoords(c:any) {
   if (!c) return null;
   if (typeof c === "string") { try { c = JSON.parse(c); } catch { return null; } }
@@ -47,8 +45,6 @@ function isValidTile(t:any) {
   t.coordinates = c;
   return true;
 }
-const gridX = (t:any) => q(t.coordinates.x, STEP);
-const gridY = (t:any) => q(t.coordinates.y, STEP);
 
 function featherLUT(ov: number, invert = false) {
   const lut = new Uint8Array(Math.max(ov, 1));
@@ -159,8 +155,6 @@ serve(async (req) => {
     }
     // --- END FAST PATH ---
 
-    completeTiles.sort((a,b) => gridY(a) - gridY(b) || gridX(a) - gridX(b));
-
     const startIndex = claimedJob.comp_next_index || 0;
     log(`Processing starts at index: ${startIndex}. Batch size: ${BATCH_SIZE}.`);
     if (startIndex >= completeTiles.length) { log("All tiles already processed. Moving to finalization."); }
@@ -183,11 +177,17 @@ serve(async (req) => {
     }
     log(`Using TILE_SIZE: ${TILE_SIZE} based on job metadata. Full size mode: ${isFullSizeMode}`);
 
+    const STEP_SRC = TILE_SIZE - TILE_OVERLAP;
+    const gxOf = (t: any) => Math.round(t.coordinates.x / STEP_SRC);
+    const gyOf = (t: any) => Math.round(t.coordinates.y / STEP_SRC);
+    completeTiles.sort((a,b) => gyOf(a) - gyOf(b) || gxOf(a) - gxOf(b));
+
     const actualTileSize = TILE_SIZE * (claimedJob.upscale_factor || 2.0);
     const scaleFactor = actualTileSize / TILE_SIZE;
     const finalW = claimedJob.canvas_w;
     const finalH = claimedJob.canvas_h;
-    const ovScaled = Math.min(Math.max(1, Math.round(TILE_OVERLAP * scaleFactor)), MAX_FEATHER, actualTileSize - 1);
+    const stepScaled = Math.round(STEP_SRC * scaleFactor);
+    const ovScaled = Math.min(actualTileSize - stepScaled, MAX_FEATHER);
     log(`Calculated parameters: actualTileSize=${actualTileSize}, scaleFactor=${scaleFactor}, finalW=${finalW}, finalH=${finalH}, ovScaled=${ovScaled}`);
 
     let canvas: Image;
@@ -209,15 +209,14 @@ serve(async (req) => {
       canvas = flattenOpaqueWhite(loadedCanvas);
     }
 
-    const occupy = new Set<string>();
-    for (const t of completeTiles) occupy.add(`${gridX(t)}:${gridY(t)}`);
+    const occupy = new Set(completeTiles.map(t => `${gxOf(t)}:${gyOf(t)}`));
     const hasAt = (gx:number,gy:number)=>occupy.has(`${gx}:${gy}`);
 
     const endIndex = Math.min(startIndex + BATCH_SIZE, completeTiles.length);
     log(`Processing batch from index ${startIndex} to ${endIndex-1}.`);
     for (let i = startIndex; i < endIndex; i++) {
       const t = completeTiles[i];
-      const gx = gridX(t), gy = gridY(t);
+      const gx = gxOf(t), gy = gyOf(t);
       log(`[Tile ${i}] Processing tile at grid pos (${gx}, ${gy}).`);
       
       const arr = await retry(() => downloadTileBytes(supabase, t), 3, 2000, `${logPrefix} [Tile ${i}]`);
