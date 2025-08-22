@@ -25,6 +25,7 @@ export const BatchDetailView = ({ batchJob, onSelectJob, onDownload, isDownloadi
         .eq('batch_id', batchJob.id)
         .order('created_at', { ascending: true });
       if (error) throw error;
+      console.log(`[BatchDetailView] Fetched ${data.length} individual jobs for batch ${batchJob.id}:`, data);
       return data;
     },
     enabled: !!batchJob?.id,
@@ -60,14 +61,17 @@ export const BatchDetailView = ({ batchJob, onSelectJob, onDownload, isDownloadi
           </div>
         ) : (
           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
-            {individualJobs?.map(job => (
-              <TiledUpscaleJobThumbnail 
-                key={job.id} 
-                job={job} 
-                onClick={() => onSelectJob(job.id)}
-                isSelected={false} // Individual selection not yet implemented in this view
-              />
-            ))}
+            {individualJobs?.map(job => {
+              console.log(`[BatchDetailView] Rendering thumbnail for job:`, job);
+              return (
+                <TiledUpscaleJobThumbnail 
+                  key={job.id} 
+                  job={job} 
+                  onClick={() => onSelectJob(job.id)}
+                  isSelected={false} // Individual selection not yet implemented in this view
+                />
+              )
+            })}
           </div>
         )}
       </ScrollArea>

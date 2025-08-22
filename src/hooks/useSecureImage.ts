@@ -27,9 +27,12 @@ export const useSecureImage = (
       try {
         if (imageUrl.startsWith('data:image') || imageUrl.startsWith('blob:')) {
           setDisplayUrl(imageUrl);
-        } else if (imageUrl.includes('supabase.co/storage/v1/object/public/') || imageUrl.includes('cloudfront.net')) {
+        } else if (imageUrl.includes('cloudfront.net')) {
+          // CloudFront URLs are safe to load directly and must be, to avoid proxy issues.
           setDisplayUrl(imageUrl);
         } else if (imageUrl.includes('supabase.co')) {
+          // Force ALL Supabase URLs (public or private) through the download method
+          // to avoid potential browser extension interference with direct src loading.
           const url = new URL(imageUrl);
           const pathSegments = url.pathname.split('/');
           const objectIndex = pathSegments.indexOf('object');
@@ -48,6 +51,7 @@ export const useSecureImage = (
           objectUrl = URL.createObjectURL(data);
           setDisplayUrl(objectUrl);
         } else {
+          // Fallback to proxy for any other external URLs
           const { data, error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-image-download', { body: { url: imageUrl } });
           if (proxyError) throw new Error(`Proxy failed: ${proxyError.message}`);
           if (data.base64 && data.mimeType) {

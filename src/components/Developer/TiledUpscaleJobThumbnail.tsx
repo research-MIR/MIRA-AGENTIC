@@ -13,7 +13,9 @@ interface TiledUpscaleJobThumbnailProps {
 }
 
 export const TiledUpscaleJobThumbnail = ({ job, onClick, isSelected }: TiledUpscaleJobThumbnailProps) => {
+  console.log(`[TiledUpscaleJobThumbnail] Received job prop:`, job);
   const { displayUrl, isLoading } = useSecureImage(job.source_image_url, { width: 200, height: 200 });
+  console.log(`[TiledUpscaleJobThumbnail][${job.id.substring(0,8)}] useSecureImage state: isLoading=${isLoading}, displayUrl=${displayUrl?.substring(0, 100)}...`);
 
   return (
     <div 
