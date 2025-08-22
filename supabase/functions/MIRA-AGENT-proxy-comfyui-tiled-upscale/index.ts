@@ -13,11 +13,11 @@ const corsHeaders = {
 };
 
 const omnipresentPayload = {
-  imagescaleby_scale_by: 0.5,
-  controlnetapplyadvanced_strength: 0.15,
-  controlnetapplyadvanced_end_percent: 0.50,
-  basicscheduler_denoise: 0.4,
-  ksampleradvanced_start_at_step: 12
+  ImageScaleBy_scale_by: 0.5,
+  ControlNetApplyAdvanced_strength: 0.15,
+  ControlNetApplyAdvanced_end_percent: 0.50,
+  BasicScheduler_denoise: 0.4,
+  KSamplerAdvanced_start_at_step: 12
 };
 
 serve(async (req) => {
@@ -62,8 +62,8 @@ serve(async (req) => {
 
     const finalPayload = {
       ...omnipresentPayload,
-      cliptextencode_text: finalPrompt,
-      loadimage_1: source_image_url,
+      CLIPTextEncode_text: finalPrompt,
+      LoadImage_1: source_image_url,
     };
 
     console.log(`${logPrefix} Submitting job to Fal.ai at ${falQueueUrl}`);

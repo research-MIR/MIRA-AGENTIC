@@ -73,7 +73,7 @@ serve(async (req) => {
           status: 'complete',
           generated_tile_bucket: GENERATED_IMAGES_BUCKET,
           generated_tile_path: filePath,
-          generated_tile_url: publicUrl, // This was the missing piece
+          generated_tile_url: publicUrl,
       };
 
       const { data: updatedTile, error: updateTileError } = await supabase
@@ -94,7 +94,9 @@ serve(async (req) => {
       console.log(`${logPrefix} Tile ${tileId} successfully finalized and stored at ${filePath}.`);
 
     } else {
-      const errorMessage = `Fal.ai reported failure. Status: ${status}. Error: ${JSON.stringify(falError || payload)}`;
+      const logs = payload.logs || [];
+      const logsString = logs.map((log: any) => `[${log.timestamp}] ${log.message}`).join('\n');
+      const errorMessage = `Fal.ai reported failure. Status: ${status}. Error: ${JSON.stringify(falError || 'N/A')}. Logs:\n${logsString}`;
       console.error(`${logPrefix} Job ${jobId} failed: ${errorMessage}`);
       
       const { data: updatedTile, error: updateTileError } = await supabase
