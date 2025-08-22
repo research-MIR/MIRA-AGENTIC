@@ -20,6 +20,7 @@ import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious
 import { SecureImageDisplay } from '@/components/VTO/SecureImageDisplay';
 import { TileDetailModal } from '@/components/Developer/TileDetailModal';
 import { Progress } from '@/components/ui/progress';
+import { ScrollArea } from '@/components/ui/scroll-area';
 
 const UPLOAD_BUCKET = 'mira-agent-user-uploads';
 
