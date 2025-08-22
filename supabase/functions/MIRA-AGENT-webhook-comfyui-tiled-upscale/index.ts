@@ -42,9 +42,9 @@ serve(async (req) => {
       throw new Error("Webhook received without job_id or tile_id in the query parameters.");
     }
 
-    // Sanitize inputs to ensure they are valid UUIDs and remove any trailing characters
-    jobId = jobId.replace(/[^a-f0-9-]/g, '');
-    tileId = tileId.replace(/[^a-f0-9-]/g, '');
+    // Sanitize inputs to ensure they are valid UUIDs, allowing uppercase hex
+    jobId = jobId.replace(/[^A-Fa-f0-9-]/g, '');
+    tileId = tileId.replace(/[^A-Fa-f0-9-]/g, '');
 
     console.log(`${logPrefix} Received webhook for job ${jobId}, tile ${tileId}.`);
 
@@ -55,9 +55,14 @@ serve(async (req) => {
 
     if (status === 'OK' && resultPayload) {
       console.log(`${logPrefix} Job ${jobId} completed successfully.`);
-      const imageUrl = resultPayload?.outputs?.['283']?.images?.[0]?.url;
+      
+      const outputs = resultPayload?.outputs ?? {};
+      const imageUrl = Object.values(outputs)
+        .flatMap((node: any) => (node?.images || []).map((img: any) => img.url))
+        .find(Boolean);
+
       if (!imageUrl) {
-        throw new Error("Fal.ai webhook payload is missing the expected image URL in outputs.283.images[0].url");
+        throw new Error("No image URL found in webhook payload (checked all nodes).");
       }
 
       const imageResponse = await fetch(imageUrl);
