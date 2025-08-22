@@ -32,6 +32,21 @@ Your most important rule is to describe anatomical features **as if they are per
 ### Output Format:
 Your output must be a single, descriptive paragraph in natural language, written in English.`;
 
+// --- Resilience Helper ---
+async function retry<T>(fn: () => Promise<T>, retries = 3, delay = 1000, logPrefix = ""): Promise<T> {
+    let lastError: Error | null = null;
+    for (let i = 0; i < retries; i++) {
+        try {
+            return await fn();
+        } catch (error) {
+            lastError = error;
+            console.warn(`${logPrefix} Attempt ${i + 1}/${retries} failed: ${error.message}. Retrying in ${delay * (i + 1)}ms...`);
+            await new Promise(resolve => setTimeout(resolve, delay * (i + 1))); // Linear backoff
+        }
+    }
+    throw lastError;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
 
@@ -44,17 +59,20 @@ serve(async (req) => {
   const logPrefix = `[TileAnalyzerWorker][${tile_id}]`;
 
   try {
-    const { data: claimedTile, error: claimError } = await supabase
-      .from('mira_agent_tiled_upscale_tiles')
-      .update({ status: 'analyzing' })
-      .eq('id', tile_id)
-      .eq('status', 'pending_analysis')
-      .not('source_tile_bucket', 'is', null)
-      .not('source_tile_path', 'is', null)
-      .select('source_tile_bucket, source_tile_path')
-      .single();
+    const { data: claimedTile, error: claimError } = await retry(() => 
+        supabase
+        .from('mira_agent_tiled_upscale_tiles')
+        .update({ status: 'analyzing' })
+        .eq('id', tile_id)
+        .eq('status', 'pending_analysis')
+        .not('source_tile_bucket', 'is', null)
+        .not('source_tile_path', 'is', null)
+        .select('source_tile_bucket, source_tile_path')
+        .single()
+        .then(res => { if (res.error && res.error.code !== 'PGRST116') throw res.error; return res; }), // Ignore "No rows found" as a retryable error
+        3, 1000, logPrefix
+    );
 
-    if (claimError) throw new Error(`Claiming tile failed: ${claimError.message}`);
     if (!claimedTile) {
       console.log(`${logPrefix} Tile already claimed, not in 'pending_analysis' state, or missing storage info. Exiting.`);
       return new Response(JSON.stringify({ success: true, message: "Tile not eligible for analysis." }), { headers: corsHeaders });
@@ -62,34 +80,44 @@ serve(async (req) => {
 
     const { source_tile_bucket, source_tile_path } = claimedTile;
 
-    const { data: imageBlob, error: downloadError } = await supabase.storage.from(source_tile_bucket).download(source_tile_path);
-    if (downloadError) throw downloadError;
+    const { data: imageBlob, error: downloadError } = await retry(() => 
+        supabase.storage.from(source_tile_bucket).download(source_tile_path)
+        .then(res => { if (res.error) throw res.error; return res; }),
+        3, 2000, logPrefix
+    );
 
     const imageBase64 = encodeBase64(await imageBlob.arrayBuffer());
     const imageMimeType = imageBlob.type;
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
-    const result = await ai.models.generateContent({
-        model: MODEL_NAME,
-        contents: [{
-            role: 'user',
-            parts: [{
-                inlineData: {
-                    mimeType: imageMimeType || 'image/webp',
-                    data: imageBase64
-                }
-            }]
-        }],
-        config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
-    });
+    const result = await retry(() => 
+        ai.models.generateContent({
+            model: MODEL_NAME,
+            contents: [{
+                role: 'user',
+                parts: [{
+                    inlineData: {
+                        mimeType: imageMimeType || 'image/webp',
+                        data: imageBase64
+                    }
+                }]
+            }],
+            config: { systemInstruction: { role: "system", parts: [{ text: systemPrompt }] } }
+        }),
+        3, 5000, logPrefix // Longer delay for AI API
+    );
 
     const description = result.text.trim();
     if (!description) throw new Error("AI model failed to generate a description.");
 
-    await supabase
-      .from('mira_agent_tiled_upscale_tiles')
-      .update({ generated_prompt: description, status: 'pending_generation' })
-      .eq('id', tile_id);
+    await retry(() => 
+        supabase
+        .from('mira_agent_tiled_upscale_tiles')
+        .update({ generated_prompt: description, status: 'pending_generation' })
+        .eq('id', tile_id)
+        .then(res => { if (res.error) throw res.error; return res; }),
+        3, 1000, logPrefix
+    );
 
     return Response.json({ success: true, prompt: description }, { headers: corsHeaders });
 

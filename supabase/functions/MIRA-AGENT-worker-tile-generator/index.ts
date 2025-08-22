@@ -10,6 +10,21 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// --- Resilience Helper ---
+async function retry<T>(fn: () => Promise<T>, retries = 3, delay = 1000, logPrefix = ""): Promise<T> {
+    let lastError: Error | null = null;
+    for (let i = 0; i < retries; i++) {
+        try {
+            return await fn();
+        } catch (error) {
+            lastError = error;
+            console.warn(`${logPrefix} Attempt ${i + 1}/${retries} failed: ${error.message}. Retrying in ${delay * (i + 1)}ms...`);
+            await new Promise(resolve => setTimeout(resolve, delay * (i + 1))); // Linear backoff
+        }
+    }
+    throw lastError;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
 
@@ -22,15 +37,18 @@ serve(async (req) => {
   const logPrefix = `[TileGeneratorWorker][${tile_id}]`;
 
   try {
-    const { data: claimedTile, error: claimError } = await supabase
-      .from('mira_agent_tiled_upscale_tiles')
-      .update({ status: 'generating' })
-      .eq('id', tile_id)
-      .eq('status', 'pending_generation')
-      .select('parent_job_id, source_tile_bucket, source_tile_path, generated_prompt')
-      .single();
+    const { data: claimedTile, error: claimError } = await retry(() => 
+        supabase
+        .from('mira_agent_tiled_upscale_tiles')
+        .update({ status: 'generating' })
+        .eq('id', tile_id)
+        .eq('status', 'pending_generation')
+        .select('parent_job_id, source_tile_bucket, source_tile_path, generated_prompt')
+        .single()
+        .then(res => { if (res.error && res.error.code !== 'PGRST116') throw res.error; return res; }),
+        3, 1000, logPrefix
+    );
 
-    if (claimError) throw new Error(`Claiming tile failed: ${claimError.message}`);
     if (!claimedTile) {
       console.log(`${logPrefix} Tile already claimed or not in 'pending_generation' state. Exiting.`);
       return new Response(JSON.stringify({ success: true, message: "Tile not eligible for generation." }), { headers: corsHeaders });
@@ -38,14 +56,16 @@ serve(async (req) => {
 
     const { parent_job_id, source_tile_bucket, source_tile_path, generated_prompt } = claimedTile;
 
-    const { data: parentJob, error: fetchParentError } = await supabase
-      .from('mira_agent_tiled_upscale_jobs')
-      .select('user_id, metadata')
-      .eq('id', parent_job_id)
-      .single();
+    const { data: parentJob, error: fetchParentError } = await retry(() => 
+        supabase
+        .from('mira_agent_tiled_upscale_jobs')
+        .select('user_id, metadata')
+        .eq('id', parent_job_id)
+        .single()
+        .then(res => { if (res.error) throw res.error; return res; }),
+        3, 1000, logPrefix
+    );
     
-    if (fetchParentError) throw new Error(`Failed to fetch parent job: ${fetchParentError.message}`);
-
     const { data: { publicUrl: originalTileUrl } } = supabase.storage.from(source_tile_bucket).getPublicUrl(source_tile_path);
 
     const engine = parentJob.metadata?.upscaler_engine || 'enhancor_detailed';
@@ -55,16 +75,18 @@ serve(async (req) => {
         if (!generated_prompt) {
             throw new Error("Cannot use ComfyUI engine: tile is missing a generated_prompt.");
         }
-        const { error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-comfyui-tiled-upscale', {
-            body: {
-                user_id: parentJob.user_id,
-                source_image_url: originalTileUrl,
-                prompt: generated_prompt,
-                tile_id: tile_id,
-                metadata: { original_tile_url: originalTileUrl }
-            }
-        });
-        if (proxyError) throw new Error(`Failed to invoke ComfyUI proxy: ${proxyError.message}`);
+        await retry(() => 
+            supabase.functions.invoke('MIRA-AGENT-proxy-comfyui-tiled-upscale', {
+                body: {
+                    user_id: parentJob.user_id,
+                    source_image_url: originalTileUrl,
+                    prompt: generated_prompt,
+                    tile_id: tile_id,
+                    metadata: { original_tile_url: originalTileUrl }
+                }
+            }).then(res => { if (res.error) throw res.error; return res; }),
+            3, 5000, logPrefix // Longer delay for function invocation
+        );
 
     } else { // Default to Enhancor
         const transformedUrl = `${originalTileUrl}?format=jpeg&quality=95`;
@@ -73,22 +95,27 @@ serve(async (req) => {
         const imageBlob = await response.blob();
 
         const convertedFilePath = `${parentJob.user_id}/enhancor-sources/converted/${Date.now()}-tile-${tile_id}.jpeg`;
-        const { error: uploadError } = await supabase.storage.from(UPLOAD_BUCKET).upload(convertedFilePath, imageBlob, { contentType: 'image/jpeg', upsert: true });
-        if (uploadError) throw uploadError;
+        await retry(() => 
+            supabase.storage.from(UPLOAD_BUCKET).upload(convertedFilePath, imageBlob, { contentType: 'image/jpeg', upsert: true })
+            .then(res => { if (res.error) throw res.error; return res; }),
+            3, 1000, logPrefix
+        );
 
         const { data: { publicUrl: convertedImageUrl } } = supabase.storage.from(UPLOAD_BUCKET).getPublicUrl(convertedFilePath);
         console.log(`${logPrefix} Converted image stored at: ${convertedImageUrl}`);
 
-        const { error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-enhancor-ai', {
-          body: {
-            user_id: parentJob.user_id,
-            source_image_urls: [convertedImageUrl],
-            enhancor_mode: engine,
-            tile_id: tile_id,
-            metadata: { original_tile_url: originalTileUrl }
-          }
-        });
-        if (proxyError) throw new Error(`Failed to invoke Enhancor proxy: ${proxyError.message}`);
+        await retry(() => 
+            supabase.functions.invoke('MIRA-AGENT-proxy-enhancor-ai', {
+              body: {
+                user_id: parentJob.user_id,
+                source_image_urls: [convertedImageUrl],
+                enhancor_mode: engine,
+                tile_id: tile_id,
+                metadata: { original_tile_url: originalTileUrl }
+              }
+            }).then(res => { if (res.error) throw res.error; return res; }),
+            3, 5000, logPrefix // Longer delay for function invocation
+        );
     }
 
     console.log(`${logPrefix} Successfully dispatched tile to the appropriate proxy.`);
