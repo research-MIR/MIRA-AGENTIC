@@ -82,6 +82,13 @@ async function downloadTileBytes(supabase: SupabaseClient, t: any): Promise<Uint
   return new Uint8Array(await res.arrayBuffer());
 }
 
+function flattenOpaqueWhite(img: Image): Image {
+  const bg = new Image(img.width, img.height);
+  bg.fill(0xFFFFFFFF); // Opaque white
+  bg.composite(img, 0, 0);
+  return bg;
+}
+
 serve(async (req) => {
   const { parent_job_id } = await req.json();
   if (!parent_job_id) return new Response("Missing parent_job_id", { status: 400 });
@@ -188,6 +195,7 @@ serve(async (req) => {
       log(`Creating new canvas with dimensions: ${finalW}x${finalH}`);
       if (finalW < 1 || finalH < 1) throw new Error(`Invalid canvas dimensions before creation: ${finalW}x${finalH}`);
       canvas = new Image(finalW, finalH);
+      canvas.fill(0xFFFFFFFF); // FIX 1: Start with an opaque white canvas
     } else {
       log(`Loading canvas state from: ${claimedJob.comp_state_bucket}/${claimedJob.comp_state_path}`);
       const { data: stateBlob, error: downloadError } = await retry(() => 
@@ -195,8 +203,10 @@ serve(async (req) => {
           .then(res => { if (res.error) throw res.error; return res; }),
           3, 2000, logPrefix
       );
-      canvas = await Image.decode(await stateBlob.arrayBuffer());
-      log(`Canvas state loaded successfully. Dimensions: ${canvas.width}x${canvas.height}`);
+      const loadedCanvas = await Image.decode(await stateBlob.arrayBuffer());
+      log(`Canvas state loaded successfully. Dimensions: ${loadedCanvas.width}x${loadedCanvas.height}. Re-opaquing...`);
+      // FIX 2: When resuming from a PNG state, re-opaque it
+      canvas = flattenOpaqueWhite(loadedCanvas);
     }
 
     const occupy = new Set<string>();
@@ -253,7 +263,9 @@ serve(async (req) => {
     if (endIndex < completeTiles.length) {
       const statePath = `${claimedJob.user_id}/${parent_job_id}/compositor_state.png`;
       log(`Batch complete. Saving checkpoint to ${STATE_BUCKET}/${statePath}`);
-      const stateBuffer = await canvas.encode(0); // PNG encoding
+      // FIX 3: Flatten before saving checkpoint
+      const opaqueForState = flattenOpaqueWhite(canvas);
+      const stateBuffer = await opaqueForState.encode(0); // PNG encoding
       await retry(() => 
           supabase.storage.from(STATE_BUCKET).upload(statePath, stateBuffer, { contentType: 'image/png', upsert: true })
           .then(res => { if (res.error) throw res.error; return res; }),
@@ -280,7 +292,9 @@ serve(async (req) => {
       const px = finalW * finalH;
       const effQ = px > 64e6 ? Math.min(75, JPEG_QUALITY) : px > 36e6 ? Math.min(80, JPEG_QUALITY) : JPEG_QUALITY;
       log(`Encoding final JPEG (${finalW}x${finalH}) with quality ${effQ}.`);
-      const outBytes = await canvas.encodeJPEG(effQ);
+      // FIX 3: Flatten before final JPEG encode
+      const finalOpaque = flattenOpaqueWhite(canvas);
+      const outBytes = await finalOpaque.encodeJPEG(effQ);
       const outPath = `${claimedJob.user_id}/${parent_job_id}/tiled-upscale-final-${finalW}x${finalH}.jpg`;
       log(`Uploading final image to ${BUCKET_OUT}/${outPath}`);
       await retry(() => 
