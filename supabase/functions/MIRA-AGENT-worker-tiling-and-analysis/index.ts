@@ -52,6 +52,7 @@ serve(async (req) => {
 
     let TILE_SIZE = 768;
     let TILE_OVERLAP = 96;
+    let isFullSizeMode = false;
 
     if (USE_HARDCODED_OVERRIDE) {
         TILE_SIZE = HARDCODED_TILE_SIZE;
@@ -60,6 +61,7 @@ serve(async (req) => {
         const userTileSize = job.metadata.tile_size;
         if (userTileSize === 'full_size') {
             TILE_SIZE = Math.max(img.width, img.height);
+            isFullSizeMode = true;
             console.log(`${logPrefix} Using 'full_size' option. Tile size set to largest dimension: ${TILE_SIZE}`);
         } else if (typeof userTileSize === 'number' && userTileSize >= 128 && userTileSize <= 1024) {
             TILE_SIZE = userTileSize;
@@ -96,7 +98,7 @@ serve(async (req) => {
         let y = (gy === tilesY - 1) ? img.height - TILE_SIZE : gy * STEP;
         y = Math.max(0, y);
 
-        const tile = new Image(TILE_SIZE, TILE_SIZE);
+        const tile = isFullSizeMode ? new Image(img.width, img.height) : new Image(TILE_SIZE, TILE_SIZE);
         tile.composite(img, -x, -y);
 
         const tileBuffer = await tile.encode(2, 85);
