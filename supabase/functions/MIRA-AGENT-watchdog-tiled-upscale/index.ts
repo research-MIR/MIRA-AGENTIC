@@ -36,7 +36,7 @@ serve(async (req) => {
     const { count: activeJobsCount, error: countError } = await supabase
         .from('mira_agent_tiled_upscale_jobs')
         .select('*', { count: 'exact', head: true })
-        .in('status', ['tiling', 'compositing', 'generating', 'queued_for_generation']);
+        .in('status', ['tiling', 'compositing', 'queued_for_generation']); // Refined active statuses
     if (countError) throw countError;
 
     const availableSlots = concurrencyLimit - (activeJobsCount || 0);
@@ -109,7 +109,7 @@ serve(async (req) => {
             .from('mira_agent_tiled_upscale_jobs')
             .update({ status: 'failed', error_message: 'Job failed because one or more tiles could not be processed.' })
             .in('id', parentJobIdsToFail)
-            .not('status', 'in', ['failed', 'complete']); // Don't update already terminal jobs
+            .not('status', 'in', '("failed","complete")'); // Corrected syntax
         if (failParentError) console.error(`${logPrefix} Error marking parent jobs as failed:`, failParentError);
     }
     // --- END NEW CLEANUP LOGIC ---
