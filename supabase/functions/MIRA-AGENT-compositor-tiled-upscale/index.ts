@@ -231,12 +231,16 @@ serve(async (req) => {
           3, 1000, logPrefix
       );
       log(`Checkpoint saved. Next index is ${endIndex}. Re-invoking self to continue.`);
-      // Asynchronously invoke self to process the next batch
-      supabase.functions.invoke('MIRA-AGENT-compositor-tiled-upscale', {
-        body: { parent_job_id: parent_job_id }
-      }).catch(err => {
-        console.error(`${logPrefix} CRITICAL: Failed to re-invoke self for next batch. The watchdog will need to recover this job. Error:`, err);
-      });
+      
+      // Asynchronously invoke self to process the next batch AFTER a short delay
+      setTimeout(() => {
+        supabase.functions.invoke('MIRA-AGENT-compositor-tiled-upscale', {
+          body: { parent_job_id: parent_job_id }
+        }).catch(err => {
+          console.error(`${logPrefix} CRITICAL: Failed to re-invoke self for next batch. The watchdog will need to recover this job. Error:`, err);
+        });
+      }, 2000); // 2-second delay
+
     } else {
       log("All tiles composited. Finalizing image...");
       const px = finalW * finalH;
