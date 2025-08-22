@@ -35,12 +35,17 @@ serve(async (req) => {
 
   try {
     const url = new URL(req.url);
-    const jobId = url.searchParams.get('job_id');
-    const tileId = url.searchParams.get('tile_id');
+    let jobId = url.searchParams.get('job_id');
+    let tileId = url.searchParams.get('tile_id');
 
     if (!jobId || !tileId) {
       throw new Error("Webhook received without job_id or tile_id in the query parameters.");
     }
+
+    // Sanitize inputs to ensure they are valid UUIDs and remove any trailing characters
+    jobId = jobId.replace(/[^a-f0-9-]/g, '');
+    tileId = tileId.replace(/[^a-f0-9-]/g, '');
+
     console.log(`${logPrefix} Received webhook for job ${jobId}, tile ${tileId}.`);
 
     const payload = await req.json();
