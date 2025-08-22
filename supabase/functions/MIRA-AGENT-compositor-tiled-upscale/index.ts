@@ -231,7 +231,17 @@ serve(async (req) => {
         const xSnap = x0 + gx * stepX, ySnap = y0 + gy * stepY;
         const err = Math.abs(p.xs - xSnap) + Math.abs(p.ys - ySnap);
         const best = byCell.get(key);
-        if (!best || err < (best as any).err) { (p as any).err = err; byCell.set(key, p); }
+        if (!best || err < (best as any).err) { 
+            (p as any).err = err; 
+            byCell.set(key, p); 
+        } else if (err === (best as any).err) {
+            // Deterministic tie-break
+            const currentPath = p.t.generated_tile_path || p.t.generated_tile_url;
+            const bestPath = best.t.generated_tile_path || best.t.generated_tile_url;
+            if (currentPath < bestPath) {
+                byCell.set(key, p);
+            }
+        }
     }
     const dedupedPositions = Array.from(byCell.values());
     if (dedupedPositions.length < positions.length) {
@@ -274,22 +284,20 @@ serve(async (req) => {
       const t = p.t;
       const gx = gxOf(p.xs), gy = gyOf(p.ys);
       
-      // --- SNAPPING LOGIC ---
+      // --- UNCONDITIONAL SNAPPING LOGIC ---
       const xSnap = x0 + gx * stepX;
       const ySnap = y0 + gy * stepY;
       const dx = p.xs - xSnap;
       const dy = p.ys - ySnap;
-      const SNAP_TOL = 2;
-      let x = p.xs, y = p.ys;
-      if (Math.abs(dx) > SNAP_TOL || Math.abs(dy) > SNAP_TOL) {
-        log(`[WARN] Snapping tile ${i} by (${dx}, ${dy}) from (${p.xs},${p.ys}) -> (${xSnap},${ySnap})`);
-        x = xSnap; y = ySnap;
+      const x = xSnap, y = ySnap; // Always use snapped coordinates
+      if (dx !== 0 || dy !== 0) {
+        log(`[INFO] Snapped tile ${i} by (${dx}, ${dy}) from (${p.xs},${p.ys}) -> (${x},${y})`);
       }
       // --- END SNAPPING ---
 
       log(`[Tile ${i}] Processing tile at grid pos (${gx}, ${gy}) and canvas pos (${x}, ${y}).`);
       
-      const arr = (i === 0 && startIndex === 0) ? sampleBytes : await retry(() => downloadTileBytes(supabase, t), 3, 2000, `${logPrefix} [Tile ${i}]`);
+      const arr = await retry(() => downloadTileBytes(supabase, t), 3, 2000, `${logPrefix} [Tile ${i}]`);
       log(`[Tile ${i}] Downloaded ${arr.byteLength} bytes.`);
       
       let tile = await Image.decode(arr);
@@ -301,10 +309,11 @@ serve(async (req) => {
       }
 
       // --- ACTUAL OVERLAP FEATHERING ---
+      const tileW = tile.width, tileH = tile.height;
       const leftNeighborX = x0 + (gx - 1) * stepX;
       const topNeighborY = y0 + (gy - 1) * stepY;
-      const leftOverlap = processed.has(`${gx-1}:${gy}`) ? Math.max(0, (leftNeighborX + actualTileSize) - x) : 0;
-      const topOverlap  = processed.has(`${gx}:${gy-1}`) ? Math.max(0, (topNeighborY + actualTileSize) - y) : 0;
+      const leftOverlap = processed.has(`${gx-1}:${gy}`) ? Math.max(0, (leftNeighborX + tileW) - x) : 0;
+      const topOverlap  = processed.has(`${gx}:${gy-1}`) ? Math.max(0, (topNeighborY + tileH) - y) : 0;
       
       const ovL = Math.min(leftOverlap, ovX);
       const ovT = Math.min(topOverlap,  ovY);
