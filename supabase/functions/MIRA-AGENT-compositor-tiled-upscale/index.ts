@@ -223,42 +223,71 @@ serve(async (req) => {
     const gxOf = (x:number) => idx(x, x0, stepX);
     const gyOf = (y:number) => idx(y, y0, stepY);
 
-    const occupy = new Set(positions.map(p => `${gxOf(p.xs)}:${gyOf(p.ys)}`));
+    // --- DEDUPLICATION LOGIC ---
+    const byCell = new Map<string, typeof positions[0]>();
+    for (const p of positions) {
+        const gx = gxOf(p.xs), gy = gyOf(p.ys);
+        const key = `${gx}:${gy}`;
+        const xSnap = x0 + gx * stepX, ySnap = y0 + gy * stepY;
+        const err = Math.abs(p.xs - xSnap) + Math.abs(p.ys - ySnap);
+        const best = byCell.get(key);
+        if (!best || err < (best as any).err) { (p as any).err = err; byCell.set(key, p); }
+    }
+    const dedupedPositions = Array.from(byCell.values());
+    if (dedupedPositions.length < positions.length) {
+        log(`[WARN] Deduplicated ${positions.length - dedupedPositions.length} tiles that mapped to the same grid cell.`);
+    }
+    // --- END DEDUPLICATION ---
+
+    const occupy = new Set(dedupedPositions.map(p => `${gxOf(p.xs)}:${gyOf(p.ys)}`));
     log(`[DBG] gx/gy uniques -> x:${new Set(xs.map(v=>gxOf(v))).size}, y:${new Set(ys.map(v=>gyOf(v))).size}`);
 
-    positions.sort((a,b) => a.ys - b.ys || a.xs - b.xs);
+    dedupedPositions.sort((a,b) => a.ys - b.ys || a.xs - b.xs);
 
     let canvas: Image;
     if (startIndex === 0) {
       log(`Creating new canvas with dimensions: ${finalW}x${finalH}`);
       if (finalW < 1 || finalH < 1) throw new Error(`Invalid canvas dimensions before creation: ${finalW}x${finalH}`);
       canvas = new Image(finalW, finalH);
-      canvas.fill(0xFFFFFFFF); // FIX 1: Start with an opaque white canvas
+      canvas.fill(0xFFFFFFFF);
     } else {
       log(`Loading canvas state from: ${claimedJob.comp_state_bucket}/${claimedJob.comp_state_path}`);
-      const { data: stateBlob, error: downloadError } = await retry(() => 
+      const { data: stateBlob } = await retry(() => 
           supabase.storage.from(claimedJob.comp_state_bucket).download(claimedJob.comp_state_path)
           .then(res => { if (res.error) throw res.error; return res; }),
           3, 2000, logPrefix
       );
       const loadedCanvas = await Image.decode(await stateBlob.arrayBuffer());
       log(`Canvas state loaded successfully. Dimensions: ${loadedCanvas.width}x${loadedCanvas.height}. Re-opaquing...`);
-      // FIX 2: When resuming from a PNG state, re-opaque it
       canvas = flattenOpaqueWhite(loadedCanvas);
     }
 
     const hasAt = (gx:number, gy:number) => occupy.has(`${gx}:${gy}`);
     const processed = new Set<string>(
-        positions.slice(0, startIndex).map(p => `${gxOf(p.xs)}:${gyOf(p.ys)}`)
+        dedupedPositions.slice(0, startIndex).map(p => `${gxOf(p.xs)}:${gyOf(p.ys)}`)
     );
 
-    const endIndex = Math.min(startIndex + BATCH_SIZE, completeTiles.length);
+    const endIndex = Math.min(startIndex + BATCH_SIZE, dedupedPositions.length);
     log(`Processing batch from index ${startIndex} to ${endIndex-1}.`);
     for (let i = startIndex; i < endIndex; i++) {
-      const p = positions[i];
+      const p = dedupedPositions[i];
       const t = p.t;
       const gx = gxOf(p.xs), gy = gyOf(p.ys);
-      log(`[Tile ${i}] Processing tile at grid pos (${gx}, ${gy}) and canvas pos (${p.xs}, ${p.ys}).`);
+      
+      // --- SNAPPING LOGIC ---
+      const xSnap = x0 + gx * stepX;
+      const ySnap = y0 + gy * stepY;
+      const dx = p.xs - xSnap;
+      const dy = p.ys - ySnap;
+      const SNAP_TOL = 2;
+      let x = p.xs, y = p.ys;
+      if (Math.abs(dx) > SNAP_TOL || Math.abs(dy) > SNAP_TOL) {
+        log(`[WARN] Snapping tile ${i} by (${dx}, ${dy}) from (${p.xs},${p.ys}) -> (${xSnap},${ySnap})`);
+        x = xSnap; y = ySnap;
+      }
+      // --- END SNAPPING ---
+
+      log(`[Tile ${i}] Processing tile at grid pos (${gx}, ${gy}) and canvas pos (${x}, ${y}).`);
       
       const arr = (i === 0 && startIndex === 0) ? sampleBytes : await retry(() => downloadTileBytes(supabase, t), 3, 2000, `${logPrefix} [Tile ${i}]`);
       log(`[Tile ${i}] Downloaded ${arr.byteLength} bytes.`);
@@ -271,33 +300,38 @@ serve(async (req) => {
           tile.resize(actualTileSize, actualTileSize);
       }
 
-      const n = {
-        left:   hasAt(gx-1, gy) && processed.has(`${gx-1}:${gy}`),
-        top:    hasAt(gx, gy-1) && processed.has(`${gx}:${gy-1}`),
-        right:  false,
-        bottom: false
-      };
-      log(`[Tile ${i}] Feather neighbors: ${JSON.stringify(n)}`);
+      // --- ACTUAL OVERLAP FEATHERING ---
+      const leftNeighborX = x0 + (gx - 1) * stepX;
+      const topNeighborY = y0 + (gy - 1) * stepY;
+      const leftOverlap = processed.has(`${gx-1}:${gy}`) ? Math.max(0, (leftNeighborX + actualTileSize) - x) : 0;
+      const topOverlap  = processed.has(`${gx}:${gy-1}`) ? Math.max(0, (topNeighborY + actualTileSize) - y) : 0;
       
-      if (n.left || n.top) {
-        log(`[Tile ${i}] Applying feathering with overlap X=${ovX}, Y=${ovY}.`);
-        featherBandsLUT2(tile, ovX, ovY, n);
+      const ovL = Math.min(leftOverlap, ovX);
+      const ovT = Math.min(topOverlap,  ovY);
+      
+      const BAD_OVERLAP_FACTOR = 1.5;
+      const doLeft = ovL > 0 && leftOverlap <= BAD_OVERLAP_FACTOR * ovX;
+      const doTop  = ovT > 0 && topOverlap  <= BAD_OVERLAP_FACTOR * ovY;
+
+      if (doLeft || doTop) {
+        log(`[Tile ${i}] Applying feathering. Left: ${doLeft ? ovL : 0}px, Top: ${doTop ? ovT : 0}px.`);
+        featherBandsLUT2(tile, doLeft ? ovL : 0, doTop ? ovT : 0, { left: doLeft, right: false, top: doTop, bottom: false });
       }
+      // --- END FEATHERING ---
       
-      log(`[Tile ${i}] Compositing onto canvas at (${p.xs}, ${p.ys}).`);
-      canvas.composite(tile, p.xs, p.ys);
+      log(`[Tile ${i}] Compositing onto canvas at (${x}, ${y}).`);
+      canvas.composite(tile, x, y);
       processed.add(`${gx}:${gy}`);
       // @ts-ignore
       tile = null;
       await new Promise(r => setTimeout(r, 0));
     }
 
-    if (endIndex < completeTiles.length) {
+    if (endIndex < dedupedPositions.length) {
       const statePath = `${claimedJob.user_id}/${parent_job_id}/compositor_state.png`;
       log(`Batch complete. Saving checkpoint to ${STATE_BUCKET}/${statePath}`);
-      // FIX 3: Flatten before saving checkpoint
       const opaqueForState = flattenOpaqueWhite(canvas);
-      const stateBuffer = await opaqueForState.encode(0); // PNG encoding
+      const stateBuffer = await opaqueForState.encode(0);
       await retry(() => 
           supabase.storage.from(STATE_BUCKET).upload(statePath, stateBuffer, { contentType: 'image/png', upsert: true })
           .then(res => { if (res.error) throw res.error; return res; }),
@@ -310,21 +344,19 @@ serve(async (req) => {
       );
       log(`Checkpoint saved. Next index is ${endIndex}. Re-invoking self to continue.`);
       
-      // Asynchronously invoke self to process the next batch AFTER a short delay
       setTimeout(() => {
         supabase.functions.invoke('MIRA-AGENT-compositor-tiled-upscale', {
           body: { parent_job_id: parent_job_id }
         }).catch(err => {
           console.error(`${logPrefix} CRITICAL: Failed to re-invoke self for next batch. The watchdog will need to recover this job. Error:`, err);
         });
-      }, 2000); // 2-second delay
+      }, 2000);
 
     } else {
       log("All tiles composited. Finalizing image...");
       const px = finalW * finalH;
       const effQ = px > 64e6 ? Math.min(75, JPEG_QUALITY) : px > 36e6 ? Math.min(80, JPEG_QUALITY) : JPEG_QUALITY;
       log(`Encoding final JPEG (${finalW}x${finalH}) with quality ${effQ}.`);
-      // FIX 3: Flatten before final JPEG encode
       const finalOpaque = flattenOpaqueWhite(canvas);
       const outBytes = await finalOpaque.encodeJPEG(effQ);
       const outPath = `${claimedJob.user_id}/${parent_job_id}/tiled-upscale-final-${finalW}x${finalH}.jpg`;
