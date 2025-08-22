@@ -125,6 +125,13 @@ serve(async (req) => {
     log(`Found ${completeTiles.length} valid completed tiles.`);
     if (!completeTiles.length) throw new Error("No valid completed tiles found.");
 
+    // Deterministic Sort for stable processing order
+    completeTiles.sort((a, b) => {
+        const pathA = a.generated_tile_path || a.generated_tile_url;
+        const pathB = b.generated_tile_path || b.generated_tile_url;
+        return pathA.localeCompare(pathB);
+    });
+
     // --- SINGLE-TILE FAST PATH ---
     if (completeTiles.length === 1) {
         log("Single-tile job detected. Executing fast path, skipping composition.");
@@ -201,7 +208,7 @@ serve(async (req) => {
         return Math.max(1, Math.round(diffs[Math.floor(diffs.length/2)]));
     };
 
-    const sampleBytes = await downloadTileBytes(supabase, completeTiles[0]);
+    const sampleBytes = await downloadTileBytes(supabase, completeTiles[0].t);
     const sample = await Image.decode(sampleBytes);
     const expectedTileDim = Math.round(TILE_SIZE * scaleFactor);
     if (sample.width !== expectedTileDim) sample.resize(expectedTileDim, expectedTileDim);
@@ -215,15 +222,17 @@ serve(async (req) => {
     const stepY = detectStep(ys);
     if (!stepX || !stepY) throw new Error("Could not detect tile step.");
     
-    const ovX = Math.max(1, Math.min(actualTileSize - stepX, MAX_FEATHER));
-    const ovY = Math.max(1, Math.min(actualTileSize - stepY, MAX_FEATHER));
+    if (Math.abs(stepX - stepY) > 2) {
+        log(`[WARN] Significant difference between detected steps. stepX=${stepX}, stepY=${stepY}`);
+    }
+    const ovX = Math.min(Math.max(1, actualTileSize - stepX), actualTileSize / 2, MAX_FEATHER);
+    const ovY = Math.min(Math.max(1, actualTileSize - stepY), actualTileSize / 2, MAX_FEATHER);
     log(`[DBG] tileSize=${actualTileSize}, stepX=${stepX}, stepY=${stepY}, ovX=${ovX}, ovY=${ovY}`);
 
     const idx = (v:number, origin:number, step:number) => Math.floor((v - origin + step*0.5) / step);
     const gxOf = (x:number) => idx(x, x0, stepX);
     const gyOf = (y:number) => idx(y, y0, stepY);
 
-    // --- DEDUPLICATION LOGIC ---
     const byCell = new Map<string, typeof positions[0]>();
     for (const p of positions) {
         const gx = gxOf(p.xs), gy = gyOf(p.ys);
@@ -231,28 +240,25 @@ serve(async (req) => {
         const xSnap = x0 + gx * stepX, ySnap = y0 + gy * stepY;
         const err = Math.abs(p.xs - xSnap) + Math.abs(p.ys - ySnap);
         const best = byCell.get(key);
-        if (!best || err < (best as any).err) { 
-            (p as any).err = err; 
-            byCell.set(key, p); 
-        } else if (err === (best as any).err) {
-            // Deterministic tie-break
-            const currentPath = p.t.generated_tile_path || p.t.generated_tile_url;
-            const bestPath = best.t.generated_tile_path || best.t.generated_tile_url;
-            if (currentPath < bestPath) {
-                byCell.set(key, p);
-            }
+        const currentPath = p.t.generated_tile_path || p.t.generated_tile_url;
+
+        if (!best || err < (best as any).err) {
+            if (best) log(`[DEDUPE] Replacing tile for cell ${key}. New tile is closer to grid. Dropped: ${best.t.generated_tile_path || best.t.generated_tile_url}`);
+            (p as any).err = err;
+            byCell.set(key, p);
+        } else if (err === (best as any).err && currentPath < (best.t.generated_tile_path || best.t.generated_tile_url)) {
+            log(`[DEDUPE] Replacing tile for cell ${key}. Same error, new tile path is lexicographically smaller. Dropped: ${best.t.generated_tile_path || best.t.generated_tile_url}`);
+            byCell.set(key, p);
+        } else {
+            log(`[DEDUPE] Dropping duplicate tile for cell ${key}: ${currentPath}`);
         }
     }
     const dedupedPositions = Array.from(byCell.values());
     if (dedupedPositions.length < positions.length) {
         log(`[WARN] Deduplicated ${positions.length - dedupedPositions.length} tiles that mapped to the same grid cell.`);
     }
-    // --- END DEDUPLICATION ---
 
-    const occupy = new Set(dedupedPositions.map(p => `${gxOf(p.xs)}:${gyOf(p.ys)}`));
-    log(`[DBG] gx/gy uniques -> x:${new Set(xs.map(v=>gxOf(v))).size}, y:${new Set(ys.map(v=>gyOf(v))).size}`);
-
-    dedupedPositions.sort((a,b) => a.ys - b.ys || a.xs - b.xs);
+    dedupedPositions.sort((a,b) => gyOf(a.ys) - gyOf(b.ys) || gxOf(a.xs) - gxOf(b.xs));
 
     let canvas: Image;
     if (startIndex === 0) {
@@ -272,7 +278,7 @@ serve(async (req) => {
       canvas = flattenOpaqueWhite(loadedCanvas);
     }
 
-    const hasAt = (gx:number, gy:number) => occupy.has(`${gx}:${gy}`);
+    const occupy = new Set(dedupedPositions.map(p => `${gxOf(p.xs)}:${gyOf(p.ys)}`));
     const processed = new Set<string>(
         dedupedPositions.slice(0, startIndex).map(p => `${gxOf(p.xs)}:${gyOf(p.ys)}`)
     );
@@ -284,16 +290,12 @@ serve(async (req) => {
       const t = p.t;
       const gx = gxOf(p.xs), gy = gyOf(p.ys);
       
-      // --- UNCONDITIONAL SNAPPING LOGIC ---
       const xSnap = x0 + gx * stepX;
       const ySnap = y0 + gy * stepY;
-      const dx = p.xs - xSnap;
-      const dy = p.ys - ySnap;
-      const x = xSnap, y = ySnap; // Always use snapped coordinates
-      if (dx !== 0 || dy !== 0) {
-        log(`[INFO] Snapped tile ${i} by (${dx}, ${dy}) from (${p.xs},${p.ys}) -> (${x},${y})`);
+      const x = xSnap, y = ySnap;
+      if (p.xs !== x || p.ys !== y) {
+        log(`[INFO] Snapped tile ${i} from (${p.xs},${p.ys}) -> (${x},${y})`);
       }
-      // --- END SNAPPING ---
 
       log(`[Tile ${i}] Processing tile at grid pos (${gx}, ${gy}) and canvas pos (${x}, ${y}).`);
       
@@ -308,7 +310,6 @@ serve(async (req) => {
           tile.resize(actualTileSize, actualTileSize);
       }
 
-      // --- ACTUAL OVERLAP FEATHERING ---
       const tileW = tile.width, tileH = tile.height;
       const leftNeighborX = x0 + (gx - 1) * stepX;
       const topNeighborY = y0 + (gy - 1) * stepY;
@@ -322,11 +323,13 @@ serve(async (req) => {
       const doLeft = ovL > 0 && leftOverlap <= BAD_OVERLAP_FACTOR * ovX;
       const doTop  = ovT > 0 && topOverlap  <= BAD_OVERLAP_FACTOR * ovY;
 
+      if (!doLeft && leftOverlap > 0) log(`[WARN] Disabling left feather for tile ${i} due to excessive overlap (${leftOverlap}px > ${BAD_OVERLAP_FACTOR * ovX}px)`);
+      if (!doTop && topOverlap > 0) log(`[WARN] Disabling top feather for tile ${i} due to excessive overlap (${topOverlap}px > ${BAD_OVERLAP_FACTOR * ovY}px)`);
+
       if (doLeft || doTop) {
         log(`[Tile ${i}] Applying feathering. Left: ${doLeft ? ovL : 0}px, Top: ${doTop ? ovT : 0}px.`);
         featherBandsLUT2(tile, doLeft ? ovL : 0, doTop ? ovT : 0, { left: doLeft, right: false, top: doTop, bottom: false });
       }
-      // --- END FEATHERING ---
       
       log(`[Tile ${i}] Compositing onto canvas at (${x}, ${y}).`);
       canvas.composite(tile, x, y);
