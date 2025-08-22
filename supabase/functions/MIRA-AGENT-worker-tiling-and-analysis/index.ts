@@ -13,6 +13,21 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// --- Resilience Helper ---
+async function retry<T>(fn: () => Promise<T>, retries = 3, delay = 1000, logPrefix = ""): Promise<T> {
+    let lastError: Error | null = null;
+    for (let i = 0; i < retries; i++) {
+        try {
+            return await fn();
+        } catch (error) {
+            lastError = error;
+            console.warn(`${logPrefix} Attempt ${i + 1}/${retries} failed: ${error.message}. Retrying in ${delay}ms...`);
+            await new Promise(resolve => setTimeout(resolve, delay * (i + 1))); // Linear backoff
+        }
+    }
+    throw lastError;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -27,12 +42,16 @@ serve(async (req) => {
     const logPrefix = `[TilingWorker][${parent_job_id}]`;
     console.log(`${logPrefix} Invoked. Tiling on base image and queuing for next step.`);
 
-    const { data: job, error: fetchError } = await supabase
-      .from("mira_agent_tiled_upscale_jobs")
-      .select("source_bucket, source_path, user_id, upscale_factor, metadata")
-      .eq("id", parent_job_id)
-      .single();
-    if (fetchError) throw fetchError;
+    const { data: job, error: fetchError } = await retry(() => 
+        supabase
+        .from("mira_agent_tiled_upscale_jobs")
+        .select("source_bucket, source_path, user_id, upscale_factor, metadata")
+        .eq("id", parent_job_id)
+        .single()
+        .then(res => { if (res.error) throw res.error; return res; }),
+        3, 1000, logPrefix
+    );
+    
     if (!job.source_bucket || !job.source_path) {
         throw new Error("Parent job is missing source_bucket or source_path.");
     }
@@ -41,8 +60,11 @@ serve(async (req) => {
     const initialStatus = engine.startsWith('comfyui') ? 'pending_analysis' : 'pending_generation';
     console.log(`${logPrefix} Engine is '${engine}'. Initial tile status will be '${initialStatus}'.`);
 
-    const { data: blob, error: downloadError } = await supabase.storage.from(job.source_bucket).download(job.source_path);
-    if (downloadError) throw downloadError;
+    const { data: blob, error: downloadError } = await retry(() => 
+        supabase.storage.from(job.source_bucket).download(job.source_path)
+        .then(res => { if (res.error) throw res.error; return res; }),
+        3, 2000, logPrefix
+    );
 
     const img = await Image.decode(await blob.arrayBuffer());
     console.log(`${logPrefix} Decoded original image: ${img.width}x${img.height}`);
@@ -110,10 +132,13 @@ serve(async (req) => {
         const tileBuffer = await tile.encode(2, 85);
         const filePath = `${job.user_id}/${parent_job_id}/tile_${i}.webp`;
         
-        await supabase.storage.from(TILE_UPLOAD_BUCKET).upload(filePath, tileBuffer, {
-            contentType: 'image/webp',
-            upsert: true,
-        });
+        await retry(() => 
+            supabase.storage.from(TILE_UPLOAD_BUCKET).upload(filePath, tileBuffer, {
+                contentType: 'image/webp',
+                upsert: true,
+            }).then(res => { if (res.error) throw res.error; return res; }),
+            3, 1000, `${logPrefix} [Tile ${i}]`
+        );
 
         batch.push({
             parent_job_id,
@@ -125,23 +150,33 @@ serve(async (req) => {
         });
 
         if (batch.length >= INSERT_BATCH_SIZE) {
-            const { error } = await supabase.from("mira_agent_tiled_upscale_tiles").upsert(batch, { onConflict: "parent_job_id,tile_index" });
-            if (error) throw error;
+            await retry(() => 
+                supabase.from("mira_agent_tiled_upscale_tiles").upsert(batch, { onConflict: "parent_job_id,tile_index" })
+                .then(res => { if (res.error) throw res.error; return res; }),
+                3, 1000, logPrefix
+            );
             batch.length = 0;
         }
     }
 
     if (batch.length > 0) {
-        const { error } = await supabase.from("mira_agent_tiled_upscale_tiles").upsert(batch, { onConflict: "parent_job_id,tile_index" });
-        if (error) throw error;
+        await retry(() => 
+            supabase.from("mira_agent_tiled_upscale_tiles").upsert(batch, { onConflict: "parent_job_id,tile_index" })
+            .then(res => { if (res.error) throw res.error; return res; }),
+            3, 1000, logPrefix
+        );
     }
 
-    await supabase.from("mira_agent_tiled_upscale_jobs").update({ 
-        status: "queued_for_generation", 
-        total_tiles: totalTiles,
-        canvas_w: finalW,
-        canvas_h: finalH
-    }).eq("id", parent_job_id);
+    await retry(() => 
+        supabase.from("mira_agent_tiled_upscale_jobs").update({ 
+            status: "queued_for_generation", 
+            total_tiles: totalTiles,
+            canvas_w: finalW,
+            canvas_h: finalH
+        }).eq("id", parent_job_id)
+        .then(res => { if (res.error) throw res.error; return res; }),
+        3, 1000, logPrefix
+    );
     console.log(`${logPrefix} Tiling complete. All tiles queued for the next step.`);
 
     return new Response(JSON.stringify({ success: true, tileCount: totalTiles }), { headers: corsHeaders });
