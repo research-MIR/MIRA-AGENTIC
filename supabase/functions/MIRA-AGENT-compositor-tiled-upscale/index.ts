@@ -127,13 +127,6 @@ serve(async (req) => {
     log(`Found ${completeTiles.length} valid completed tiles.`);
     if (!completeTiles.length) throw new Error("No valid completed tiles found.");
 
-    // Deterministic Sort for stable processing order
-    completeTiles.sort((a, b) => {
-        const pathA = a.generated_tile_path || a.generated_tile_url || "";
-        const pathB = b.generated_tile_path || b.generated_tile_url || "";
-        return pathA.localeCompare(pathB);
-    });
-
     // --- SINGLE-TILE FAST PATH ---
     if (completeTiles.length === 1) {
         log("Single-tile job detected. Executing fast path, skipping composition.");
@@ -198,18 +191,6 @@ serve(async (req) => {
         ys: t.coordinates.y * scaleFactor,
     }));
 
-    const detectStep = (vals: number[]) => {
-        const uniq = Array.from(new Set(vals)).sort((a,b)=>a-b);
-        const diffs: number[] = [];
-        for (let i=1; i<uniq.length; i++) {
-            const d = uniq[i] - uniq[i-1];
-            if (d > 0) diffs.push(d);
-        }
-        if (!diffs.length) return 0;
-        diffs.sort((a,b)=>a-b);
-        return Math.max(1, Math.round(diffs[Math.floor(diffs.length/2)]));
-    };
-
     const sampleBytes = await downloadTileBytes(supabase, completeTiles[0]);
     const sample = await Image.decode(sampleBytes);
     const expectedTileDim = Math.round(TILE_SIZE * scaleFactor);
@@ -218,77 +199,91 @@ serve(async (req) => {
 
     const xs = positions.map(p => p.xs);
     const ys = positions.map(p => p.ys);
-    
-    const stepX = detectStep(xs);
-    const stepY = detectStep(ys);
+
+    const stepOf = (vals:number[]) => {
+      const uniq = Array.from(new Set(vals)).sort((a,b)=>a-b);
+      const diffs:number[] = [];
+      for (let i=1;i<uniq.length;i++){ const d=uniq[i]-uniq[i-1]; if (d>0) diffs.push(d); }
+      if (!diffs.length) return 0;
+      diffs.sort((a,b)=>a-b);
+      return Math.max(1, Math.round(diffs[Math.floor(diffs.length/2)])); // median
+    };
+
+    const stepX = stepOf(xs), stepY = stepOf(ys);
     if (!stepX || !stepY) throw new Error("Could not detect tile step.");
 
-    function chooseOriginAxis(vals: number[], step: number, tile: number, limit: number) {
-        let origin = Math.min(...vals);
-        const idx = (v: number) => Math.floor((v - origin + step * 0.5) / step);
-        let snapped = vals.map(v => origin + idx(v) * step);
-        let minS = Math.min(...snapped);
-        let maxS = Math.max(...snapped);
-        let shift = 0;
-        if (minS < 0) {
-            shift += Math.ceil(-minS / step) * step;
-        }
-        if (maxS + tile > limit) {
-            shift -= Math.ceil((maxS + tile - limit) / step) * step;
-        }
-        origin += shift;
-        const idx2 = (v: number) => Math.floor((v - origin + step * 0.5) / step);
-        snapped = vals.map(v => origin + idx2(v) * step);
-        minS = Math.min(...snapped);
-        maxS = Math.max(...snapped);
-        if (minS < 0 || maxS + tile > limit) {
-            const overTop = Math.max(0, -minS);
-            const overBot = Math.max(0, (maxS + tile) - limit);
-            const net = Math.ceil((overTop - overBot) / step) * step;
-            origin += net;
-        }
-        return origin;
+    function bands(vals: number[], step: number) {
+      const s = [...new Set(vals)].sort((a,b)=>a-b);
+      if (s.length === 0) return [];
+      const groups: number[] = [];
+      let cur: number[] = [s[0]];
+      for (let i=1; i<s.length; i++) {
+        if (Math.abs(s[i] - s[i-1]) <= step/2) cur.push(s[i]);
+        else { groups.push(Math.round(cur.reduce((a,b)=>a+b,0)/cur.length)); cur = [s[i]]; }
+      }
+      groups.push(Math.round(cur.reduce((a,b)=>a+b,0)/cur.length));
+      return groups;
     }
 
-    const x0 = chooseOriginAxis(xs, stepX, actualTileSize, finalW);
-    const y0 = chooseOriginAxis(ys, stepY, actualTileSize, finalH);
-    
-    if (Math.abs(stepX - stepY) > 2) {
-        log(`[WARN] Significant difference between detected steps. stepX=${stepX}, stepY=${stepY}`);
+    const xBands = bands(xs, stepX);
+    const yBands = bands(ys, stepY);
+
+    const expectCols = Math.ceil((finalW - actualTileSize) / stepX) + 1;
+    const expectRows = Math.ceil((finalH - actualTileSize) / stepY) + 1;
+
+    if (xBands.length !== expectCols || yBands.length !== expectRows) {
+      throw new Error(`Incomplete coverage: have ${xBands.length}×${yBands.length}, expected ${expectCols}×${expectRows}. xBands=${xBands.join(',')} yBands=${yBands.join(',')}`);
     }
+
+    function nearestIdx(bands: number[], v: number) {
+      let bi = 0, best = Infinity;
+      for (let i=0; i<bands.length; i++) {
+        const d = Math.abs(v - bands[i]);
+        if (d < best) { best = d; bi = i; }
+      }
+      return bi;
+    }
+
+    const gxOf = (x: number) => nearestIdx(xBands, x);
+    const gyOf = (y: number) => nearestIdx(yBands, y);
+    const x0 = 0, y0 = 0;
+
+    const buckets = new Map<string, Pos[]>();
+    for (const p of positions) {
+      const gx = gxOf(p.xs), gy = gyOf(p.ys);
+      const key = `${gx}:${gy}`;
+      (buckets.get(key) ?? buckets.set(key, []).get(key)!).push(p);
+    }
+
+    const pick = (arr:Pos[], key:string) => {
+      const [gx, gy] = key.split(":").map(Number);
+      const xSnap = x0 + gx*stepX, ySnap = y0 + gy*stepY;
+      arr.sort((a,b)=>{
+        const ea = Math.abs(a.xs - xSnap) + Math.abs(a.ys - ySnap);
+        const eb = Math.abs(b.xs - xSnap) + Math.abs(b.ys - ySnap);
+        if (ea !== eb) return ea - eb;
+        const pa = a.t.generated_tile_path || a.t.generated_tile_url || "";
+        const pb = b.t.generated_tile_path || b.t.generated_tile_url || "";
+        return String(pa).localeCompare(String(pb));
+      });
+      return arr[0];
+    };
+
+    const cells: Array<{gx:number; gy:number; p: Pos}> = [];
+    for (let gy = 0; gy < expectRows; gy++) {
+      for (let gx = 0; gx < expectCols; gx++) {
+        const key = `${gx}:${gy}`;
+        const arr = buckets.get(key);
+        if (!arr || !arr.length) {
+          throw new Error(`Missing tile for cell ${key}. Expected a ${expectCols}×${expectRows} grid to fill ${finalW}×${finalH}, step=(${stepX},${stepY}), tile=${actualTileSize}.`);
+        }
+        cells.push({ gx, gy, p: pick(arr, key) });
+      }
+    }
+    
     const ovX = Math.min(Math.max(1, actualTileSize - stepX), actualTileSize / 2, MAX_FEATHER);
     const ovY = Math.min(Math.max(1, actualTileSize - stepY), actualTileSize / 2, MAX_FEATHER);
-    log(`[DBG] tileSize=${actualTileSize}, stepX=${stepX}, stepY=${stepY}, ovX=${ovX}, ovY=${ovY}, x0=${x0}, y0=${y0}`);
-
-    const idx = (v:number, origin:number, step:number) => Math.floor((v - origin + step*0.5) / step);
-    const gxOf = (x:number) => idx(x, x0, stepX);
-    const gyOf = (y:number) => idx(y, y0, stepY);
-
-    const byCell = new Map<string, Pos>();
-    for (const p of positions) {
-        const gx = gxOf(p.xs), gy = gyOf(p.ys);
-        const key = `${gx}:${gy}`;
-        const xSnap = x0 + gx * stepX, ySnap = y0 + gy * stepY;
-        const err = Math.abs(p.xs - xSnap) + Math.abs(p.ys - ySnap);
-        const best = byCell.get(key);
-        const currentPath = p.t.generated_tile_path || p.t.generated_tile_url || "";
-        if (!best || err < (best as any).err) {
-            if (best) log(`[DEDUPE] Replacing tile for cell ${key}. New tile is closer to grid. Dropped: ${best.t.generated_tile_path || best.t.generated_tile_url}`);
-            (p as any).err = err;
-            byCell.set(key, p);
-        } else if (err === (best as any).err && currentPath < (best.t.generated_tile_path || best.t.generated_tile_url || "")) {
-            log(`[DEDUPE] Replacing tile for cell ${key}. Same error, new tile path is lexicographically smaller. Dropped: ${best.t.generated_tile_path || best.t.generated_tile_url}`);
-            byCell.set(key, p);
-        } else {
-            log(`[DEDUPE] Dropping duplicate tile for cell ${key}: ${currentPath}`);
-        }
-    }
-    const dedupedPositions = Array.from(byCell.values());
-    if (dedupedPositions.length < positions.length) {
-        log(`[WARN] Deduplicated ${positions.length - dedupedPositions.length} tiles that mapped to the same grid cell.`);
-    }
-
-    dedupedPositions.sort((a,b) => gyOf(a.ys) - gyOf(b.ys) || gxOf(a.xs) - gxOf(b.xs));
+    log(`[DBG] tileSize=${actualTileSize}, stepX=${stepX}, stepY=${stepY}, ovX=${ovX}, ovY=${ovY}`);
 
     let canvas: Image;
     if (startIndex === 0) {
@@ -307,22 +302,17 @@ serve(async (req) => {
     }
 
     const processed = new Set<string>(
-        dedupedPositions.slice(0, startIndex).map(p => `${gxOf(p.xs)}:${gyOf(p.ys)}`)
+        cells.slice(0, startIndex).map(c => `${c.gx}:${c.gy}`)
     );
 
-    const endIndex = Math.min(startIndex + BATCH_SIZE, dedupedPositions.length);
+    const endIndex = Math.min(startIndex + BATCH_SIZE, cells.length);
     log(`Processing batch from index ${startIndex} to ${endIndex-1}.`);
     for (let i = startIndex; i < endIndex; i++) {
-      const p = dedupedPositions[i];
+      const { gx, gy, p } = cells[i];
       const t = p.t;
-      const gx = gxOf(p.xs), gy = gyOf(p.ys);
       
-      const xSnap = x0 + gx * stepX;
-      const ySnap = y0 + gy * stepY;
-      const x = xSnap, y = ySnap;
-      if (p.xs !== x || p.ys !== y) {
-        log(`[INFO] Snapped tile ${i} from (${p.xs},${p.ys}) -> (${x},${y})`);
-      }
+      const x = x0 + gx * stepX;
+      const y = y0 + gy * stepY;
 
       log(`[Tile ${i}] Processing tile at grid pos (${gx}, ${gy}) and canvas pos (${x}, ${y}).`);
       
@@ -366,7 +356,7 @@ serve(async (req) => {
       await new Promise(r => setTimeout(r, 0));
     }
 
-    if (endIndex < dedupedPositions.length) {
+    if (endIndex < cells.length) {
       const statePath = `${claimedJob.user_id}/${parent_job_id}/compositor_state.png`;
       log(`Batch complete. Saving checkpoint to ${STATE_BUCKET}/${statePath}`);
       const stateBuffer = await canvas.encode(0);
