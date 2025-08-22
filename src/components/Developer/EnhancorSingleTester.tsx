@@ -19,6 +19,15 @@ import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious
 
 const UPLOAD_BUCKET = 'enhancor-ai-uploads';
 
+const fileToBase64 = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve((reader.result as string).split(',')[1]);
+    reader.onerror = (error) => reject(error);
+  });
+};
+
 export const EnhancorSingleTester = () => {
   const { supabase, session } = useSession();
   const [files, setFiles] = useState<File[]>([]);
@@ -41,7 +50,7 @@ export const EnhancorSingleTester = () => {
         .select('*')
         .eq('user_id', session.user.id)
         .order('created_at', { ascending: false })
-        .limit(20);
+        .limit(50);
       if (error) throw error;
       return data;
     },
