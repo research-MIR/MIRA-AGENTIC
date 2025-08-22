@@ -6,6 +6,7 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const BATCH_SIZE = 10;
 const STALLED_ANALYSIS_THRESHOLD_SECONDS = 300; // 5 minutes
 const STALLED_GENERATION_THRESHOLD_SECONDS = 900; // 15 minutes
+const FAILED_TILE_CLEANUP_THRESHOLD_MINUTES = 60; // 1 hour
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -44,6 +45,28 @@ serve(async (req) => {
         .eq('status', 'generating')
         .lt('updated_at', stalledGenerationThreshold);
     if (updateGenerationError) console.error(`${logPrefix} Error updating stalled generation jobs:`, updateGenerationError);
+
+    // --- NEW: Cleanup for Permanently Failed Jobs ---
+    const failedCleanupThreshold = new Date(Date.now() - FAILED_TILE_CLEANUP_THRESHOLD_MINUTES * 60 * 1000).toISOString();
+    const { data: failedTiles, error: fetchFailedError } = await supabase
+        .from('mira_agent_tiled_upscale_tiles')
+        .select('parent_job_id')
+        .in('status', ['generation_failed', 'analysis_failed'])
+        .lt('updated_at', failedCleanupThreshold);
+    
+    if (fetchFailedError) console.error(`${logPrefix} Error fetching failed tiles for cleanup:`, fetchFailedError);
+
+    if (failedTiles && failedTiles.length > 0) {
+        const parentJobIdsToFail = [...new Set(failedTiles.map(t => t.parent_job_id))];
+        console.log(`${logPrefix} Found ${parentJobIdsToFail.length} parent jobs with permanently failed tiles. Marking them as failed.`);
+        const { error: failParentError } = await supabase
+            .from('mira_agent_tiled_upscale_jobs')
+            .update({ status: 'failed', error_message: 'Job failed because one or more tiles could not be processed.' })
+            .in('id', parentJobIdsToFail)
+            .not('status', 'in', ['failed', 'complete']); // Don't update already terminal jobs
+        if (failParentError) console.error(`${logPrefix} Error marking parent jobs as failed:`, failParentError);
+    }
+    // --- END NEW CLEANUP LOGIC ---
 
     // Dispatch Pending Analysis
     const { data: pendingAnalysisTiles, error: fetchAnalysisError } = await supabase.from('mira_agent_tiled_upscale_tiles').select('id').eq('status', 'pending_analysis').limit(BATCH_SIZE);
