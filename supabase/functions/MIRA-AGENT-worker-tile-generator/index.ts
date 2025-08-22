@@ -82,7 +82,8 @@ serve(async (req) => {
                     source_image_url: originalTileUrl,
                     prompt: generated_prompt,
                     tile_id: tile_id,
-                    metadata: { original_tile_url: originalTileUrl }
+                    metadata: { original_tile_url: originalTileUrl },
+                    use_blank_prompt: parentJob.metadata?.use_blank_prompt
                 }
             }).then(res => { if (res.error) throw res.error; return res; }),
             3, 5000, logPrefix // Longer delay for function invocation

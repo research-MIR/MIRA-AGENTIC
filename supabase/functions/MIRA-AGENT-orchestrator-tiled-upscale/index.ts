@@ -53,7 +53,8 @@ serve(async (req) => {
         source_job_id, 
         upscaler_engine, 
         tile_size,
-        batch_name // For batch jobs
+        batch_name, // For batch jobs
+        use_blank_prompt
     } = await req.json();
 
     if (!user_id) {
@@ -97,7 +98,8 @@ serve(async (req) => {
                 status: 'pending',
                 metadata: { 
                     upscaler_engine: upscaler_engine || Deno.env.get('DEFAULT_UPSCALER_ENGINE') || 'enhancor_detailed',
-                    tile_size: tile_size
+                    tile_size: tile_size,
+                    use_blank_prompt: use_blank_prompt
                 },
                 batch_id: batchId
             };
@@ -140,7 +142,8 @@ serve(async (req) => {
                 status: 'pending',
                 metadata: { 
                     upscaler_engine: finalEngine,
-                    tile_size: tile_size
+                    tile_size: tile_size,
+                    use_blank_prompt: use_blank_prompt
                 }
             })
             .select('id')
