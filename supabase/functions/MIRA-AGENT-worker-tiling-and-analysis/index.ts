@@ -28,17 +28,21 @@ serve(async (req) => {
     if (!parent_job_id) throw new Error("parent_job_id is required.");
 
     const logPrefix = `[TilingWorker][${parent_job_id}]`;
-    console.log(`${logPrefix} Invoked. Tiling on base image and queuing for generation.`);
+    console.log(`${logPrefix} Invoked. Tiling on base image and queuing for next step.`);
 
     const { data: job, error: fetchError } = await supabase
       .from("mira_agent_tiled_upscale_jobs")
-      .select("source_bucket, source_path, user_id, upscale_factor")
+      .select("source_bucket, source_path, user_id, upscale_factor, metadata")
       .eq("id", parent_job_id)
       .single();
     if (fetchError) throw fetchError;
     if (!job.source_bucket || !job.source_path) {
         throw new Error("Parent job is missing source_bucket or source_path.");
     }
+
+    const engine = job.metadata?.upscaler_engine || 'enhancor_detailed';
+    const initialStatus = engine.startsWith('comfyui') ? 'pending_analysis' : 'pending_generation';
+    console.log(`${logPrefix} Engine is '${engine}'. Initial tile status will be '${initialStatus}'.`);
 
     const { data: blob, error: downloadError } = await supabase.storage.from(job.source_bucket).download(job.source_path);
     if (downloadError) throw downloadError;
@@ -84,7 +88,7 @@ serve(async (req) => {
             coordinates: { x, y, width: TILE_SIZE, height: TILE_SIZE },
             source_tile_bucket: TILE_UPLOAD_BUCKET,
             source_tile_path: filePath,
-            status: "pending_generation", // Changed from pending_analysis
+            status: initialStatus,
         });
 
         if (batch.length >= INSERT_BATCH_SIZE) {
@@ -105,7 +109,7 @@ serve(async (req) => {
         canvas_w: finalW,
         canvas_h: finalH
     }).eq("id", parent_job_id);
-    console.log(`${logPrefix} Tiling complete. All tiles queued for generation.`);
+    console.log(`${logPrefix} Tiling complete. All tiles queued for the next step.`);
 
     return new Response(JSON.stringify({ success: true, tileCount: totalTiles }), { headers: corsHeaders });
   } catch (error) {

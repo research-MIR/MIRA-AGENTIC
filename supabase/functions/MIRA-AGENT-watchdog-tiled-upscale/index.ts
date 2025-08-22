@@ -4,6 +4,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const BATCH_SIZE = 10;
+const STALLED_ANALYSIS_THRESHOLD_SECONDS = 300; // 5 minutes
 const STALLED_GENERATION_THRESHOLD_SECONDS = 900; // 15 minutes
 
 const corsHeaders = {
@@ -26,15 +27,31 @@ serve(async (req) => {
     }
     console.log(`${logPrefix} Advisory lock acquired. Proceeding with checks.`);
 
+    // Stalled Job Recovery for ANALYSIS
+    const stalledAnalysisThreshold = new Date(Date.now() - STALLED_ANALYSIS_THRESHOLD_SECONDS * 1000).toISOString();
+    const { error: updateAnalysisError } = await supabase
+        .from('mira_agent_tiled_upscale_tiles')
+        .update({ status: 'analysis_failed', error_message: 'Reset by watchdog due to stall in analysis.' })
+        .eq('status', 'analyzing')
+        .lt('updated_at', stalledAnalysisThreshold);
+    if (updateAnalysisError) console.error(`${logPrefix} Error updating stalled analysis jobs:`, updateAnalysisError);
+
     // Stalled Job Recovery for GENERATION
-    const stalledThreshold = new Date(Date.now() - STALLED_GENERATION_THRESHOLD_SECONDS * 1000).toISOString();
-    const { error: updateStalledError } = await supabase
+    const stalledGenerationThreshold = new Date(Date.now() - STALLED_GENERATION_THRESHOLD_SECONDS * 1000).toISOString();
+    const { error: updateGenerationError } = await supabase
         .from('mira_agent_tiled_upscale_tiles')
         .update({ status: 'generation_failed', error_message: 'Reset by watchdog due to stall in generation.' })
         .eq('status', 'generating')
-        .lt('updated_at', stalledThreshold);
-    if (updateStalledError) console.error(`${logPrefix} Error updating stalled generation jobs:`, updateStalledError);
+        .lt('updated_at', stalledGenerationThreshold);
+    if (updateGenerationError) console.error(`${logPrefix} Error updating stalled generation jobs:`, updateGenerationError);
 
+    // Dispatch Pending Analysis
+    const { data: pendingAnalysisTiles, error: fetchAnalysisError } = await supabase.from('mira_agent_tiled_upscale_tiles').select('id').eq('status', 'pending_analysis').limit(BATCH_SIZE);
+    if (fetchAnalysisError) throw fetchAnalysisError;
+    if (pendingAnalysisTiles && pendingAnalysisTiles.length > 0) {
+      const analysisPromises = pendingAnalysisTiles.map(t => supabase.functions.invoke('MIRA-AGENT-worker-tile-analyzer', { body: { tile_id: t.id } }));
+      await Promise.allSettled(analysisPromises);
+    }
 
     // Dispatch Pending Generation
     const { data: pendingGenerationTiles, error: fetchGenerationError } = await supabase.from('mira_agent_tiled_upscale_tiles').select('id').eq('status', 'pending_generation').not('source_tile_bucket', 'is', null).not('source_tile_path', 'is', null).limit(BATCH_SIZE);

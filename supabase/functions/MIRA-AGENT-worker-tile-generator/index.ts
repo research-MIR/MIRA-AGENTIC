@@ -27,7 +27,7 @@ serve(async (req) => {
       .update({ status: 'generating' })
       .eq('id', tile_id)
       .eq('status', 'pending_generation')
-      .select('parent_job_id, source_tile_bucket, source_tile_path')
+      .select('parent_job_id, source_tile_bucket, source_tile_path, generated_prompt')
       .single();
 
     if (claimError) throw new Error(`Claiming tile failed: ${claimError.message}`);
@@ -36,7 +36,7 @@ serve(async (req) => {
       return new Response(JSON.stringify({ success: true, message: "Tile not eligible for generation." }), { headers: corsHeaders });
     }
 
-    const { parent_job_id, source_tile_bucket, source_tile_path } = claimedTile;
+    const { parent_job_id, source_tile_bucket, source_tile_path, generated_prompt } = claimedTile;
 
     const { data: parentJob, error: fetchParentError } = await supabase
       .from('mira_agent_tiled_upscale_jobs')
@@ -48,34 +48,50 @@ serve(async (req) => {
 
     const { data: { publicUrl: originalTileUrl } } = supabase.storage.from(source_tile_bucket).getPublicUrl(source_tile_path);
 
-    // Prepare the image for EnhancorAI
-    const transformedUrl = `${originalTileUrl}?format=jpeg&quality=95`;
-    const response = await fetch(transformedUrl);
-    if (!response.ok) throw new Error(`Failed to fetch and convert image from Supabase Storage. Status: ${response.status}`);
-    const imageBlob = await response.blob();
+    const engine = parentJob.metadata?.upscaler_engine || 'enhancor_detailed';
+    console.log(`${logPrefix} Dispatching to engine: ${engine}`);
 
-    const convertedFilePath = `${parentJob.user_id}/enhancor-sources/converted/${Date.now()}-tile-${tile_id}.jpeg`;
-    const { error: uploadError } = await supabase.storage.from(UPLOAD_BUCKET).upload(convertedFilePath, imageBlob, { contentType: 'image/jpeg', upsert: true });
-    if (uploadError) throw uploadError;
+    if (engine.startsWith('comfyui')) {
+        if (!generated_prompt) {
+            throw new Error("Cannot use ComfyUI engine: tile is missing a generated_prompt.");
+        }
+        const { error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-comfyui-tiled-upscale', {
+            body: {
+                user_id: parentJob.user_id,
+                source_image_url: originalTileUrl,
+                prompt: generated_prompt,
+                tile_id: tile_id,
+                metadata: { original_tile_url: originalTileUrl }
+            }
+        });
+        if (proxyError) throw new Error(`Failed to invoke ComfyUI proxy: ${proxyError.message}`);
 
-    const { data: { publicUrl: convertedImageUrl } } = supabase.storage.from(UPLOAD_BUCKET).getPublicUrl(convertedFilePath);
-    console.log(`${logPrefix} Converted image stored at: ${convertedImageUrl}`);
+    } else { // Default to Enhancor
+        const transformedUrl = `${originalTileUrl}?format=jpeg&quality=95`;
+        const response = await fetch(transformedUrl);
+        if (!response.ok) throw new Error(`Failed to fetch and convert image from Supabase Storage. Status: ${response.status}`);
+        const imageBlob = await response.blob();
 
-    const enhancor_mode = parentJob.metadata?.upscaler_engine || 'enhancor_detailed';
+        const convertedFilePath = `${parentJob.user_id}/enhancor-sources/converted/${Date.now()}-tile-${tile_id}.jpeg`;
+        const { error: uploadError } = await supabase.storage.from(UPLOAD_BUCKET).upload(convertedFilePath, imageBlob, { contentType: 'image/jpeg', upsert: true });
+        if (uploadError) throw uploadError;
 
-    const { error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-enhancor-ai', {
-      body: {
-        user_id: parentJob.user_id,
-        source_image_urls: [convertedImageUrl], // Pass the ready-to-use URL
-        enhancor_mode: enhancor_mode,
-        tile_id: tile_id,
-        metadata: { original_tile_url: originalTileUrl }
-      }
-    });
+        const { data: { publicUrl: convertedImageUrl } } = supabase.storage.from(UPLOAD_BUCKET).getPublicUrl(convertedFilePath);
+        console.log(`${logPrefix} Converted image stored at: ${convertedImageUrl}`);
 
-    if (proxyError) throw new Error(`Failed to invoke Enhancor proxy: ${proxyError.message}`);
+        const { error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-enhancor-ai', {
+          body: {
+            user_id: parentJob.user_id,
+            source_image_urls: [convertedImageUrl],
+            enhancor_mode: engine,
+            tile_id: tile_id,
+            metadata: { original_tile_url: originalTileUrl }
+          }
+        });
+        if (proxyError) throw new Error(`Failed to invoke Enhancor proxy: ${proxyError.message}`);
+    }
 
-    console.log(`${logPrefix} Successfully dispatched tile to EnhancorAI proxy.`);
+    console.log(`${logPrefix} Successfully dispatched tile to the appropriate proxy.`);
     return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
 
   } catch (error) {
