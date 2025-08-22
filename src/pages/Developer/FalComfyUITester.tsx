@@ -15,17 +15,13 @@ import { Textarea } from '@/components/ui/textarea';
 const UPLOAD_BUCKET = 'enhancor-ai-uploads';
 
 const findImageUrlInResult = (result: any): string | null => {
-  if (!result?.data?.outputs) {
-    return null;
-  }
-  const outputs = result.data.outputs;
+  if (!result?.outputs) return null;
+  const outputs = result.outputs;
   for (const nodeId in outputs) {
     const node = outputs[nodeId];
     if (node?.images && Array.isArray(node.images) && node.images.length > 0) {
       const imageUrl = node.images[0]?.url;
-      if (imageUrl) {
-        return imageUrl;
-      }
+      if (imageUrl) return imageUrl;
     }
   }
   return null;
@@ -131,16 +127,31 @@ const FalComfyUITester = () => {
         .getPublicUrl(filePath);
       addLog(`Image uploaded: ${source_image_url}`);
 
-      const tile_id = crypto.randomUUID();
-      addLog(`Using dummy tile_id: ${tile_id}`);
+      addLog("Creating dummy parent job for tracking...");
+      const { data: parentJob, error: parentError } = await supabase
+        .from('mira_agent_tiled_upscale_jobs')
+        .insert({ user_id: session.user.id, source_image_url, status: 'tiling' })
+        .select('id')
+        .single();
+      if (parentError) throw parentError;
+      addLog(`Dummy parent job created: ${parentJob.id}`);
 
-      addLog("Submitting job to proxy...");
+      addLog("Creating tile record in database...");
+      const { data: tile, error: tileError } = await supabase
+        .from('mira_agent_tiled_upscale_tiles')
+        .insert({ parent_job_id: parentJob.id, status: 'pending_generation', source_tile_bucket: UPLOAD_BUCKET, source_tile_path: filePath })
+        .select('id')
+        .single();
+      if (tileError) throw tileError;
+      addLog(`Real tile record created: ${tile.id}`);
+
+      addLog("Submitting job to proxy with real tile ID...");
       const { data, error } = await supabase.functions.invoke('MIRA-AGENT-proxy-comfyui-tiled-upscale', {
         body: { 
           user_id: session.user.id,
           source_image_url,
           prompt,
-          tile_id
+          tile_id: tile.id
         }
       });
       if (error) throw error;
