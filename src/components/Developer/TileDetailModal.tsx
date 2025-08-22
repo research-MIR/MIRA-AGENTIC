@@ -4,20 +4,24 @@ import { Card, CardContent } from "@/components/ui/card";
 import { SecureImageDisplay } from "@/components/VTO/SecureImageDisplay";
 
 interface Tile {
-  source_tile_url: string;
+  source_tile_path: string;
   generated_tile_url: string;
   generated_prompt: string;
   tile_index: number;
+  source_tile_bucket: string;
 }
 
 interface TileDetailModalProps {
   isOpen: boolean;
   onClose: () => void;
   tile: Tile | null;
+  supabase: any;
 }
 
-export const TileDetailModal = ({ isOpen, onClose, tile }: TileDetailModalProps) => {
+export const TileDetailModal = ({ isOpen, onClose, tile, supabase }: TileDetailModalProps) => {
   if (!isOpen || !tile) return null;
+
+  const sourceUrl = supabase.storage.from(tile.source_tile_bucket).getPublicUrl(tile.source_tile_path).data.publicUrl;
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -32,7 +36,7 @@ export const TileDetailModal = ({ isOpen, onClose, tile }: TileDetailModalProps)
           <div className="space-y-2">
             <h3 className="font-semibold text-center">Source Tile</h3>
             <div className="aspect-square bg-muted rounded-md">
-              <SecureImageDisplay imageUrl={tile.source_tile_url} alt="Source Tile" />
+              <SecureImageDisplay imageUrl={sourceUrl} alt="Source Tile" />
             </div>
           </div>
           <div className="space-y-2">
