@@ -30,12 +30,13 @@ serve(async (req) => {
   const logPrefix = `[ComfyUI-Tiled-Proxy]`;
 
   try {
-    const { user_id, source_image_url, prompt, tile_id, metadata } = await req.json();
+    const { user_id, source_image_url, prompt, tile_id, metadata, use_blank_prompt } = await req.json();
     if (!user_id || !source_image_url || !tile_id) {
       throw new Error("user_id, source_image_url, and tile_id are required.");
     }
-    const finalPrompt = prompt || "a high-quality, detailed image";
-    console.log(`${logPrefix} Received request for tile ${tile_id}.`);
+    
+    const finalPrompt = use_blank_prompt ? "" : (prompt || "a high-quality, detailed image");
+    console.log(`${logPrefix} Received request for tile ${tile_id}. Using blank prompt: ${use_blank_prompt}. Final prompt: "${finalPrompt}"`);
 
     const { data: newJob, error: insertError } = await supabase
       .from('fal_comfyui_jobs')

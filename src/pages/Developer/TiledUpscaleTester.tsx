@@ -21,6 +21,7 @@ import { BatchJobCard } from '@/components/Developer/BatchJobCard';
 import { BatchDetailView } from '@/components/Developer/BatchDetailView';
 import { SecureImageDisplay } from '@/components/VTO/SecureImageDisplay';
 import JSZip from 'jszip';
+import { Switch } from '@/components/ui/switch';
 
 const UPLOAD_BUCKET = 'mira-agent-user-uploads';
 
@@ -37,6 +38,7 @@ const TiledUpscaleTester = () => {
   const [upscaleFactor, setUpscaleFactor] = useState(2.0);
   const [engine, setEngine] = useState('comfyui_tiled_upscaler');
   const [tileSize, setTileSize] = useState<string | number>('default');
+  const [useBlankPrompt, setUseBlankPrompt] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [isCompareModalOpen, setIsCompareModalOpen] = useState(false);
@@ -106,6 +108,7 @@ const TiledUpscaleTester = () => {
         upscale_factor: upscaleFactor,
         upscaler_engine: engine,
         tile_size: tileSize === 'default' ? null : tileSize,
+        use_blank_prompt: useBlankPrompt,
       };
 
       if (activeTab === 'single') {
@@ -289,6 +292,19 @@ const TiledUpscaleTester = () => {
                     </SelectContent>
                   </Select>
                 </div>
+                {engine === 'comfyui_tiled_upscaler' && (
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="blank-prompt-switch" className="flex items-center gap-2">
+                      Use Blank Prompt
+                      <Info className="h-3 w-3 text-muted-foreground" title="Sends an empty string as the prompt, mimicking the Fal.ai UI for debugging." />
+                    </Label>
+                    <Switch
+                      id="blank-prompt-switch"
+                      checked={useBlankPrompt}
+                      onCheckedChange={setUseBlankPrompt}
+                    />
+                  </div>
+                )}
                 <div>
                   <Label>Tile Size</Label>
                   <Select value={String(tileSize)} onValueChange={(v) => setTileSize(v === 'full_size' || v === 'default' ? v : Number(v))}>
