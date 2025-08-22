@@ -87,9 +87,11 @@ const processJob = async (supabase: any, imageUrl: string, user_id: string, enha
             endpoint = '/upscaler/v1/queue';
             apiPayload.mode = enhancor_params?.mode || 'professional';
             break;
+          case 'general':
           case 'enhancor_general':
             endpoint = '/image-upscaler/v1/queue';
             break;
+          case 'detailed':
           case 'enhancor_detailed':
             endpoint = '/detailed/v1/queue';
             break;
