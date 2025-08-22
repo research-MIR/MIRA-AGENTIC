@@ -37,7 +37,18 @@ serve(async (req) => {
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
     
-    const finalEngine = upscaler_engine || Deno.env.get('DEFAULT_UPSCALER_ENGINE') || 'enhancor_detailed';
+    // --- SYSTEM OVERRIDE ---
+    // Set SYSTEM_OVERRIDE to true to force a specific engine, bypassing the UI choice.
+    // Set to false to allow the 'upscaler_engine' parameter from the request to be used.
+    const SYSTEM_OVERRIDE = true; 
+    
+    // Define the engine to use when SYSTEM_OVERRIDE is true.
+    // Possible values: 'enhancor_detailed', 'enhancor_general', 'comfyui_tiled_upscaler'
+    const OVERRIDE_ENGINE_CHOICE = 'comfyui_tiled_upscaler'; 
+
+    const finalEngine = SYSTEM_OVERRIDE 
+      ? OVERRIDE_ENGINE_CHOICE 
+      : upscaler_engine || Deno.env.get('DEFAULT_UPSCALER_ENGINE') || 'enhancor_detailed';
 
     const logPrefix = `[TiledUpscaleOrchestrator]`;
     console.log(`${logPrefix} Creating new upscale job record with engine: ${finalEngine}.`);
