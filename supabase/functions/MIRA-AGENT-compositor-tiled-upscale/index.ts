@@ -178,17 +178,33 @@ serve(async (req) => {
     log(`Using TILE_SIZE: ${TILE_SIZE} based on job metadata. Full size mode: ${isFullSizeMode}`);
 
     const STEP_SRC = TILE_SIZE - TILE_OVERLAP;
-    const gxOf = (t: any) => Math.round(t.coordinates.x / STEP_SRC);
-    const gyOf = (t: any) => Math.round(t.coordinates.y / STEP_SRC);
-    completeTiles.sort((a,b) => gyOf(a) - gyOf(b) || gxOf(a) - gxOf(b));
-
     const actualTileSize = TILE_SIZE * (claimedJob.upscale_factor || 2.0);
     const scaleFactor = actualTileSize / TILE_SIZE;
     const finalW = claimedJob.canvas_w;
     const finalH = claimedJob.canvas_h;
     const stepScaled = Math.round(STEP_SRC * scaleFactor);
     const ovScaled = Math.min(actualTileSize - stepScaled, MAX_FEATHER);
-    log(`Calculated parameters: actualTileSize=${actualTileSize}, scaleFactor=${scaleFactor}, finalW=${finalW}, finalH=${finalH}, ovScaled=${ovScaled}`);
+    log(`Calculated parameters: actualTileSize=${actualTileSize}, scaleFactor=${scaleFactor}, finalW=${finalW}, finalH=${finalH}, stepScaled=${stepScaled}, ovScaled=${ovScaled}`);
+
+    const idx = (v: number, step: number) => Math.round(v / step);
+    const pastePositions = new Map(completeTiles.map(t => {
+        const xs = Math.round(t.coordinates.x * scaleFactor);
+        const ys = Math.round(t.coordinates.y * scaleFactor);
+        return [t, { xs, ys }];
+    }));
+    const occupy = new Set(
+        completeTiles.map(t => {
+            const { xs, ys } = pastePositions.get(t)!;
+            return `${idx(xs, stepScaled)}:${idx(ys, stepScaled)}`;
+        })
+    );
+    log(`[DBG] unique gx=${new Set([...occupy].map(k=>k.split(':')[0])).size}, unique gy=${new Set([...occupy].map(k=>k.split(':')[1])).size}, stepScaled=${stepScaled}`);
+
+    completeTiles.sort((a, b) => {
+        const posA = pastePositions.get(a)!;
+        const posB = pastePositions.get(b)!;
+        return posA.ys - posB.ys || posA.xs - posB.xs;
+    });
 
     let canvas: Image;
     if (startIndex === 0) {
@@ -209,15 +225,16 @@ serve(async (req) => {
       canvas = flattenOpaqueWhite(loadedCanvas);
     }
 
-    const occupy = new Set(completeTiles.map(t => `${gxOf(t)}:${gyOf(t)}`));
-    const hasAt = (gx:number,gy:number)=>occupy.has(`${gx}:${gy}`);
+    const hasAt = (gx:number, gy:number) => occupy.has(`${gx}:${gy}`);
 
     const endIndex = Math.min(startIndex + BATCH_SIZE, completeTiles.length);
     log(`Processing batch from index ${startIndex} to ${endIndex-1}.`);
     for (let i = startIndex; i < endIndex; i++) {
       const t = completeTiles[i];
-      const gx = gxOf(t), gy = gyOf(t);
-      log(`[Tile ${i}] Processing tile at grid pos (${gx}, ${gy}).`);
+      const { xs: x, ys: y } = pastePositions.get(t)!;
+      const gx = idx(x, stepScaled);
+      const gy = idx(y, stepScaled);
+      log(`[Tile ${i}] Processing tile at grid pos (${gx}, ${gy}) and canvas pos (${x}, ${y}).`);
       
       const arr = await retry(() => downloadTileBytes(supabase, t), 3, 2000, `${logPrefix} [Tile ${i}]`);
       log(`[Tile ${i}] Downloaded ${arr.byteLength} bytes.`);
@@ -241,8 +258,6 @@ serve(async (req) => {
           }
       }
 
-      const x = Math.round(t.coordinates.x * scaleFactor);
-      const y = Math.round(t.coordinates.y * scaleFactor);
       const n = { left: hasAt(gx-1,gy), right: hasAt(gx+1,gy), top: hasAt(gx,gy-1), bottom: hasAt(gx,gy+1) };
       log(`[Tile ${i}] Feather neighbors: ${JSON.stringify(n)}`);
       
