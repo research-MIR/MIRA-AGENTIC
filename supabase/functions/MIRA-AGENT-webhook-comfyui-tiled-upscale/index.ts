@@ -66,7 +66,6 @@ serve(async (req) => {
           status: 'complete',
           generated_tile_bucket: GENERATED_IMAGES_BUCKET,
           generated_tile_path: filePath,
-          generation_result: resultPayload,
       };
 
       if (imageUrl.includes('supabase.co')) {
