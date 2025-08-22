@@ -9,7 +9,6 @@ const BUCKET_OUT = "mira-generations";
 const STATE_BUCKET = "mira-agent-compositor-state";
 
 const TILE_SIZE_DEFAULT = 768;
-const TILE_OVERLAP = 96;
 const JPEG_QUALITY = Number(Deno.env.get("COMPOSITOR_JPEG_QUALITY") ?? 85);
 const BATCH_SIZE = Number(Deno.env.get("COMPOSITOR_BATCH") ?? 12);
 const MAX_FEATHER = Number(Deno.env.get("COMPOSITOR_MAX_FEATHER") ?? 256);
@@ -177,34 +176,52 @@ serve(async (req) => {
     }
     log(`Using TILE_SIZE: ${TILE_SIZE} based on job metadata. Full size mode: ${isFullSizeMode}`);
 
-    const STEP_SRC = TILE_SIZE - TILE_OVERLAP;
-    const actualTileSize = TILE_SIZE * (claimedJob.upscale_factor || 2.0);
-    const scaleFactor = actualTileSize / TILE_SIZE;
+    const scaleFactor = (claimedJob.upscale_factor || 2.0);
     const finalW = claimedJob.canvas_w;
     const finalH = claimedJob.canvas_h;
-    const stepScaled = Math.round(STEP_SRC * scaleFactor);
-    const ovScaled = Math.min(actualTileSize - stepScaled, MAX_FEATHER);
-    log(`Calculated parameters: actualTileSize=${actualTileSize}, scaleFactor=${scaleFactor}, finalW=${finalW}, finalH=${finalH}, stepScaled=${stepScaled}, ovScaled=${ovScaled}`);
+
+    const positions = completeTiles.map(t => ({
+        t,
+        xs: Math.round(t.coordinates.x * scaleFactor),
+        ys: Math.round(t.coordinates.y * scaleFactor),
+    }));
+
+    const detectStep = (vals: number[]) => {
+        const uniq = Array.from(new Set(vals)).sort((a,b)=>a-b);
+        const diffs: number[] = [];
+        for (let i=1; i<uniq.length; i++) {
+            const d = uniq[i] - uniq[i-1];
+            if (d > 0) diffs.push(d);
+        }
+        if (!diffs.length) return 0;
+        diffs.sort((a,b)=>a-b);
+        return Math.max(1, Math.round(diffs[Math.floor(diffs.length/2)]));
+    };
+
+    const sample = await Image.decode(await downloadTileBytes(supabase, completeTiles[0]));
+    const expectedTileDim = Math.round(TILE_SIZE * scaleFactor);
+    if (sample.width !== expectedTileDim) sample.resize(expectedTileDim, expectedTileDim);
+    const actualTileSize = sample.width;
+
+    const xs = positions.map(p => p.xs);
+    const ys = positions.map(p => p.ys);
+    const x0 = Math.min(...xs);
+    const y0 = Math.min(...ys);
+    const stepX = detectStep(xs);
+    const stepY = detectStep(ys);
+    if (!stepX || !stepY) throw new Error("Could not detect tile step.");
+    const stepScaled = Math.min(stepX, stepY);
+    const ovScaled = Math.max(1, Math.min(actualTileSize - stepScaled, MAX_FEATHER));
+    log(`[DBG] tileSize=${actualTileSize}, stepScaled=${stepScaled}, ovScaled=${ovScaled}, cols≈${1+Math.round((finalW-actualTileSize)/stepScaled)}, rows≈${1+Math.round((finalH-actualTileSize)/stepScaled)}`);
 
     const idx = (v: number, step: number) => Math.round(v / step);
-    const pastePositions = new Map(completeTiles.map(t => {
-        const xs = Math.round(t.coordinates.x * scaleFactor);
-        const ys = Math.round(t.coordinates.y * scaleFactor);
-        return [t, { xs, ys }];
-    }));
-    const occupy = new Set(
-        completeTiles.map(t => {
-            const { xs, ys } = pastePositions.get(t)!;
-            return `${idx(xs, stepScaled)}:${idx(ys, stepScaled)}`;
-        })
-    );
-    log(`[DBG] unique gx=${new Set([...occupy].map(k=>k.split(':')[0])).size}, unique gy=${new Set([...occupy].map(k=>k.split(':')[1])).size}, stepScaled=${stepScaled}`);
+    const gxOf = (x:number) => idx(x - x0, stepScaled);
+    const gyOf = (y:number) => idx(y - y0, stepScaled);
 
-    completeTiles.sort((a, b) => {
-        const posA = pastePositions.get(a)!;
-        const posB = pastePositions.get(b)!;
-        return posA.ys - posB.ys || posA.xs - posB.xs;
-    });
+    const occupy = new Set(positions.map(p => `${gxOf(p.xs)}:${gyOf(p.ys)}`));
+    log(`[DBG] gx/gy uniques -> x:${new Set(xs.map(v=>gxOf(v))).size}, y:${new Set(ys.map(v=>gyOf(v))).size}`);
+
+    positions.sort((a,b) => a.ys - b.ys || a.xs - b.xs);
 
     let canvas: Image;
     if (startIndex === 0) {
@@ -226,15 +243,17 @@ serve(async (req) => {
     }
 
     const hasAt = (gx:number, gy:number) => occupy.has(`${gx}:${gy}`);
+    const processed = new Set<string>(
+        positions.slice(0, startIndex).map(p => `${gxOf(p.xs)}:${gyOf(p.ys)}`)
+    );
 
     const endIndex = Math.min(startIndex + BATCH_SIZE, completeTiles.length);
     log(`Processing batch from index ${startIndex} to ${endIndex-1}.`);
     for (let i = startIndex; i < endIndex; i++) {
-      const t = completeTiles[i];
-      const { xs: x, ys: y } = pastePositions.get(t)!;
-      const gx = idx(x, stepScaled);
-      const gy = idx(y, stepScaled);
-      log(`[Tile ${i}] Processing tile at grid pos (${gx}, ${gy}) and canvas pos (${x}, ${y}).`);
+      const p = positions[i];
+      const t = p.t;
+      const gx = gxOf(p.xs), gy = gyOf(p.ys);
+      log(`[Tile ${i}] Processing tile at grid pos (${gx}, ${gy}) and canvas pos (${p.xs}, ${p.ys}).`);
       
       const arr = await retry(() => downloadTileBytes(supabase, t), 3, 2000, `${logPrefix} [Tile ${i}]`);
       log(`[Tile ${i}] Downloaded ${arr.byteLength} bytes.`);
@@ -242,33 +261,27 @@ serve(async (req) => {
       let tile = await Image.decode(arr);
       log(`[Tile ${i}] Decoded image. Original dims: ${tile.width}x${tile.height}.`);
 
-      if (isFullSizeMode) {
-          const expectedW = Math.round(originalW * claimedJob.upscale_factor);
-          const expectedH = Math.round(originalH * claimedJob.upscale_factor);
-          log(`[Tile ${i}] Full size mode. Expected dims: ${expectedW}x${expectedH}.`);
-          if (tile.width !== expectedW || tile.height !== expectedH) {
-              log(`[Tile ${i}] Resizing tile to ${expectedW}x${expectedH}.`);
-              tile.resize(expectedW, expectedH);
-          }
-      } else {
-          log(`[Tile ${i}] Tiled mode. Expected square dims: ${actualTileSize}x${actualTileSize}.`);
-          if (tile.width !== actualTileSize || tile.height !== actualTileSize) {
-              log(`[Tile ${i}] Resizing tile to ${actualTileSize}x${actualTileSize}.`);
-              tile.resize(actualTileSize, actualTileSize);
-          }
+      if (tile.width !== actualTileSize || tile.height !== actualTileSize) {
+          log(`[Tile ${i}] Resizing tile to ${actualTileSize}x${actualTileSize}.`);
+          tile.resize(actualTileSize, actualTileSize);
       }
 
-      const n = { left: hasAt(gx-1,gy), right: hasAt(gx+1,gy), top: hasAt(gx,gy-1), bottom: hasAt(gx,gy+1) };
+      const n = {
+        left:   hasAt(gx-1, gy) && processed.has(`${gx-1}:${gy}`),
+        top:    hasAt(gx, gy-1) && processed.has(`${gx}:${gy-1}`),
+        right:  false,
+        bottom: false
+      };
       log(`[Tile ${i}] Feather neighbors: ${JSON.stringify(n)}`);
       
-      const incoming = { left: n.left, right: false, top: n.top, bottom: false };
-      if (incoming.left || incoming.top) {
+      if (n.left || n.top) {
         log(`[Tile ${i}] Applying feathering with overlap ${ovScaled}.`);
-        featherBandsLUT(tile, ovScaled, incoming);
+        featherBandsLUT(tile, ovScaled, n);
       }
       
-      log(`[Tile ${i}] Compositing onto canvas at (${x}, ${y}).`);
-      canvas.composite(tile, x, y);
+      log(`[Tile ${i}] Compositing onto canvas at (${p.xs}, ${p.ys}).`);
+      canvas.composite(tile, p.xs, p.ys);
+      processed.add(`${gx}:${gy}`);
       // @ts-ignore
       tile = null;
       await new Promise(r => setTimeout(r, 0));
