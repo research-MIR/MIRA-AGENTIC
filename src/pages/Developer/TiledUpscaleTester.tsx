@@ -163,6 +163,7 @@ const TiledUpscaleTester = () => {
 
   const progress = selectedJob && selectedJob.total_tiles ? ((tiles?.filter(t => t.status === 'complete').length || 0) / selectedJob.total_tiles) * 100 : 0;
   const gridWidth = selectedJob?.metadata?.grid_width || Math.ceil(Math.sqrt(selectedJob?.total_tiles || 1));
+  const controlsDisabled = isSubmitting || !!selectedJob;
 
   return (
     <>
@@ -181,17 +182,17 @@ const TiledUpscaleTester = () => {
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div {...dropzoneProps} onClick={() => fileInputRef.current?.click()} className={cn("p-4 border-2 border-dashed rounded-lg text-center cursor-pointer", isDraggingOver && "border-primary")}>
+                <div {...dropzoneProps} onClick={() => !controlsDisabled && fileInputRef.current?.click()} className={cn("p-4 border-2 border-dashed rounded-lg text-center cursor-pointer", isDraggingOver && "border-primary", controlsDisabled && "opacity-50 cursor-not-allowed")}>
                   {sourcePreview ? <img src={sourcePreview} alt="Preview" className="max-h-40 mx-auto rounded-md" /> : <><UploadCloud className="mx-auto h-8 w-8 text-muted-foreground" /><p className="mt-2 text-xs font-medium">Click or drag source image</p></>}
-                  <Input ref={fileInputRef} type="file" className="hidden" accept="image/*" onChange={(e) => handleFileSelect(e.target.files?.[0] || null)} />
+                  <Input ref={fileInputRef} type="file" className="hidden" accept="image/*" onChange={(e) => handleFileSelect(e.target.files?.[0] || null)} disabled={controlsDisabled} />
                 </div>
                 <div>
                   <Label>Upscale Factor: {upscaleFactor.toFixed(1)}x</Label>
-                  <Slider value={[upscaleFactor]} onValueChange={(v) => setUpscaleFactor(v[0])} min={1.1} max={4} step={0.1} />
+                  <Slider value={[upscaleFactor]} onValueChange={(v) => setUpscaleFactor(v[0])} min={1.1} max={4} step={0.1} disabled={controlsDisabled} />
                 </div>
                 <div>
                   <Label>Upscaler Engine</Label>
-                  <Select value={engine} onValueChange={(v) => setEngine(v)}>
+                  <Select value={engine} onValueChange={(v) => setEngine(v)} disabled={controlsDisabled}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="comfyui_tiled_upscaler">ComfyUI (Prompt-based)</SelectItem>
@@ -202,8 +203,8 @@ const TiledUpscaleTester = () => {
                 </div>
                 <div>
                   <Label>Tile Size</Label>
-                  <Select value={String(tileSize)} onValueChange={(v) => setTileSize(v === 'full_size' ? v : Number(v))}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
+                  <Select value={String(tileSize)} onValueChange={(v) => setTileSize(v === 'full_size' || v === 'default' ? v : Number(v))} disabled={controlsDisabled}>
+                    <SelectTrigger><SelectValue placeholder="Select tile size..." /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="default">Default (768px)</SelectItem>
                       <SelectItem value="full_size">Full Size (Single Tile)</SelectItem>
