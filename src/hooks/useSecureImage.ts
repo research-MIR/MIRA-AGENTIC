@@ -34,13 +34,14 @@ export const useSecureImage = (
           return;
         }
         
+        // Treat Supabase public URLs and CloudFront URLs as safe to load directly
+        if (imageUrl.includes('supabase.co/storage/v1/object/public/') || imageUrl.includes('cloudfront.net')) {
+          console.log(`${logPrefix} URL is a public Supabase or CloudFront URL. Setting directly.`);
+          setDisplayUrl(imageUrl);
+          return;
+        }
+        
         if (imageUrl.includes('supabase.co')) {
-          if (imageUrl.includes('/mira-agent-generations/')) {
-            console.log(`${logPrefix} URL is in a public bucket. Setting directly.`);
-            setDisplayUrl(imageUrl);
-            return;
-          }
-
           const url = new URL(imageUrl);
           const pathSegments = url.pathname.split('/');
           
