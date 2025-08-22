@@ -21,6 +21,7 @@ import { BatchJobCard } from '@/components/Developer/BatchJobCard';
 import { BatchDetailView } from '@/components/Developer/BatchDetailView';
 import { TiledUpscaleJobThumbnail } from '@/components/Developer/TiledUpscaleJobThumbnail';
 import { SecureImageDisplay } from '@/components/VTO/SecureImageDisplay';
+import JSZip from 'jszip';
 
 const UPLOAD_BUCKET = 'mira-agent-user-uploads';
 
@@ -40,6 +41,7 @@ const TiledUpscaleTester = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [isCompareModalOpen, setIsCompareModalOpen] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const sourcePreview = useMemo(() => sourceFile ? URL.createObjectURL(sourceFile) : null, [sourceFile]);
@@ -143,6 +145,67 @@ const TiledUpscaleTester = () => {
     setSourceFile(null);
     setBatchFiles([]);
     setBatchName('');
+  };
+
+  const handleDownloadBatch = async (batchJob: any) => {
+    if (!batchJob || batchJob.status !== 'complete') return;
+    setIsDownloading(true);
+    const toastId = showLoading(`Preparing ${batchJob.completed_jobs} images for download...`);
+
+    try {
+        const { data: individualJobs, error } = await supabase
+            .from('mira_agent_tiled_upscale_jobs')
+            .select('source_image_url, final_image_url')
+            .eq('batch_id', batchJob.id)
+            .eq('status', 'complete');
+
+        if (error) throw error;
+        if (!individualJobs || individualJobs.length === 0) {
+            throw new Error("No completed jobs found in this batch to download.");
+        }
+
+        const zip = new JSZip();
+        let downloadedCount = 0;
+
+        const downloadPromises = individualJobs.map(async (job) => {
+            if (!job.final_image_url) return;
+            try {
+                const response = await fetch(job.final_image_url);
+                if (!response.ok) return;
+                const blob = await response.blob();
+                const originalFilename = job.source_image_url.split('/').pop()?.split('.')[0] || `image_${job.id}`;
+                zip.file(`${originalFilename}_upscaled.jpg`, blob);
+                downloadedCount++;
+                dismissToast(toastId);
+                showLoading(`Downloading... (${downloadedCount}/${individualJobs.length})`);
+            } catch (e) {
+                console.error(`Failed to fetch or add image to zip: ${job.final_image_url}`, e);
+            }
+        });
+
+        await Promise.all(downloadPromises);
+
+        dismissToast(toastId);
+        showLoading("Zipping files...");
+
+        const content = await zip.generateAsync({ type: "blob" });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(content);
+        link.download = `${batchJob.name.replace(/\s+/g, '_')}_batch_export.zip`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(link.href);
+
+        dismissToast(toastId);
+        showSuccess("Download started!");
+
+    } catch (err: any) {
+        dismissToast(toastId);
+        showError(`Download failed: ${err.message}`);
+    } finally {
+        setIsDownloading(false);
+    }
   };
 
   const combinedJobs = useMemo(() => {
@@ -252,7 +315,12 @@ const TiledUpscaleTester = () => {
               <CardHeader><CardTitle>Result</CardTitle></CardHeader>
               <CardContent className="min-h-[400px]">
                 {selectedJob?.isBatch ? (
-                  <BatchDetailView batchJob={selectedJob} onSelectJob={(jobId) => console.log("Selected individual job:", jobId)} />
+                  <BatchDetailView 
+                    batchJob={selectedJob} 
+                    onSelectJob={(jobId) => console.log("Selected individual job:", jobId)} 
+                    onDownload={handleDownloadBatch}
+                    isDownloading={isDownloading}
+                  />
                 ) : selectedJob ? (
                   <div className="space-y-4">
                     <div className="grid grid-cols-2 gap-4">

@@ -4,6 +4,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
 import { TiledUpscaleJobThumbnail } from "./TiledUpscaleJobThumbnail";
+import { Button } from "@/components/ui/button";
+import { Download, Loader2 } from "lucide-react";
 
 interface BatchJob {
   id: string;
@@ -16,9 +18,11 @@ interface BatchJob {
 interface Props {
   batchJob: BatchJob;
   onSelectJob: (jobId: string) => void;
+  onDownload: (batchJob: BatchJob) => void;
+  isDownloading: boolean;
 }
 
-export const BatchDetailView = ({ batchJob, onSelectJob }: Props) => {
+export const BatchDetailView = ({ batchJob, onSelectJob, onDownload, isDownloading }: Props) => {
   const { supabase } = useSession();
 
   const { data: individualJobs, isLoading } = useQuery({
@@ -40,7 +44,17 @@ export const BatchDetailView = ({ batchJob, onSelectJob }: Props) => {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{batchJob.name}</CardTitle>
+        <div className="flex justify-between items-center">
+          <CardTitle>{batchJob.name}</CardTitle>
+          <Button 
+            onClick={() => onDownload(batchJob)} 
+            disabled={isDownloading || batchJob.status !== 'complete'}
+            size="sm"
+          >
+            {isDownloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+            Download ZIP
+          </Button>
+        </div>
         <div className="flex items-center gap-4 pt-2">
           <Progress value={progress} className="w-full" />
           <span className="text-sm font-medium text-muted-foreground whitespace-nowrap">{batchJob.completed_jobs} / {batchJob.total_jobs}</span>
