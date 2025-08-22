@@ -13,11 +13,10 @@ const corsHeaders = {
 };
 
 const omnipresentPayload = {
-  ImageScaleBy_scale_by: 0.5,
+  ImageScaleBy_scale_by: 0.50,
   ControlNetApplyAdvanced_strength: 0.15,
-  ControlNetApplyAdvanced_end_percent: 0.50,
-  BasicScheduler_denoise: 0.4,
-  KSamplerAdvanced_start_at_step: 12
+  ControlNetApplyAdvanced_end_percent: 0.40,
+  BasicScheduler_denoise: 0.5
 };
 
 serve(async (req) => {

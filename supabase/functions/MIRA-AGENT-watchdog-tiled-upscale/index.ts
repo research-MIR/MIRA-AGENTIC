@@ -7,6 +7,7 @@ const BATCH_SIZE = 10;
 const STALLED_ANALYSIS_THRESHOLD_SECONDS = 300; // 5 minutes
 const STALLED_GENERATION_THRESHOLD_SECONDS = 900; // 15 minutes
 const FAILED_TILE_CLEANUP_THRESHOLD_MINUTES = 60; // 1 hour
+const STALLED_ACTIVE_JOB_THRESHOLD_MINUTES = 15; // New: 15 minutes for a whole job to be stuck
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -28,7 +29,62 @@ serve(async (req) => {
     }
     console.log(`${logPrefix} Advisory lock acquired. Proceeding with checks.`);
 
-    // --- START NEW CONCURRENCY LOGIC ---
+    // --- Stalled Active Job Recovery (Catch-all) ---
+    const stalledActiveThreshold = new Date(Date.now() - STALLED_ACTIVE_JOB_THRESHOLD_MINUTES * 60 * 1000).toISOString();
+    const { data: stalledActiveJobs, error: stalledActiveError } = await supabase
+        .from('mira_agent_tiled_upscale_jobs')
+        .select('id')
+        .in('status', ['tiling', 'compositing', 'queued_for_generation', 'generating'])
+        .lt('updated_at', stalledActiveThreshold);
+
+    if (stalledActiveError) {
+        console.error(`${logPrefix} Error fetching stalled active jobs:`, stalledActiveError);
+        throw stalledActiveError;
+    }
+
+    if (stalledActiveJobs && stalledActiveJobs.length > 0) {
+        const jobIdsToFail = stalledActiveJobs.map(j => j.id);
+        console.log(`${logPrefix} Found ${jobIdsToFail.length} active jobs that have stalled for over ${STALLED_ACTIVE_JOB_THRESHOLD_MINUTES} minutes. Marking them as failed.`);
+        
+        const { error: failStalledError } = await supabase
+            .from('mira_agent_tiled_upscale_jobs')
+            .update({ status: 'failed', error_message: `Job failed due to stalling for over ${STALLED_ACTIVE_JOB_THRESHOLD_MINUTES} minutes.` })
+            .in('id', jobIdsToFail);
+
+        if (failStalledError) {
+            console.error(`${logPrefix} Error marking stalled active jobs as failed:`, failStalledError);
+            throw failStalledError;
+        }
+    }
+
+    // --- Cleanup for Permanently Failed Jobs ---
+    const failedCleanupThreshold = new Date(Date.now() - FAILED_TILE_CLEANUP_THRESHOLD_MINUTES * 60 * 1000).toISOString();
+    const { data: failedTiles, error: fetchFailedError } = await supabase
+        .from('mira_agent_tiled_upscale_tiles')
+        .select('parent_job_id')
+        .in('status', ['generation_failed', 'analysis_failed'])
+        .lt('updated_at', failedCleanupThreshold);
+    
+    if (fetchFailedError) {
+        console.error(`${logPrefix} Error fetching failed tiles for cleanup:`, fetchFailedError);
+        throw fetchFailedError;
+    }
+
+    if (failedTiles && failedTiles.length > 0) {
+        const parentJobIdsToFail = [...new Set(failedTiles.map(t => t.parent_job_id))];
+        console.log(`${logPrefix} Found ${parentJobIdsToFail.length} parent jobs with permanently failed tiles. Marking them as failed.`);
+        const { error: failParentError } = await supabase
+            .from('mira_agent_tiled_upscale_jobs')
+            .update({ status: 'failed', error_message: 'Job failed because one or more tiles could not be processed.' })
+            .in('id', parentJobIdsToFail)
+            .not('status', 'in', '("failed","complete")');
+        if (failParentError) {
+            console.error(`${logPrefix} Error marking parent jobs as failed:`, failParentError);
+            throw failParentError;
+        }
+    }
+
+    // --- Concurrency Logic (Runs AFTER cleanup) ---
     const { data: config, error: configError } = await supabase.from('mira-agent-config').select('value').eq('key', 'TILED_UPSCALE_CONCURRENCY_LIMIT').single();
     if (configError) throw new Error(`Failed to fetch concurrency limit: ${configError.message}`);
     const concurrencyLimit = config?.value?.limit || 1;
@@ -36,7 +92,7 @@ serve(async (req) => {
     const { count: activeJobsCount, error: countError } = await supabase
         .from('mira_agent_tiled_upscale_jobs')
         .select('*', { count: 'exact', head: true })
-        .in('status', ['tiling', 'compositing', 'queued_for_generation']); // Refined active statuses
+        .in('status', ['tiling', 'compositing', 'queued_for_generation']);
     if (countError) throw countError;
 
     const availableSlots = concurrencyLimit - (activeJobsCount || 0);
@@ -72,7 +128,6 @@ serve(async (req) => {
             console.log(`${logPrefix} No pending jobs to start.`);
         }
     }
-    // --- END NEW CONCURRENCY LOGIC ---
 
     // Stalled Job Recovery for ANALYSIS
     const stalledAnalysisThreshold = new Date(Date.now() - STALLED_ANALYSIS_THRESHOLD_SECONDS * 1000).toISOString();
@@ -91,28 +146,6 @@ serve(async (req) => {
         .eq('status', 'generating')
         .lt('updated_at', stalledGenerationThreshold);
     if (updateGenerationError) console.error(`${logPrefix} Error updating stalled generation jobs:`, updateGenerationError);
-
-    // --- NEW: Cleanup for Permanently Failed Jobs ---
-    const failedCleanupThreshold = new Date(Date.now() - FAILED_TILE_CLEANUP_THRESHOLD_MINUTES * 60 * 1000).toISOString();
-    const { data: failedTiles, error: fetchFailedError } = await supabase
-        .from('mira_agent_tiled_upscale_tiles')
-        .select('parent_job_id')
-        .in('status', ['generation_failed', 'analysis_failed'])
-        .lt('updated_at', failedCleanupThreshold);
-    
-    if (fetchFailedError) console.error(`${logPrefix} Error fetching failed tiles for cleanup:`, fetchFailedError);
-
-    if (failedTiles && failedTiles.length > 0) {
-        const parentJobIdsToFail = [...new Set(failedTiles.map(t => t.parent_job_id))];
-        console.log(`${logPrefix} Found ${parentJobIdsToFail.length} parent jobs with permanently failed tiles. Marking them as failed.`);
-        const { error: failParentError } = await supabase
-            .from('mira_agent_tiled_upscale_jobs')
-            .update({ status: 'failed', error_message: 'Job failed because one or more tiles could not be processed.' })
-            .in('id', parentJobIdsToFail)
-            .not('status', 'in', '("failed","complete")'); // Corrected syntax
-        if (failParentError) console.error(`${logPrefix} Error marking parent jobs as failed:`, failParentError);
-    }
-    // --- END NEW CLEANUP LOGIC ---
 
     // Dispatch Pending Analysis
     const { data: pendingAnalysisTiles, error: fetchAnalysisError } = await supabase.from('mira_agent_tiled_upscale_tiles').select('id').eq('status', 'pending_analysis').limit(BATCH_SIZE);
@@ -156,7 +189,7 @@ serve(async (req) => {
                 console.log(`${logPrefix} Successfully claimed job ${job.id} via RPC. Invoking compositor.`);
                 compositorInvocations.push(supabase.functions.invoke('MIRA-AGENT-compositor-tiled-upscale', { body: { parent_job_id: job.id } }));
             } else {
-                console.log(`${logPrefix} Job ${job.id} was claimed by another instance. Skipping invocation.`);
+                console.log(`${logPrefix} Job ${job.id} was already claimed by another instance. Skipping invocation.`);
             }
         } else if (job.status === 'compositing') {
             const isStalled = job.compositor_worker_id && new Date(job.comp_lease_expires_at) < new Date();
