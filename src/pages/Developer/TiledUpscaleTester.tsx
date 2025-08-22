@@ -19,6 +19,7 @@ import { Progress } from '@/components/ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { RecentJobThumbnail } from '@/components/Jobs/RecentJobThumbnail';
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from '@/components/ui/carousel';
+import { SecureImageDisplay } from '@/components/VTO/SecureImageDisplay';
 
 const UPLOAD_BUCKET = 'mira-agent-user-uploads';
 

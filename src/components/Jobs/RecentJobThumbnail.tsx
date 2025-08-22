@@ -2,11 +2,16 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 import { AlertTriangle, Loader2, CheckCircle } from 'lucide-react';
 import { useSecureImage } from '@/hooks/useSecureImage';
+import { Badge } from '@/components/ui/badge';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface Job {
   id: string;
-  status: 'tiling' | 'generating' | 'compositing' | 'complete' | 'failed';
+  status: 'tiling' | 'generating' | 'compositing' | 'complete' | 'failed' | 'queued' | 'processing';
   source_image_url: string;
+  metadata?: {
+    upscaler_engine?: string;
+  };
 }
 
 interface Props {
@@ -14,6 +19,27 @@ interface Props {
   onClick: () => void;
   isSelected: boolean;
 }
+
+const EngineBadge = ({ engine }: { engine?: string }) => {
+    let text = '?';
+    let tooltipText = `Engine: ${engine || 'Unknown'}`;
+    if (engine?.includes('comfyui')) { text = 'C'; tooltipText = 'Engine: ComfyUI'; }
+    if (engine?.includes('enhancor_detailed')) { text = 'ED'; tooltipText = 'Engine: Enhancor Detailed'; }
+    if (engine?.includes('enhancor_general')) { text = 'EG'; tooltipText = 'Engine: Enhancor General'; }
+    
+    return (
+        <TooltipProvider>
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <Badge variant="outline" className="absolute top-1 left-1 z-10">{text}</Badge>
+                </TooltipTrigger>
+                <TooltipContent>
+                    <p>{tooltipText}</p>
+                </TooltipContent>
+            </Tooltip>
+        </TooltipProvider>
+    );
+};
 
 export const RecentJobThumbnail = ({ job, onClick, isSelected }: Props) => {
   const { displayUrl, isLoading, error } = useSecureImage(job.source_image_url, { width: 200, height: 200, resize: 'cover' });
@@ -28,6 +54,7 @@ export const RecentJobThumbnail = ({ job, onClick, isSelected }: Props) => {
     return (
       <div className="relative w-full h-full group">
         <img src={displayUrl} alt="Job source" className="w-full h-full object-cover rounded-md" />
+        <EngineBadge engine={job.metadata?.upscaler_engine} />
         {job.status === 'complete' && (
           <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
             <CheckCircle className="h-8 w-8 text-white" />
