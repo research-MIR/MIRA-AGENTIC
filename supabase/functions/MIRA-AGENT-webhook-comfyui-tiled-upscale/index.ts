@@ -67,17 +67,14 @@ serve(async (req) => {
       const filePath = `${jobId}/final.png`;
       await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(filePath, imageBuffer, { contentType: 'image/png', upsert: true });
       
+      const { data: { publicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
+
       const updatePayload: any = {
           status: 'complete',
           generated_tile_bucket: GENERATED_IMAGES_BUCKET,
           generated_tile_path: filePath,
+          generated_tile_url: publicUrl, // This was the missing piece
       };
-
-      if (imageUrl.includes('supabase.co')) {
-          const { bucket, path } = parseStorageURL(imageUrl);
-          updatePayload.generated_tile_bucket = bucket;
-          updatePayload.generated_tile_path = path;
-      }
 
       const { data: updatedTile, error: updateTileError } = await supabase
         .from('mira_agent_tiled_upscale_tiles')
