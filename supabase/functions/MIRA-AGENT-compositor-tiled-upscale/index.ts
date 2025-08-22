@@ -126,9 +126,8 @@ serve(async (req) => {
     if (!completeTiles.length) throw new Error("No valid completed tiles found.");
 
     // --- SINGLE-TILE FAST PATH ---
-    const engine = claimedJob.metadata?.upscaler_engine;
-    if (engine?.startsWith('enhancor') && completeTiles.length === 1) {
-        log("Single-tile Enhancor job detected. Executing fast path.");
+    if (completeTiles.length === 1) {
+        log("Single-tile job detected. Executing fast path, skipping composition.");
         const singleTile = completeTiles[0];
         let finalUrl = singleTile.generated_tile_url;
         if (!finalUrl) {
