@@ -200,21 +200,17 @@ serve(async (req) => {
     const xs = positions.map(p => p.xs);
     const ys = positions.map(p => p.ys);
 
-    const EPS = Math.max(2, Math.round(actualTileSize / 16)); // 64 for 1024px tiles
+    const EPS = Math.max(2, Math.floor(actualTileSize / 16) - 1);
     function bandsByEps(vals: number[], eps: number) {
       const s = Array.from(new Set(vals.map(v => Math.round(v)))).sort((a,b)=>a-b);
       if (!s.length) return [];
       const centers: number[] = [];
       let cur: number[] = [s[0]];
       for (let i = 1; i < s.length; i++) {
-        if (s[i] - cur[cur.length-1] <= eps) { 
-            cur.push(s[i]);
-        } else { 
-            centers.push(Math.round(cur.reduce((a,b)=>a+b,0)/cur.length)); 
-            cur = [s[i]]; 
-        }
+        if (s[i] - cur[cur.length - 1] < eps) cur.push(s[i]);
+        else { centers.push(cur.reduce((a,b)=>a+b,0) / cur.length); cur = [s[i]]; }
       }
-      centers.push(Math.round(cur.reduce((a,b)=>a+b,0)/cur.length));
+      centers.push(cur.reduce((a,b)=>a+b,0) / cur.length);
       return centers;
     }
 
@@ -236,6 +232,7 @@ serve(async (req) => {
     const y0 = Math.round((finalH - gridH) * 1.0);
 
     log(`[GRID] tile=${actualTileSize} bands=${xC.length}x${yC.length} grid=${gridW}x${gridH} canvas=${finalW}x${finalH} x0=${x0} y0=${y0} xC=${xC.join(',')} yC=${yC.join(',')}`);
+    log(`[BANDS] x=${xC.join(',')} y=${yC.join(',')} gapsX=${xC.slice(1).map((c,i)=>c-xC[i]).join(',')} gapsY=${yC.slice(1).map((c,i)=>c-yC[i]).join(',')}`);
 
     function nearestIdx(bands: number[], v: number) {
       let bi = 0, best = Infinity;
@@ -255,6 +252,7 @@ serve(async (req) => {
       if (!buckets.has(k)) buckets.set(k, arr);
       arr.push(p);
     }
+    log(`[BUCKETS] unique cells=${buckets.size}, expected=${xC.length * yC.length}`);
 
     function pick(arr:Pos[], gx:number, gy:number): Pos {
       const xSnap = xC[gx];
@@ -273,11 +271,8 @@ serve(async (req) => {
     const cells: Array<{gx:number; gy:number; p:Pos}> = [];
     for (let gy=0; gy<yC.length; gy++) {
       for (let gx=0; gx<xC.length; gx++) {
-        const key = `${gx}:${gy}`;
-        const arr = buckets.get(key);
-        if (!arr || !arr.length) {
-          throw new Error(`Missing tile for cell ${key}. Expected a ${xC.length}×${yC.length} grid.`);
-        }
+        const arr = buckets.get(`${gx}:${gy}`);
+        if (!arr || !arr.length) continue;
         cells.push({ gx, gy, p: pick(arr, gx, gy) });
       }
     }
