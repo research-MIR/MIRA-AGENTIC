@@ -3,7 +3,6 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-const FAL_WEBHOOK_SECRET = Deno.env.get('FAL_WEBHOOK_SECRET');
 const GENERATED_IMAGES_BUCKET = 'mira-agent-upscale-tiles';
 
 const corsHeaders = {
@@ -11,20 +10,6 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS'
 };
-
-async function verifyHmacSHA256(body: string, signature: string | null, secret: string): Promise<boolean> {
-    if (!signature) return false;
-    const encoder = new TextEncoder();
-    const key = await crypto.subtle.importKey(
-        "raw",
-        encoder.encode(secret),
-        { name: "HMAC", hash: "SHA-256" },
-        false,
-        ["verify"]
-    );
-    const sigBytes = Uint8Array.from(atob(signature), c => c.charCodeAt(0));
-    return await crypto.subtle.verify("HMAC", key, sigBytes, encoder.encode(body));
-}
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -35,19 +20,6 @@ serve(async (req) => {
   const logPrefix = `[FalComfyUI-Webhook]`;
 
   try {
-    if (!FAL_WEBHOOK_SECRET) {
-        console.error(`${logPrefix} CRITICAL: FAL_WEBHOOK_SECRET is not set. Cannot verify request authenticity.`);
-        throw new Error("Webhook secret is not configured.");
-    }
-    const signature = req.headers.get("x-fal-signature");
-    const body = await req.text();
-    const isVerified = await verifyHmacSHA256(body, signature, FAL_WEBHOOK_SECRET);
-    if (!isVerified) {
-        console.error(`${logPrefix} Invalid signature received. Rejecting request.`);
-        return new Response("Invalid signature", { status: 401 });
-    }
-    const payload = JSON.parse(body);
-
     const url = new URL(req.url);
     let jobId = url.searchParams.get('job_id');
     let tileId = url.searchParams.get('tile_id');
@@ -56,12 +28,15 @@ serve(async (req) => {
       throw new Error("Webhook received without job_id or tile_id in the query parameters.");
     }
 
+    // Sanitize inputs to ensure they are valid UUIDs, allowing uppercase hex
     jobId = jobId.replace(/[^A-Fa-f0-9-]/g, '');
     tileId = tileId.replace(/[^A-Fa-f0-9-]/g, '');
 
-    console.log(`${logPrefix} Received verified webhook for job ${jobId}, tile ${tileId}.`);
+    console.log(`${logPrefix} Received webhook for job ${jobId}, tile ${tileId}.`);
 
+    const payload = await req.json();
     const { status, payload: resultPayload, error: falError } = payload;
+
     let parentJobId: string | null = null;
 
     if (status === 'OK' && resultPayload) {
@@ -139,6 +114,7 @@ serve(async (req) => {
         .eq('id', jobId);
     }
 
+    // --- Real-time Compositor Trigger ---
     if (parentJobId) {
         console.log(`${logPrefix} Performing ready-check for parent job ${parentJobId}...`);
         const { data: parentJob, error: parentJobError } = await supabase
@@ -173,6 +149,7 @@ serve(async (req) => {
             }
         }
     }
+    // --- End Trigger ---
 
     return new Response(JSON.stringify({ success: true }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
