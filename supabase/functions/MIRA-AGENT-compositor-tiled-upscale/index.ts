@@ -200,40 +200,42 @@ serve(async (req) => {
     const xs = positions.map(p => p.xs);
     const ys = positions.map(p => p.ys);
 
-    const stepOf = (vals:number[]) => {
-      const uniq = Array.from(new Set(vals)).sort((a,b)=>a-b);
-      const diffs:number[] = [];
-      for (let i=1;i<uniq.length;i++){ const d=uniq[i]-uniq[i-1]; if (d>0) diffs.push(d); }
-      if (!diffs.length) return 0;
-      diffs.sort((a,b)=>a-b);
-      return Math.max(1, Math.round(diffs[Math.floor(diffs.length/2)])); // median
-    };
-
-    const stepX = stepOf(xs), stepY = stepOf(ys);
-    if (!stepX || !stepY) throw new Error("Could not detect tile step.");
-
-    function bands(vals: number[], step: number) {
+    function median(a:number[]) { const s=[...a].sort((x,y)=>x-y); const m=Math.floor(s.length/2); return s.length? (s.length%2?s[m]:(s[m-1]+s[m])/2):0; }
+    function cluster1d(vals:number[], tile:number): number[] {
       const s = [...new Set(vals)].sort((a,b)=>a-b);
-      if (s.length === 0) return [];
-      const groups: number[] = [];
-      let cur: number[] = [s[0]];
-      for (let i=1; i<s.length; i++) {
-        if (Math.abs(s[i] - s[i-1]) <= step/2) cur.push(s[i]);
-        else { groups.push(Math.round(cur.reduce((a,b)=>a+b,0)/cur.length)); cur = [s[i]]; }
+      if (!s.length) return [];
+      const diffs = [];
+      for (let i=1;i<s.length;i++) diffs.push(s[i]-s[i-1]);
+      const med = median(diffs.length?diffs:[tile/3]);
+      const eps = Math.max(1, Math.min(tile*0.5, Math.round(med || tile/3)));
+      const groups:number[][] = [];
+      let cur:number[] = [s[0]];
+      for (let i=1;i<s.length;i++) {
+        if (s[i] - cur[cur.length-1] <= eps) cur.push(s[i]);
+        else { groups.push(cur); cur=[s[i]]; }
       }
-      groups.push(Math.round(cur.reduce((a,b)=>a+b,0)/cur.length));
-      return groups;
+      groups.push(cur);
+      return groups.map(g => Math.round(g.reduce((a,b)=>a+b,0)/g.length));
     }
 
-    const xBands = bands(xs, stepX);
-    const yBands = bands(ys, stepY);
+    const xC = cluster1d(xs, actualTileSize);
+    const yC = cluster1d(ys, actualTileSize);
+    if (!xC.length || !yC.length) throw new Error("No band centers detected");
 
-    const expectCols = Math.ceil((finalW - actualTileSize) / stepX) + 1;
-    const expectRows = Math.ceil((finalH - actualTileSize) / stepY) + 1;
+    const xDelta = xC.map((c,i)=> i? (c - xC[i-1]) : actualTileSize);
+    const yDelta = yC.map((c,i)=> i? (c - yC[i-1]) : actualTileSize);
 
-    if (xBands.length !== expectCols || yBands.length !== expectRows) {
-      throw new Error(`Incomplete coverage: have ${xBands.length}×${yBands.length}, expected ${expectCols}×${expectRows}. xBands=${xBands.join(',')} yBands=${yBands.join(',')}`);
+    const gridW = (xC[xC.length-1] - xC[0]) + actualTileSize;
+    const gridH = (yC[yC.length-1] - yC[0]) + actualTileSize;
+
+    if (gridW > finalW + 1 || gridH > finalH + 1) {
+      throw new Error(`Snapped grid exceeds canvas: grid=${gridW}x${gridH} canvas=${finalW}x${finalH}`);
     }
+
+    const x0 = Math.round((finalW - gridW) * 0.5);
+    const y0 = Math.round((finalH - gridH) * 1.0);
+
+    log(`[GRID] tile=${actualTileSize} bands=${xC.length}x${yC.length} grid=${gridW}x${gridH} canvas=${finalW}x${finalH} x0=${x0} y0=${y0} xC=${xC.join(',')} yC=${yC.join(',')}`);
 
     function nearestIdx(bands: number[], v: number) {
       let bi = 0, best = Infinity;
@@ -243,47 +245,39 @@ serve(async (req) => {
       }
       return bi;
     }
-
-    const gxOf = (x: number) => nearestIdx(xBands, x);
-    const gyOf = (y: number) => nearestIdx(yBands, y);
-    const x0 = 0, y0 = 0;
+    const gxOf = (x:number) => nearestIdx(xC, x);
+    const gyOf = (y:number) => nearestIdx(yC, y);
 
     const buckets = new Map<string, Pos[]>();
     for (const p of positions) {
-      const gx = gxOf(p.xs), gy = gyOf(p.ys);
-      const key = `${gx}:${gy}`;
-      (buckets.get(key) ?? buckets.set(key, []).get(key)!).push(p);
+      const k = `${gxOf(p.xs)}:${gyOf(p.ys)}`;
+      const arr = buckets.get(k) ?? [];
+      if (!buckets.has(k)) buckets.set(k, arr);
+      arr.push(p);
     }
 
-    const pick = (arr:Pos[], key:string) => {
-      const [gx, gy] = key.split(":").map(Number);
-      const xSnap = x0 + gx*stepX, ySnap = y0 + gy*stepY;
+    function pick(arr:Pos[], gx:number, gy:number): Pos {
+      const xSnap = x0 + (xC[gx] - xC[0]);
+      const ySnap = y0 + (yC[gy] - yC[0]);
       arr.sort((a,b)=>{
         const ea = Math.abs(a.xs - xSnap) + Math.abs(a.ys - ySnap);
         const eb = Math.abs(b.xs - xSnap) + Math.abs(b.ys - ySnap);
         if (ea !== eb) return ea - eb;
         const pa = a.t.generated_tile_path || a.t.generated_tile_url || "";
         const pb = b.t.generated_tile_path || b.t.generated_tile_url || "";
-        return String(pa).localeCompare(String(pb));
+        return pa.localeCompare(pb);
       });
       return arr[0];
-    };
+    }
 
-    const cells: Array<{gx:number; gy:number; p: Pos}> = [];
-    for (let gy = 0; gy < expectRows; gy++) {
-      for (let gx = 0; gx < expectCols; gx++) {
-        const key = `${gx}:${gy}`;
-        const arr = buckets.get(key);
-        if (!arr || !arr.length) {
-          throw new Error(`Missing tile for cell ${key}. Expected a ${expectCols}×${expectRows} grid to fill ${finalW}×${finalH}, step=(${stepX},${stepY}), tile=${actualTileSize}.`);
-        }
-        cells.push({ gx, gy, p: pick(arr, key) });
+    const cells: Array<{gx:number; gy:number; p:Pos}> = [];
+    for (let gy=0; gy<yC.length; gy++) {
+      for (let gx=0; gx<xC.length; gx++) {
+        const arr = buckets.get(`${gx}:${gy}`);
+        if (!arr || !arr.length) continue;
+        cells.push({ gx, gy, p: pick(arr, gx, gy) });
       }
     }
-    
-    const ovX = Math.min(Math.max(1, actualTileSize - stepX), actualTileSize / 2, MAX_FEATHER);
-    const ovY = Math.min(Math.max(1, actualTileSize - stepY), actualTileSize / 2, MAX_FEATHER);
-    log(`[DBG] tileSize=${actualTileSize}, stepX=${stepX}, stepY=${stepY}, ovX=${ovX}, ovY=${ovY}`);
 
     let canvas: Image;
     if (startIndex === 0) {
@@ -311,8 +305,8 @@ serve(async (req) => {
       const { gx, gy, p } = cells[i];
       const t = p.t;
       
-      const x = x0 + gx * stepX;
-      const y = y0 + gy * stepY;
+      const x = x0 + (xC[gx] - xC[0]);
+      const y = y0 + (yC[gy] - yC[0]);
 
       log(`[Tile ${i}] Processing tile at grid pos (${gx}, ${gy}) and canvas pos (${x}, ${y}).`);
       
@@ -328,20 +322,26 @@ serve(async (req) => {
       }
 
       const tileW = tile.width, tileH = tile.height;
-      const leftNeighborX = x0 + (gx - 1) * stepX;
-      const topNeighborY = y0 + (gy - 1) * stepY;
-      const leftOverlap = processed.has(`${gx-1}:${gy}`) ? Math.max(0, (leftNeighborX + tileW) - x) : 0;
-      const topOverlap  = processed.has(`${gx}:${gy-1}`) ? Math.max(0, (topNeighborY + tileH) - y) : 0;
-      
-      const ovL = Math.min(leftOverlap, ovX);
-      const ovT = Math.min(topOverlap,  ovY);
+      const leftNeighborX = gx > 0 ? x0 + (xC[gx-1] - xC[0]) : 0;
+      const topNeighborY  = gy > 0 ? y0 + (yC[gy-1] - yC[0]) : 0;
+
+      const leftOverlap = gx>0 && processed.has(`${gx-1}:${gy}`) ? Math.max(0, (leftNeighborX + actualTileSize) - x) : 0;
+      const topOverlap  = gy>0 && processed.has(`${gx}:${gy-1}`) ? Math.max(0, (topNeighborY  + actualTileSize) - y) : 0;
+
+      const leftDelta = gx > 0 ? xDelta[gx] : actualTileSize;
+      const topDelta  = gy > 0 ? yDelta[gy] : actualTileSize;
+      const leftOverlapExp = Math.max(0, actualTileSize - leftDelta);
+      const topOverlapExp  = Math.max(0, actualTileSize - topDelta);
+
+      const ovL = Math.min(leftOverlap, leftOverlapExp, MAX_FEATHER);
+      const ovT = Math.min(topOverlap,  topOverlapExp,  MAX_FEATHER);
       
       const BAD_OVERLAP_FACTOR = 1.5;
-      const doLeft = ovL > 0 && leftOverlap <= BAD_OVERLAP_FACTOR * ovX;
-      const doTop  = ovT > 0 && topOverlap  <= BAD_OVERLAP_FACTOR * ovY;
+      const doLeft = ovL > 0 && leftOverlap <= BAD_OVERLAP_FACTOR * leftOverlapExp;
+      const doTop  = ovT > 0 && topOverlap  <= BAD_OVERLAP_FACTOR * topOverlapExp;
 
-      if (!doLeft && leftOverlap > 0) log(`[WARN] Disabling left feather for tile ${i} due to excessive overlap (${leftOverlap}px > ${BAD_OVERLAP_FACTOR * ovX}px)`);
-      if (!doTop && topOverlap > 0) log(`[WARN] Disabling top feather for tile ${i} due to excessive overlap (${topOverlap}px > ${BAD_OVERLAP_FACTOR * ovY}px)`);
+      if (!doLeft && leftOverlap > 0) log(`[WARN] Disabling left feather for tile ${i} due to excessive overlap (${leftOverlap}px > ${BAD_OVERLAP_FACTOR * leftOverlapExp}px)`);
+      if (!doTop && topOverlap > 0) log(`[WARN] Disabling top feather for tile ${i} due to excessive overlap (${topOverlap}px > ${BAD_OVERLAP_FACTOR * topOverlapExp}px)`);
 
       if (doLeft || doTop) {
         log(`[Tile ${i}] Applying feathering. Left: ${doLeft ? ovL : 0}px, Top: ${doTop ? ovT : 0}px.`);
