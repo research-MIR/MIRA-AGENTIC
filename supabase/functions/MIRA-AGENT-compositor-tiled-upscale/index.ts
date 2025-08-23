@@ -200,26 +200,26 @@ serve(async (req) => {
     const xs = positions.map(p => p.xs);
     const ys = positions.map(p => p.ys);
 
-    function median(a:number[]) { const s=[...a].sort((x,y)=>x-y); const m=Math.floor(s.length/2); return s.length? (s.length%2?s[m]:(s[m-1]+s[m])/2):0; }
-    function cluster1d(vals:number[], tile:number): number[] {
-      const s = [...new Set(vals)].sort((a,b)=>a-b);
+    const EPS = Math.max(2, Math.round(actualTileSize / 16)); // 64 for 1024px tiles
+    function bandsByEps(vals: number[], eps: number) {
+      const s = Array.from(new Set(vals.map(v => Math.round(v)))).sort((a,b)=>a-b);
       if (!s.length) return [];
-      const diffs = [];
-      for (let i=1;i<s.length;i++) diffs.push(s[i]-s[i-1]);
-      const med = median(diffs.length?diffs:[tile/3]);
-      const eps = Math.max(1, Math.min(tile*0.5, Math.round(med || tile/3)));
-      const groups:number[][] = [];
-      let cur:number[] = [s[0]];
-      for (let i=1;i<s.length;i++) {
-        if (s[i] - cur[cur.length-1] <= eps) cur.push(s[i]);
-        else { groups.push(cur); cur=[s[i]]; }
+      const centers: number[] = [];
+      let cur: number[] = [s[0]];
+      for (let i = 1; i < s.length; i++) {
+        if (s[i] - cur[cur.length-1] <= eps) { 
+            cur.push(s[i]);
+        } else { 
+            centers.push(Math.round(cur.reduce((a,b)=>a+b,0)/cur.length)); 
+            cur = [s[i]]; 
+        }
       }
-      groups.push(cur);
-      return groups.map(g => Math.round(g.reduce((a,b)=>a+b,0)/g.length));
+      centers.push(Math.round(cur.reduce((a,b)=>a+b,0)/cur.length));
+      return centers;
     }
 
-    const xC = cluster1d(xs, actualTileSize);
-    const yC = cluster1d(ys, actualTileSize);
+    const xC = bandsByEps(xs, EPS);
+    const yC = bandsByEps(ys, EPS);
     if (!xC.length || !yC.length) throw new Error("No band centers detected");
 
     const xDelta = xC.map((c,i)=> i? (c - xC[i-1]) : actualTileSize);
@@ -257,8 +257,8 @@ serve(async (req) => {
     }
 
     function pick(arr:Pos[], gx:number, gy:number): Pos {
-      const xSnap = x0 + (xC[gx] - xC[0]);
-      const ySnap = y0 + (yC[gy] - yC[0]);
+      const xSnap = xC[gx];
+      const ySnap = yC[gy];
       arr.sort((a,b)=>{
         const ea = Math.abs(a.xs - xSnap) + Math.abs(a.ys - ySnap);
         const eb = Math.abs(b.xs - xSnap) + Math.abs(b.ys - ySnap);
@@ -273,8 +273,11 @@ serve(async (req) => {
     const cells: Array<{gx:number; gy:number; p:Pos}> = [];
     for (let gy=0; gy<yC.length; gy++) {
       for (let gx=0; gx<xC.length; gx++) {
-        const arr = buckets.get(`${gx}:${gy}`);
-        if (!arr || !arr.length) continue;
+        const key = `${gx}:${gy}`;
+        const arr = buckets.get(key);
+        if (!arr || !arr.length) {
+          throw new Error(`Missing tile for cell ${key}. Expected a ${xC.length}×${yC.length} grid.`);
+        }
         cells.push({ gx, gy, p: pick(arr, gx, gy) });
       }
     }
