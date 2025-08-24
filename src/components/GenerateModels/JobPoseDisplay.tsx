@@ -1,6 +1,6 @@
 import { useLanguage } from "@/context/LanguageContext";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { AlertTriangle, CheckCircle, Loader2, Wand2, Info, RefreshCw } from "lucide-react";
+import { AlertTriangle, CheckCircle, Loader2, Wand2, Info, RefreshCw, Clock } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useImagePreview } from "@/context/ImagePreviewContext";
@@ -8,30 +8,7 @@ import { SecureImageDisplay } from "@/components/VTO/SecureImageDisplay";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { showSuccess } from "@/utils/toast";
-
-interface PoseAnalysis {
-  qa_status: 'pass' | 'fail';
-  reasoning: string;
-  failure_modes?: string[];
-  garment_analysis?: {
-    description: string;
-    coverage: 'upper_body' | 'lower_body' | 'full_body';
-    is_identical_to_base_garment: boolean;
-  };
-}
-
-interface Pose {
-  final_url: string;
-  is_upscaled?: boolean;
-  status: string;
-  pose_prompt: string;
-  jobId: string;
-  analysis?: PoseAnalysis;
-  comfyui_prompt_id?: string;
-  prompt_context_for_gemini?: string;
-  qa_history?: any[];
-  retry_count?: number;
-}
+import { Pose } from "@/types/vto";
 
 interface Job {
     id: string;
@@ -72,30 +49,44 @@ const PoseStatusIcon = ({ pose }: { pose: Pose }) => {
   let tooltipText = '';
   let color = '';
 
-  switch (pose.status) {
+  switch (pose.upscale_status) {
     case 'complete':
-      if (pose.is_upscaled) {
-        statusIcon = <CheckCircle className="h-5 w-5 text-white" />;
-        tooltipText = 'Upscaled & Ready';
-        color = 'bg-green-600';
-      } else {
+      statusIcon = <CheckCircle className="h-5 w-5 text-white" />;
+      tooltipText = 'Upscaled & Ready';
+      color = 'bg-green-600';
+      break;
+    case 'queued':
+      statusIcon = <Clock className="h-5 w-5 text-white" />;
+      tooltipText = 'Upscale Queued';
+      color = 'bg-gray-500';
+      break;
+    case 'processing':
+      statusIcon = <Loader2 className="h-5 w-5 text-white animate-spin" />;
+      tooltipText = 'Upscaling...';
+      color = 'bg-blue-500';
+      break;
+    case 'failed':
+      statusIcon = <AlertTriangle className="h-5 w-5 text-white" />;
+      tooltipText = pose.error_message || 'Upscale Failed';
+      color = 'bg-destructive';
+      break;
+    default:
+      if (pose.status === 'complete' && !pose.is_upscaled) {
         statusIcon = <Wand2 className="h-5 w-5 text-white" />;
         tooltipText = 'Ready for Upscaling';
         color = 'bg-blue-500';
+      } else if (pose.status === 'failed') {
+        statusIcon = <AlertTriangle className="h-5 w-5 text-white" />;
+        tooltipText = 'Pose Generation Failed';
+        color = 'bg-destructive';
+      } else if (['analyzing', 'processing', 'pending'].includes(pose.status)) {
+        statusIcon = <Loader2 className="h-5 w-5 text-white animate-spin" />;
+        tooltipText = pose.status === 'analyzing' ? 'Analyzing...' : 'Generating...';
+        color = 'bg-gray-500';
       }
-      break;
-    case 'analyzing':
-    case 'processing':
-    case 'pending':
-      statusIcon = <Loader2 className="h-5 w-5 text-white animate-spin" />;
-      tooltipText = pose.status === 'analyzing' ? 'Analyzing...' : 'Generating...';
-      color = 'bg-gray-500';
-      break;
-    default: // failed
-      statusIcon = <AlertTriangle className="h-5 w-5 text-white" />;
-      tooltipText = 'Failed';
-      color = 'bg-destructive';
   }
+
+  if (!statusIcon) return null;
 
   return (
     <TooltipProvider>

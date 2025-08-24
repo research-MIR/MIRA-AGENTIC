@@ -52,6 +52,11 @@ export interface Pose {
   jobId: string;
   analysis?: PoseAnalysis;
   comfyui_prompt_id?: string;
+  upscale_status?: 'queued' | 'processing' | 'complete' | 'failed';
+  error_message?: string;
+  prompt_context_for_gemini?: string;
+  qa_history?: any[];
+  retry_count?: number;
 }
 
 export interface AnalyzedGarment {
