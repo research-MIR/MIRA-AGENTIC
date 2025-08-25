@@ -35,9 +35,39 @@ const sizeToKreaEnum: { [key: string]: string } = {
     '1408x768': 'landscape_16_9',
 };
 
-function mapToKreaImageSize(size?: string): string {
+function mapToKreaImageSize(size?: string): string | { width: number, height: number } {
     if (!size) return "landscape_4_3";
-    return sizeToKreaEnum[size] || "landscape_4_3";
+
+    // 1. Check for direct enum match
+    if (sizeToKreaEnum[size]) {
+        return sizeToKreaEnum[size];
+    }
+
+    // 2. Parse for custom WxH resolution
+    if (size.includes('x')) {
+        const parts = size.split('x').map(Number);
+        if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1]) && parts[0] > 0 && parts[1] > 0) {
+            return { width: parts[0], height: parts[1] };
+        }
+    }
+    
+    // 3. Parse for ratio string and calculate a size
+    if (size.includes(':')) {
+        const parts = size.split(':').map(Number);
+        if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1]) && parts[0] > 0 && parts[1] > 0) {
+            const long_edge = 1440;
+            const w = parts[0];
+            const h = parts[1];
+            if (w > h) {
+                return { width: long_edge, height: Math.round(long_edge * (h / w)) };
+            } else {
+                return { width: Math.round(long_edge * (w / h)), height: long_edge };
+            }
+        }
+    }
+
+    // 4. Fallback to default
+    return "landscape_4_3";
 }
 
 async function describeImage(base64Data: string, mimeType: string): Promise<string> {

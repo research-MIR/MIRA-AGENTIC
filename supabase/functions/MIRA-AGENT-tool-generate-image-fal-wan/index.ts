@@ -26,7 +26,7 @@ const hardcodedLoras = [{
 const sizeToQwenEnum: { [key: string]: string } = {
     'square': 'square',
     'square_hd': 'square_hd',
-    'portrait_4_3': 'portrait_4_3',
+    'portrait_4_3': 'portrait_4_3', // Note: Qwen uses W:H format for enums
     'landscape_4_3': 'landscape_4_3',
     'landscape_16_9': 'landscape_16_9',
     'portrait_16_9': 'portrait_16_9',
@@ -48,27 +48,37 @@ const sizeToQwenEnum: { [key: string]: string } = {
 
 function mapToQwenImageSize(size?: string): string | { width: number, height: number } {
     if (!size) return "square_hd";
+
+    // 1. Check for direct enum match
     if (sizeToQwenEnum[size]) {
         return sizeToQwenEnum[size];
     }
     
-    let w, h;
-    if (size.includes(':')) {
-        [w, h] = size.split(':').map(Number);
-    } else if (size.includes('x')) {
-        [w, h] = size.split('x').map(Number);
+    // 2. Parse for custom WxH resolution
+    if (size.includes('x')) {
+        const parts = size.split('x').map(Number);
+        if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1]) && parts[0] > 0 && parts[1] > 0) {
+            return { width: parts[0], height: parts[1] };
+        }
     }
 
-    if (w && h && !isNaN(w) && !isNaN(h) && h > 0) {
-        const long_edge = 1440;
-        if (w > h) {
-            return { width: long_edge, height: Math.round(long_edge * (h / w)) };
-        } else {
-            return { width: Math.round(long_edge * (w / h)), height: long_edge };
+    // 3. Parse for ratio string and calculate a size
+    if (size.includes(':')) {
+        const parts = size.split(':').map(Number);
+        if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1]) && parts[0] > 0 && parts[1] > 0) {
+            const long_edge = 1440;
+            const w = parts[0];
+            const h = parts[1];
+            if (w > h) {
+                return { width: long_edge, height: Math.round(long_edge * (h / w)) };
+            } else {
+                return { width: Math.round(long_edge * (w / h)), height: long_edge };
+            }
         }
     }
     
-    return 'square_hd'; // Fallback
+    // 4. Fallback
+    return 'square_hd';
 }
 
 async function describeImage(base64Data: string, mimeType: string): Promise<string> {
