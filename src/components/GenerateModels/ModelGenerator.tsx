@@ -10,12 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Plus, Sparkles, Loader2 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { PoseInput } from "./PoseInput";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
 import { PosePresetModal } from "./PosePresetModal";
-import { Badge } from "@/components/ui/badge";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface Pose {
   type: 'text' | 'image';
@@ -34,12 +29,12 @@ export const ModelGenerator = ({ packId }: ModelGeneratorProps) => {
   const { supabase, session } = useSession();
   const queryClient = useQueryClient();
 
-  const [activeTab, setActiveTab] = useState<'single' | 'multi'>('single');
-  const [multiModelPrompt, setMultiModelPrompt] = useState("");
-  const [modelDescription, setModelDescription] = useState("");
+  const [upperBodyModels, setUpperBodyModels] = useState("");
+  const [lowerBodyModels, setLowerBodyModels] = useState("");
+  const [fullBodyModels, setFullBodyModels] = useState("");
+  
   const [setDescription, setSetDescription] = useState("white ecommerce background,with no shadows, no vignette");
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
-  const [autoApprove, setAutoApprove] = useState(true);
   const [poses, setPoses] = useState<Pose[]>([{ type: 'text', value: '', file: undefined, previewUrl: undefined }]);
   const [isLoading, setIsLoading] = useState(false);
   const [isPoseModalOpen, setIsPoseModalOpen] = useState(false);
@@ -58,22 +53,18 @@ export const ModelGenerator = ({ packId }: ModelGeneratorProps) => {
   }, [models, selectedModelId]);
 
   const handleGenerate = async () => {
-    setIsLoading(true);
-    if (activeTab === 'single') {
-      await handleSingleModelGenerate();
-    } else {
-      await handleMultiModelGenerate();
-    }
-    setIsLoading(false);
-  };
-
-  const handleSingleModelGenerate = async () => {
-    if (!modelDescription.trim() || !selectedModelId || !session?.user) {
-      showError("Please provide a model description and select a base model.");
+    if (!session?.user || !selectedModelId) {
+      showError("Please select a base model.");
       return;
     }
+    if (!upperBodyModels.trim() && !lowerBodyModels.trim() && !fullBodyModels.trim()) {
+      showError("Please describe at least one model in one of the categories.");
+      return;
+    }
+
+    setIsLoading(true);
+    const toastId = showLoading("Preparing assets and queuing jobs...");
     
-    const toastId = showLoading("Preparing assets...");
     try {
       const processedPoses = await Promise.all(poses.map(async (pose) => {
         if (pose.type === 'image' && pose.file) {
@@ -86,16 +77,15 @@ export const ModelGenerator = ({ packId }: ModelGeneratorProps) => {
       const validPoses = processedPoses.filter(p => p.value.trim() !== '');
       if (validPoses.length === 0) throw new Error("Please define at least one valid pose.");
 
-      dismissToast(toastId);
-      showLoading("Starting generation pipeline...");
-
       const { data, error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-generate-poses', {
         body: {
-          model_description: modelDescription,
+          upper_body_models: upperBodyModels,
+          lower_body_models: lowerBodyModels,
+          full_body_models: fullBodyModels,
           set_description: setDescription,
           selected_model_id: selectedModelId,
           user_id: session.user.id,
-          auto_approve: autoApprove,
+          auto_approve: true, // Always true for this workflow
           pose_prompts: validPoses,
           pack_id: packId,
           aspect_ratio: aspectRatio,
@@ -103,72 +93,21 @@ export const ModelGenerator = ({ packId }: ModelGeneratorProps) => {
         }
       });
       if (error) throw error;
+      
       dismissToast(toastId);
-      showSuccess("Generation pipeline started!");
+      showSuccess(`${data.jobIds.length} model generation jobs have been queued!`);
       queryClient.invalidateQueries({ queryKey: ['modelsForPack', packId] });
-    } catch (err: any) {
-      dismissToast(toastId);
-      showError(err.message);
-    }
-  };
-
-  const handleMultiModelGenerate = async () => {
-    if (!multiModelPrompt.trim() || !selectedModelId || !session?.user) {
-      showError("Please provide a multi-model description and select a base model.");
-      return;
-    }
-    
-    const toastId = showLoading("Parsing multi-model prompt...");
-    try {
-      const { data: parseData, error: parseError } = await supabase.functions.invoke('MIRA-AGENT-tool-parse-multi-model-prompt', {
-        body: { high_level_prompt: multiModelPrompt }
-      });
-      if (parseError) throw parseError;
-      const modelDescriptions = parseData.model_descriptions;
-      if (!modelDescriptions || modelDescriptions.length === 0) {
-        throw new Error("The AI could not parse any models from your description.");
-      }
-
-      dismissToast(toastId);
-      showSuccess(`Parsed ${modelDescriptions.length} models. Queuing generation jobs...`);
-
-      const jobPromises = modelDescriptions.map(async (desc: string) => {
-        try {
-          const processedPoses = await Promise.all(poses.map(async (pose) => {
-            if (pose.type === 'image' && pose.file) {
-              const { data: { publicUrl } } = await supabase.storage.from('mira-agent-user-uploads').upload(`${session.user.id}/pose-references/${Date.now()}-${pose.file.name}`, pose.file);
-              return { type: 'image', value: publicUrl };
-            }
-            return { type: pose.type, value: pose.value };
-          }));
-          const validPoses = processedPoses.filter(p => p.value.trim() !== '');
-
-          const { error } = await supabase.functions.invoke('MIRA-AGENT-orchestrator-generate-poses', {
-            body: {
-              model_description: desc,
-              set_description: setDescription,
-              selected_model_id: selectedModelId,
-              user_id: session.user.id,
-              auto_approve: true, // Always true for multi-model
-              pose_prompts: validPoses,
-              pack_id: packId,
-              aspect_ratio: aspectRatio,
-              engine: engine,
-            }
-          });
-          if (error) throw error;
-        } catch (err) {
-          console.error(`Failed to queue job for description "${desc}":`, err);
-        }
-      });
-
-      await Promise.all(jobPromises);
-      showSuccess("All generation jobs have been queued.");
-      queryClient.invalidateQueries({ queryKey: ['modelsForPack', packId] });
+      
+      // Reset form
+      setUpperBodyModels("");
+      setLowerBodyModels("");
+      setFullBodyModels("");
 
     } catch (err: any) {
       dismissToast(toastId);
       showError(err.message);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -184,20 +123,18 @@ export const ModelGenerator = ({ packId }: ModelGeneratorProps) => {
     <>
       <div className="space-y-4">
         <SettingsPanel
-          modelDescription={modelDescription}
-          setModelDescription={setModelDescription}
+          upperBodyModels={upperBodyModels}
+          setUpperBodyModels={setUpperBodyModels}
+          lowerBodyModels={lowerBodyModels}
+          setLowerBodyModels={setLowerBodyModels}
+          fullBodyModels={fullBodyModels}
+          setFullBodyModels={setFullBodyModels}
           setDescription={setDescription}
           setSetDescription={setSetDescription}
           models={models as Model[]}
           selectedModelId={selectedModelId}
           setSelectedModelId={setSelectedModelId}
-          autoApprove={autoApprove}
-          setAutoApprove={setAutoApprove}
           isJobActive={isLoading}
-          activeTab={activeTab}
-          setActiveTab={setActiveTab}
-          multiModelPrompt={multiModelPrompt}
-          setMultiModelPrompt={setMultiModelPrompt}
           aspectRatio={aspectRatio}
           setAspectRatio={setAspectRatio}
           engine={engine}
@@ -230,7 +167,7 @@ export const ModelGenerator = ({ packId }: ModelGeneratorProps) => {
           </CardContent>
         </Card>
 
-        <Button size="lg" className="w-full" onClick={handleGenerate} disabled={isLoading || (activeTab === 'single' && !modelDescription.trim()) || (activeTab === 'multi' && !multiModelPrompt.trim())}>
+        <Button size="lg" className="w-full" onClick={handleGenerate} disabled={isLoading || (!upperBodyModels.trim() && !lowerBodyModels.trim() && !fullBodyModels.trim())}>
           {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
           {t('generateModelsButton')}
         </Button>

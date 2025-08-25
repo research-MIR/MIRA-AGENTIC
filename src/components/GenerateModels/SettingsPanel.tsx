@@ -1,31 +1,28 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Switch } from "@/components/ui/switch";
 import { ModelSelector } from "@/components/ModelSelector";
 import { Model } from "@/hooks/useChatManager";
 import { useLanguage } from "@/context/LanguageContext";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 
 interface SettingsPanelProps {
-  modelDescription: string;
-  setModelDescription: (value: string) => void;
+  upperBodyModels: string;
+  setUpperBodyModels: (value: string) => void;
+  lowerBodyModels: string;
+  setLowerBodyModels: (value: string) => void;
+  fullBodyModels: string;
+  setFullBodyModels: (value: string) => void;
   setDescription: string;
   setSetDescription: (value: string) => void;
   models: Model[];
   selectedModelId: string | null;
   setSelectedModelId: (id: string) => void;
-  autoApprove: boolean;
-  setAutoApprove: (value: boolean) => void;
   isJobActive: boolean;
-  activeTab: 'single' | 'multi';
-  setActiveTab: (tab: 'single' | 'multi') => void;
-  multiModelPrompt: string;
-  setMultiModelPrompt: (value: string) => void;
   aspectRatio: string;
   setAspectRatio: (value: string) => void;
   engine: string;
@@ -54,20 +51,18 @@ const resolutionToRatioMap: { [key: string]: string } = {
 };
 
 export const SettingsPanel = ({
-  modelDescription,
-  setModelDescription,
+  upperBodyModels,
+  setUpperBodyModels,
+  lowerBodyModels,
+  setLowerBodyModels,
+  fullBodyModels,
+  setFullBodyModels,
   setDescription,
   setSetDescription,
   models,
   selectedModelId,
   setSelectedModelId,
-  autoApprove,
-  setAutoApprove,
   isJobActive,
-  activeTab,
-  setActiveTab,
-  multiModelPrompt,
-  setMultiModelPrompt,
   aspectRatio,
   setAspectRatio,
   engine,
@@ -84,34 +79,46 @@ export const SettingsPanel = ({
         <CardTitle>{t('step1')}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'single' | 'multi')}>
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="single">{t('singleModel')}</TabsTrigger>
-            <TabsTrigger value="multi">{t('multiModel')}</TabsTrigger>
-          </TabsList>
-          <TabsContent value="single" className="pt-4">
-            <Label htmlFor="model-description">{t('modelDescription')}</Label>
-            <Textarea
-              id="model-description"
-              value={modelDescription}
-              onChange={(e) => setModelDescription(e.target.value)}
-              placeholder={t('modelDescriptionPlaceholder')}
-              rows={3}
-              disabled={isJobActive}
-            />
-          </TabsContent>
-          <TabsContent value="multi" className="pt-4">
-            <Label htmlFor="multi-model-prompt">{t('multiModelDescription')}</Label>
-            <Textarea
-              id="multi-model-prompt"
-              value={multiModelPrompt}
-              onChange={(e) => setMultiModelPrompt(e.target.value)}
-              placeholder={t('multiModelPlaceholder')}
-              rows={5}
-              disabled={isJobActive}
-            />
-          </TabsContent>
-        </Tabs>
+        <Accordion type="multiple" defaultValue={['item-1']} className="w-full">
+          <AccordionItem value="item-1">
+            <AccordionTrigger className="text-base font-semibold">Model Descriptions</AccordionTrigger>
+            <AccordionContent className="pt-4 space-y-4">
+              <div>
+                <Label htmlFor="upper-body-models">Upper Body Models</Label>
+                <Textarea
+                  id="upper-body-models"
+                  value={upperBodyModels}
+                  onChange={(e) => setUpperBodyModels(e.target.value)}
+                  placeholder="e.g., a tall female model with blonde hair, a male model with a beard..."
+                  rows={3}
+                  disabled={isJobActive}
+                />
+              </div>
+              <div>
+                <Label htmlFor="lower-body-models">Lower Body Models</Label>
+                <Textarea
+                  id="lower-body-models"
+                  value={lowerBodyModels}
+                  onChange={(e) => setLowerBodyModels(e.target.value)}
+                  placeholder="e.g., a curvy model, a very slim model..."
+                  rows={3}
+                  disabled={isJobActive}
+                />
+              </div>
+              <div>
+                <Label htmlFor="full-body-models">Full Body Models</Label>
+                <Textarea
+                  id="full-body-models"
+                  value={fullBodyModels}
+                  onChange={(e) => setFullBodyModels(e.target.value)}
+                  placeholder="e.g., an athletic model in a dynamic pose..."
+                  rows={3}
+                  disabled={isJobActive}
+                />
+              </div>
+            </AccordionContent>
+          </AccordionItem>
+        </Accordion>
 
         <div className="space-y-2">
           <div className="flex items-center gap-2">
@@ -139,7 +146,7 @@ export const SettingsPanel = ({
         <div className="space-y-2">
           <Label>{t('baseModel')}</Label>
           <ModelSelector
-            models={models}
+            models={models as Model[]}
             selectedModelId={selectedModelId}
             onModelChange={setSelectedModelId}
             disabled={isJobActive}
@@ -175,23 +182,6 @@ export const SettingsPanel = ({
                 />
             )}
         </div>
-        {activeTab === 'single' && (
-          <div>
-            <h3 className="text-sm font-semibold mb-2">{t('step2')}</h3>
-            <div className="flex items-center space-x-2 p-3 rounded-md bg-muted/50">
-              <Switch
-                id="auto-approve"
-                checked={autoApprove}
-                onCheckedChange={setAutoApprove}
-                disabled={isJobActive}
-              />
-              <div className="grid gap-1.5 leading-none">
-                  <Label htmlFor="auto-approve">{t('autoApprove')}</Label>
-                  <p className="text-xs text-muted-foreground">{t('autoApproveDescription')}</p>
-              </div>
-            </div>
-          </div>
-        )}
       </CardContent>
     </Card>
   );
