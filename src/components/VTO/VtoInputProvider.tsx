@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useSession } from '@/components/Auth/SessionContextProvider';
 import { useQuery } from '@tanstack/react-query';
-import { VtoModel, ModelPack } from './ModelPoseSelector';
+import { VtoModel, ModelPack, AnalyzedGarment } from '@/types/vto';
 import { OneToManyInputs } from './modes/OneToManyInputs';
 import { RandomPairsInputs } from './modes/RandomPairsInputs';
 import { PrecisePairsInputs } from './modes/PrecisePairsInputs';
@@ -11,10 +11,9 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Info, Loader2, Wand2 } from 'lucide-react';
-import { useLanguage } from '@/context/LanguageContext';
+import { useLanguage } from "@/context/LanguageContext";
 import { showError, showSuccess } from '@/utils/toast';
 import { calculateFileHash } from '@/lib/utils';
-import { AnalyzedGarment } from '@/types/vto';
 import { isPoseCompatible } from '@/lib/vto-utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { ModelPoseSelector } from './ModelPoseSelector';
@@ -82,7 +81,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
       if (!session?.user) return [];
       let query = supabase
         .from('mira-agent-model-generation-jobs')
-        .select('id, base_model_image_url, final_posed_images, gender')
+        .select('id, base_model_image_url, final_posed_images, gender, target_body_part')
         .eq('user_id', session.user.id)
         .eq('status', 'complete');
       
@@ -99,6 +98,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
           baseModelUrl: job.base_model_image_url,
           poses: (job.final_posed_images || []).filter((p: any) => p.is_upscaled),
           gender: job.gender,
+          target_body_part: job.target_body_part,
         }))
         .filter(model => model.poses.length > 0);
     },
@@ -258,12 +258,11 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
         else if (garmentGender === 'unisex') targetModels = [...maleModels, ...femaleModels];
 
         targetModels.forEach(model => {
-            model.poses.filter(pose => selectedModelUrls.has(pose.final_url)).forEach(pose => {
-                const compatibility = isPoseCompatible(garment, pose, isStrictFiltering);
-                if (compatibility.compatible) {
+            if (isPoseCompatible(garment, model, isStrictFiltering).compatible) {
+                model.poses.filter(pose => selectedModelUrls.has(pose.final_url)).forEach(pose => {
                     finalQueue.push({ person: { url: pose.final_url, model_job_id: model.jobId }, garment: { url: garment.previewUrl, file: garment.file, analysis: garment.analysis, hash: garment.hash }, appendix: generalAppendix });
-                }
-            });
+                });
+            }
         });
     } else if (mode === 'random-pairs') {
         const maleGarments = analyzedRandomGarments.filter(g => g.analysis?.intended_gender === 'male');
@@ -276,12 +275,11 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
             for (let i = 0; i < numPairs; i++) {
                 const garment = garments[i];
                 const model = models[i % models.length];
-                model.poses.filter(pose => selectedModelUrls.has(pose.final_url)).forEach(pose => {
-                    const compatibility = isPoseCompatible(garment, pose, isStrictFiltering);
-                    if (compatibility.compatible) {
+                if (isPoseCompatible(garment, model, isStrictFiltering).compatible) {
+                    model.poses.filter(pose => selectedModelUrls.has(pose.final_url)).forEach(pose => {
                         finalQueue.push({ person: { url: pose.final_url, model_job_id: model.jobId }, garment: { url: garment.previewUrl, file: garment.file, analysis: garment.analysis, hash: garment.hash }, appendix: generalAppendix });
-                    }
-                });
+                    });
+                }
             }
         };
         createPairs([...maleGarments, ...unisexGarments], maleModels);
@@ -290,12 +288,8 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
         precisePairs.forEach(pair => {
             const modelForPair = models?.find(m => m.poses.some(p => p.final_url === pair.person.url));
             if (modelForPair) {
-                const pose = modelForPair.poses.find(p => p.final_url === pair.person.url);
-                if (pose) {
-                    const compatibility = isPoseCompatible(pair.garment as any, pose, isStrictFiltering);
-                    if (compatibility.compatible) {
-                        finalQueue.push({ ...pair, person: { ...pair.person, model_job_id: modelForPair.jobId } });
-                    }
+                if (isPoseCompatible(pair.garment as any, modelForPair, isStrictFiltering).compatible) {
+                    finalQueue.push({ ...pair, person: { ...pair.person, model_job_id: modelForPair.jobId } });
                 }
             }
         });
@@ -332,7 +326,7 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
                 <TooltipProvider>
                   <Tooltip>
                     <TooltipTrigger asChild><Info className="h-4 w-4 text-muted-foreground cursor-help" /></TooltipTrigger>
-                    <TooltipContent><p className="max-w-xs">When enabled, the system prevents incompatible pairings (e.g., putting a t-shirt on a close-up of shoes). Disable for more creative freedom.</p></TooltipContent>
+                    <TooltipContent><p className="max-w-xs">When enabled, the system prevents incompatible pairings (e.g., putting a t-shirt on a model designated for lower-body shots). Disable for more creative freedom.</p></TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
                 <Switch id="strict-pairing-switch" checked={isStrictFiltering} onCheckedChange={setIsStrictFiltering} />
@@ -363,6 +357,8 @@ export const VtoInputProvider = ({ mode, onQueueReady, onGoBack }: VtoInputProvi
             isLoadingPacks={isLoadingPacks}
             selectedPackId={selectedPackId}
             setSelectedPackId={setSelectedPackId}
+            garmentFilter={mode === 'one-to-many' ? analyzedGarment : null}
+            isStrict={isStrictFiltering}
           />
           <DialogFooter><Button onClick={() => setIsModelModalOpen(false)}>Done</Button></DialogFooter>
         </DialogContent>

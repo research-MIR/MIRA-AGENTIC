@@ -8,22 +8,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 import { AlertTriangle, CheckCircle } from 'lucide-react';
 import { SecureImageDisplay } from './SecureImageDisplay';
-
-interface Pose {
-  final_url: string;
-}
-
-export interface VtoModel {
-  jobId: string;
-  baseModelUrl: string | null;
-  poses: Pose[];
-  gender: 'male' | 'female' | null;
-}
-
-export interface ModelPack {
-  id: string;
-  name: string;
-}
+import { VtoModel, ModelPack, AnalyzedGarment } from '@/types/vto';
+import { isPoseCompatible } from '@/lib/vto-utils';
 
 interface ModelPoseSelectorProps {
   mode: 'single' | 'multiple' | 'get-all';
@@ -37,6 +23,8 @@ interface ModelPoseSelectorProps {
   isLoadingPacks: boolean;
   selectedPackId: string;
   setSelectedPackId: (id: string) => void;
+  garmentFilter?: AnalyzedGarment | null;
+  isStrict: boolean;
 }
 
 export const ModelPoseSelector = ({
@@ -50,12 +38,15 @@ export const ModelPoseSelector = ({
   packs,
   isLoadingPacks,
   selectedPackId,
-  setSelectedPackId
+  setSelectedPackId,
+  garmentFilter,
+  isStrict,
 }: ModelPoseSelectorProps) => {
   const { t } = useLanguage();
 
-  const handleSelect = (poseUrls: string[]) => {
+  const handleSelect = (model: VtoModel) => {
     if (onSelect) {
+      const poseUrls = model.poses.map(p => p.final_url);
       onSelect(poseUrls);
     }
   };
@@ -107,9 +98,20 @@ export const ModelPoseSelector = ({
         <ScrollArea className="h-96">
           <div className="grid grid-cols-3 md:grid-cols-4 gap-2 pr-4">
             {models.map((model) => {
+              const { compatible, reason } = isPoseCompatible(garmentFilter, model, isStrict);
               const isSelected = model.poses.length > 0 && model.poses.some(p => selectedUrls?.has(p.final_url));
+              
               return (
-                <button key={model.jobId} onClick={() => handleSelect(model.poses.map(p => p.final_url))} className="relative aspect-square block w-full h-full group">
+                <button 
+                  key={model.jobId} 
+                  onClick={() => handleSelect(model)} 
+                  disabled={!compatible}
+                  className={cn(
+                    "relative aspect-square block w-full h-full group",
+                    !compatible && "opacity-50 cursor-not-allowed"
+                  )}
+                  title={!compatible ? reason : `Select model ${model.jobId}`}
+                >
                   <SecureImageDisplay imageUrl={model.baseModelUrl} alt={`Model ${model.jobId}`} />
                   {isSelected && (
                     <div className="absolute inset-0 bg-primary/70 flex items-center justify-center rounded-md">

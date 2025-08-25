@@ -59,6 +59,14 @@ export interface Pose {
   retry_count?: number;
 }
 
+export interface VtoModel {
+  jobId: string;
+  baseModelUrl: string | null;
+  poses: Pose[];
+  gender: 'male' | 'female' | null;
+  target_body_part: 'upper_body' | 'lower_body' | 'full_body' | null;
+}
+
 export interface AnalyzedGarment {
   file?: File;
   previewUrl: string;
