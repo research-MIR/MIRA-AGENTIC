@@ -117,7 +117,7 @@ serve(async (req) => {
     fal.config({ credentials: FAL_KEY });
     
     const lorasPayload = REQUIRED_LORAS.map(lora => ({
-        path: lora.source_url,
+        path: lora.path,
         ...lora.params
     }));
 
