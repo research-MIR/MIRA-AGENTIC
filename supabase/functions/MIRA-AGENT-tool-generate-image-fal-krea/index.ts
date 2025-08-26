@@ -12,19 +12,6 @@ const corsHeaders = {
 const FAL_KEY = Deno.env.get('FAL_KEY');
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
 
-const REQUIRED_LORAS = [
-    {
-        key: 'v15-bf16',
-        source_url: 'https://huggingface.co/jhguighukjghkj/Test/resolve/main/v15-bf16.safetensors',
-        params: { scale: 1.0 }
-    },
-    {
-        key: 'fix-v2',
-        source_url: 'https://huggingface.co/jhguighukjghkj/Test/resolve/main/fix-v2.safetensors',
-        params: { scale: 1.0 }
-    }
-];
-
 const sizeToKreaEnum: { [key: string]: string } = {
     'square': 'square',
     'square_hd': 'square_hd',
@@ -85,98 +72,9 @@ async function describeImage(base64Data: string, mimeType: string): Promise<stri
     }
 }
 
-async function ensureLorasAreCached(supabase: SupabaseClient, logPrefix: string): Promise<any[]> {
-    console.log(`${logPrefix} Ensuring all required LoRAs are cached...`);
-    
-    const finalLoras = [];
-
-    for (const lora of REQUIRED_LORAS) {
-        let isAvailable = false;
-        let falUrl = null;
-        let attempts = 0;
-        const maxAttempts = 10; // Wait for up to 50 seconds (10 * 5s)
-
-        while (!isAvailable && attempts < maxAttempts) {
-            attempts++;
-            console.log(`${logPrefix} Checking cache for '${lora.key}', attempt ${attempts}...`);
-
-            let { data: cachedLora, error: fetchError } = await supabase
-                .from('lora_url_cache')
-                .select('fal_url, status')
-                .eq('key', lora.key)
-                .maybeSingle();
-
-            if (fetchError) throw new Error(`Failed to query LoRA cache for '${lora.key}': ${fetchError.message}`);
-
-            if (cachedLora?.status === 'available' && cachedLora.fal_url) {
-                console.log(`${logPrefix} Cache hit for '${lora.key}'. Status: available.`);
-                falUrl = cachedLora.fal_url;
-                isAvailable = true;
-            } else if (cachedLora?.status === 'uploading') {
-                console.log(`${logPrefix} Cache hit for '${lora.key}'. Status: uploading. Waiting...`);
-                await new Promise(resolve => setTimeout(resolve, 5000));
-            } else {
-                console.log(`${logPrefix} Cache miss for '${lora.key}'. Attempting to claim upload task.`);
-                
-                const { data: claimedLora, error: claimError } = await supabase
-                    .from('lora_url_cache')
-                    .upsert({ key: lora.key, source_url: lora.source_url, status: 'uploading' }, { onConflict: 'key' })
-                    .eq('status', 'pending')
-                    .select('key')
-                    .single();
-
-                if (claimError && claimError.code !== 'PGRST116') {
-                    throw new Error(`Failed to claim LoRA upload for '${lora.key}': ${claimError.message}`);
-                }
-
-                if (claimedLora) {
-                    console.log(`${logPrefix} Successfully claimed upload for '${lora.key}'. Starting upload from source: ${lora.source_url}`);
-                    try {
-                        const uploadedUrl = await fal.storage.upload(new URL(lora.source_url));
-                        console.log(`${logPrefix} Upload complete for '${lora.key}'. New Fal URL: ${uploadedUrl}`);
-                        
-                        const { error: updateError } = await supabase
-                            .from('lora_url_cache')
-                            .update({ fal_url: uploadedUrl, status: 'available' })
-                            .eq('key', lora.key);
-                        
-                        if (updateError) throw new Error(`Failed to update cache for '${lora.key}' after upload: ${updateError.message}`);
-                        
-                        console.log(`${logPrefix} Upload successful. Waiting 5 seconds for propagation...`);
-                        await new Promise(resolve => setTimeout(resolve, 5000));
-                        console.log(`${logPrefix} Delay complete.`);
-
-                        falUrl = uploadedUrl;
-                        isAvailable = true;
-                    } catch (uploadError) {
-                        console.error(`${logPrefix} Upload failed for '${lora.key}'. Resetting status to 'pending'. Error:`, uploadError);
-                        await supabase.from('lora_url_cache').update({ status: 'pending' }).eq('key', lora.key);
-                        throw uploadError;
-                    }
-                } else {
-                    console.log(`${logPrefix} Lost race to claim upload for '${lora.key}'. Another worker is handling it. Waiting...`);
-                    await new Promise(resolve => setTimeout(resolve, 5000));
-                }
-            }
-        }
-
-        if (!isAvailable) {
-            throw new Error(`Failed to get available status for LoRA '${lora.key}' after ${maxAttempts} attempts.`);
-        }
-
-        finalLoras.push({
-            path: falUrl,
-            ...lora.params
-        });
-    }
-    
-    console.log(`${logPrefix} All LoRAs are cached and ready. Assembling final payload.`);
-    return finalLoras;
-}
-
 serve(async (req) => {
   const requestId = req.headers.get("x-request-id") || `agent-krea-${Date.now()}`;
-  console.log(`[KreaTool][${requestId}] Function invoked.`);
+  console.log(`[KreaTool][${requestId}] Function invoked (LoRAs temporarily disabled for testing).`);
 
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -206,7 +104,6 @@ serve(async (req) => {
     }
 
     fal.config({ credentials: FAL_KEY });
-    const lorasPayload = await ensureLorasAreCached(supabaseAdmin, `[KreaTool][${requestId}]`);
 
     const falInput = {
         prompt: prompt,
@@ -215,10 +112,10 @@ serve(async (req) => {
         num_images: finalImageCount,
         seed: seed ? Number(seed) : undefined,
         enable_safety_checker: false,
-        loras: lorasPayload
+        // loras parameter is intentionally omitted for this test
     };
 
-    console.log(`[KreaTool][${requestId}] Calling fal-ai/flux-krea-lora with payload...`);
+    console.log(`[KreaTool][${requestId}] Calling fal-ai/flux-krea-lora with payload (NO LORAS)...`);
 
     const result: any = await fal.subscribe("fal-ai/flux-krea-lora", {
       input: falInput,
