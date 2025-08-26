@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { fal } from 'npm:@fal-ai/client@1.5.0';
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
@@ -19,6 +19,7 @@ const sizeToKreaEnum: { [key: string]: string } = {
     'landscape_4_3': 'landscape_4_3',
     'landscape_16_9': 'landscape_16_9',
     'portrait_16_9': 'portrait_16_9',
+    // Aliases for robustness
     '1:1': 'square',
     '1024x1024': 'square_hd',
     '3:4': 'portrait_4_3',
@@ -36,21 +37,36 @@ const sizeToKreaEnum: { [key: string]: string } = {
 
 function mapToKreaImageSize(size?: string): string | { width: number, height: number } {
     if (!size) return "landscape_4_3";
-    if (sizeToKreaEnum[size]) return sizeToKreaEnum[size];
+
+    // 1. Check for direct enum match
+    if (sizeToKreaEnum[size]) {
+        return sizeToKreaEnum[size];
+    }
+
+    // 2. Parse for custom WxH resolution
     if (size.includes('x')) {
         const parts = size.split('x').map(Number);
         if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1]) && parts[0] > 0 && parts[1] > 0) {
             return { width: parts[0], height: parts[1] };
         }
     }
+    
+    // 3. Parse for ratio string and calculate a size
     if (size.includes(':')) {
         const parts = size.split(':').map(Number);
         if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1]) && parts[0] > 0 && parts[1] > 0) {
             const long_edge = 1440;
-            const w = parts[0], h = parts[1];
-            return w > h ? { width: long_edge, height: Math.round(long_edge * (h / w)) } : { width: Math.round(long_edge * (w / h)), height: long_edge };
+            const w = parts[0];
+            const h = parts[1];
+            if (w > h) {
+                return { width: long_edge, height: Math.round(long_edge * (h / w)) };
+            } else {
+                return { width: Math.round(long_edge * (w / h)), height: long_edge };
+            }
         }
     }
+
+    // 4. Fallback to default
     return "landscape_4_3";
 }
 
@@ -74,7 +90,7 @@ async function describeImage(base64Data: string, mimeType: string): Promise<stri
 
 serve(async (req) => {
   const requestId = req.headers.get("x-request-id") || `agent-krea-${Date.now()}`;
-  console.log(`[KreaTool][${requestId}] Function invoked (LoRAs temporarily disabled for testing).`);
+  console.log(`[KreaTool][${requestId}] Function invoked.`);
 
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -112,12 +128,11 @@ serve(async (req) => {
         num_images: finalImageCount,
         seed: seed ? Number(seed) : undefined,
         enable_safety_checker: false,
-        // loras parameter is intentionally omitted for this test
     };
 
-    console.log(`[KreaTool][${requestId}] Calling fal-ai/flux-krea-lora with payload (NO LORAS)...`);
+    console.log(`[KreaTool][${requestId}] Calling fal-ai/flux/krea with payload:`, falInput);
 
-    const result: any = await fal.subscribe("fal-ai/flux-krea-lora", {
+    const result: any = await fal.subscribe("fal-ai/flux/krea", {
       input: falInput,
       logs: true,
       onQueueUpdate: (update) => {
