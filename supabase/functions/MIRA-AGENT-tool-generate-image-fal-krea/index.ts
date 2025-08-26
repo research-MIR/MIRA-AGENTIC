@@ -100,7 +100,6 @@ async function ensureLorasAreCached(supabase: SupabaseClient, logPrefix: string)
             attempts++;
             console.log(`${logPrefix} Checking cache for '${lora.key}', attempt ${attempts}...`);
 
-            // 1. Check current state
             let { data: cachedLora, error: fetchError } = await supabase
                 .from('lora_url_cache')
                 .select('fal_url, status')
@@ -115,30 +114,27 @@ async function ensureLorasAreCached(supabase: SupabaseClient, logPrefix: string)
                 isAvailable = true;
             } else if (cachedLora?.status === 'uploading') {
                 console.log(`${logPrefix} Cache hit for '${lora.key}'. Status: uploading. Waiting...`);
-                await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds
-            } else { // Status is 'pending' or row doesn't exist
+                await new Promise(resolve => setTimeout(resolve, 5000));
+            } else {
                 console.log(`${logPrefix} Cache miss for '${lora.key}'. Attempting to claim upload task.`);
                 
-                // Atomically try to claim the upload task
                 const { data: claimedLora, error: claimError } = await supabase
                     .from('lora_url_cache')
                     .upsert({ key: lora.key, source_url: lora.source_url, status: 'uploading' }, { onConflict: 'key' })
-                    .eq('status', 'pending') // Only update if it's currently pending
+                    .eq('status', 'pending')
                     .select('key')
                     .single();
 
-                if (claimError && claimError.code !== 'PGRST116') { // PGRST116 means no rows were returned, which is expected if we lost the race
+                if (claimError && claimError.code !== 'PGRST116') {
                     throw new Error(`Failed to claim LoRA upload for '${lora.key}': ${claimError.message}`);
                 }
 
                 if (claimedLora) {
-                    // We won the race and claimed the job
                     console.log(`${logPrefix} Successfully claimed upload for '${lora.key}'. Starting upload from source: ${lora.source_url}`);
                     try {
                         const uploadedUrl = await fal.storage.upload(new URL(lora.source_url));
                         console.log(`${logPrefix} Upload complete for '${lora.key}'. New Fal URL: ${uploadedUrl}`);
                         
-                        // Update the cache with the final URL and set status to available
                         const { error: updateError } = await supabase
                             .from('lora_url_cache')
                             .update({ fal_url: uploadedUrl, status: 'available' })
@@ -146,16 +142,18 @@ async function ensureLorasAreCached(supabase: SupabaseClient, logPrefix: string)
                         
                         if (updateError) throw new Error(`Failed to update cache for '${lora.key}' after upload: ${updateError.message}`);
                         
+                        console.log(`${logPrefix} Upload successful. Waiting 5 seconds for propagation...`);
+                        await new Promise(resolve => setTimeout(resolve, 5000));
+                        console.log(`${logPrefix} Delay complete.`);
+
                         falUrl = uploadedUrl;
                         isAvailable = true;
                     } catch (uploadError) {
-                        // If upload fails, reset the status to 'pending' so another worker can try
                         console.error(`${logPrefix} Upload failed for '${lora.key}'. Resetting status to 'pending'. Error:`, uploadError);
                         await supabase.from('lora_url_cache').update({ status: 'pending' }).eq('key', lora.key);
                         throw uploadError;
                     }
                 } else {
-                    // We lost the race, another worker is uploading. Wait and retry the loop.
                     console.log(`${logPrefix} Lost race to claim upload for '${lora.key}'. Another worker is handling it. Waiting...`);
                     await new Promise(resolve => setTimeout(resolve, 5000));
                 }
