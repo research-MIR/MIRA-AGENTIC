@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { fal } from 'npm:@fal-ai/client@1.5.0';
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
@@ -12,6 +12,19 @@ const corsHeaders = {
 const FAL_KEY = Deno.env.get('FAL_KEY');
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
 
+const REQUIRED_LORAS = [
+    {
+        key: 'v15-bf16',
+        source_url: 'https://huggingface.co/jhguighukjghkj/Test/resolve/main/v15-bf16.safetensors',
+        params: { scale: 1.0 }
+    },
+    {
+        key: 'fix-v2',
+        source_url: 'https://huggingface.co/jhguighukjghkj/Test/resolve/main/fix-v2.safetensors',
+        params: { scale: 1.0 }
+    }
+];
+
 const sizeToKreaEnum: { [key: string]: string } = {
     'square': 'square',
     'square_hd': 'square_hd',
@@ -19,7 +32,6 @@ const sizeToKreaEnum: { [key: string]: string } = {
     'landscape_4_3': 'landscape_4_3',
     'landscape_16_9': 'landscape_16_9',
     'portrait_16_9': 'portrait_16_9',
-    // Aliases for robustness
     '1:1': 'square',
     '1024x1024': 'square_hd',
     '3:4': 'portrait_4_3',
@@ -37,36 +49,21 @@ const sizeToKreaEnum: { [key: string]: string } = {
 
 function mapToKreaImageSize(size?: string): string | { width: number, height: number } {
     if (!size) return "landscape_4_3";
-
-    // 1. Check for direct enum match
-    if (sizeToKreaEnum[size]) {
-        return sizeToKreaEnum[size];
-    }
-
-    // 2. Parse for custom WxH resolution
+    if (sizeToKreaEnum[size]) return sizeToKreaEnum[size];
     if (size.includes('x')) {
         const parts = size.split('x').map(Number);
         if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1]) && parts[0] > 0 && parts[1] > 0) {
             return { width: parts[0], height: parts[1] };
         }
     }
-    
-    // 3. Parse for ratio string and calculate a size
     if (size.includes(':')) {
         const parts = size.split(':').map(Number);
         if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1]) && parts[0] > 0 && parts[1] > 0) {
             const long_edge = 1440;
-            const w = parts[0];
-            const h = parts[1];
-            if (w > h) {
-                return { width: long_edge, height: Math.round(long_edge * (h / w)) };
-            } else {
-                return { width: Math.round(long_edge * (w / h)), height: long_edge };
-            }
+            const w = parts[0], h = parts[1];
+            return w > h ? { width: long_edge, height: Math.round(long_edge * (h / w)) } : { width: Math.round(long_edge * (w / h)), height: long_edge };
         }
     }
-
-    // 4. Fallback to default
     return "landscape_4_3";
 }
 
@@ -86,6 +83,36 @@ async function describeImage(base64Data: string, mimeType: string): Promise<stri
         console.error("[ImageDescriber] Error:", error.message);
         return "Description generation failed.";
     }
+}
+
+async function ensureLorasAreCached(supabase: SupabaseClient, logPrefix: string): Promise<any[]> {
+    console.log(`${logPrefix} Ensuring all required LoRAs are cached...`);
+    const { data: cachedLoras, error: cacheError } = await supabase.from('lora_url_cache').select('*');
+    if (cacheError) throw new Error(`Failed to query LoRA cache: ${cacheError.message}`);
+
+    const cacheMap = new Map(cachedLoras.map(l => [l.key, l.fal_url]));
+    
+    for (const lora of REQUIRED_LORAS) {
+        if (!cacheMap.get(lora.key)) {
+            console.log(`${logPrefix} Cache miss for '${lora.key}'. Uploading from source: ${lora.source_url}`);
+            const uploadedUrl = await fal.storage.upload(new URL(lora.source_url));
+            console.log(`${logPrefix} Upload complete for '${lora.key}'. New Fal URL: ${uploadedUrl}`);
+            
+            const { error: upsertError } = await supabase.from('lora_url_cache').upsert({
+                key: lora.key,
+                source_url: lora.source_url,
+                fal_url: uploadedUrl
+            });
+            if (upsertError) throw new Error(`Failed to update LoRA cache for '${lora.key}': ${upsertError.message}`);
+            cacheMap.set(lora.key, uploadedUrl);
+        }
+    }
+    
+    console.log(`${logPrefix} All LoRAs are cached. Assembling payload.`);
+    return REQUIRED_LORAS.map(lora => ({
+        path: cacheMap.get(lora.key),
+        ...lora.params
+    }));
 }
 
 serve(async (req) => {
@@ -120,6 +147,7 @@ serve(async (req) => {
     }
 
     fal.config({ credentials: FAL_KEY });
+    const lorasPayload = await ensureLorasAreCached(supabaseAdmin, `[KreaTool][${requestId}]`);
 
     const falInput = {
         prompt: prompt,
@@ -128,11 +156,12 @@ serve(async (req) => {
         num_images: finalImageCount,
         seed: seed ? Number(seed) : undefined,
         enable_safety_checker: false,
+        loras: lorasPayload
     };
 
-    console.log(`[KreaTool][${requestId}] Calling fal-ai/flux/krea with payload:`, falInput);
+    console.log(`[KreaTool][${requestId}] Calling fal-ai/flux-krea-lora with payload...`);
 
-    const result: any = await fal.subscribe("fal-ai/flux/krea", {
+    const result: any = await fal.subscribe("fal-ai/flux-krea-lora", {
       input: falInput,
       logs: true,
       onQueueUpdate: (update) => {
