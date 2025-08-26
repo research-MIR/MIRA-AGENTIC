@@ -87,32 +87,93 @@ async function describeImage(base64Data: string, mimeType: string): Promise<stri
 
 async function ensureLorasAreCached(supabase: SupabaseClient, logPrefix: string): Promise<any[]> {
     console.log(`${logPrefix} Ensuring all required LoRAs are cached...`);
-    const { data: cachedLoras, error: cacheError } = await supabase.from('lora_url_cache').select('*');
-    if (cacheError) throw new Error(`Failed to query LoRA cache: ${cacheError.message}`);
-
-    const cacheMap = new Map(cachedLoras.map(l => [l.key, l.fal_url]));
     
+    const finalLoras = [];
+
     for (const lora of REQUIRED_LORAS) {
-        if (!cacheMap.get(lora.key)) {
-            console.log(`${logPrefix} Cache miss for '${lora.key}'. Uploading from source: ${lora.source_url}`);
-            const uploadedUrl = await fal.storage.upload(new URL(lora.source_url));
-            console.log(`${logPrefix} Upload complete for '${lora.key}'. New Fal URL: ${uploadedUrl}`);
-            
-            const { error: upsertError } = await supabase.from('lora_url_cache').upsert({
-                key: lora.key,
-                source_url: lora.source_url,
-                fal_url: uploadedUrl
-            });
-            if (upsertError) throw new Error(`Failed to update LoRA cache for '${lora.key}': ${upsertError.message}`);
-            cacheMap.set(lora.key, uploadedUrl);
+        let isAvailable = false;
+        let falUrl = null;
+        let attempts = 0;
+        const maxAttempts = 10; // Wait for up to 50 seconds (10 * 5s)
+
+        while (!isAvailable && attempts < maxAttempts) {
+            attempts++;
+            console.log(`${logPrefix} Checking cache for '${lora.key}', attempt ${attempts}...`);
+
+            // 1. Check current state
+            let { data: cachedLora, error: fetchError } = await supabase
+                .from('lora_url_cache')
+                .select('fal_url, status')
+                .eq('key', lora.key)
+                .maybeSingle();
+
+            if (fetchError) throw new Error(`Failed to query LoRA cache for '${lora.key}': ${fetchError.message}`);
+
+            if (cachedLora?.status === 'available' && cachedLora.fal_url) {
+                console.log(`${logPrefix} Cache hit for '${lora.key}'. Status: available.`);
+                falUrl = cachedLora.fal_url;
+                isAvailable = true;
+            } else if (cachedLora?.status === 'uploading') {
+                console.log(`${logPrefix} Cache hit for '${lora.key}'. Status: uploading. Waiting...`);
+                await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds
+            } else { // Status is 'pending' or row doesn't exist
+                console.log(`${logPrefix} Cache miss for '${lora.key}'. Attempting to claim upload task.`);
+                
+                // Atomically try to claim the upload task
+                const { data: claimedLora, error: claimError } = await supabase
+                    .from('lora_url_cache')
+                    .upsert({ key: lora.key, source_url: lora.source_url, status: 'uploading' }, { onConflict: 'key' })
+                    .eq('status', 'pending') // Only update if it's currently pending
+                    .select('key')
+                    .single();
+
+                if (claimError && claimError.code !== 'PGRST116') { // PGRST116 means no rows were returned, which is expected if we lost the race
+                    throw new Error(`Failed to claim LoRA upload for '${lora.key}': ${claimError.message}`);
+                }
+
+                if (claimedLora) {
+                    // We won the race and claimed the job
+                    console.log(`${logPrefix} Successfully claimed upload for '${lora.key}'. Starting upload from source: ${lora.source_url}`);
+                    try {
+                        const uploadedUrl = await fal.storage.upload(new URL(lora.source_url));
+                        console.log(`${logPrefix} Upload complete for '${lora.key}'. New Fal URL: ${uploadedUrl}`);
+                        
+                        // Update the cache with the final URL and set status to available
+                        const { error: updateError } = await supabase
+                            .from('lora_url_cache')
+                            .update({ fal_url: uploadedUrl, status: 'available' })
+                            .eq('key', lora.key);
+                        
+                        if (updateError) throw new Error(`Failed to update cache for '${lora.key}' after upload: ${updateError.message}`);
+                        
+                        falUrl = uploadedUrl;
+                        isAvailable = true;
+                    } catch (uploadError) {
+                        // If upload fails, reset the status to 'pending' so another worker can try
+                        console.error(`${logPrefix} Upload failed for '${lora.key}'. Resetting status to 'pending'. Error:`, uploadError);
+                        await supabase.from('lora_url_cache').update({ status: 'pending' }).eq('key', lora.key);
+                        throw uploadError;
+                    }
+                } else {
+                    // We lost the race, another worker is uploading. Wait and retry the loop.
+                    console.log(`${logPrefix} Lost race to claim upload for '${lora.key}'. Another worker is handling it. Waiting...`);
+                    await new Promise(resolve => setTimeout(resolve, 5000));
+                }
+            }
         }
+
+        if (!isAvailable) {
+            throw new Error(`Failed to get available status for LoRA '${lora.key}' after ${maxAttempts} attempts.`);
+        }
+
+        finalLoras.push({
+            path: falUrl,
+            ...lora.params
+        });
     }
     
-    console.log(`${logPrefix} All LoRAs are cached. Assembling payload.`);
-    return REQUIRED_LORAS.map(lora => ({
-        path: cacheMap.get(lora.key),
-        ...lora.params
-    }));
+    console.log(`${logPrefix} All LoRAs are cached and ready. Assembling final payload.`);
+    return finalLoras;
 }
 
 serve(async (req) => {
