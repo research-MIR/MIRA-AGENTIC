@@ -1,279 +1,198 @@
-import { useState, useMemo, useRef } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useSession } from "@/components/Auth/SessionContextProvider";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Loader2, Image as ImageIcon, Wand2, UploadCloud, X, Palette } from "lucide-react";
-import { useLanguage } from "@/context/LanguageContext";
-import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
-import { ImageCompareModal } from "@/components/ImageCompareModal";
-import { RecentJobThumbnail } from "@/components/Jobs/RecentJobThumbnail";
-import { useSecureImage } from "@/hooks/useSecureImage";
-import { useDropzone } from "@/hooks/useDropzone";
-import { cn } from "@/lib/utils";
-import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel";
+"use client";
 
-interface EditJob {
+import React, { useState, useCallback, useEffect } from 'react';
+import { supabase } from '@/integrations/supabase/client';
+import ImageUploader from '@/components/ImageUploader';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Loader2, AlertCircle } from 'lucide-react';
+import { useToast } from "@/components/ui/use-toast";
+
+interface RecentEdit {
   id: string;
-  status: 'queued' | 'processing' | 'complete' | 'failed';
-  final_result?: {
-    publicUrl: string;
-  };
-  metadata?: {
-    source_image_url?: string;
-    reference_image_urls?: string[];
-    prompt?: string;
-  };
-  error_message?: string;
+  final_result: { publicUrl: string };
+  created_at: string;
 }
 
-const SecureDisplayImage = ({ imageUrl, alt }: { imageUrl: string | null, alt: string }) => {
-  const { displayUrl, isLoading, error } = useSecureImage(imageUrl);
-
-  if (!imageUrl) return null;
-
-  return (
-    <div className="relative w-full h-full">
-      {isLoading && <Skeleton className="w-full h-full" />}
-      {error && <div className="w-full h-full bg-destructive/10 rounded-md flex items-center justify-center text-destructive text-sm p-2">Error loading image.</div>}
-      {displayUrl && <img src={displayUrl} alt={alt} className="w-full h-full object-contain" />}
-    </div>
-  );
-};
-
-const FileUploader = ({ onFileSelect, title, imageUrl, onClear, icon, multiple = false }: { onFileSelect: (files: FileList) => void, title: string, imageUrl?: string | null, onClear?: () => void, icon: React.ReactNode, multiple?: boolean }) => {
-    const inputRef = useRef<HTMLInputElement>(null);
-    const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: (e) => e.dataTransfer.files && onFileSelect(e.dataTransfer.files) });
-  
-    if (imageUrl && onClear) {
-      return (
-        <div className="relative h-48 w-full">
-          <img src={imageUrl} alt={title} className="w-full h-full object-cover rounded-md" />
-          <Button variant="destructive" size="icon" className="absolute top-2 right-2 h-6 w-6 z-10" onClick={onClear}><X className="h-4 w-4" /></Button>
-        </div>
-      );
-    }
-  
-    return (
-      <div {...dropzoneProps} className={cn("flex flex-col h-48 w-full justify-center items-center rounded-lg border border-dashed p-4 text-center transition-colors cursor-pointer", isDraggingOver && "border-primary bg-primary/10")} onClick={() => inputRef.current?.click()}>
-        <div className="text-center pointer-events-none">{icon}<p className="mt-2 text-sm font-semibold">{title}</p></div>
-        <Input ref={inputRef} type="file" multiple={multiple} className="hidden" accept="image/*" onChange={(e) => e.target.files && onFileSelect(e.target.files)} />
-      </div>
-    );
-};
-
 const EditWithWords = () => {
-  const { supabase, session } = useSession();
-  const { t } = useLanguage();
-  const queryClient = useQueryClient();
-  
-  const [sourceFile, setSourceFile] = useState<File | null>(null);
-  const [referenceFiles, setReferenceFiles] = useState<File[]>([]);
-  const [instruction, setInstruction] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
-  const [isCompareModalOpen, setIsCompareModalOpen] = useState(false);
+  const [sourceImage, setSourceImage] = useState<File | null>(null);
+  const [referenceImages, setReferenceImages] = useState<File[]>([]);
+  const [instruction, setInstruction] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [resultImageUrl, setResultImageUrl] = useState<string | null>(null);
+  const [recentEdits, setRecentEdits] = useState<RecentEdit[]>([]);
+  const { toast } = useToast();
 
-  const sourceImageUrl = useMemo(() => sourceFile ? URL.createObjectURL(sourceFile) : null, [sourceFile]);
-  const referenceImageUrls = useMemo(() => referenceFiles.map(f => URL.createObjectURL(f)), [referenceFiles]);
+  const fetchRecentEdits = useCallback(async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
 
-  const { data: recentJobs, isLoading: isLoadingRecent } = useQuery<EditJob[]>({
-    queryKey: ['recentEditJobs', session?.user?.id],
-    queryFn: async () => {
-      if (!session?.user) return [];
-      const { data, error } = await supabase
-        .from('mira-agent-comfyui-jobs')
-        .select('id, status, final_result, metadata, error_message')
-        .eq('metadata->>source', 'edit-with-words')
-        .eq('user_id', session.user.id)
-        .order('created_at', { ascending: false })
-        .limit(10);
-      if (error) throw error;
-      return data;
-    },
-    enabled: !!session?.user,
-  });
+    const { data, error } = await supabase
+      .from('mira-agent-comfyui-jobs')
+      .select('id, final_result, created_at')
+      .eq('user_id', user.id)
+      .eq('metadata->>source', 'edit-with-words')
+      .order('created_at', { ascending: false })
+      .limit(5);
 
-  const selectedJob = useMemo(() => recentJobs?.find(j => j.id === selectedJobId), [recentJobs, selectedJobId]);
+    if (error) {
+      console.error("Error fetching recent edits:", error);
+    } else if (data) {
+      setRecentEdits(data as RecentEdit[]);
+    }
+  }, []);
 
-  const startNew = () => {
-    setSelectedJobId(null);
-    setSourceFile(null);
-    setReferenceFiles([]);
-    setInstruction("");
-  };
+  useEffect(() => {
+    fetchRecentEdits();
+  }, [fetchRecentEdits]);
 
-  const handleSubmit = async () => {
-    if (!sourceFile) return showError("Please upload an image to edit.");
-    if (!instruction.trim()) return showError("Please provide an editing instruction.");
-    
-    setIsSubmitting(true);
-    let toastId = showLoading(t('sendingJob'));
+  const handleGenerate = useCallback(async () => {
+    if (!sourceImage) {
+      setError('Please upload a source image.');
+      return;
+    }
+    if (!instruction.trim()) {
+      setError('Please provide an instruction.');
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+    setResultImageUrl(null);
 
     try {
-        const uploadFile = async (file: File, type: 'source' | 'reference') => {
-            const filePath = `${session?.user?.id}/edit-${type}/${Date.now()}-${file.name}`;
-            const { data, error } = await supabase.storage
-                .from('mira-agent-user-uploads')
-                .upload(filePath, file);
-            if (error) throw error;
-            return supabase.storage.from('mira-agent-user-uploads').getPublicUrl(data.path).data.publicUrl;
-        };
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("You must be logged in to generate images.");
 
-        const sourcePublicUrl = await uploadFile(sourceFile, 'source');
-        const referencePublicUrls = await Promise.all(referenceFiles.map(file => uploadFile(file, 'reference')));
+      const uploadFile = async (file: File, folder: string) => {
+        const filePath = `${user.id}/${folder}/${Date.now()}-${file.name}`;
+        const { error: uploadError } = await supabase.storage
+          .from('mira-agent-user-uploads')
+          .upload(filePath, file);
+        if (uploadError) throw uploadError;
+        const { data: { publicUrl } } = supabase.storage
+          .from('mira-agent-user-uploads')
+          .getPublicUrl(filePath);
+        return publicUrl;
+      };
 
-        dismissToast(toastId);
-        toastId = showLoading("Sending job to the image editor...");
+      const source_image_url = await uploadFile(sourceImage, 'edit-with-words/source');
+      
+      const reference_image_urls = await Promise.all(
+        referenceImages.map(file => uploadFile(file, 'edit-with-words/reference'))
+      );
 
-        const payload = {
-            source_image_url: sourcePublicUrl,
-            instruction: instruction,
-            reference_image_urls: referencePublicUrls,
-            invoker_user_id: session?.user?.id,
-        };
+      const { data, error: functionError } = await supabase.functions.invoke('MIRA-AGENT-tool-edit-with-words', {
+        body: {
+          source_image_url,
+          reference_image_urls,
+          instruction,
+          invoker_user_id: user.id,
+        },
+      });
 
-        const { error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-tool-edit-with-words', { body: payload });
+      if (functionError) {
+        throw new Error(`Generation failed: ${functionError.message || JSON.stringify(functionError)}`);
+      }
+      
+      if (data.error) {
+        throw new Error(`Generation failed: ${data.error}`);
+      }
 
-        if (proxyError) throw proxyError;
-        
-        dismissToast(toastId);
-        showSuccess("Edit job started! You can track its progress in the sidebar.");
-        queryClient.invalidateQueries({ queryKey: ['activeComfyJobs'] });
-        queryClient.invalidateQueries({ queryKey: ['recentEditJobs'] });
-        startNew();
-    } catch (err: any) {
-        dismissToast(toastId);
-        showError(`Job submission failed: ${err.message}`);
+      if (!data.finalImageUrl) {
+        throw new Error("Generation succeeded but did not return an image URL.");
+      }
+
+      setResultImageUrl(data.finalImageUrl);
+      
+      toast({
+        title: "Success!",
+        description: "Your image has been edited.",
+      });
+      
+      fetchRecentEdits(); // Refresh recent edits list
+
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
+      setError(`Failed to generate the image. ${errorMessage}`);
+      console.error(err);
     } finally {
-      setIsSubmitting(false);
+      setIsLoading(false);
     }
-  };
+  }, [sourceImage, referenceImages, instruction, toast, fetchRecentEdits]);
 
   return (
-    <>
-      <div className="p-4 md:p-8 h-screen overflow-y-auto">
-        <header className="pb-4 mb-8 border-b">
-          <h1 className="text-3xl font-bold">{t('editWithWords')}</h1>
-          <p className="text-muted-foreground">{t('editWithWordsDescription')}</p>
-        </header>
+    <div className="bg-gray-900 text-white min-h-screen p-8">
+      <h1 className="text-3xl font-bold mb-6">Modifica con Parole</h1>
+      <p className="text-gray-400 mb-8">Modifica le tue immagini usando semplici istruzioni di testo.</p>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          <div className="lg:col-span-1 space-y-6">
-            <Card>
-              <CardHeader><CardTitle>1. Provide Images</CardTitle></CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                    <Label>{t('sourceImage')}</Label>
-                    <FileUploader onFileSelect={(files) => files && setSourceFile(files[0])} title="Source" imageUrl={sourceImageUrl} onClear={() => setSourceFile(null)} icon={<ImageIcon className="h-8 w-8 text-muted-foreground" />} />
-                </div>
-                <div className="space-y-2">
-                    <Label>{t('referenceImage')}</Label>
-                    <FileUploader onFileSelect={(files) => files && setReferenceFiles(Array.from(files))} title="Reference(s)" icon={<Palette className="h-8 w-8 text-muted-foreground" />} multiple />
-                    {referenceImageUrls.length > 0 && (
-                        <div className="flex flex-wrap gap-2 pt-2">
-                            {referenceImageUrls.map((url, index) => (
-                                <div key={index} className="relative">
-                                    <img src={url} alt={`Reference ${index}`} className="w-16 h-16 object-cover rounded-md" />
-                                    <Button variant="destructive" size="icon" className="absolute -top-2 -right-2 h-5 w-5 rounded-full" onClick={() => setReferenceFiles(files => files.filter((_, i) => i !== index))}><X className="h-3 w-3" /></Button>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader><CardTitle>2. {t('editingInstruction')}</CardTitle></CardHeader>
-              <CardContent>
-                <Textarea value={instruction} onChange={(e) => setInstruction(e.target.value)} placeholder={t('instructionPlaceholder')} rows={4} />
-              </CardContent>
-            </Card>
-            <Button size="lg" className="w-full" onClick={handleSubmit} disabled={isSubmitting || !sourceFile || !instruction.trim()}>
-              {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
-              {t('generate')}
-            </Button>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {/* Input Column */}
+        <div className="flex flex-col gap-6 p-6 bg-gray-800 rounded-lg">
+          <h2 className="text-xl font-semibold">1. Provide Images</h2>
+          <ImageUploader
+            label="Immagine Sorgente"
+            onFilesChange={(files) => setSourceImage(files[0] || null)}
+            multiple={false}
+          />
+          <ImageUploader
+            label="Immagini di Riferimento"
+            onFilesChange={setReferenceImages}
+            multiple={true}
+          />
+          <div>
+            <h2 className="text-xl font-semibold mb-4">2. Istruzione di Modifica</h2>
+            <Input
+              value={instruction}
+              onChange={(e) => setInstruction(e.target.value)}
+              placeholder="Es. rendi i suoi blu, aggiungi un cappello alla persona..."
+              className="bg-gray-700 border-gray-600 text-white"
+            />
           </div>
-          <div className="lg:col-span-2 space-y-6">
-            <Card>
-              <CardHeader>
-                <div className="flex justify-between items-center">
-                  <CardTitle>{t('result')}</CardTitle>
-                  {selectedJob && <Button variant="outline" onClick={startNew}>{t('newJob')}</Button>}
+          <Button onClick={handleGenerate} disabled={isLoading} className="w-full">
+            {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            Genera
+          </Button>
+          {error && (
+            <div className="flex items-center gap-2 text-red-400">
+              <AlertCircle size={16} />
+              <p className="text-sm">{error}</p>
+            </div>
+          )}
+        </div>
+
+        {/* Output Column */}
+        <div className="flex flex-col gap-6 p-6 bg-gray-800 rounded-lg">
+          <h2 className="text-xl font-semibold">Risultato</h2>
+          <div className="flex items-center justify-center w-full h-96 bg-gray-900 rounded-lg">
+            {isLoading ? (
+              <Loader2 className="h-8 w-8 animate-spin text-gray-500" />
+            ) : resultImageUrl ? (
+              <img src={resultImageUrl} alt="Generated result" className="max-w-full max-h-full object-contain rounded-lg" />
+            ) : (
+              <p className="text-gray-500">Carica un'immagine di base per iniziare.</p>
+            )}
+          </div>
+          <h2 className="text-xl font-semibold">Modifiche Recenti</h2>
+          <div className="flex flex-col gap-4">
+            {recentEdits.length > 0 ? (
+              recentEdits.map(edit => (
+                <div key={edit.id} className="flex items-center gap-4 p-2 bg-gray-700 rounded-md">
+                  <img src={edit.final_result.publicUrl} alt="Recent edit" className="w-16 h-16 object-cover rounded" />
+                  <div className="text-sm text-gray-400">
+                    <p>ID: {edit.id.substring(0, 8)}...</p>
+                    <p>{new Date(edit.created_at).toLocaleString()}</p>
+                  </div>
                 </div>
-              </CardHeader>
-              <CardContent className="min-h-[400px]">
-                {selectedJob ? (
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="w-full aspect-square bg-muted rounded-md overflow-hidden flex justify-center items-center relative">
-                        <h3 className="font-semibold mb-2 absolute top-2 left-2 bg-background/80 px-2 py-1 rounded-full text-xs">{t('originalImage')}</h3>
-                        <SecureDisplayImage imageUrl={selectedJob.metadata?.source_image_url || null} alt="Original" />
-                      </div>
-                      <div className="w-full aspect-square bg-muted rounded-md overflow-hidden flex justify-center items-center relative">
-                        <h3 className="font-semibold mb-2 absolute top-2 left-2 bg-background/80 px-2 py-1 rounded-full text-xs">{t('result')}</h3>
-                        {selectedJob.status === 'complete' && selectedJob.final_result?.publicUrl ? (
-                          <SecureDisplayImage imageUrl={selectedJob.final_result.publicUrl} alt="Result" />
-                        ) : (
-                          <div className="w-full h-full flex flex-col items-center justify-center text-muted-foreground">
-                            <Loader2 className="h-8 w-8 animate-spin" />
-                            <p className="mt-2 text-sm">{t('inProgress')}</p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    {selectedJob.status === 'complete' && selectedJob.final_result?.publicUrl && (
-                      <Button className="w-full mt-4" onClick={() => setIsCompareModalOpen(true)}>{t('compareResults')}</Button>
-                    )}
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-                    <ImageIcon className="h-16 w-16" />
-                    <p className="mt-4">{t('uploadAnImageToStart')}</p>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader><CardTitle>{t('recentEdits')}</CardTitle></CardHeader>
-              <CardContent>
-                {isLoadingRecent ? <Skeleton className="h-24 w-full" /> : recentJobs && recentJobs.length > 0 ? (
-                  <Carousel opts={{ align: "start" }} className="w-full">
-                    <CarouselContent className="-ml-4">
-                      {recentJobs.map(job => (
-                        <CarouselItem key={job.id} className="pl-4 basis-auto">
-                          <RecentJobThumbnail
-                            job={job}
-                            onClick={() => setSelectedJobId(job.id)}
-                            isSelected={selectedJobId === job.id}
-                          />
-                        </CarouselItem>
-                      ))}
-                    </CarouselContent>
-                    <CarouselPrevious />
-                    <CarouselNext />
-                  </Carousel>
-                ) : (
-                  <p className="text-sm text-muted-foreground">{t('noRecentEdits')}</p>
-                )}
-              </CardContent>
-            </Card>
+              ))
+            ) : (
+              <p className="text-sm text-gray-500">Nessuna modifica recente trovata.</p>
+            )}
           </div>
         </div>
       </div>
-      {isCompareModalOpen && selectedJob?.metadata?.source_image_url && selectedJob?.final_result?.publicUrl && (
-        <ImageCompareModal 
-          isOpen={isCompareModalOpen}
-          onClose={() => setIsCompareModalOpen(false)}
-          beforeUrl={selectedJob.metadata.source_image_url}
-          afterUrl={selectedJob.final_result.publicUrl}
-        />
-      )}
-    </>
+    </div>
   );
 };
 

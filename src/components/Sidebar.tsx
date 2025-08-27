@@ -1,325 +1,63 @@
-import { useState } from "react";
-import { NavLink, useNavigate, useParams } from "react-router-dom";
-import { Button } from "./ui/button";
-import { MessageSquare, Image, GalleryHorizontal, LogOut, HelpCircle, LogIn, Shirt, Code, Wand2, PencilRuler, Pencil, Trash2, Settings, FolderPlus, LayoutGrid, Cog, Brush, Users, MessageSquareQuote, ChevronRight, FlaskConical, Shapes, BoxSelect, ClipboardCheck, Package } from "lucide-react";
-import { useSession } from "./Auth/SessionContextProvider";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
-import { Skeleton } from "./ui/skeleton";
-import { useLanguage } from "@/context/LanguageContext";
-import { useOnboardingTour } from "@/context/OnboardingTourContext";
-import { ActiveJobsTracker } from "@/components/Jobs/ActiveJobsTracker";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
-import { Input } from "./ui/input";
-import { Label } from "./ui/label";
-import { RadioGroup, RadioGroupItem } from "./ui/radio-group";
-import { showError, showSuccess, showLoading, dismissToast } from "@/utils/toast";
-import { AddToProjectDialog } from "./Jobs/AddToProjectDialog";
-import { useModalStore } from "@/store/modalStore";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+"use client";
 
-interface JobHistory {
-  id: string;
-  original_prompt: string;
-  project_id: string | null;
-}
+import React from 'react';
+import { Link, useLocation } from 'react-router-dom';
+import { Bot, Users, Upload, Wand2, GalleryHorizontal, Box, Package, LogOut, Settings } from 'lucide-react';
 
-interface Project {
-  id: string;
-  name: string;
-}
+const navItems = [
+  { href: '/', label: 'Chat Agente', icon: Bot },
+  { href: '/clients', label: 'Clienti', icon: Users },
+  { href: '/upload', label: 'Upload', icon: Upload },
+  { href: '/edit-with-words', label: 'Modifica con Parole', icon: Wand2 },
+  { href: '/gallery', label: 'Galleria', icon: GalleryHorizontal },
+  { href: '/armadio', label: 'Armadio', icon: Box },
+  { href: '/pack-manager', label: 'Pack Manager', icon: Package },
+];
 
 const Sidebar = () => {
-  const { session, supabase } = useSession();
-  const navigate = useNavigate();
-  const { jobId: activeJobId } = useParams();
-  const { t } = useLanguage();
-  const { startTour } = useOnboardingTour();
-  const queryClient = useQueryClient();
-  const { openMoveToProjectModal } = useModalStore();
-
-  const [renamingJob, setRenamingJob] = useState<JobHistory | null>(null);
-  const [deletingJobId, setDeletingJobId] = useState<string | null>(null);
-  const [newName, setNewName] = useState("");
-  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
-  const [sortOrder, setSortOrder] = useState<'created_at' | 'updated_at'>('updated_at');
-  const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
-
-  const { data: projects } = useQuery<Project[]>({
-    queryKey: ['projects', session?.user?.id],
-    queryFn: async () => {
-      if (!session?.user) return [];
-      const { data, error } = await supabase.from('mira-agent-projects').select('id, name').eq('user_id', session.user.id).order('name', { ascending: true });
-      if (error) throw error;
-      return data;
-    },
-    enabled: !!session?.user,
-  });
-
-  const { data: jobHistory, isLoading: isLoadingJobs } = useQuery<JobHistory[]>({
-    queryKey: ["jobHistory", session?.user?.id, sortOrder],
-    queryFn: async () => {
-      if (!session?.user) return [];
-      const { data, error } = await supabase
-        .rpc('get_chat_history', { 
-            p_user_id: session.user.id, 
-            sort_on_update: sortOrder === 'updated_at' 
-        });
-      if (error) throw new Error(error.message);
-      return data as JobHistory[];
-    },
-    enabled: !!session?.user,
-  });
-
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    navigate("/login");
-  };
-
-  const handleRestartTour = () => {
-    navigate('/chat');
-    startTour();
-  };
-
-  const handleRename = async () => {
-    if (!renamingJob || !newName.trim()) return;
-    const toastId = showLoading("Renaming chat...");
-    try {
-      const { error } = await supabase.from('mira-agent-jobs').update({ original_prompt: newName }).eq('id', renamingJob.id);
-      if (error) throw error;
-      dismissToast(toastId);
-      showSuccess("Chat renamed.");
-      queryClient.invalidateQueries({ queryKey: ['jobHistory'] });
-      queryClient.invalidateQueries({ queryKey: ['chatJob', renamingJob.id] });
-      setRenamingJob(null);
-    } catch (err: any) {
-      dismissToast(toastId);
-      showError(`Failed to rename chat: ${err.message}`);
-    }
-  };
-
-  const handleDelete = async () => {
-    if (!deletingJobId) return;
-    const toastId = showLoading("Deleting chat...");
-    try {
-      const { error } = await supabase.rpc('delete_mira_agent_job', { p_job_id: deletingJobId });
-      if (error) throw error;
-      dismissToast(toastId);
-      showSuccess("Chat deleted.");
-      queryClient.invalidateQueries({ queryKey: ["jobHistory"] });
-      if (activeJobId === deletingJobId) {
-        navigate("/chat");
-      }
-      setDeletingJobId(null);
-    } catch (error: any) {
-      dismissToast(toastId);
-      showError(`Error deleting chat: ${error.message}`);
-    }
-  };
-
-  const handleSortChange = (newSortOrder: 'created_at' | 'updated_at') => {
-    setSortOrder(newSortOrder);
-    setIsSettingsModalOpen(false);
-  };
-
-  const unassignedChats = jobHistory?.filter(job => !job.project_id) || [];
+  const location = useLocation();
 
   return (
-    <>
-      <aside className="w-64 bg-background border-r flex flex-col h-screen">
-        <div className="p-4 border-b">
-          <h1 className="text-2xl font-bold">MIRA</h1>
-        </div>
-        <nav className="p-4 space-y-2">
-          <NavLink id="chat-nav-link" to="/chat" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-            <MessageSquare size={20} className="text-icon" />
-            {t('agentChat')}
-          </NavLink>
-          <NavLink id="clients-nav-link" to="/clients" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-            <Users size={20} className="text-icon" />
-            {t('clientsTitle')}
-          </NavLink>
-          <NavLink id="generator-nav-link" to="/generator" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-            <Image size={20} className="text-icon" />
-            {t('generator')}
-          </NavLink>
-          <NavLink id="upscale-nav-link" to="/upscale" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-            <Wand2 size={20} className="text-icon" />
-            {t('upscale')}
-          </NavLink>
-          <NavLink id="inpainting-nav-link" to="/inpainting" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-            <Brush size={20} className="text-icon" />
-            {t('inpainting')}
-          </NavLink>
-          <NavLink id="virtual-try-on-nav-link" to="/virtual-try-on" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-            <Shirt size={20} className="text-icon" />
-            {t('virtualTryOn')}
-          </NavLink>
-          <NavLink id="gallery-nav-link" to="/gallery" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-            <GalleryHorizontal size={20} className="text-icon" />
-            {t('gallery')}
-          </NavLink>
-          <NavLink id="wardrobe-nav-link" to="/wardrobe" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-            <ClipboardCheck size={20} className="text-icon" />
-            {t('wardrobe')}
-          </NavLink>
-          <NavLink id="wardrobe-packs-nav-link" to="/wardrobe-packs" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-            <Package size={20} className="text-icon" />
-            {t('wardrobePacks')}
-          </NavLink>
-          
-          <Collapsible open={isAdvancedOpen} onOpenChange={setIsAdvancedOpen}>
-            <CollapsibleTrigger asChild>
-              <Button variant="ghost" className="w-full justify-between p-2">
-                <div className="flex items-center gap-2">
-                  <Wand2 size={20} className="text-icon" />
-                  {t('advancedTools')}
-                </div>
-                <ChevronRight className={`h-4 w-4 transition-transform duration-200 ${isAdvancedOpen ? 'rotate-90' : ''}`} />
-              </Button>
-            </CollapsibleTrigger>
-            <CollapsibleContent className="pl-4 space-y-1 pt-1">
-              <NavLink id="edit-with-words-nav-link" to="/edit-with-words" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-                <MessageSquareQuote size={20} className="text-icon" />
-                {t('editWithWords')}
-              </NavLink>
-              <NavLink id="recontext-nav-link" to="/product-recontext" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-                <Shapes size={20} className="text-icon" />
-                {t('productRecontextualization')}
-              </NavLink>
-              <NavLink id="reframe-nav-link" to="/reframe" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-                <BoxSelect size={20} className="text-icon" />
-                {t('reframe')}
-              </NavLink>
-              <NavLink id="editor-nav-link" to="/editor" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-                <PencilRuler size={20} className="text-icon" />
-                {t('imageEditor')}
-              </NavLink>
-              <NavLink id="virtual-try-on-packs-nav-link" to="/virtual-try-on-packs" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-                <Shirt size={20} className="text-icon" />
-                {t('virtualTryOnPacks')}
-              </NavLink>
-              <NavLink id="model-packs-nav-link" to="/model-packs" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-                <Users size={20} className="text-icon" />
-                {t('modelPacks')}
-              </NavLink>
-              <NavLink id="vto-reports-nav-link" to="/vto-reports" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-                <ClipboardCheck size={20} className="text-icon" />
-                {t('vtoAnalysisReports')}
-              </NavLink>
-              <NavLink id="developer-nav-link" to="/developer" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-                <Code size={20} className="text-icon" />
-                {t('developer')}
-              </NavLink>
-            </CollapsibleContent>
-          </Collapsible>
-        </nav>
-        <div className="flex-1 flex flex-col overflow-hidden">
-            <div className="flex justify-between items-center w-full px-4 pt-4 pb-2">
-                <h2 className="text-sm font-semibold text-muted-foreground">Recent Chats</h2>
-                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); setIsSettingsModalOpen(true); }}><Settings className="h-4 w-4" /></Button>
-            </div>
-            <div className="flex-1 overflow-y-auto no-scrollbar">
-                <div className="p-2 space-y-1">
-                    {isLoadingJobs ? (
-                    <div className="space-y-2">
-                        {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}
-                    </div>
-                    ) : (
-                    unassignedChats.map(job => (
-                        <div 
-                          key={job.id} 
-                          className="group relative"
-                          draggable
-                          onDragStart={(e) => e.dataTransfer.setData('application/json', JSON.stringify(job))}
-                        >
-                          <NavLink to={`/chat/${job.id}`} className={({ isActive }) => `flex items-center justify-between p-2 rounded-md text-sm ${isActive ? 'bg-primary text-primary-foreground font-semibold' : 'hover:bg-muted'}`}>
-                              <span className="truncate pr-1">{job.original_prompt || "Untitled Chat"}</span>
-                          </NavLink>
-                          <div className="absolute right-1 top-1/2 -translate-y-1/2 z-10 flex items-center gap-0.5 rounded-md bg-muted/80 opacity-0 transition-opacity group-hover:opacity-100 pointer-events-auto">
-                              <Button variant="ghost" size="icon" className="h-7 w-7" title="Add to project" onClick={(e) => { e.preventDefault(); openMoveToProjectModal(job); }}>
-                              <FolderPlus className="h-4 w-4" />
-                              </Button>
-                              <Button variant="ghost" size="icon" className="h-7 w-7" title="Rename" onClick={(e) => { e.preventDefault(); setNewName(job.original_prompt); setRenamingJob(job); }}>
-                              <Pencil className="h-4 w-4" />
-                              </Button>
-                              <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-destructive/10" title="Delete" onClick={(e) => { e.preventDefault(); setDeletingJobId(job.id); }}>
-                              <Trash2 className="h-4 w-4 text-destructive/80" />
-                              </Button>
-                          </div>
-                        </div>
-                    ))
-                    )}
-                </div>
-            </div>
-        </div>
-        <div className="p-4 border-t space-y-2">
-          <ActiveJobsTracker />
-          <NavLink id="settings-nav-link" to="/settings" className={({ isActive }) => `flex items-center gap-2 p-2 rounded-md ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-            <Cog size={20} className="text-icon" />
-            {t('settings')}
-          </NavLink>
-          <Button variant="ghost" className="w-full justify-start gap-2" onClick={handleRestartTour}>
-            <HelpCircle size={20} className="text-icon" />
-            {t('restartOnboarding')}
-          </Button>
-          {session ? (
-            <Button variant="ghost" className="w-full justify-start gap-2" onClick={handleLogout}>
-              <LogOut size={20} className="text-icon" />
-              {t('logout')}
-            </Button>
-          ) : (
-            <Button variant="ghost" className="w-full justify-start gap-2" onClick={() => navigate("/login")}>
-              <LogIn size={20} className="text-icon" />
-              {t('login')}
-            </Button>
-          )}
-        </div>
-      </aside>
-
-      <AddToProjectDialog projects={projects || []} />
-
-      <Dialog open={!!renamingJob} onOpenChange={(open) => !open && setRenamingJob(null)}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Rename Chat</DialogTitle></DialogHeader>
-          <Input value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleRename()} />
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setRenamingJob(null)}>Cancel</Button>
-            <Button onClick={handleRename}>Save</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <AlertDialog open={!!deletingJobId} onOpenChange={(open) => !open && setDeletingJobId(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader><AlertDialogTitle>Are you sure?</AlertDialogTitle><AlertDialogDescription>This action cannot be undone. This will permanently delete this chat's history.</AlertDialogDescription></AlertDialogHeader>
-          <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={handleDelete}>Delete</AlertDialogAction></AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <Dialog open={isSettingsModalOpen} onOpenChange={setIsSettingsModalOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t('chatSettings')}</DialogTitle>
-            <DialogDescription>{t('manageChatHistory')}</DialogDescription>
-          </DialogHeader>
-          <div className="py-4">
-            <Label>{t('sortChatsBy')}</Label>
-            <RadioGroup defaultValue={sortOrder} onValueChange={(value: 'created_at' | 'updated_at') => handleSortChange(value)} className="mt-2">
-              <div className="flex items-center space-x-2">
-                <RadioGroupItem value="updated_at" id="sort-updated" />
-                <Label htmlFor="sort-updated">{t('lastUpdated')}</Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <RadioGroupItem value="created_at" id="sort-created" />
-                <Label htmlFor="sort-created">{t('creationDate')}</Label>
-              </div>
-            </RadioGroup>
-          </div>
-        </DialogContent>
-      </Dialog>
-    </>
+    <div className="flex flex-col h-full bg-gray-800 text-white w-64 p-4">
+      <div className="mb-8">
+        <h1 className="text-2xl font-bold">MIRA</h1>
+      </div>
+      <nav className="flex-grow">
+        <ul>
+          {navItems.map((item) => (
+            <li key={item.href} className="mb-2">
+              <Link
+                to={item.href}
+                className={`flex items-center p-2 rounded-md transition-colors ${
+                  location.pathname === item.href
+                    ? 'bg-blue-600'
+                    : 'hover:bg-gray-700'
+                }`}
+              >
+                <item.icon className="mr-3 h-5 w-5" />
+                {item.label}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </nav>
+      <div>
+        <ul>
+            <li className="mb-2">
+                <Link to="/settings" className="flex items-center p-2 rounded-md hover:bg-gray-700">
+                    <Settings className="mr-3 h-5 w-5" />
+                    Settings
+                </Link>
+            </li>
+            <li className="mb-2">
+                <button className="flex items-center p-2 rounded-md hover:bg-gray-700 w-full text-left">
+                    <LogOut className="mr-3 h-5 w-5" />
+                    Logout
+                </button>
+            </li>
+        </ul>
+      </div>
+    </div>
   );
 };
 
