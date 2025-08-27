@@ -28,7 +28,8 @@ serve(async (req) => {
       .from('mira-agent-comfyui-jobs')
       .select('id')
       .in('status', ['queued', 'processing'])
-      .lt('last_polled_at', threshold);
+      .lt('last_polled_at', threshold)
+      .not('comfyui_address', 'is', null); // Ignore jobs that don't have a comfyui_address
 
     const { data: stalledInpaintingJobs, error: inpaintingError } = await supabase
       .from('mira-agent-inpainting-jobs')
