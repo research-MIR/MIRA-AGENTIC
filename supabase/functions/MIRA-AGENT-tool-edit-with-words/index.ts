@@ -43,7 +43,7 @@ const metaPrompt = `You are a "Hyper-Detailed Image Editor's Assistant". Your ta
 ### Example:
 - **USER_INSTRUCTION:** "change his t-shirt to blue"
 - **SOURCE_IMAGE:** [Image of a man with brown hair in a red shirt, standing on a city street]
-- **Your Output:** "For the man with short brown hair, fair skin, and a slight smile, change his red crew-neck t-shirt to a deep royal blue color. It is absolutely critical to preserve his exact identity, including his specific facial structure and skin tone. His standing pose must remain identical. The background, a bustling city street with yellow taxis and glass-front buildings, must be preserved in every detail, including the soft daytime lighting."`;
+- **Your Output:** "For the man with short brown hair, fair skin, and a slight smile, change his red crew-neck t-shirt to a deep royal blue color. It is absolutely essential to preserve his exact identity, including his specific facial structure and skin tone. His standing pose must remain identical. The background, a bustling city street with yellow taxis and glass-front buildings, must be preserved in every detail, including the soft daytime lighting."`;
 
 async function downloadImageAsPart(supabase: SupabaseClient, url: string, label: string): Promise<Part[]> {
     const urlObj = new URL(url);
@@ -109,6 +109,7 @@ serve(async (req) => {
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
 
     // Step 1: Prepare all image inputs first
+    console.log("[EditWithWordsTool] Step 1: Preparing image inputs...");
     const [sourceImagePart, referenceImageParts] = await Promise.all([
         downloadImageAsPart(supabase, source_image_url, "SOURCE_IMAGE"),
         reference_image_urls && reference_image_urls.length > 0 
@@ -116,36 +117,47 @@ serve(async (req) => {
             : Promise.resolve([]),
     ]);
     const allImageParts = [...sourceImagePart, ...referenceImageParts.flat()];
+    console.log("[EditWithWordsTool] Step 1 complete.");
 
     // Step 2: Generate the dynamic, precise prompt using the images as context
+    console.log("[EditWithWordsTool] Step 2: Generating precise prompt...");
     const precisePrompt = await generatePrecisePrompt(ai, instruction, allImageParts);
-    console.log("Generated Precise Prompt:", precisePrompt);
+    console.log("[EditWithWordsTool] Generated Precise Prompt:", precisePrompt);
+    console.log("[EditWithWordsTool] Step 2 complete.");
 
     const textPart = { text: precisePrompt };
     const finalPartsForImageModel = [...allImageParts, textPart];
 
     // Step 3: Call the Gemini Image Editing API with the new prompt
+    console.log(`[EditWithWordsTool] Step 3: Calling image model (${IMAGE_MODEL_NAME})...`);
     const response = await ai.models.generateContent({
         model: IMAGE_MODEL_NAME,
         contents: [{ parts: finalPartsForImageModel }],
     });
+    console.log("[EditWithWordsTool] Step 3 complete. Received response from image model.");
 
     // Step 4: Handle the API response
+    console.log("[EditWithWordsTool] Step 4: Handling API response...");
     if (response.promptFeedback?.blockReason) {
+        console.error("[EditWithWordsTool] Prompt was blocked. Reason:", response.promptFeedback.blockReason);
         throw new Error(`Request was blocked by safety filters: ${response.promptFeedback.blockReason}`);
     }
     const imagePartFromResponse = response.candidates?.[0]?.content?.parts?.find(part => part.inlineData);
     if (!imagePartFromResponse?.inlineData) {
         const finishReason = response.candidates?.[0]?.finishReason;
+        console.error("[EditWithWordsTool] No image data in response. Finish reason:", finishReason);
         throw new Error(`Image generation failed. Reason: ${finishReason || 'No image was returned.'}`);
     }
+    console.log("[EditWithWordsTool] Step 4 complete. Found image data in response.");
 
     // Step 5: Upload to Storage and save job record
+    console.log("[EditWithWordsTool] Step 5: Uploading to storage and saving job record...");
     const { mimeType, data: base64Data } = imagePartFromResponse.inlineData;
     const imageBuffer = decodeBase64(base64Data);
     const filePath = `${invoker_user_id}/edit-with-words/${Date.now()}_final.png`;
     await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(filePath, imageBuffer, { contentType: mimeType, upsert: true });
     const { data: { publicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
+    console.log(`[EditWithWordsTool] Image uploaded to: ${publicUrl}`);
 
     await supabase.from('mira-agent-comfyui-jobs').insert({
         user_id: invoker_user_id,
@@ -158,6 +170,7 @@ serve(async (req) => {
             reference_image_urls,
         }
     });
+    console.log("[EditWithWordsTool] Step 5 complete. Job record saved.");
 
     return new Response(JSON.stringify({ success: true, finalImageUrl: publicUrl }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
