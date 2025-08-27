@@ -99,17 +99,36 @@ async function generatePrecisePrompt(ai: GoogleGenAI, userInstruction: string, a
 serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
 
+  const { job_id } = await req.json();
+  if (!job_id) {
+    return new Response(JSON.stringify({ error: "job_id is required." }), { status: 400, headers: corsHeaders });
+  }
+
+  const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
+  const logPrefix = `[EditWithWordsWorker][${job_id}]`;
+
   try {
-    const { source_image_url, instruction, reference_image_urls, invoker_user_id } = await req.json();
+    console.log(`${logPrefix} Starting job.`);
+    await supabase.from('mira-agent-comfyui-jobs').update({ status: 'processing' }).eq('id', job_id);
+
+    const { data: job, error: fetchError } = await supabase
+      .from('mira-agent-comfyui-jobs')
+      .select('metadata, user_id')
+      .eq('id', job_id)
+      .single();
+    
+    if (fetchError) throw fetchError;
+
+    const { source_image_url, instruction, reference_image_urls } = job.metadata;
+    const invoker_user_id = job.user_id;
+
     if (!source_image_url || !instruction || !invoker_user_id) {
-      throw new Error("source_image_url, instruction, and invoker_user_id are required.");
+      throw new Error("Job metadata is missing required fields: source_image_url, instruction, or user_id.");
     }
 
-    const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
 
-    // Step 1: Prepare all image inputs first
-    console.log("[EditWithWordsTool] Step 1: Preparing image inputs...");
+    console.log(`${logPrefix} Step 1: Preparing image inputs...`);
     const [sourceImagePart, referenceImageParts] = await Promise.all([
         downloadImageAsPart(supabase, source_image_url, "SOURCE_IMAGE"),
         reference_image_urls && reference_image_urls.length > 0 
@@ -117,60 +136,53 @@ serve(async (req) => {
             : Promise.resolve([]),
     ]);
     const allImageParts = [...sourceImagePart, ...referenceImageParts.flat()];
-    console.log("[EditWithWordsTool] Step 1 complete.");
+    console.log(`${logPrefix} Step 1 complete.`);
 
-    // Step 2: Generate the dynamic, precise prompt using the images as context
-    console.log("[EditWithWordsTool] Step 2: Generating precise prompt...");
+    console.log(`${logPrefix} Step 2: Generating precise prompt...`);
     const precisePrompt = await generatePrecisePrompt(ai, instruction, allImageParts);
-    console.log("[EditWithWordsTool] Generated Precise Prompt:", precisePrompt);
-    console.log("[EditWithWordsTool] Step 2 complete.");
+    console.log(`${logPrefix} Generated Precise Prompt:`, precisePrompt);
+    console.log(`${logPrefix} Step 2 complete.`);
 
     const textPart = { text: precisePrompt };
     const finalPartsForImageModel = [...allImageParts, textPart];
 
-    // Step 3: Call the Gemini Image Editing API with the new prompt
-    console.log(`[EditWithWordsTool] Step 3: Calling image model (${IMAGE_MODEL_NAME})...`);
+    console.log(`${logPrefix} Step 3: Calling image model (${IMAGE_MODEL_NAME})...`);
     const response = await ai.models.generateContent({
         model: IMAGE_MODEL_NAME,
         contents: [{ parts: finalPartsForImageModel }],
     });
-    console.log("[EditWithWordsTool] Step 3 complete. Received response from image model.");
+    console.log(`${logPrefix} Step 3 complete. Received response from image model.`);
 
-    // Step 4: Handle the API response
-    console.log("[EditWithWordsTool] Step 4: Handling API response...");
+    console.log(`${logPrefix} Step 4: Handling API response...`);
     if (response.promptFeedback?.blockReason) {
-        console.error("[EditWithWordsTool] Prompt was blocked. Reason:", response.promptFeedback.blockReason);
+        console.error(`${logPrefix} Prompt was blocked. Reason:`, response.promptFeedback.blockReason);
         throw new Error(`Request was blocked by safety filters: ${response.promptFeedback.blockReason}`);
     }
     const imagePartFromResponse = response.candidates?.[0]?.content?.parts?.find(part => part.inlineData);
     if (!imagePartFromResponse?.inlineData) {
         const finishReason = response.candidates?.[0]?.finishReason;
-        console.error("[EditWithWordsTool] No image data in response. Finish reason:", finishReason);
+        console.error(`${logPrefix} No image data in response. Finish reason:`, finishReason);
         throw new Error(`Image generation failed. Reason: ${finishReason || 'No image was returned.'}`);
     }
-    console.log("[EditWithWordsTool] Step 4 complete. Found image data in response.");
+    console.log(`${logPrefix} Step 4 complete. Found image data in response.`);
 
-    // Step 5: Upload to Storage and save job record
-    console.log("[EditWithWordsTool] Step 5: Uploading to storage and saving job record...");
+    console.log(`${logPrefix} Step 5: Uploading to storage and updating job record...`);
     const { mimeType, data: base64Data } = imagePartFromResponse.inlineData;
     const imageBuffer = decodeBase64(base64Data);
     const filePath = `${invoker_user_id}/edit-with-words/${Date.now()}_final.png`;
     await supabase.storage.from(GENERATED_IMAGES_BUCKET).upload(filePath, imageBuffer, { contentType: mimeType, upsert: true });
     const { data: { publicUrl } } = supabase.storage.from(GENERATED_IMAGES_BUCKET).getPublicUrl(filePath);
-    console.log(`[EditWithWordsTool] Image uploaded to: ${publicUrl}`);
+    console.log(`${logPrefix} Image uploaded to: ${publicUrl}`);
 
-    await supabase.from('mira-agent-comfyui-jobs').insert({
-        user_id: invoker_user_id,
+    await supabase.from('mira-agent-comfyui-jobs').update({
         status: 'complete',
         final_result: { publicUrl },
         metadata: {
-            source: 'edit-with-words',
+            ...job.metadata,
             prompt: precisePrompt,
-            source_image_url,
-            reference_image_urls,
         }
-    });
-    console.log("[EditWithWordsTool] Step 5 complete. Job record saved.");
+    }).eq('id', job_id);
+    console.log(`${logPrefix} Step 5 complete. Job record updated.`);
 
     return new Response(JSON.stringify({ success: true, finalImageUrl: publicUrl }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -178,7 +190,8 @@ serve(async (req) => {
     });
 
   } catch (error) {
-    console.error("[EditWithWordsTool] Error:", error);
+    console.error(`${logPrefix} Error:`, error);
+    await supabase.from('mira-agent-comfyui-jobs').update({ status: 'failed', error_message: error.message }).eq('id', job_id);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,

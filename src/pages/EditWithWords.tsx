@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Button } from "@/components/ui/button";
@@ -112,7 +112,7 @@ const EditWithWords = () => {
     if (!instruction.trim()) return showError("Please provide an editing instruction.");
     
     setIsSubmitting(true);
-    let toastId = showLoading(t('sendingJob'));
+    const toastId = showLoading(t('sendingJob'));
 
     try {
         const uploadFile = async (file: File, type: 'source' | 'reference') => {
@@ -128,7 +128,7 @@ const EditWithWords = () => {
         const referencePublicUrls = await Promise.all(referenceFiles.map(file => uploadFile(file, 'reference')));
 
         dismissToast(toastId);
-        toastId = showLoading("Sending job to the image editor...");
+        showLoading("Sending job to the image editor...");
 
         const payload = {
             source_image_url: sourcePublicUrl,
@@ -137,13 +137,13 @@ const EditWithWords = () => {
             invoker_user_id: session?.user?.id,
         };
 
-        const { error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-tool-edit-with-words', { body: payload });
+        const { error: proxyError } = await supabase.functions.invoke('MIRA-AGENT-proxy-edit-with-words', { body: payload });
 
         if (proxyError) throw proxyError;
         
         dismissToast(toastId);
         showSuccess("Edit job started! You can track its progress in the sidebar.");
-        queryClient.invalidateQueries({ queryKey: ['activeComfyJobs'] });
+        queryClient.invalidateQueries({ queryKey: ['activeJobs'] });
         queryClient.invalidateQueries({ queryKey: ['recentEditJobs'] });
         startNew();
     } catch (err: any) {
