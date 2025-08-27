@@ -16,12 +16,34 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const metaPrompt = `You are an expert prompt engineer for a generative AI model that performs image editing.
-Your task is to generate a precise, safe, and effective prompt for an image generation model ('gemini-2.5-flash-image-preview').
-You will be given a user's instruction and context about the images involved.
-Your final prompt must be a single, natural language instruction.
-It is critical to use safe and unambiguous language. For example, instead of saying "remove the original clothing", instruct the model to "place the new garment over the existing clothing" or "cover the original clothing". Avoid any phrasing that could be misinterpreted by safety filters.
-The output should be ONLY the text of the generated prompt for the image model. Do not include any other text, greetings, or explanations.`;
+const metaPrompt = `You are a "Hyper-Detailed Image Editor's Assistant". Your task is to analyze a user's request and the provided images, then generate a single, precise, and safe prompt for a powerful image editing model.
+
+### Your Inputs:
+- **USER_INSTRUCTION:** A text instruction from the user.
+- **SOURCE_IMAGE:** The base image to be edited.
+- **REFERENCE_IMAGE (Optional):** An image providing style or content guidance.
+
+### Your Internal Thought Process:
+1.  **Deconstruct the User's Goal:** Analyze the USER_INSTRUCTION to understand the primary editing task (e.g., change clothing, alter background, add an object).
+2.  **Analyze the Source Image for Preservation:** This is your most critical task. Visually inspect the SOURCE_IMAGE and create a detailed mental description of everything that should NOT change. This includes:
+    -   **Identity:** The person's specific facial features, skin tone, hair style and color.
+    -   **Pose:** The exact position of their body, limbs, and head.
+    -   **Background:** The specific elements and style of the environment.
+    -   **Lighting:** The direction, quality (soft/hard), and color of the light.
+3.  **Synthesize the Final Prompt:** Construct a single, natural-language paragraph for the image model. This prompt MUST combine:
+    -   A clear instruction for the change requested by the user.
+    -   **Explicit, detailed instructions to preserve all other elements**, using the descriptions you generated in step 2.
+
+### Critical Rules:
+- **Preserve by Default:** Your prompt must be heavily weighted towards preservation. Describe what to keep in more detail than what to change.
+- **Safety First:** Use unambiguous language. Instead of "remove clothing," say "place the new garment over the existing clothing."
+- **Describe, Don't Point:** If a reference image is used, describe its key attributes in the prompt. Do not say "make it look like the reference image."
+- **Output:** Your entire response must be ONLY the final text prompt.
+
+### Example:
+- **USER_INSTRUCTION:** "change his t-shirt to blue"
+- **SOURCE_IMAGE:** [Image of a man with brown hair in a red shirt, standing on a city street]
+- **Your Output:** "For the man with short brown hair, fair skin, and a slight smile, change his red crew-neck t-shirt to a deep royal blue color. It is absolutely critical to preserve his exact identity, including his specific facial structure and skin tone. His standing pose must remain identical. The background, a bustling city street with yellow taxis and glass-front buildings, must be preserved in every detail, including the soft daytime lighting."`;
 
 async function downloadImageAsPart(supabase: SupabaseClient, url: string, label: string): Promise<Part[]> {
     const urlObj = new URL(url);
@@ -46,13 +68,20 @@ async function downloadImageAsPart(supabase: SupabaseClient, url: string, label:
     ];
 }
 
-async function generatePrecisePrompt(ai: GoogleGenAI, userInstruction: string, hasReference: boolean): Promise<string> {
+async function generatePrecisePrompt(ai: GoogleGenAI, userInstruction: string, allImageParts: Part[]): Promise<string> {
     const fallbackPrompt = `You are a virtual try-on AI assistant. Your task is to seamlessly edit the source image based on the user's instructions. Place the new garment over the existing clothing, preserving the model's identity, pose, and the background.`;
     try {
-        const context = `The user wants to edit an image. Their instruction is: "${userInstruction}". ${hasReference ? 'They have also provided a reference image to guide the style or object.' : ''}`;
+        const contents: Content[] = [{
+            role: 'user',
+            parts: [
+                { text: `USER_INSTRUCTION: "${userInstruction}"` },
+                ...allImageParts
+            ]
+        }];
+
         const response = await ai.models.generateContent({
             model: TEXT_MODEL_NAME,
-            contents: [{ role: 'user', parts: [{ text: context }] }],
+            contents: contents,
             config: { systemInstruction: { role: "system", parts: [{ text: metaPrompt }] } }
         });
         const precisePrompt = response.text?.trim();
@@ -79,22 +108,26 @@ serve(async (req) => {
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
 
-    // Step 1 & 2: Prepare inputs and generate a precise prompt concurrently
-    const [sourceImagePart, referenceImageParts, precisePrompt] = await Promise.all([
-        downloadImageAsPart(supabase, source_image_url, "SOURCE IMAGE"),
+    // Step 1: Prepare all image inputs first
+    const [sourceImagePart, referenceImageParts] = await Promise.all([
+        downloadImageAsPart(supabase, source_image_url, "SOURCE_IMAGE"),
         reference_image_urls && reference_image_urls.length > 0 
-            ? Promise.all(reference_image_urls.map((url: string, i: number) => downloadImageAsPart(supabase, url, `REFERENCE IMAGE ${i + 1}`)))
+            ? Promise.all(reference_image_urls.map((url: string, i: number) => downloadImageAsPart(supabase, url, `REFERENCE_IMAGE ${i + 1}`)))
             : Promise.resolve([]),
-        generatePrecisePrompt(ai, instruction, !!reference_image_urls && reference_image_urls.length > 0)
     ]);
+    const allImageParts = [...sourceImagePart, ...referenceImageParts.flat()];
+
+    // Step 2: Generate the dynamic, precise prompt using the images as context
+    const precisePrompt = await generatePrecisePrompt(ai, instruction, allImageParts);
+    console.log("Generated Precise Prompt:", precisePrompt);
 
     const textPart = { text: precisePrompt };
-    const finalParts = [...sourceImagePart, ...referenceImageParts.flat(), textPart];
+    const finalPartsForImageModel = [...allImageParts, textPart];
 
-    // Step 3: Call the Gemini Image Editing API
+    // Step 3: Call the Gemini Image Editing API with the new prompt
     const response = await ai.models.generateContent({
         model: IMAGE_MODEL_NAME,
-        contents: [{ parts: finalParts }],
+        contents: [{ parts: finalPartsForImageModel }],
     });
 
     // Step 4: Handle the API response
