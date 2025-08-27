@@ -9,7 +9,7 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
 
 const TEXT_MODEL_NAME = "gemini-2.5-pro-preview-06-05";
-const IMAGE_MODEL_NAME = "gemini-2.5-flash-image-preview-05-27";
+const IMAGE_MODEL_NAME = "gemini-2.5-flash-image-preview";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
