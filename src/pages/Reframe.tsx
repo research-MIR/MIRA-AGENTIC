@@ -11,7 +11,6 @@ import { Loader2, Image as ImageIcon, Wand2, UploadCloud, X, PlusCircle } from "
 import { useLanguage } from "@/context/LanguageContext";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { ImageCompareModal } from "@/components/ImageCompareModal";
-import { Slider } from "@/components/ui/slider";
 import { RecentJobThumbnail } from "@/components/Jobs/RecentJobThumbnail";
 import { useDropzone } from "@/hooks/useDropzone";
 import { cn } from "@/lib/utils";
@@ -19,6 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { SecureImageDisplay } from "@/components/VTO/SecureImageDisplay";
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel";
+import { Badge } from "@/components/ui/badge";
 
 interface ReframeJob {
   id: string;
