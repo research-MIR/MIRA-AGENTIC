@@ -9,7 +9,6 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const FAL_KEY = Deno.env.get('FAL_KEY');
 const UPLOAD_BUCKET = 'mira-agent-user-uploads';
-const FAL_WEBHOOK_SECRET = Deno.env.get("FAL_WEBHOOK_SECRET");
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -149,10 +148,7 @@ serve(async (req) => {
         "Ratio - Y Value": ratioY,
         "Filler_Prompt": fillerPrompt
       },
-      webhook: {
-        url: webhookUrl,
-        headers: { "x-webhook-secret": FAL_WEBHOOK_SECRET ?? "" }
-      }
+      webhookUrl: webhookUrl
     });
 
     console.log(`${logPrefix} Step 4: Updating job ${jobId} with Fal request ID ${falResult.request_id}.`);
