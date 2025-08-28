@@ -55,33 +55,53 @@ function extractJson(text: string): any {
     }
 }
 
-function parseStorageURL(url: string) {
-    const u = new URL(url);
-    const pathSegments = u.pathname.split('/');
-    const objectSegmentIndex = pathSegments.indexOf('object');
-    if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) {
-        throw new Error(`Invalid Supabase storage URL format: ${url}`);
+function parseStorageURL(url: string): { bucket: string, path: string } | null {
+    try {
+        const u = new URL(url);
+        // Only attempt to parse if it looks like a Supabase URL
+        if (!u.hostname.endsWith('supabase.co')) {
+            return null;
+        }
+        const pathSegments = u.pathname.split('/');
+        const objectSegmentIndex = pathSegments.indexOf('object');
+        if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) {
+            return null;
+        }
+        const bucket = pathSegments[objectSegmentIndex + 2];
+        const path = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
+        if (!bucket || !path) {
+            return null;
+        }
+        return { bucket, path };
+    } catch (e) {
+        // URL constructor might fail for invalid URLs
+        return null;
     }
-    const bucket = pathSegments[objectSegmentIndex + 2];
-    const path = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
-    if (!bucket || !path) {
-        throw new Error(`Could not parse bucket or path from Supabase URL: ${url}`);
-    }
-    return { bucket, path };
 }
 
-async function getDimensionsFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<{width: number, height: number}> {
-    const { bucket, path } = parseStorageURL(publicUrl);
+async function getDimensionsAndBuffer(supabase: SupabaseClient, publicUrl: string): Promise<{buffer: Uint8Array, dimensions: {width: number, height: number}, mimeType: string}> {
+    const parsed = parseStorageURL(publicUrl);
+    let blob: Blob;
 
-    // Download only the first 64KB, which is more than enough for image headers.
-    const { data: fileHead, error } = await supabase.storage.from(bucket).download(path, { range: '0-65535' });
-    if (error) throw new Error(`Failed to download image header: ${error.message}`);
+    if (parsed) {
+        const { bucket, path } = parsed;
+        const { data, error } = await supabase.storage.from(bucket).download(path);
+        if (error) throw new Error(`Failed to download image from Supabase: ${error.message}`);
+        blob = data;
+    } else {
+        console.log(`[BBox-Worker] URL is not a Supabase URL. Fetching directly: ${publicUrl}`);
+        const response = await fetch(publicUrl);
+        if (!response.ok) {
+            throw new Error(`Failed to download image from external URL: ${response.statusText}`);
+        }
+        blob = await response.blob();
+    }
 
-    const buffer = new Uint8Array(await fileHead.arrayBuffer());
+    const buffer = new Uint8Array(await blob.arrayBuffer());
     const size = imageSize(buffer);
     if (!size || !size.width || !size.height) throw new Error("Could not determine image dimensions from file header.");
     
-    return { width: size.width, height: size.height };
+    return { buffer, dimensions: { width: size.width, height: size.height }, mimeType: blob.type };
 }
 
 serve(async (req) => {
@@ -94,37 +114,19 @@ serve(async (req) => {
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
 
-    // 1. Get original dimensions without loading the full image
-    const original_dimensions = await getDimensionsFromSupabase(supabase, image_url);
+    // 1. Get original dimensions and buffer
+    const { buffer: imageBuffer, dimensions: original_dimensions, mimeType } = await getDimensionsAndBuffer(supabase, image_url);
     console.log(`[BBox-Worker] Original dimensions: ${original_dimensions.width}x${original_dimensions.height}`);
 
-    // 2. Create a resized image URL and download the smaller version
-    const RESIZE_DIMENSION = 512;
-    const resizedUrl = `${image_url}?width=${RESIZE_DIMENSION}&height=${RESIZE_DIMENSION}&resize=contain`;
-    console.log(`[BBox-Worker] Fetching resized image from: ${resizedUrl}`);
-    
-    const resizedResponse = await fetch(resizedUrl);
-    if (!resizedResponse.ok) {
-        throw new Error(`Failed to fetch resized image: ${resizedResponse.statusText}`);
-    }
-    const resizedImageBuffer = new Uint8Array(await resizedResponse.arrayBuffer());
-    
-    // 3. Get dimensions of the resized image
-    const resized_dimensions = imageSize(resizedImageBuffer);
-    if (!resized_dimensions || !resized_dimensions.width || !resized_dimensions.height) {
-        throw new Error("Could not determine resized image dimensions.");
-    }
-    console.log(`[BBox-Worker] Resized dimensions: ${resized_dimensions.width}x${resized_dimensions.height}`);
-
-    // 4. Base64 encode the SMALL image and send to Gemini
-    const imageBase64 = encodeBase64(resizedImageBuffer);
+    // 2. Base64 encode the image and send to Gemini
+    const imageBase64 = encodeBase64(imageBuffer);
     
     const result = await ai.models.generateContent({
         model: MODEL_NAME,
         contents: [{
             role: 'user',
             parts: [
-                { inlineData: { mimeType: 'image/webp', data: imageBase64 } },
+                { inlineData: { mimeType: mimeType || 'image/png', data: imageBase64 } },
                 { text: "Output the position of the person in the image." }
             ]
         }],
@@ -137,28 +139,17 @@ serve(async (req) => {
 
     console.log("[BBox-Worker] Full LLM response:", result.text);
 
-    // 5. Parse the response and scale the coordinates
+    // 3. Parse the response
     const responseJson = extractJson(result.text);
     const detectedBox = responseJson.person;
     if (!detectedBox || detectedBox.y_min === undefined) {
       throw new Error("AI response did not contain a valid 'person' object with coordinates.");
     }
-    console.log(`[BBox-Worker] Detected box (normalized to 1000x1000 on resized image):`, detectedBox);
+    console.log(`[BBox-Worker] Detected box (normalized to 1000x1000):`, detectedBox);
 
-    const scaleX = original_dimensions.width / resized_dimensions.width;
-    const scaleY = original_dimensions.height / resized_dimensions.height;
-
-    const finalBox = {
-        y_min: Math.round(detectedBox.y_min * scaleY),
-        x_min: Math.round(detectedBox.x_min * scaleX),
-        y_max: Math.round(detectedBox.y_max * scaleY),
-        x_max: Math.round(detectedBox.x_max * scaleX),
-    };
-    console.log(`[BBox-Worker] Scaled box (normalized to 1000x1000 on original image):`, finalBox);
-
-    // 6. Return the final, scaled box and original dimensions
+    // 4. Return the normalized box and original dimensions
     return new Response(JSON.stringify({
-      normalized_bounding_box: finalBox,
+      normalized_bounding_box: detectedBox,
       original_dimensions: original_dimensions
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
