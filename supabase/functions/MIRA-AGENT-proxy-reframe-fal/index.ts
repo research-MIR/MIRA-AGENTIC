@@ -27,6 +27,16 @@ const autoDescribeSceneSystemPrompt = `You are an expert, literal scene describe
 3.  **Language:** The final prompt must be in English.
 4.  **Output:** Respond with ONLY the final, detailed prompt text. Do not add any other text, notes, or explanations.`;
 
+async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
+    const url = new URL(publicUrl);
+    const pathSegments = url.pathname.split('/');
+    const bucketName = pathSegments[pathSegments.indexOf('public') + 1];
+    const filePath = decodeURIComponent(pathSegments.slice(pathSegments.indexOf(bucketName) + 1).join('/'));
+    const { data, error } = await supabase.storage.from(bucketName).download(filePath);
+    if (error) throw new Error(`Failed to download from Supabase storage (${filePath}): ${error.message}`);
+    return data;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
 
@@ -35,25 +45,40 @@ serve(async (req) => {
   fal.config({ credentials: FAL_KEY! });
 
   try {
-    const { user_id, base64_image_data, mime_type, aspect_ratio, prompt: user_hint, parent_vto_job_id = null } = await req.json();
-    if (!user_id || !base64_image_data || !mime_type || !aspect_ratio) {
-      throw new Error("user_id, base64_image_data, mime_type, and aspect_ratio are required.");
+    const { user_id, base_image_url, base64_image_data, mime_type, aspect_ratio, prompt: user_hint, parent_vto_job_id = null } = await req.json();
+    if (!user_id || (!base_image_url && !base64_image_data) || !aspect_ratio) {
+      throw new Error("user_id, aspect_ratio, and either base_image_url or base64_image_data are required.");
     }
 
-    console.log(`${logPrefix} Step 0: Uploading base image to get a persistent URL.`);
-    const imageBuffer = decodeBase64(base64_image_data);
-    const filePath = `${user_id}/reframe-sources/${Date.now()}-source.jpeg`;
-    const { error: uploadError } = await supabase.storage.from(UPLOAD_BUCKET).upload(filePath, imageBuffer, { contentType: mime_type, upsert: true });
-    if (uploadError) throw uploadError;
-    const { data: { publicUrl: base_image_url } } = supabase.storage.from(UPLOAD_BUCKET).getPublicUrl(filePath);
-    console.log(`${logPrefix} Base image uploaded to: ${base_image_url}`);
+    let final_base_image_url = base_image_url;
+    let image_blob_for_analysis: Blob;
+    let final_mime_type = mime_type;
+
+    if (base64_image_data) {
+        console.log(`${logPrefix} Received base64 data. Uploading to get a persistent URL.`);
+        const imageBuffer = decodeBase64(base64_image_data);
+        final_mime_type = mime_type || 'image/jpeg';
+        image_blob_for_analysis = new Blob([imageBuffer], { type: final_mime_type });
+        const filePath = `${user_id}/reframe-sources/${Date.now()}-source.jpeg`;
+        const { error: uploadError } = await supabase.storage.from(UPLOAD_BUCKET).upload(filePath, imageBuffer, { contentType: final_mime_type, upsert: true });
+        if (uploadError) throw uploadError;
+        const { data: { publicUrl } } = supabase.storage.from(UPLOAD_BUCKET).getPublicUrl(filePath);
+        final_base_image_url = publicUrl;
+        console.log(`${logPrefix} Base image uploaded to: ${final_base_image_url}`);
+    } else {
+        console.log(`${logPrefix} Received image URL. Downloading for analysis.`);
+        image_blob_for_analysis = await downloadFromSupabase(supabase, final_base_image_url);
+        final_mime_type = image_blob_for_analysis.type;
+    }
 
     console.log(`${logPrefix} Step 1: Generating filler prompt.`);
+    const imageBase64ForAnalysis = encodeBase64(await image_blob_for_analysis.arrayBuffer());
+    
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
     const promptResult = await ai.models.generateContent({
         model: "gemini-2.5-flash-lite-preview-06-17",
         contents: [{ role: 'user', parts: [
-            { inlineData: { mimeType: mime_type, data: base64_image_data } },
+            { inlineData: { mimeType: final_mime_type, data: imageBase64ForAnalysis } },
             { text: `User Hint: "${user_hint || 'No hint provided.'}"` }
         ]}],
         config: { systemInstruction: { role: "system", parts: [{ text: autoDescribeSceneSystemPrompt }] } }
@@ -67,7 +92,7 @@ serve(async (req) => {
       .from('fal_reframe_jobs')
       .insert({
         user_id,
-        source_image_url: base_image_url,
+        source_image_url: final_base_image_url,
         target_aspect_ratio: aspect_ratio,
         generated_prompt: fillerPrompt,
         parent_vto_job_id,
@@ -84,7 +109,7 @@ serve(async (req) => {
 
     const falResult = await fal.queue.submit("comfy/research-MIR/outpaint-fal-api", {
       input: {
-        loadimage_1: base_image_url,
+        loadimage_1: final_base_image_url,
         "Ratio - X Value": ratioX,
         "Ratio - Y Value": ratioY,
         "Filler_Prompt": fillerPrompt
