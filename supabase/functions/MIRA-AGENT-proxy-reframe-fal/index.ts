@@ -9,6 +9,7 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const FAL_KEY = Deno.env.get('FAL_KEY');
 const UPLOAD_BUCKET = 'mira-agent-user-uploads';
+const FAL_WEBHOOK_SECRET = Deno.env.get("FAL_WEBHOOK_SECRET");
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -27,6 +28,25 @@ const autoDescribeSceneSystemPrompt = `You are an expert, literal scene describe
 3.  **Language:** The final prompt must be in English.
 4.  **Output:** Respond with ONLY the final, detailed prompt text. Do not add any other text, notes, or explanations.`;
 
+async function retry<T>(fn: () => Promise<T>, label: string, tries = 5, baseMs = 250): Promise<T> {
+  let lastErr;
+  for (let i = 0; i < tries; i++) {
+    try { return await fn(); } catch (e) {
+      lastErr = e;
+      const wait = Math.round((baseMs * 2 ** i) + Math.random() * 100);
+      console.warn(`[retry] ${label} failed (${i+1}/${tries}). Waiting ${wait}ms`, e?.message ?? e);
+      await new Promise(r => setTimeout(r, wait));
+    }
+  }
+  throw lastErr;
+}
+
+async function downloadFromPublicUrl(publicUrl: string): Promise<Blob> {
+  const res = await fetch(publicUrl, { redirect: "follow", cache: "no-store" });
+  if (!res.ok) throw new Error(`Fetch public URL failed: ${res.status}`);
+  return await res.blob();
+}
+
 async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
     const url = new URL(publicUrl);
     const pathSegments = url.pathname.split('/');
@@ -35,6 +55,14 @@ async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string)
     const { data, error } = await supabase.storage.from(bucketName).download(filePath);
     if (error) throw new Error(`Failed to download from Supabase storage (${filePath}): ${error.message}`);
     return data;
+}
+
+async function getImageBlob(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
+  try { return await downloadFromSupabase(supabase, publicUrl); }
+  catch (e) {
+    console.warn("[fallback] storage.download failed, trying fetch()", e?.message ?? e);
+    return await downloadFromPublicUrl(publicUrl);
+  }
 }
 
 serve(async (req) => {
@@ -60,14 +88,13 @@ serve(async (req) => {
         final_mime_type = mime_type || 'image/jpeg';
         image_blob_for_analysis = new Blob([imageBuffer], { type: final_mime_type });
         const filePath = `${user_id}/reframe-sources/${Date.now()}-source.jpeg`;
-        const { error: uploadError } = await supabase.storage.from(UPLOAD_BUCKET).upload(filePath, imageBuffer, { contentType: final_mime_type, upsert: true });
-        if (uploadError) throw uploadError;
+        await retry(() => supabase.storage.from(UPLOAD_BUCKET).upload(filePath, imageBuffer, { contentType: final_mime_type, upsert: true }).then(res => { if (res.error) throw res.error; return res; }), "storage.upload");
         const { data: { publicUrl } } = supabase.storage.from(UPLOAD_BUCKET).getPublicUrl(filePath);
         final_base_image_url = publicUrl;
         console.log(`${logPrefix} Base image uploaded to: ${final_base_image_url}`);
     } else {
         console.log(`${logPrefix} Received image URL. Downloading for analysis.`);
-        image_blob_for_analysis = await downloadFromSupabase(supabase, final_base_image_url);
+        image_blob_for_analysis = await retry(() => getImageBlob(supabase, final_base_image_url), "image download");
         final_mime_type = image_blob_for_analysis.type;
     }
 
@@ -88,7 +115,8 @@ serve(async (req) => {
     console.log(`${logPrefix} Generated Filler Prompt: "${fillerPrompt}"`);
 
     console.log(`${logPrefix} Step 2: Creating tracking job in 'fal_reframe_jobs'.`);
-    const { data: newJob, error: insertError } = await supabase
+    const { data: newJob } = await retry(() => 
+      supabase
       .from('fal_reframe_jobs')
       .insert({
         user_id,
@@ -99,12 +127,16 @@ serve(async (req) => {
         status: 'queued'
       })
       .select('id')
-      .single();
-    if (insertError) throw insertError;
+      .single()
+      .then(res => { if (res.error) throw res.error; return res; }),
+      "fal_reframe_jobs.insert"
+    );
     const jobId = newJob.id;
 
     console.log(`${logPrefix} Step 3: Calling Fal.ai API for job ${jobId}.`);
-    const webhookUrl = `${SUPABASE_URL}/functions/v1/MIRA-AGENT-webhook-reframe-fal?job_id=${jobId}`;
+    const PROJECT_REF = new URL(SUPABASE_URL!).host.split('.')[0];
+    const FUNCTIONS_URL = `https://${PROJECT_REF}.functions.supabase.co`;
+    const webhookUrl = `${FUNCTIONS_URL}/MIRA-AGENT-webhook-reframe-fal?job_id=${jobId}`;
     const [ratioX, ratioY] = aspect_ratio.split(':').map(Number);
 
     const falResult = await fal.queue.submit("comfy/research-MIR/outpaint-fal-api", {
@@ -114,14 +146,21 @@ serve(async (req) => {
         "Ratio - Y Value": ratioY,
         "Filler_Prompt": fillerPrompt
       },
-      webhookUrl: webhookUrl
+      webhook: {
+        url: webhookUrl,
+        headers: { "x-webhook-secret": FAL_WEBHOOK_SECRET ?? "" }
+      }
     });
 
     console.log(`${logPrefix} Step 4: Updating job ${jobId} with Fal request ID ${falResult.request_id}.`);
-    await supabase
+    await retry(() => 
+      supabase
       .from('fal_reframe_jobs')
       .update({ fal_request_id: falResult.request_id, status: 'processing' })
-      .eq('id', jobId);
+      .eq('id', jobId)
+      .then(res => { if (res.error) throw res.error; return res; }),
+      "fal_reframe_jobs.update"
+    );
 
     return new Response(JSON.stringify({ success: true, jobId: jobId }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

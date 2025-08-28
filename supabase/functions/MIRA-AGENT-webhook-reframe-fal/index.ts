@@ -4,6 +4,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
+const FAL_WEBHOOK_SECRET = Deno.env.get("FAL_WEBHOOK_SECRET");
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -17,6 +18,11 @@ serve(async (req) => {
   const logPrefix = `[ReframeWebhook-Fal]`;
 
   try {
+    if (req.headers.get("x-webhook-secret") !== FAL_WEBHOOK_SECRET) {
+        console.error(`${logPrefix} Invalid or missing webhook secret received.`);
+        return new Response("Forbidden", { status: 403 });
+    }
+
     const url = new URL(req.url);
     const jobId = url.searchParams.get('job_id');
     if (!jobId) throw new Error("Webhook received without a job_id.");
