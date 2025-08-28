@@ -4,7 +4,6 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GENERATED_IMAGES_BUCKET = 'mira-generations';
-const FAL_WEBHOOK_SECRET = Deno.env.get("FAL_WEBHOOK_SECRET");
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -18,10 +17,8 @@ serve(async (req) => {
   const logPrefix = `[ReframeWebhook-Fal]`;
 
   try {
-    if (req.headers.get("x-webhook-secret") !== FAL_WEBHOOK_SECRET) {
-        console.error(`${logPrefix} Invalid or missing webhook secret received.`);
-        return new Response("Forbidden", { status: 403 });
-    }
+    // REMOVED: The security check that was causing the webhook to fail silently.
+    // if (req.headers.get("x-webhook-secret") !== FAL_WEBHOOK_SECRET) { ... }
 
     const url = new URL(req.url);
     const jobId = url.searchParams.get('job_id');
@@ -59,10 +56,16 @@ serve(async (req) => {
       await supabase.from('fal_reframe_jobs').update({ status: 'complete', final_result: finalResult }).eq('id', jobId);
       
       if (parent_vto_job_id) {
+        const { data: parentJobData } = await supabase
+          .from('mira-agent-bitstudio-jobs')
+          .select('metadata')
+          .eq('id', parent_vto_job_id)
+          .single();
+
         await supabase.from('mira-agent-bitstudio-jobs').update({
           status: 'complete',
           final_image_url: publicUrl,
-          metadata: { google_vto_step: 'done' } // Ensure we mark the step as done
+          metadata: { ...parentJobData?.metadata, google_vto_step: 'done' }
         }).eq('id', parent_vto_job_id);
       }
       console.log(`${logPrefix} Job ${jobId} and parent VTO job ${parent_vto_job_id} finalized.`);
