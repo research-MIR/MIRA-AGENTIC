@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/components/Auth/SessionContextProvider";
 import { Button } from "@/components/ui/button";
@@ -30,50 +30,6 @@ interface ReframeJob {
   error_message?: string;
 }
 
-const fileToJpegBase64 = (file: File): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = (event) => {
-      const img = new Image();
-      img.src = event.target?.result as string;
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = img.width;
-        canvas.height = img.height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return reject(new Error('Failed to get canvas context'));
-        ctx.drawImage(img, 0, 0);
-        const jpegDataUrl = canvas.toDataURL('image/jpeg', 0.9); // 90% quality
-        resolve(jpegDataUrl.split(',')[1]);
-      };
-      img.onerror = reject;
-    };
-    reader.onerror = reject;
-  });
-};
-
-const ImageUploader = ({ onFileSelect, title, imageUrl, onClear }: { onFileSelect: (file: File) => void, title: string, imageUrl: string | null, onClear: () => void }) => {
-    const inputRef = useRef<HTMLInputElement>(null);
-    const { dropzoneProps, isDraggingOver } = useDropzone({ onDrop: (e) => e.dataTransfer.files && onFileSelect(e.dataTransfer.files[0]) });
-  
-    if (imageUrl) {
-      return (
-        <div className="relative aspect-square">
-          <img src={imageUrl} alt={title} className="w-full h-full object-cover rounded-md" />
-          <Button variant="destructive" size="icon" className="absolute top-2 right-2 h-6 w-6 z-10" onClick={onClear}><X className="h-4 w-4" /></Button>
-        </div>
-      );
-    }
-  
-    return (
-      <div {...dropzoneProps} className={cn("flex aspect-square justify-center items-center rounded-lg border border-dashed p-4 text-center transition-colors cursor-pointer", isDraggingOver && "border-primary bg-primary/10")} onClick={() => inputRef.current?.click()}>
-        <div className="text-center pointer-events-none"><UploadCloud className="mx-auto h-8 w-8 text-muted-foreground" /><p className="mt-2 text-sm font-semibold">{title}</p></div>
-        <Input ref={inputRef} type="file" className="hidden" accept="image/*" onChange={(e) => e.target.files && onFileSelect(e.target.files[0])} />
-      </div>
-    );
-};
-
 const commonRatios = ["1:1", "9:16", "16:9", "4:3", "3:4", "21:9", "3:2", "2:3", "4:5", "5:4"];
 
 const Reframe = () => {
@@ -89,8 +45,19 @@ const Reframe = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [isCompareModalOpen, setIsCompareModalOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const basePreviewUrl = useMemo(() => baseFile ? URL.createObjectURL(baseFile) : null, [baseFile]);
+
+  const handleFileSelect = useCallback((files: FileList | null) => {
+    if (files && files[0] && files[0].type.startsWith("image/")) {
+      setBaseFile(files[0]);
+    }
+  }, []);
+
+  const { dropzoneProps, isDraggingOver } = useDropzone({
+    onDrop: (e) => handleFileSelect(e.dataTransfer.files),
+  });
 
   const { data: recentJobs, isLoading: isLoadingRecent } = useQuery<ReframeJob[]>({
     queryKey: ['recentReframeJobs', session?.user?.id],
@@ -223,7 +190,17 @@ const Reframe = () => {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="max-w-xs mx-auto">
-                  <ImageUploader onFileSelect={(files) => files && setBaseFile(files[0])} title={t('baseImage')} imageUrl={basePreviewUrl} onClear={() => setBaseFile(null)} />
+                  {basePreviewUrl ? (
+                    <div className="relative aspect-square">
+                      <img src={basePreviewUrl} alt="Base image" className="w-full h-full object-cover rounded-md" />
+                      <Button variant="destructive" size="icon" className="absolute top-2 right-2 h-6 w-6 z-10" onClick={() => setBaseFile(null)}><X className="h-4 w-4" /></Button>
+                    </div>
+                  ) : (
+                    <div {...dropzoneProps} onClick={() => fileInputRef.current?.click()} className={cn("flex aspect-square justify-center items-center rounded-lg border border-dashed p-4 text-center transition-colors cursor-pointer", isDraggingOver && "border-primary bg-primary/10")}>
+                      <div className="text-center pointer-events-none"><UploadCloud className="mx-auto h-8 w-8 text-muted-foreground" /><p className="mt-2 text-sm font-semibold">{t('baseImage')}</p></div>
+                      <Input ref={fileInputRef} type="file" className="hidden" accept="image/*" onChange={(e) => handleFileSelect(e.target.files)} />
+                    </div>
+                  )}
                 </div>
                 <div>
                   <Label htmlFor="prompt">{t('prompt')}</Label>
