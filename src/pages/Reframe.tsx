@@ -7,14 +7,13 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Loader2, Image as ImageIcon, Wand2, UploadCloud, X, PlusCircle } from "lucide-react";
+import { Loader2, Image as ImageIcon, Wand2, UploadCloud, X } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
 import { showError, showLoading, dismissToast, showSuccess } from "@/utils/toast";
 import { ImageCompareModal } from "@/components/ImageCompareModal";
 import { RecentJobThumbnail } from "@/components/Jobs/RecentJobThumbnail";
 import { useDropzone } from "@/hooks/useDropzone";
 import { cn } from "@/lib/utils";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { SecureImageDisplay } from "@/components/VTO/SecureImageDisplay";
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel";
@@ -29,6 +28,15 @@ interface ReframeJob {
   source_image_url: string;
   error_message?: string;
 }
+
+const fileToBase64 = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve((reader.result as string).split(',')[1]);
+    reader.onerror = (error) => reject(error);
+  });
+};
 
 const commonRatios = ["1:1", "9:16", "16:9", "4:3", "3:4", "21:9", "3:2", "2:3", "4:5", "5:4"];
 
@@ -105,22 +113,24 @@ const Reframe = () => {
     if (aspectRatios.length === 0) return showError("Please select at least one aspect ratio.");
     
     setIsSubmitting(true);
-    const toastId = showLoading(`Uploading image and queuing ${aspectRatios.length} job(s)...`);
+    const toastId = showLoading(`Preparing image and queuing ${aspectRatios.length} job(s)...`);
 
     try {
-      const filePath = `${session?.user.id}/reframe-sources/${Date.now()}-${baseFile.name}`;
-      const { error: uploadError } = await supabase.storage.from('mira-agent-user-uploads').upload(filePath, baseFile);
-      if (uploadError) throw uploadError;
-      const { data: { publicUrl: base_image_url } } = supabase.storage.from('mira-agent-user-uploads').getPublicUrl(filePath);
+      const base64_image_data = await fileToBase64(baseFile);
+      const mime_type = baseFile.type;
+
+      dismissToast(toastId);
+      showLoading(`Queuing ${aspectRatios.length} job(s)...`, { id: toastId });
 
       const jobPromises = aspectRatios.map(ratio => {
           return supabase.functions.invoke('MIRA-AGENT-proxy-reframe-fal', {
               body: {
                   user_id: session?.user?.id,
-                  base_image_url,
+                  base64_image_data,
+                  mime_type,
                   prompt,
                   aspect_ratio: ratio,
-                  parent_vto_job_id: null, // This is a standalone job
+                  parent_vto_job_id: null,
               }
           });
       });

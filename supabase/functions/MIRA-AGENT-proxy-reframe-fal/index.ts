@@ -2,12 +2,13 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { GoogleGenAI } from 'https://esm.sh/@google/genai@0.15.0';
 import { fal } from 'npm:@fal-ai/client@1.5.0';
-import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
+import { encodeBase64, decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const FAL_KEY = Deno.env.get('FAL_KEY');
+const UPLOAD_BUCKET = 'mira-agent-user-uploads';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -26,16 +27,6 @@ const autoDescribeSceneSystemPrompt = `You are an expert, literal scene describe
 3.  **Language:** The final prompt must be in English.
 4.  **Output:** Respond with ONLY the final, detailed prompt text. Do not add any other text, notes, or explanations.`;
 
-async function downloadFromSupabase(supabase: SupabaseClient, publicUrl: string): Promise<Blob> {
-    const url = new URL(publicUrl);
-    const pathSegments = url.pathname.split('/');
-    const bucketName = pathSegments[pathSegments.indexOf('public') + 1];
-    const filePath = decodeURIComponent(pathSegments.slice(pathSegments.indexOf(bucketName) + 1).join('/'));
-    const { data, error } = await supabase.storage.from(bucketName).download(filePath);
-    if (error) throw new Error(`Failed to download from Supabase storage (${filePath}): ${error.message}`);
-    return data;
-}
-
 serve(async (req) => {
   if (req.method === 'OPTIONS') { return new Response(null, { headers: corsHeaders }); }
 
@@ -44,20 +35,25 @@ serve(async (req) => {
   fal.config({ credentials: FAL_KEY! });
 
   try {
-    const { user_id, base_image_url, aspect_ratio, prompt: user_hint, parent_vto_job_id = null } = await req.json();
-    if (!user_id || !base_image_url || !aspect_ratio) {
-      throw new Error("user_id, base_image_url, and aspect_ratio are required.");
+    const { user_id, base64_image_data, mime_type, aspect_ratio, prompt: user_hint, parent_vto_job_id = null } = await req.json();
+    if (!user_id || !base64_image_data || !mime_type || !aspect_ratio) {
+      throw new Error("user_id, base64_image_data, mime_type, and aspect_ratio are required.");
     }
 
+    console.log(`${logPrefix} Step 0: Uploading base image to get a persistent URL.`);
+    const imageBuffer = decodeBase64(base64_image_data);
+    const filePath = `${user_id}/reframe-sources/${Date.now()}-source.jpeg`;
+    const { error: uploadError } = await supabase.storage.from(UPLOAD_BUCKET).upload(filePath, imageBuffer, { contentType: mime_type, upsert: true });
+    if (uploadError) throw uploadError;
+    const { data: { publicUrl: base_image_url } } = supabase.storage.from(UPLOAD_BUCKET).getPublicUrl(filePath);
+    console.log(`${logPrefix} Base image uploaded to: ${base_image_url}`);
+
     console.log(`${logPrefix} Step 1: Generating filler prompt.`);
-    const imageBlob = await downloadFromSupabase(supabase, base_image_url);
-    const imageBase64 = encodeBase64(await imageBlob.arrayBuffer());
-    
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
     const promptResult = await ai.models.generateContent({
         model: "gemini-2.5-flash-lite-preview-06-17",
         contents: [{ role: 'user', parts: [
-            { inlineData: { mimeType: imageBlob.type, data: imageBase64 } },
+            { inlineData: { mimeType: mime_type, data: base64_image_data } },
             { text: `User Hint: "${user_hint || 'No hint provided.'}"` }
         ]}],
         config: { systemInstruction: { role: "system", parts: [{ text: autoDescribeSceneSystemPrompt }] } }
