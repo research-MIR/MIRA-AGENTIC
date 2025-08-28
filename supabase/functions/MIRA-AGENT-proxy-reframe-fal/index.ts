@@ -81,6 +81,7 @@ serve(async (req) => {
     let final_base_image_url = base_image_url;
     let image_blob_for_analysis: Blob;
     let final_mime_type = mime_type;
+    let imageBase64ForAnalysis: string;
 
     if (base64_image_data) {
         console.log(`${logPrefix} Received base64 data. Uploading to get a persistent URL.`);
@@ -91,16 +92,16 @@ serve(async (req) => {
         await retry(() => supabase.storage.from(UPLOAD_BUCKET).upload(filePath, imageBuffer, { contentType: final_mime_type, upsert: true }).then(res => { if (res.error) throw res.error; return res; }), "storage.upload");
         const { data: { publicUrl } } = supabase.storage.from(UPLOAD_BUCKET).getPublicUrl(filePath);
         final_base_image_url = publicUrl;
+        imageBase64ForAnalysis = base64_image_data;
         console.log(`${logPrefix} Base image uploaded to: ${final_base_image_url}`);
     } else {
         console.log(`${logPrefix} Received image URL. Downloading for analysis.`);
         image_blob_for_analysis = await retry(() => getImageBlob(supabase, final_base_image_url), "image download");
         final_mime_type = image_blob_for_analysis.type;
+        imageBase64ForAnalysis = encodeBase64(await image_blob_for_analysis.arrayBuffer());
     }
 
     console.log(`${logPrefix} Step 1: Generating filler prompt.`);
-    const imageBase64ForAnalysis = encodeBase64(await image_blob_for_analysis.arrayBuffer());
-    
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
     const promptResult = await ai.models.generateContent({
         model: "gemini-2.5-flash-lite-preview-06-17",
@@ -138,10 +139,12 @@ serve(async (req) => {
     const FUNCTIONS_URL = `https://${PROJECT_REF}.functions.supabase.co`;
     const webhookUrl = `${FUNCTIONS_URL}/MIRA-AGENT-webhook-reframe-fal?job_id=${jobId}`;
     const [ratioX, ratioY] = aspect_ratio.split(':').map(Number);
+    
+    const dataUri = `data:${final_mime_type};base64,${imageBase64ForAnalysis}`;
 
     const falResult = await fal.queue.submit("comfy/research-MIR/outpaint-fal-api", {
       input: {
-        loadimage_1: final_base_image_url,
+        loadimage_1: dataUri,
         "Ratio - X Value": ratioX,
         "Ratio - Y Value": ratioY,
         "Filler_Prompt": fillerPrompt
