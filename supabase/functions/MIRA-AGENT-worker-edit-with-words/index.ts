@@ -1,7 +1,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { GoogleGenAI, Content, Part, GenerationResult } from 'https://esm.sh/@google/genai@0.15.0';
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { encodeBase64, decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
+import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
+import { Image } from "https://deno.land/x/imagescript@1.2.15/mod.ts";
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
@@ -43,45 +44,60 @@ const metaPrompt = `You are a "Hyper-Detailed Image Editor's Assistant". Your ta
 ### Example:
 - **USER_INSTRUCTION:** "change his t-shirt to blue"
 - **SOURCE_IMAGE:** [Image of a man with brown hair in a red shirt, standing on a city street]
-- **Your Output:** "For the man with short brown hair, fair skin, and a slight smile, change his red crew-neck t-shirt to a deep royal blue color. It is absolutely essential to preserve his exact identity, including his specific facial structure and skin tone. His standing pose must remain identical. The background, a bustling city street with yellow taxis and glass-front buildings, must be preserved in every detail, including the soft daytime lighting."`;
+- **Your Output:** "For the man with short brown hair, fair skin, and a slight smile, change his red crew-neck t-shirt to a deep royal blue color. It is absolutely critical to preserve his exact identity, including his specific facial structure and skin tone. His standing pose must remain identical. The background, a bustling city street with yellow taxis and glass-front buildings, must be preserved in every detail, including the soft daytime lighting."`;
 
-async function downloadImageAsPart(supabase: SupabaseClient, url: string, label: string): Promise<Part[]> {
-    const urlObj = new URL(url);
-    const pathSegments = urlObj.pathname.split('/');
-    const objectSegmentIndex = pathSegments.indexOf('object');
-    if (objectSegmentIndex === -1 || objectSegmentIndex + 2 >= pathSegments.length) {
-        throw new Error(`Could not parse bucket name from Supabase URL: ${url}`);
-    }
-    const bucketName = pathSegments[objectSegmentIndex + 2];
-    const filePath = decodeURIComponent(pathSegments.slice(objectSegmentIndex + 3).join('/'));
+async function maybeDownscaleBlob(blob: Blob, maxSide = 2048, jpegQuality = 85): Promise<Blob> {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  const img = await Image.decode(bytes);
+  const maxDim = Math.max(img.width, img.height);
+  if (maxDim <= maxSide) return blob;
 
-    const { data: fileBlob, error: downloadError } = await supabase.storage.from(bucketName).download(filePath);
-    if (downloadError) throw new Error(`Supabase download failed: ${downloadError.message}`);
-
-    const mimeType = fileBlob.type;
-    const buffer = await fileBlob.arrayBuffer();
-    const base64 = encodeBase64(buffer);
-
-    return [
-        { text: `--- ${label} ---` },
-        { inlineData: { mimeType, data: base64 } }
-    ];
+  const scale = maxSide / maxDim;
+  img.resize(Math.round(img.width * scale), Math.round(img.height * scale), Image.RESIZE_LANCZOS);
+  const jpeg = await img.encodeJPEG(jpegQuality);
+  return new Blob([jpeg], { type: "image/jpeg" });
 }
 
-async function generatePrecisePrompt(ai: GoogleGenAI, userInstruction: string, allImageParts: Part[]): Promise<string> {
+async function uploadGeminiFileFromSupabaseURL(
+  supabase: SupabaseClient,
+  ai: GoogleGenAI,
+  url: string,
+  displayName: string,
+  opts: { maxSide?: number; jpegQuality?: number } = {}
+) {
+  const { maxSide = 2048, jpegQuality = 85 } = opts;
+
+  const u = new URL(url);
+  const seg = u.pathname.split('/');
+  const i = seg.indexOf('object');
+  if (i === -1 || i + 2 >= seg.length) throw new Error(`Bad Supabase URL: ${url}`);
+  const bucket = seg[i + 2];
+  const filePath = decodeURIComponent(seg.slice(i + 3).join('/'));
+
+  const { data: blob, error } = await supabase.storage.from(bucket).download(filePath);
+  if (error) throw new Error(`Supabase download failed: ${error.message}`);
+
+  const prepped = await maybeDownscaleBlob(blob, maxSide, jpegQuality);
+
+  const file = await ai.files.upload({
+    file: prepped,
+    config: { mimeType: prepped.type, displayName }
+  });
+
+  return file;
+}
+
+async function generatePrecisePrompt(ai: GoogleGenAI, userInstruction: string, files: any[]): Promise<string> {
     const fallbackPrompt = `You are a virtual try-on AI assistant. Your task is to seamlessly edit the source image based on the user's instructions. Place the new garment over the existing clothing, preserving the model's identity, pose, and the background.`;
     try {
-        const contents: Content[] = [{
-            role: 'user',
-            parts: [
-                { text: `USER_INSTRUCTION: "${userInstruction}"` },
-                ...allImageParts
-            ]
-        }];
+        const contents: any[] = [
+            ...files,
+            { text: `USER_INSTRUCTION: "${userInstruction}"` }
+        ];
 
         const response = await ai.models.generateContent({
             model: TEXT_MODEL_NAME,
-            contents: contents,
+            contents: [{ role: 'user', parts: contents }],
             config: { systemInstruction: { role: "system", parts: [{ text: metaPrompt }] } }
         });
         const precisePrompt = response.text?.trim();
@@ -128,23 +144,24 @@ serve(async (req) => {
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
 
-    console.log(`${logPrefix} Step 1: Preparing image inputs...`);
-    const [sourceImagePart, referenceImageParts] = await Promise.all([
-        downloadImageAsPart(supabase, source_image_url, "SOURCE_IMAGE"),
-        reference_image_urls && reference_image_urls.length > 0 
-            ? Promise.all(reference_image_urls.map((url: string, i: number) => downloadImageAsPart(supabase, url, `REFERENCE_IMAGE ${i + 1}`)))
-            : Promise.resolve([]),
-    ]);
-    const allImageParts = [...sourceImagePart, ...referenceImageParts.flat()];
-    console.log(`${logPrefix} Step 1 complete.`);
+    console.log(`${logPrefix} Step 1: Preparing and uploading image inputs sequentially...`);
+    const sourceFile = await uploadGeminiFileFromSupabaseURL(supabase, ai, source_image_url, "SOURCE_IMAGE");
+    
+    const MAX_REFS = 4;
+    const refsToUpload = (reference_image_urls || []).slice(0, MAX_REFS);
+    const referenceFiles: any[] = [];
+    for (let i = 0; i < refsToUpload.length; i++) {
+        const file = await uploadGeminiFileFromSupabaseURL(supabase, ai, refsToUpload[i], `REFERENCE_IMAGE_${i + 1}`);
+        referenceFiles.push(file);
+    }
+    console.log(`${logPrefix} Step 1 complete. Uploaded ${1 + referenceFiles.length} file(s) to Gemini.`);
 
     console.log(`${logPrefix} Step 2: Generating precise prompt...`);
-    const precisePrompt = await generatePrecisePrompt(ai, instruction, allImageParts);
+    const precisePrompt = await generatePrecisePrompt(ai, instruction, [sourceFile, ...referenceFiles]);
     console.log(`${logPrefix} Generated Precise Prompt:`, precisePrompt);
     console.log(`${logPrefix} Step 2 complete.`);
 
-    const textPart = { text: precisePrompt };
-    const finalPartsForImageModel = [...allImageParts, textPart];
+    const finalPartsForImageModel: any[] = [sourceFile, ...referenceFiles, { text: precisePrompt }];
 
     console.log(`${logPrefix} Step 3: Calling image model (${IMAGE_MODEL_NAME})...`);
     const response = await ai.models.generateContent({
@@ -155,18 +172,16 @@ serve(async (req) => {
 
     console.log(`${logPrefix} Step 4: Handling API response...`);
     if (response.promptFeedback?.blockReason) {
-        console.error(`${logPrefix} Prompt was blocked. Reason:`, response.promptFeedback.blockReason);
         throw new Error(`Request was blocked by safety filters: ${response.promptFeedback.blockReason}`);
     }
     const imagePartFromResponse = response.candidates?.[0]?.content?.parts?.find(part => part.inlineData);
     if (!imagePartFromResponse?.inlineData) {
         const finishReason = response.candidates?.[0]?.finishReason;
-        console.error(`${logPrefix} No image data in response. Finish reason:`, finishReason);
         throw new Error(`Image generation failed. Reason: ${finishReason || 'No image was returned.'}`);
     }
     console.log(`${logPrefix} Step 4 complete. Found image data in response.`);
 
-    console.log(`${logPrefix} Step 5: Uploading to storage and updating job record...`);
+    console.log(`${logPrefix} Step 5: Uploading to storage and saving job record...`);
     const { mimeType, data: base64Data } = imagePartFromResponse.inlineData;
     const imageBuffer = decodeBase64(base64Data);
     const filePath = `${invoker_user_id}/edit-with-words/${Date.now()}_final.png`;
@@ -182,7 +197,7 @@ serve(async (req) => {
             prompt: precisePrompt,
         }
     }).eq('id', job_id);
-    console.log(`${logPrefix} Step 5 complete. Job record updated.`);
+    console.log(`${logPrefix} Step 5 complete. Job record saved.`);
 
     return new Response(JSON.stringify({ success: true, finalImageUrl: publicUrl }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
