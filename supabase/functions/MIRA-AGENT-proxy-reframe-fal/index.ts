@@ -44,9 +44,9 @@ serve(async (req) => {
   fal.config({ credentials: FAL_KEY! });
 
   try {
-    const { user_id, base_image_url, aspect_ratio, prompt: user_hint, parent_vto_job_id } = await req.json();
-    if (!user_id || !base_image_url || !aspect_ratio || !parent_vto_job_id) {
-      throw new Error("user_id, base_image_url, aspect_ratio, and parent_vto_job_id are required.");
+    const { user_id, base_image_url, aspect_ratio, prompt: user_hint, parent_vto_job_id = null } = await req.json();
+    if (!user_id || !base_image_url || !aspect_ratio) {
+      throw new Error("user_id, base_image_url, and aspect_ratio are required.");
     }
 
     console.log(`${logPrefix} Step 1: Generating filler prompt.`);

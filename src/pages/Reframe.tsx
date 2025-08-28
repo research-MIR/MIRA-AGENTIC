@@ -18,18 +18,15 @@ import { cn } from "@/lib/utils";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { SecureImageDisplay } from "@/components/VTO/SecureImageDisplay";
-import { Badge } from "@/components/ui/badge";
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel";
 
 interface ReframeJob {
   id: string;
   status: 'queued' | 'processing' | 'complete' | 'failed';
   final_result?: {
-    images?: { publicUrl: string }[];
+    publicUrl: string;
   };
-  context?: {
-    base_image_url?: string;
-  };
+  source_image_url: string;
   error_message?: string;
 }
 
@@ -87,9 +84,6 @@ const Reframe = () => {
 
   const [baseFile, setBaseFile] = useState<File | null>(null);
   const [prompt, setPrompt] = useState("");
-  const [dilation, setDilation] = useState(0.05);
-  const [steps, setSteps] = useState(55);
-  const [count, setCount] = useState(1);
   const [aspectRatios, setAspectRatios] = useState<string[]>(["1:1"]);
   const [customRatio, setCustomRatio] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -103,10 +97,10 @@ const Reframe = () => {
     queryFn: async () => {
       if (!session?.user) return [];
       const { data, error } = await supabase
-        .from('mira-agent-jobs')
-        .select('id, status, final_result, context, error_message')
-        .eq('context->>source', 'reframe')
+        .from('fal_reframe_jobs')
+        .select('id, status, final_result, source_image_url, error_message')
         .eq('user_id', session.user.id)
+        .is('parent_vto_job_id', null) // Only show standalone jobs
         .order('created_at', { ascending: false })
         .limit(20);
       if (error) throw error;
@@ -122,19 +116,6 @@ const Reframe = () => {
     setBaseFile(null);
     setPrompt("");
     setAspectRatios(["1:1"]);
-  };
-
-  const handlePresetChange = (preset: 'subtle' | 'standard' | 'artistic') => {
-    if (preset === 'subtle') {
-        setDilation(0.03);
-        setSteps(35);
-    } else if (preset === 'standard') {
-        setDilation(0.05);
-        setSteps(55);
-    } else if (preset === 'artistic') {
-        setDilation(0.15);
-        setSteps(75);
-    }
   };
 
   const addAspectRatio = (ratio: string) => {
@@ -157,21 +138,22 @@ const Reframe = () => {
     if (aspectRatios.length === 0) return showError("Please select at least one aspect ratio.");
     
     setIsSubmitting(true);
-    const toastId = showLoading(`Queuing ${aspectRatios.length} reframe job(s)...`);
+    const toastId = showLoading(`Uploading image and queuing ${aspectRatios.length} job(s)...`);
 
     try {
-      const base_image_base64 = await fileToJpegBase64(baseFile);
+      const filePath = `${session?.user.id}/reframe-sources/${Date.now()}-${baseFile.name}`;
+      const { error: uploadError } = await supabase.storage.from('mira-agent-user-uploads').upload(filePath, baseFile);
+      if (uploadError) throw uploadError;
+      const { data: { publicUrl: base_image_url } } = supabase.storage.from('mira-agent-user-uploads').getPublicUrl(filePath);
 
       const jobPromises = aspectRatios.map(ratio => {
-          return supabase.functions.invoke('MIRA-AGENT-proxy-reframe', {
+          return supabase.functions.invoke('MIRA-AGENT-proxy-reframe-fal', {
               body: {
                   user_id: session?.user?.id,
-                  base_image_base64,
+                  base_image_url,
                   prompt,
-                  dilation,
-                  steps,
-                  count,
                   aspect_ratio: ratio,
+                  parent_vto_job_id: null, // This is a standalone job
               }
           });
       });
@@ -207,11 +189,9 @@ const Reframe = () => {
     if (channelRef.current) supabase.removeChannel(channelRef.current);
 
     const channel = supabase.channel(`reframe-jobs-tracker-${session.user.id}`)
-      .on<ReframeJob>('postgres_changes', { event: '*', schema: 'public', table: 'mira-agent-jobs', filter: `user_id=eq.${session.user.id}` },
-        (payload) => {
-          if (payload.new.context?.source === 'reframe') {
-            queryClient.invalidateQueries({ queryKey: ['recentReframeJobs', session.user.id] });
-          }
+      .on<ReframeJob>('postgres_changes', { event: '*', schema: 'public', table: 'fal_reframe_jobs', filter: `user_id=eq.${session.user.id}` },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ['recentReframeJobs', session.user.id] });
         }
       ).subscribe();
     channelRef.current = channel;
@@ -221,8 +201,8 @@ const Reframe = () => {
     };
   }, [session?.user?.id, supabase, queryClient]);
 
-  const sourceImageUrl = selectedJob?.context?.base_image_url;
-  const resultImageUrl = selectedJob?.status === 'complete' ? selectedJob.final_result?.images?.[0]?.publicUrl : null;
+  const sourceImageUrl = selectedJob?.source_image_url;
+  const resultImageUrl = selectedJob?.status === 'complete' ? selectedJob.final_result?.publicUrl : null;
 
   return (
     <>
@@ -235,10 +215,15 @@ const Reframe = () => {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-1 space-y-6">
             <Card>
-              <CardHeader><CardTitle>1. Setup</CardTitle></CardHeader>
+              <CardHeader>
+                <div className="flex justify-between items-center">
+                  <CardTitle>1. Setup</CardTitle>
+                  {selectedJobId && <Button variant="outline" onClick={startNew}>{t('newJob')}</Button>}
+                </div>
+              </CardHeader>
               <CardContent className="space-y-4">
                 <div className="max-w-xs mx-auto">
-                  <ImageUploader onFileSelect={setBaseFile} title={t('baseImage')} imageUrl={basePreviewUrl} onClear={() => setBaseFile(null)} />
+                  <ImageUploader onFileSelect={(files) => files && setBaseFile(files[0])} title={t('baseImage')} imageUrl={basePreviewUrl} onClear={() => setBaseFile(null)} />
                 </div>
                 <div>
                   <Label htmlFor="prompt">{t('prompt')}</Label>
@@ -249,17 +234,6 @@ const Reframe = () => {
             <Card>
               <CardHeader><CardTitle>2. Settings</CardTitle></CardHeader>
               <CardContent className="space-y-4">
-                <div>
-                  <Label>{t('generationPreset')}</Label>
-                  <Select defaultValue="standard" onValueChange={(v) => handlePresetChange(v as any)}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="subtle">{t('presetSubtle')}</SelectItem>
-                      <SelectItem value="standard">{t('presetStandard')}</SelectItem>
-                      <SelectItem value="artistic">{t('presetArtistic')}</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
                 <div>
                   <Label>{t('aspectRatio')}</Label>
                   <div className="space-y-2">
@@ -282,14 +256,6 @@ const Reframe = () => {
                     </div>
                   </div>
                 </div>
-                <div>
-                  <Label>{t('maskDilation')}: {dilation.toFixed(3)}</Label>
-                  <Slider value={[dilation]} onValueChange={(v) => setDilation(v[0])} min={0} max={0.2} step={0.005} />
-                </div>
-                <div>
-                  <Label>{t('editSteps')}: {steps}</Label>
-                  <Slider value={[steps]} onValueChange={(v) => setSteps(v[0])} min={10} max={100} step={1} />
-                </div>
               </CardContent>
             </Card>
             <Button size="lg" className="w-full" onClick={handleSubmit} disabled={isSubmitting || !baseFile || aspectRatios.length === 0}>
@@ -302,7 +268,7 @@ const Reframe = () => {
               <CardHeader>
                 <div className="flex justify-between items-center">
                   <CardTitle>{t('result')}</CardTitle>
-                  {selectedJob && <Button variant="outline" onClick={startNew}>{t('newJob')}</Button>}
+                  {selectedJobId && <Button variant="outline" onClick={startNew}>{t('newJob')}</Button>}
                 </div>
               </CardHeader>
               <CardContent className="min-h-[400px]">
@@ -346,7 +312,7 @@ const Reframe = () => {
                       {recentJobs.map(job => (
                         <CarouselItem key={job.id} className="pl-4 basis-auto">
                           <RecentJobThumbnail
-                            job={{...job, metadata: { source_image_url: job.context?.base_image_url }}}
+                            job={{...job, metadata: { source_image_url: job.source_image_url }}}
                             onClick={() => setSelectedJobId(job.id)}
                             isSelected={selectedJobId === job.id}
                           />
